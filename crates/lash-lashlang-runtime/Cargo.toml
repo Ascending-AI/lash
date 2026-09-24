@@ -50,6 +50,6 @@ thiserror = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-execution = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { workspace = true, features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }

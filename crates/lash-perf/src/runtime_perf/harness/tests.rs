@@ -3,10 +3,12 @@ use super::super::scenarios::ScenarioWiring;
 use super::*;
 use tokio_util::sync::CancellationToken;
 
-fn benchmark_plugin_ids(scenario: RuntimePerfScenario) -> Vec<&'static str> {
-    let effect_host: Arc<dyn lash_core::EffectHost> = Arc::new(
-        lash_core::facade_support::NativeEffectHost::default()
-            .allow_process_lifetime_completion_keys(),
+async fn benchmark_plugin_ids(scenario: RuntimePerfScenario) -> Vec<&'static str> {
+    let effect_host = lash::Backend::effect_host(
+        memory_backend()
+            .await
+            .expect("SQLite memory backend")
+            .as_ref(),
     );
     let settlement_control = scenario
         .settlement_children()
@@ -26,8 +28,8 @@ fn benchmark_plugin_ids(scenario: RuntimePerfScenario) -> Vec<&'static str> {
     .collect()
 }
 
-#[test]
-fn scenario_wiring_drives_the_benchmark_plugin_list_in_order() {
+#[tokio::test]
+async fn scenario_wiring_drives_the_benchmark_plugin_list_in_order() {
     const TOOLS: &str = "runtime_perf_tools";
     let expected: Vec<(RuntimePerfScenario, Vec<&'static str>)> = vec![
         (RuntimePerfScenario::RlmLlmQuery, vec![TOOLS, "llm_tools"]),
@@ -108,7 +110,7 @@ fn scenario_wiring_drives_the_benchmark_plugin_list_in_order() {
         expected.iter().map(|(scenario, _)| *scenario).collect();
     for (scenario, ids) in expected {
         assert_eq!(
-            benchmark_plugin_ids(scenario),
+            benchmark_plugin_ids(scenario).await,
             ids,
             "benchmark plugin order changed for {}",
             scenario.name()
@@ -119,7 +121,7 @@ fn scenario_wiring_drives_the_benchmark_plugin_list_in_order() {
             continue;
         }
         assert_eq!(
-            benchmark_plugin_ids(metadata.scenario),
+            benchmark_plugin_ids(metadata.scenario).await,
             vec![TOOLS],
             "{} unexpectedly installs benchmark plugins",
             metadata.name
@@ -129,7 +131,7 @@ fn scenario_wiring_drives_the_benchmark_plugin_list_in_order() {
 
 #[test]
 fn rlm_globals_carve_out_lives_only_in_the_rlm_arm() {
-    // The store/registry carve-out used to be written in both execution-mode
+    // The queued-work carve-out used to be written in both execution-mode
     // arms; in the Standard arm `RlmGlobals` cannot appear because the metadata
     // table declares it RLM, so both predicates were unconditionally constant.
     // The wiring column now carries the fact once.
@@ -138,12 +140,10 @@ fn rlm_globals_carve_out_lives_only_in_the_rlm_arm() {
         RuntimePerfScenario::RlmGlobals.execution_mode(),
         ExecutionMode::Rlm
     );
-    assert!(!wiring.process_registry);
     assert!(!wiring.queued_work);
     assert_eq!(
         RuntimePerfScenario::RlmGlobals.wiring(),
         ScenarioWiring {
-            process_registry: false,
             queued_work: false,
             ..ScenarioWiring::DEFAULT
         }

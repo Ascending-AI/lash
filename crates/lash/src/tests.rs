@@ -2,14 +2,14 @@ use crate::admin::SessionConfigPatch;
 use crate::support::QueuedWorkSubstrate;
 use crate::support::{
     Arc, BTreeMap, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory,
-    ProcessExecutionEnvStore, ProcessRegistry, PromptContribution, PromptLayerSink, PromptSlot,
-    PromptTemplate, ProviderHandle, Result, RunActivityCollector, RuntimeHostConfig,
-    RuntimeSessionState, ScopedEffectController, SelectedQueuedWorkDrainRefusalCause, SessionError,
-    SessionObservationSubscription, SessionResume, SessionSpec, SessionStoreFactory,
-    StaticPluginFactory, StdMutex, TestLocalProcessRegistry, ToolProvider, TurnActivity,
-    TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport, async_trait,
-    message_text,
+    ProcessRegistry, PromptContribution, PromptLayerSink, PromptSlot, PromptTemplate,
+    ProviderHandle, Result, RunActivityCollector, RuntimeSessionState, ScopedEffectController,
+    SelectedQueuedWorkDrainRefusalCause, SessionError, SessionObservationSubscription,
+    SessionResume, SessionSpec, SessionStoreFactory, StaticPluginFactory, StdMutex,
+    TestLocalProcessRegistry, ToolProvider, TurnActivity, TurnActivityId, TurnActivitySink,
+    TurnEvent, TurnInput, TurnOutcome, TurnReport, async_trait, message_text,
 };
+use lash_core::ProcessExecutionEnvStore;
 use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
     SessionNodeProjection, ToolStateFacadeOps,
@@ -800,6 +800,26 @@ struct ReusableStoreFactory {
     store: Arc<dyn lash_core::RuntimePersistence>,
 }
 
+/// A memory backend whose catalog is `catalog`: a test catalog that
+/// records or faults the requests it serves.
+pub(crate) async fn backend_with_catalog(
+    catalog: Arc<dyn lash_core::SessionStoreFactory>,
+) -> Arc<DecoratedBackend> {
+    Arc::new(DecoratedBackend::over(memory_backend().await).session_store_factory(move |_| catalog))
+}
+
+/// A memory backend whose catalog serves `store` for every session id:
+/// the fixture for a test that seeds or faults one session's persistence
+/// directly. Every other port is the memory backend's.
+pub(crate) async fn backend_serving(
+    store: Arc<dyn lash_core::RuntimePersistence>,
+) -> Arc<DecoratedBackend> {
+    Arc::new(
+        DecoratedBackend::over(memory_backend().await)
+            .session_store_factory(move |_| Arc::new(ReusableStoreFactory { store })),
+    )
+}
+
 // The reusable mock store uses a no-op attachment manifest; this fixture
 // explicitly owns no attachment roots.
 #[async_trait::async_trait]
@@ -1199,14 +1219,6 @@ struct RecordingStoreFactory {
 }
 
 impl RecordingStoreFactory {
-    fn session_ids(&self) -> Vec<SessionId> {
-        self.requests
-            .lock_recover()
-            .iter()
-            .map(|request| request.session_id.clone())
-            .collect()
-    }
-
     fn provider_ids(&self) -> Vec<String> {
         self.requests
             .lock_recover()
@@ -2252,24 +2264,20 @@ fn checkpoint_gated_provider(
         .into_handle()
 }
 
-/// A standard core whose native process path decorates `registry`.
-pub(crate) fn standard_core_with_process_registry(
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-) -> LashCore {
-    explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .process_registry(registry)
-        .build(crate::testing::runtime_lease_owner())
-        .expect("standard core over a process registry")
+pub(crate) async fn standard_core() -> LashCore {
+    standard_core_over(memory_backend().await)
 }
 
-pub(crate) fn standard_core() -> LashCore {
-    explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())
-        .expect("standard core")
+/// A standard core over `backend`.
+pub(crate) fn standard_core_over(backend: Arc<dyn lash_core::Backend>) -> LashCore {
+    explicit_ephemeral_facets(LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())
+    .expect("standard core")
 }
 
 /// In-memory Lashlang artifact store for RLM test factories.
@@ -2294,24 +2302,32 @@ fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
 
 /// A [`LashCoreBuilder`] pre-seeded with the default RLM factory.
 #[cfg(feature = "rlm")]
-fn rlm_core_builder() -> crate::core::LashCoreBuilder {
-    LashCore::rlm_builder(crate::TurnBudget::Unbounded, rlm_factory())
+async fn rlm_core_builder() -> crate::core::LashCoreBuilder {
+    rlm_core_builder_over(memory_backend().await)
+}
+
+/// [`rlm_core_builder`] over `backend`.
+#[cfg(feature = "rlm")]
+fn rlm_core_builder_over(backend: Arc<dyn lash_core::Backend>) -> crate::core::LashCoreBuilder {
+    LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, rlm_factory())
 }
 
 mod scope_support;
 use scope_support::{
-    delete_bound_session, native_process_scope, native_scope, runtime_operation_scope,
-    text_message, turn_scope,
+    delete_bound_session, host_scope, process_scope, runtime_operation_scope, text_message,
+    turn_scope,
 };
 mod control_admin;
 mod core_session_builder;
 mod deployment_and_testing_facade;
 mod durable_session;
 mod harness;
-use harness::{
-    core_without_session_store, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,
-    explicit_ephemeral_facets_without_session_store, mock_model_spec, model_spec,
-    run_async_test_on_stack_budget, run_async_test_on_stack_size,
+pub(crate) use harness::{
+    DecoratedBackend, backend_work_facets_with_budget, explicit_ephemeral_facets,
+    explicit_ephemeral_facets_with_backend_work, explicit_ephemeral_facets_with_budget,
+    memory_backend, memory_backend_with_clock, mock_model_spec, model_spec,
+    run_async_test_on_stack_budget, run_async_test_on_stack_size, sqlite_queued_run_count,
+    sqlite_queued_work_claims, sqlite_turn_input_states,
 };
 mod agent_scenarios;
 #[cfg(feature = "rlm")]

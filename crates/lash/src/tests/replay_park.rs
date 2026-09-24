@@ -58,8 +58,7 @@ impl lash_core::ToolProvider for ProbeTool {
 
 struct Backend {
     directory: tempfile::TempDir,
-    effect_host: Arc<lash_sqlite_store::SqliteEffectHost>,
-    store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
+    backend: Arc<lash_sqlite_store::SqliteBackend>,
     provider_calls: Arc<AtomicUsize>,
     executions: Arc<AtomicUsize>,
 }
@@ -67,18 +66,14 @@ struct Backend {
 impl Backend {
     async fn open() -> Self {
         let directory = tempfile::tempdir().expect("temporary durable backend");
-        let effect_host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(&directory.path().join("effects.sqlite"))
+        let backend = Arc::new(
+            lash_sqlite_store::SqliteBackend::open(directory.path())
                 .await
-                .expect("file-backed SQLite effect journal"),
+                .expect("file-backed SQLite backend"),
         );
-        let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            directory.path().join("sessions"),
-        ));
         Self {
             directory,
-            effect_host,
-            store_factory,
+            backend,
             provider_calls: Arc::default(),
             executions: Arc::default(),
         }
@@ -98,22 +93,26 @@ impl Backend {
             })
             .build()
             .into_handle();
-        explicit_ephemeral_facets(rlm_core_builder())
-            .provider(provider)
-            .model(mock_model_spec())
-            .tools(Arc::new(ProbeTool {
-                id: tool_id,
-                executions: Arc::clone(&self.executions),
-            }))
-            .effect_host(Arc::clone(&self.effect_host) as Arc<dyn EffectHost>)
-            .store_factory(Arc::clone(&self.store_factory) as Arc<dyn SessionStoreFactory>)
-            .build(crate::testing::runtime_lease_owner())
-            .expect("file-backed SQLite RLM backend")
+        explicit_ephemeral_facets(rlm_core_builder_over(
+            Arc::clone(&self.backend) as Arc<dyn lash_core::Backend>
+        ))
+        .provider(provider)
+        .model(mock_model_spec())
+        .tools(Arc::new(ProbeTool {
+            id: tool_id,
+            executions: Arc::clone(&self.executions),
+        }))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("file-backed SQLite RLM backend")
     }
 
     fn journal(&self) -> rusqlite::Connection {
-        rusqlite::Connection::open(self.directory.path().join("effects.sqlite"))
-            .expect("open the effect journal")
+        rusqlite::Connection::open(
+            self.directory
+                .path()
+                .join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name()),
+        )
+        .expect("open the effect journal")
     }
 
     /// Every replay key the journal holds under `session_id`'s turn.
@@ -155,7 +154,7 @@ impl Backend {
     /// finalize: the tool dispatches, its settlement cannot be journaled, and
     /// the turn aborts with the journal holding the attempt.
     async fn abort_after_dispatch(&self, session_id: &str, attempt_key: &str) {
-        let faults = self.effect_host.effect_journal_faults();
+        let faults = self.backend.effect_host().effect_journal_faults();
         faults.fail_next(EffectJournalFaultPoint::Finalize, attempt_key);
         let core = self.core("probe");
         let session = core
@@ -174,7 +173,8 @@ impl Backend {
 
     async fn park_of(&self, session_id: &str) -> Option<lash_core::store::TurnPark> {
         let store = self
-            .store_factory
+            .backend
+            .session_store_factory()
             .open_existing_store_by_id(&lash_core::SessionId::from(session_id))
             .await
             .expect("open the session store")

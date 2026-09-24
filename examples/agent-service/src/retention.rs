@@ -18,7 +18,7 @@ const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 pub(crate) struct StoreRetentionTargets {
     pub(crate) factory: Arc<SqliteSessionStoreFactory>,
     pub(crate) gc_store: Arc<dyn lash::persistence::StoreMaintenance>,
-    pub(crate) attachment_store: Arc<lash::persistence::FileAttachmentStore>,
+    pub(crate) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
 }
 
 #[derive(Debug)]

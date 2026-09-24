@@ -13,24 +13,24 @@ use crate::rlm::{
 };
 use crate::testing::TestProvider;
 use futures_util::StreamExt as _;
+use lash_core::Backend;
 use lash_lashlang_runtime::{LashlangArtifactStore, ToolDefinitionBindingExt};
 
-/// `build_core` receives a builder pre-loaded with the mode, provider, model,
-/// plugins, and `process_registry`, and must wire the stores (and, for a
-/// durable store factory, an effect controller) and `build()`. `process_registry`
-/// is the same registry the builder is given, retained so the suite can drive
-/// and await processes. `make` in
-/// [`runtime_rebuild_and_worker_recovery`] must return a fresh backend
-/// (fresh stores) on each call.
+/// One backend under certification: a fresh backend and the Lashlang
+/// artifact store its RLM protocol factory publishes to. `make` in
+/// [`runtime_rebuild_and_worker_recovery`] must return a fresh backend (a
+/// fresh backend) on each call.
+///
+/// The suite builds every core over [`Self::backend`] and drives and
+/// awaits processes through that core's process registry, so the backend
+/// supplies nothing but the substrate.
 pub struct RuntimeRebuildBackend {
-    /// Process registry shared with the core under test.
-    pub process_registry: Arc<dyn lash_core::ProcessRegistry>,
-    /// The Lashlang artifact store, now a construction-time input to the RLM
-    /// protocol factory. The backend supplies it here so `base_builder` can
-    /// seed a tier-consistent factory.
+    /// The substrate the core under test takes every port from.
+    pub backend: Arc<dyn Backend>,
+    /// The Lashlang artifact store, a construction-time input to the RLM
+    /// protocol factory. The backend supplies it here so the suite can seed a
+    /// tier-consistent factory.
     pub artifact_store: Arc<dyn LashlangArtifactStore>,
-    /// Callback that completes backend-specific core construction.
-    pub build_core: Box<dyn Fn(LashCoreBuilder) -> LashCore + Send + Sync>,
 }
 
 /// Run the full cold-rebuild + worker-recovery conformance suite against
@@ -44,15 +44,16 @@ pub struct RuntimeRebuildBackend {
 /// persisted state; the suite asserts that trigger registry state and the
 /// process runtime surface survive rebuild across the
 /// [`ProcessInput`](lash_core::ProcessInput) variants the worker runs.
-pub async fn runtime_rebuild_and_worker_recovery<F>(make: F)
+pub async fn runtime_rebuild_and_worker_recovery<F, Fut>(make: F)
 where
-    F: Fn() -> RuntimeRebuildBackend,
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = RuntimeRebuildBackend>,
 {
-    reopen_restores_trigger_registry_state(make()).await;
-    worker_runs_trigger_started_lashlang_process_after_restart(make()).await;
-    trigger_triggered_process_wake_provenance_survives_restart(make()).await;
-    worker_recovers_tool_call_process_in_restarted_session(make()).await;
-    worker_recovers_session_turn_process_in_restarted_session(make()).await;
+    reopen_restores_trigger_registry_state(make().await).await;
+    worker_runs_trigger_started_lashlang_process_after_restart(make().await).await;
+    trigger_triggered_process_wake_provenance_survives_restart(make().await).await;
+    worker_recovers_tool_call_process_in_restarted_session(make().await).await;
+    worker_recovers_session_turn_process_in_restarted_session(make().await).await;
 }
 
 const TRIGGER_SOURCE: &str = r#"
@@ -278,10 +279,7 @@ fn rebuild_provider() -> crate::provider::ProviderHandle {
         .into_handle()
 }
 
-fn base_builder(
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    artifact_store: Arc<dyn LashlangArtifactStore>,
-) -> LashCoreBuilder {
+fn base_builder(backend: &RuntimeRebuildBackend) -> LashCoreBuilder {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         crate::rlm::RlmProtocolPluginConfig::builder()
             .channel(crate::rlm::RlmChannel::Cell)
@@ -290,10 +288,13 @@ fn base_builder(
             .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(rebuild_abilities()),
-        artifact_store,
+        Arc::clone(&backend.artifact_store),
     );
-    LashCore::rlm_builder(crate::TurnBudget::Unbounded, factory)
-        .with_native_queued_work()
+    LashCore::rlm_builder(
+        Arc::clone(&backend.backend),
+        crate::TurnBudget::Unbounded,
+        factory,
+    )
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .provider(rebuild_provider())
@@ -306,7 +307,16 @@ fn base_builder(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
         ))
         .tools(Arc::new(EchoToolProvider))
-        .process_registry(registry)
+}
+
+/// The core under certification over `backend`'s backend.
+fn build_core(backend: &RuntimeRebuildBackend) -> LashCore {
+    base_builder(backend)
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "lash-rebuild-conformance-worker",
+            "lash-rebuild-conformance-boot",
+        ))
+        .expect("build the core under certification")
 }
 
 fn worker_registration(input: lash_core::ProcessInput, id: &str) -> lash_core::ProcessRegistration {
@@ -418,12 +428,13 @@ async fn reopen_after_admission_contention(core: &LashCore) -> crate::LashSessio
     .expect("the background worker releases the admission lease promptly")
 }
 
-fn native_trigger_scope(scope_id: impl Into<String>) -> lash_core::ScopedEffectController<'static> {
-    lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::AdmittedScope::runtime_operation(scope_id.into()),
-    )
-    .expect("native trigger occurrence execution scope")
+/// A trigger occurrence's execution scope on the core's own effect host.
+fn trigger_scope(
+    host: &dyn lash_core::EffectHost,
+    scope_id: impl Into<String>,
+) -> lash_core::ScopedEffectController<'_> {
+    host.scoped(lash_core::AdmittedScope::runtime_operation(scope_id.into()))
+        .expect("trigger occurrence execution scope")
 }
 
 async fn emit_first_clock_alarm(
@@ -448,6 +459,7 @@ async fn emit_first_clock_alarm(
             .and_then(serde_json::Value::as_str)
             .unwrap_or("occurrence")
     );
+    let host = core.effect_host();
     core.triggers()
         .emit(
             crate::triggers::TriggerOccurrenceRequest::new(
@@ -456,7 +468,7 @@ async fn emit_first_clock_alarm(
                 payload,
                 idempotency_key.clone(),
             ),
-            native_trigger_scope(format!("trigger:{idempotency_key}")),
+            trigger_scope(host.as_ref(), format!("trigger:{idempotency_key}")),
         )
         .await
         .expect("emit clock trigger occurrence")
@@ -466,11 +478,8 @@ async fn emit_first_clock_alarm(
 /// installed through a normal turn — the same reconstruction the worker
 /// must use for out-of-turn process starts.
 async fn reopen_restores_trigger_registry_state(backend: RuntimeRebuildBackend) {
-    let registry = Arc::clone(&backend.process_registry);
-    let core = (backend.build_core)(base_builder(
-        Arc::clone(&registry),
-        Arc::clone(&backend.artifact_store),
-    ));
+    let core = build_core(&backend);
+    let registry = core.process_registry();
     open_mutate_and_restart(&core, None, &registry).await;
 
     let reopened = core
@@ -493,11 +502,8 @@ async fn reopen_restores_trigger_registry_state(backend: RuntimeRebuildBackend) 
 async fn worker_runs_trigger_started_lashlang_process_after_restart(
     backend: RuntimeRebuildBackend,
 ) {
-    let registry = Arc::clone(&backend.process_registry);
-    let core = (backend.build_core)(base_builder(
-        Arc::clone(&registry),
-        Arc::clone(&backend.artifact_store),
-    ));
+    let core = build_core(&backend);
+    let registry = core.process_registry();
     open_mutate_and_restart(&core, None, &registry).await;
 
     let session = core
@@ -522,11 +528,8 @@ async fn worker_runs_trigger_started_lashlang_process_after_restart(
 async fn trigger_triggered_process_wake_provenance_survives_restart(
     backend: RuntimeRebuildBackend,
 ) {
-    let registry = Arc::clone(&backend.process_registry);
-    let core = (backend.build_core)(base_builder(
-        Arc::clone(&registry),
-        Arc::clone(&backend.artifact_store),
-    ));
+    let core = build_core(&backend);
+    let registry = core.process_registry();
     open_mutate_and_restart_with_prompt(&core, "register rebuild button trigger", None, &registry)
         .await;
     // Recover while the lane is idle, before the triggered worker can own
@@ -541,6 +544,7 @@ async fn trigger_triggered_process_wake_provenance_survives_restart(
     let source_key =
         crate::triggers::empty_trigger_source_key("ui.button.pressed").expect("button source key");
     let idempotency_key = "runtime-rebuild-trigger";
+    let host = core.effect_host();
     let report = core
         .triggers()
         .emit(
@@ -555,7 +559,7 @@ async fn trigger_triggered_process_wake_provenance_survives_restart(
                 idempotency_key,
             )
             .with_source(serde_json::json!({})),
-            native_trigger_scope(format!("trigger:{idempotency_key}")),
+            trigger_scope(host.as_ref(), format!("trigger:{idempotency_key}")),
         )
         .await
         .expect("emit trigger occurrence");
@@ -734,11 +738,8 @@ async fn trigger_triggered_process_wake_provenance_survives_restart(
 }
 
 async fn worker_recovers_tool_call_process_in_restarted_session(backend: RuntimeRebuildBackend) {
-    let registry = Arc::clone(&backend.process_registry);
-    let core = (backend.build_core)(base_builder(
-        Arc::clone(&registry),
-        Arc::clone(&backend.artifact_store),
-    ));
+    let core = build_core(&backend);
+    let registry = core.process_registry();
     let registration = worker_registration(
         lash_core::ProcessInput::ToolCall {
             call: lash_core::PreparedToolCall::from_parts(
@@ -758,11 +759,8 @@ async fn worker_recovers_tool_call_process_in_restarted_session(backend: Runtime
 }
 
 async fn worker_recovers_session_turn_process_in_restarted_session(backend: RuntimeRebuildBackend) {
-    let registry = Arc::clone(&backend.process_registry);
-    let core = (backend.build_core)(base_builder(
-        Arc::clone(&registry),
-        Arc::clone(&backend.artifact_store),
-    ));
+    let core = build_core(&backend);
+    let registry = core.process_registry();
     let child_policy = lash_core::SessionPolicy {
         model: rebuild_model(),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)

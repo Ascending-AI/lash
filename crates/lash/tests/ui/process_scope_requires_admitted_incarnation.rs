@@ -1,4 +1,4 @@
-fn check(controller: &lash::runtime::NativeRuntimeEffectController) {
+fn check(controller: &dyn lash::runtime::RuntimeEffectController) {
     // A process scope is a reusable name, not an admission: the controller
     // constructors take an AdmittedScope, so a bare scope cannot build one.
     let _ = lash::runtime::ScopedEffectController::borrowed(

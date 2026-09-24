@@ -468,28 +468,17 @@ mod tests {
                 .build(),
             Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
         );
-        let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-            .with_native_queued_work()
+        let backend = crate::backend::memory_backend()
+            .await
+            .expect("SQLite memory backend");
+        let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .generation(GenerationOptions {
                 stop_sequences: vec![TYPESCRIPT_CLOSE_DELIMITER.to_string()],
                 ..GenerationOptions::default()
             })
-            .effect_host(Arc::new(
-                lash::durability::NativeEffectHost::default()
-                    .allow_process_lifetime_completion_keys(),
-            ))
             .lease_timings(crate::lease::sim_runtime_lease_timings())
-            .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(Arc::new(
-                lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-            ))
-            .store_factory(Arc::new(
-                lash::persistence::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-                as Arc<dyn lash_core::ProcessRegistry>)
             .provider(provider)
             .model(model)
             .build(crate::sim_process_owner())

@@ -1,27 +1,30 @@
 use super::*;
 
-pub(super) fn native_scope(
+/// A scope admitted on the core's own effect host.
+pub(super) fn host_scope(
+    core: &LashCore,
     admitted: lash_core::AdmittedScope,
 ) -> lash_core::ScopedEffectController<'static> {
-    lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        admitted,
-    )
-    .expect("native execution scope")
+    core.effect_host()
+        .scoped_static(admitted)
+        .expect("host execution scope")
+        .expect("effect host supplies an owned scope")
 }
 
-/// Process-scoped native controller pinned to the incarnation a test
+/// Process scope on the core's own effect host, pinned to the incarnation a
 /// registry's first registration mints (registration sequence 1). Tests that
 /// drive process entry points directly stand in for the worker's admission.
-pub(super) fn native_process_scope(
+pub(super) fn process_scope(
+    core: &LashCore,
     process_id: impl Into<lash_core::ProcessId>,
 ) -> lash_core::ScopedEffectController<'static> {
-    native_scope(lash_core::AdmittedScope::process(
-        lash_core::ProcessRef::new(
+    host_scope(
+        core,
+        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
             process_id,
             lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
-    ))
+        )),
+    )
 }
 
 /// Turn scope admitted on the core's own effect host — a turn's group
@@ -56,7 +59,7 @@ pub(super) async fn delete_bound_session(
     core: &LashCore,
     session_id: impl AsRef<str>,
 ) -> Result<crate::SessionDeleteReport> {
-    let administration = core.session_administration().await?;
+    let administration = core.session_administration().await;
     let context = administration.delete_context(session_id.as_ref())?;
     LashCore::delete_session(context).await
 }

@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessToolIntents as _};
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -9,25 +9,25 @@ const PROCESS: &str = "intent-ingress-process";
 const EVENT: &str = "intent.ingress.realized";
 const SIGNAL: &str = "ingress-signal";
 
-async fn ingress_core() -> Result<(LashCore, Arc<TestLocalProcessRegistry>)> {
+/// The controller-owned (ordinal-addressed) tier: a memory backend whose
+/// effect host is a [`KeyJournalController`].
+async fn ingress_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     ingress_core_with_effect_host(Arc::new(KeyJournalController::default())).await
 }
 
+/// A memory backend with its effect host replaced by `effect_host`.
 async fn ingress_core_with_effect_host(
     effect_host: Arc<dyn lash_core::EffectHost>,
-) -> Result<(LashCore, Arc<TestLocalProcessRegistry>)> {
-    ingress_core_with_effect_host_and_env_store(
-        effect_host,
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new()),
-    )
-    .await
+) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
+    ingress_core_over(memory_backend().await, Some(effect_host), None).await
 }
 
-async fn ingress_core_with_effect_host_and_env_store(
-    effect_host: Arc<dyn lash_core::EffectHost>,
-    process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-) -> Result<(LashCore, Arc<TestLocalProcessRegistry>)> {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+async fn ingress_core_over(
+    backend: Arc<lash_sqlite_store::SqliteBackend>,
+    effect_host: Option<Arc<dyn lash_core::EffectHost>>,
+    process_env_store: Option<Arc<dyn lash_core::ProcessExecutionEnvStore>>,
+) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
+    let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
@@ -57,29 +57,72 @@ async fn ingress_core_with_effect_host_and_env_store(
             &[SessionId::from(SESSION.to_string())],
         )
         .await?;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(effect_host)
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .plugin(lash_core::testing::process_engine_plugin_fixture())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_env_store(process_env_store)
-        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        ingress_backend(backend, effect_host, process_env_store),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(lash_core::testing::process_engine_plugin_fixture())
+    .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session(SESSION).open().await?;
     Ok((core, registry))
 }
 
+/// `backend`, with its effect host and process-env store replaced where
+/// the test names its own.
+fn ingress_backend(
+    backend: Arc<dyn lash_core::Backend>,
+    effect_host: Option<Arc<dyn lash_core::EffectHost>>,
+    process_env_store: Option<Arc<dyn lash_core::ProcessExecutionEnvStore>>,
+) -> Arc<dyn lash_core::Backend> {
+    let mut decorated = DecoratedBackend::over(backend);
+    if let Some(effect_host) = effect_host {
+        decorated = decorated.effect_host(move |_| effect_host);
+    }
+    if let Some(process_env_store) = process_env_store {
+        decorated = decorated.process_env_store(move |_| process_env_store);
+    }
+    Arc::new(decorated)
+}
+
+/// A second invocation over `first`'s durable backend with a fresh
+/// [`KeyJournalController`]: a fresh effect journal, which is exactly what a
+/// redelivered submission gets.
+async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        ingress_backend(
+            Arc::clone(first.backend()),
+            Some(Arc::new(KeyJournalController::default())),
+            None,
+        ),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(lash_core::testing::process_engine_plugin_fixture())
+    .build(crate::testing::runtime_lease_owner())?;
+    let _session = core.session(SESSION).open().await?;
+    Ok(core)
+}
+
 /// Registers the subscription a submitted occurrence must reserve a delivery
-/// for. Without it every emit report is empty and the dedupe assertions below
-/// pass without ever touching reservation or delivery state.
+/// for, with its execution environment published to `env_store`. Without it
+/// every emit report is empty and the dedupe assertions below pass without
+/// ever touching reservation or delivery state.
 async fn register_ingress_trigger_subscription(
-    store: &lash_core::facade_support::InMemoryTriggerStore,
+    store: &dyn lash_core::TriggerStore,
+    env_store: &dyn lash_core::ProcessExecutionEnvStore,
 ) -> Result<lash_core::TriggerSubscriptionRecord> {
-    use lash_core::TriggerStore as _;
-    let process_env_ref = lash_core::testing::process_execution_env_fixture_ref();
+    let process_env_ref = lash_core::testing::publish_process_execution_env_for_testing(
+        env_store,
+        &lash_core::ArtifactOwner::host("process-execution-env-fixture"),
+        &lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::default(),
+            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        ),
+    )
+    .await?;
     let draft = lash_core::TriggerSubscriptionDraft::for_process(
         "test/intent-ingress-delivery",
         process_env_ref,
@@ -114,32 +157,24 @@ async fn ingress_core_with_trigger_store(
     effect_host: Arc<dyn lash_core::EffectHost>,
 ) -> Result<(
     LashCore,
-    Arc<lash_core::facade_support::InMemoryTriggerStore>,
+    Arc<dyn lash_core::TriggerStore>,
     lash_core::TriggerSubscriptionRecord,
-    Arc<TestLocalProcessRegistry>,
+    Arc<dyn ProcessRegistry>,
 )> {
-    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-    let subscription = register_ingress_trigger_subscription(&store).await?;
-    let registry = Arc::new(TestLocalProcessRegistry::default());
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("process-exec-env backend")
-            .process_env_store();
-    // The fixture environment every subscription draft here records.
-    lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(effect_host)
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .plugin(lash_core::testing::process_engine_plugin_fixture())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_env_store(process_env_store)
-        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
-        .trigger_store(Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>)
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
+    let subscription =
+        register_ingress_trigger_subscription(store.as_ref(), backend.process_env_store().as_ref())
+            .await?;
+    let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        ingress_backend(backend, Some(effect_host), None),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(lash_core::testing::process_engine_plugin_fixture())
+    .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session(SESSION).open().await?;
     Ok((core, store, subscription, registry))
 }
@@ -160,8 +195,6 @@ fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
 /// router, and re-submitting the same identity cannot emit a second time.
 #[tokio::test]
 async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
-    use lash_core::TriggerStore as _;
-
     let (core, store, subscription, _) =
         ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -247,8 +280,6 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
 #[tokio::test]
 async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_exactly_once()
 -> Result<()> {
-    use lash_core::TriggerStore as _;
-
     let (core, store, _subscription, _) =
         ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -330,8 +361,6 @@ async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_e
 
 #[tokio::test]
 async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Result<()> {
-    use lash_core::TriggerStore as _;
-
     let (core, store, _, _) =
         ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -362,109 +391,21 @@ async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Resul
     Ok(())
 }
 
-#[tokio::test]
-async fn predecessor_runtime_owned_trigger_submission_is_refused_before_store_ingress() -> Result<()>
-{
-    use lash_core::TriggerStore as _;
-
-    let (core, store, _, registry) =
-        ingress_core_with_trigger_store(Arc::new(crate::durability::NativeEffectHost::default()))
-            .await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("predecessor-runtime-trigger-call", 0);
-    let intent = trigger_intent(&SessionId::from(SESSION));
-    let mut predecessor = serde_json::to_value(lash_core::ToolIntentSubmissionRecord::new(
-        key.identity().clone(),
-        intent.clone(),
-    )?)?;
-    predecessor
-        .as_object_mut()
-        .expect("versioned submission row")
-        .remove("protocol_version");
-    let predecessor = serde_json::from_value(predecessor)?;
-    assert!(matches!(
-        registry.admit_tool_intent_submission(predecessor).await?,
-        lash_core::ToolIntentSubmissionAdmission::Admitted
-    ));
-
-    assert!(matches!(
-        ingress.submit(key, intent).await,
-        crate::tools::ToolIntentIngressOutcome::Refused {
-            refusal: crate::tools::ToolIntentIngressRefusal::UnsupportedProtocolVersion {
-                recorded: 1
-            }
-        }
-    ));
-    assert!(
-        store
-            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
-            .await?
-            .is_empty()
-    );
-    assert!(store.list_deliveries().await?.is_empty());
-    Ok(())
-}
-
-/// A runtime-owned host has no journal to replay the emission from, so the
-/// submission row is the whole record: the first submit realizes the emission
-/// and completes its row, and the second is refused against that row rather
-/// than re-entering the router.
-#[tokio::test]
-async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<()> {
-    use lash_core::TriggerStore as _;
-
-    let (core, store, _subscription, _) =
-        ingress_core_with_trigger_store(Arc::new(crate::durability::NativeEffectHost::default()))
-            .await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("runtime-owned-trigger-call", 0);
-
-    let first = ingress
-        .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))
-        .await;
-    let crate::tools::ToolIntentIngressOutcome::Admitted {
-        outcome:
-            lash_core::ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::EmitTrigger,
-                ..
-            },
-        ..
-    } = first
-    else {
-        panic!("a runtime-owned host realizes the trigger declaration: {first:?}")
-    };
-
-    let duplicate = ingress
-        .submit(key, trigger_intent(&SessionId::from(SESSION)))
-        .await;
-    assert!(
-        matches!(
-            duplicate,
-            crate::tools::ToolIntentIngressOutcome::Refused {
-                refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
-                    kind: lash_core::ToolIntentKind::EmitTrigger
-                },
-                ..
-            }
-        ),
-        "the completed submission row refuses the second submit: {duplicate:?}"
-    );
-    assert_eq!(
-        store
-            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
-            .await?
-            .len(),
-        1,
-        "the refusal keeps the second submit out of the router"
-    );
-    Ok(())
-}
-
-#[derive(Default)]
+/// The backend's process-env store, counting and optionally failing puts.
 struct ProbeProcessEnvStore {
     puts: std::sync::atomic::AtomicUsize,
     fail_put: std::sync::atomic::AtomicBool,
-    inner: lash_core::facade_support::InMemoryProcessExecutionEnvStore,
+    inner: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+}
+
+impl ProbeProcessEnvStore {
+    fn over(inner: Arc<dyn lash_core::ProcessExecutionEnvStore>) -> Self {
+        Self {
+            puts: std::sync::atomic::AtomicUsize::new(0),
+            fail_put: std::sync::atomic::AtomicBool::new(false),
+            inner,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -1236,303 +1177,6 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
 }
 
 #[tokio::test]
-async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result<()> {
-    let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
-            .await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("runtime-owned-duplicate", 0);
-
-    let first = ingress
-        .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
-        .await;
-    assert!(matches!(
-        first,
-        crate::tools::ToolIntentIngressOutcome::Admitted {
-            replayed: false,
-            ..
-        }
-    ));
-    let mut conflicting = emit_intent(&SessionId::from(SESSION));
-    let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting else {
-        unreachable!("fixture is an emit intent")
-    };
-    intent.payload = serde_json::json!({"law": "conflicting-runtime-duplicate"});
-    let duplicate = ingress.submit(key, conflicting).await;
-    assert!(matches!(
-        duplicate,
-        crate::tools::ToolIntentIngressOutcome::Refused {
-            refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
-                kind: lash_core::ToolIntentKind::EmitProcessEvent,
-            }
-        }
-    ));
-    assert_eq!(
-        registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
-            .await?
-            .iter()
-            .filter(|event| event.event_type == EVENT)
-            .count(),
-        1
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() -> Result<()> {
-    let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
-            .await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-
-    let targets = [
-        "cancel-same-target",
-        "cancel-first-target",
-        "cancel-other-target",
-    ];
-    for target in targets {
-        let record = registry
-            .register_process_with_observers(
-                lash_core::ProcessRegistration::new(
-                    target,
-                    lash_core::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
-                    lash_core::RecoveryContract::ExternallyOwned,
-                    lash_core::ProcessProvenance::host(),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
-                ),
-                &[SessionId::from(SESSION)],
-            )
-            .await?;
-        assert!(!record.is_terminal());
-        assert!(record.cancel_request.is_none());
-    }
-    for (call_id, first_target, duplicate_target) in [
-        ("cancel-same-target", targets[0], targets[0]),
-        ("cancel-changed-target", targets[1], targets[2]),
-    ] {
-        assert_eq!(
-            first_target == duplicate_target,
-            call_id == "cancel-same-target"
-        );
-        let key = ingress.key(call_id, 0);
-        let first = ingress
-            .submit(
-                key.clone(),
-                cancel_intent_for_target(&SessionId::from(SESSION), first_target),
-            )
-            .await;
-        assert!(matches!(
-            first,
-            crate::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    kind: lash_core::ToolIntentKind::CancelProcess,
-                    ..
-                },
-                replayed: false,
-            }
-        ));
-        let duplicate = ingress
-            .submit(
-                key,
-                cancel_intent_for_target(&SessionId::from(SESSION), duplicate_target),
-            )
-            .await;
-        assert!(matches!(
-            duplicate,
-            crate::tools::ToolIntentIngressOutcome::Refused {
-                refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
-                    kind: lash_core::ToolIntentKind::CancelProcess,
-                }
-            }
-        ));
-    }
-
-    let concurrent_key = ingress.key("cancel-concurrent", 0);
-    let (left, right) = tokio::join!(
-        ingress.submit(
-            concurrent_key.clone(),
-            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
-        ),
-        ingress.submit(
-            concurrent_key,
-            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
-        ),
-    );
-    let concurrent_outcomes = [left, right];
-    assert_eq!(
-        concurrent_outcomes
-            .iter()
-            .filter(|outcome| matches!(
-                outcome,
-                crate::tools::ToolIntentIngressOutcome::Admitted {
-                    outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                        kind: lash_core::ToolIntentKind::CancelProcess,
-                        ..
-                    },
-                    replayed: false,
-                }
-            ))
-            .count(),
-        1,
-        "one concurrent submit realizes the cancellation"
-    );
-    assert_eq!(
-        concurrent_outcomes
-            .iter()
-            .filter(|outcome| matches!(
-                outcome,
-                crate::tools::ToolIntentIngressOutcome::Refused {
-                    refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
-                        kind: lash_core::ToolIntentKind::CancelProcess,
-                    }
-                }
-            ))
-            .count(),
-        1,
-        "the racing duplicate is a typed refusal"
-    );
-
-    let mut realized = 0;
-    for target in [targets[0], targets[1], PROCESS] {
-        let count = registry
-            .full_event_window(&ProcessId::from(target), 0)
-            .await?
-            .iter()
-            .filter(|event| event.event_type == "process.cancel_requested")
-            .count();
-        assert_eq!(count, 1, "each admitted target is cancelled once");
-        realized += count;
-    }
-    assert_eq!(
-        realized, 3,
-        "each ingress identity realizes one cancellation"
-    );
-    assert!(
-        registry
-            .get_process(&ProcessId::from(targets[2]))
-            .await?
-            .expect("retained alternate target")
-            .cancel_request
-            .is_none(),
-        "the conflicting duplicate never cancels its different target"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted() -> Result<()> {
-    let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
-            .await?;
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = ingress.key("runtime-cross-target-kind", 0);
-
-    let started = ingress
-        .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
-        .await;
-    assert!(matches!(
-        started,
-        crate::tools::ToolIntentIngressOutcome::Admitted {
-            outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::StartProcess,
-                ..
-            },
-            replayed: false,
-        }
-    ));
-
-    let refused = ingress
-        .submit(key, emit_intent(&SessionId::from(SESSION)))
-        .await;
-    assert!(matches!(
-        refused,
-        crate::tools::ToolIntentIngressOutcome::Refused {
-            refusal: crate::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-                recorded_kind: lash_core::ToolIntentKind::StartProcess,
-                submitted_kind: lash_core::ToolIntentKind::EmitProcessEvent,
-            }
-        }
-    ));
-    assert_eq!(
-        registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
-            .await?
-            .iter()
-            .filter(|event| event.event_type == EVENT)
-            .count(),
-        0,
-        "the different target must not hide the first identity binding"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn runtime_owned_identity_gate_is_shared_across_independent_ingress_handles() -> Result<()> {
-    let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
-            .await?;
-    let left = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let right = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let key = left.key("runtime-cross-handle-cancel", 0);
-
-    let (left_outcome, right_outcome) = tokio::join!(
-        left.submit(
-            key.clone(),
-            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
-        ),
-        right.submit(
-            key,
-            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
-        ),
-    );
-    let outcomes = [left_outcome, right_outcome];
-    assert_eq!(
-        outcomes
-            .iter()
-            .filter(|outcome| matches!(
-                outcome,
-                crate::tools::ToolIntentIngressOutcome::Admitted {
-                    replayed: false,
-                    ..
-                }
-            ))
-            .count(),
-        1,
-        "exactly one handle reports a fresh realization"
-    );
-    assert_eq!(
-        outcomes
-            .iter()
-            .filter(|outcome| matches!(
-                outcome,
-                crate::tools::ToolIntentIngressOutcome::Refused {
-                    refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity { .. }
-                }
-            ))
-            .count(),
-        1,
-        "the independently bound handle observes the authoritative duplicate"
-    );
-    assert_eq!(
-        registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
-            .await?
-            .iter()
-            .filter(|event| event.event_type == "process.cancel_requested")
-            .count(),
-        1,
-        "the identity realizes one cancellation"
-    );
-    Ok(())
-}
-
-#[tokio::test]
 async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
     let (core, registry) = ingress_core().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -1834,10 +1478,12 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
 #[tokio::test]
 async fn start_env_is_persisted_after_admission_and_matching_redrive_completes() -> Result<()> {
     let controller = Arc::new(AdmissionCrashController::default());
-    let env_store = Arc::new(ProbeProcessEnvStore::default());
-    let (core, registry) = ingress_core_with_effect_host_and_env_store(
-        Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
-        Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    let backend = memory_backend().await;
+    let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
+    let (core, registry) = ingress_core_over(
+        backend,
+        Some(Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>),
+        Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
     )
     .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -1899,11 +1545,13 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
 
 #[tokio::test]
 async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()> {
-    let env_store = Arc::new(ProbeProcessEnvStore::default());
+    let backend = memory_backend().await;
+    let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
     env_store.fail_put.store(true, Ordering::SeqCst);
-    let (core, registry) = ingress_core_with_effect_host_and_env_store(
-        Arc::new(crate::durability::NativeEffectHost::default()),
-        Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    let (core, registry) = ingress_core_over(
+        backend,
+        None,
+        Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
     )
     .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -1929,20 +1577,36 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     ));
     assert!(
         registry
+            .get_process(&ProcessId::from(process_id.clone()))
+            .await?
+            .is_none()
+    );
+    // The failed put is a live fault, not a recorded outcome: a resubmission
+    // of the same identity retries it, meets the same fault, and still
+    // registers nothing.
+    let resubmitted = ingress
+        .submit(key, start_intent_with_env(&SessionId::from(SESSION)))
+        .await;
+    assert!(
+        matches!(
+            resubmitted,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Refused {
+                    kind: lash_core::ToolIntentKind::StartProcess,
+                    refusal: lash_core::ToolIntentRefusalReason::CommandFailed { .. },
+                    ..
+                },
+                replayed: false,
+            }
+        ),
+        "{resubmitted:?}"
+    );
+    assert!(
+        registry
             .get_process(&ProcessId::from(process_id))
             .await?
             .is_none()
     );
-    assert!(matches!(
-        ingress
-            .submit(key, start_intent_with_env(&SessionId::from(SESSION)))
-            .await,
-        crate::tools::ToolIntentIngressOutcome::Refused {
-            refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
-                kind: lash_core::ToolIntentKind::StartProcess,
-            }
-        }
-    ));
     Ok(())
 }
 
@@ -2061,17 +1725,17 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
     }
 }
 
-async fn ingress_engine_core() -> Result<(LashCore, Arc<TestLocalProcessRegistry>)> {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .plugin(Arc::new(IngressAdmissionEngineFactory))
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
-        .build(crate::testing::runtime_lease_owner())?;
+async fn ingress_engine_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(Arc::new(IngressAdmissionEngineFactory))
+    .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session(SESSION).open().await?;
     Ok((core, registry))
 }

@@ -101,24 +101,19 @@ async fn probe_session(
     options.reliability.retry.jitter_ms = 0;
     provider_handle.set_options(options);
     let collector = CheckpointWriteCollector::default();
-    let store_factory: Arc<dyn SessionStoreFactory> =
-        Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?,
+    );
+    let store_factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
+    let backend =
+        Arc::new(crate::backend::DecoratedBackend::over(backend).observing(collector.clone()));
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(ObservedSessionStoreFactory::new(
-            Arc::clone(&store_factory),
-            collector.clone(),
-        )))
         .charge_safety(charge_safety)
         .provider(provider_handle)
         .model(model)
@@ -163,7 +158,7 @@ mod tests {
     #[tokio::test]
     async fn durable_content_law_bites_on_real_run_evidence() {
         let workload = generate_workload(5, "fast-random", 96).expect("workload");
-        let mut world = GeneratedRuntimeWorld::new();
+        let mut world = GeneratedRuntimeWorld::new().await.expect("world");
         drive_generated_workload(&mut world, &workload)
             .await
             .expect("drive");

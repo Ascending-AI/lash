@@ -36,9 +36,11 @@ fn wrong_field_mail_payload_is_rejected_as_unprocessable_entity() {
 async fn inject_message_scopes_emission_to_requested_session() {
     let data_dir = tempfile::tempdir().expect("tempdir");
     let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(&data_dir.path().join("triggers.db"))
-            .await
-            .expect("open trigger store"),
+        lash_sqlite_store::SqliteTriggerStore::open(
+            &crate::tests::sessions_root(data_dir.path()).join("triggers.db"),
+        )
+        .await
+        .expect("open trigger store"),
     );
     let mut state = recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
@@ -77,9 +79,14 @@ async fn inject_message_scopes_emission_to_requested_session() {
     };
     let linked =
         lash::rlm::LinkedModule::link(module, environment).expect("link mail-listener process");
-    let artifact_store = lash_sqlite_store::Store::open(&data_dir.path().join("artifacts.db"))
-        .await
-        .expect("open workbench Lashlang artifact store");
+    let artifact_store = lash_sqlite_store::Store::open(
+        &data_dir
+            .path()
+            .join("lash-sessions")
+            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+    )
+    .await
+    .expect("open workbench Lashlang artifact store");
     lash::persistence::LashlangArtifactStore::publish_module_artifact(
         &artifact_store,
         &lash::process::ArtifactOwner::host("mail-payload-test"),
@@ -99,9 +106,14 @@ async fn inject_message_scopes_emission_to_requested_session() {
         args: serde_json::Map::new(),
     };
     let process_identity = process_input.process_identity();
-    let process_env_store = lash_sqlite_store::Store::open(&data_dir.path().join("process-env.db"))
-        .await
-        .expect("open workbench process environment store");
+    let process_env_store = lash_sqlite_store::Store::open(
+        &data_dir
+            .path()
+            .join("lash-sessions")
+            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+    )
+    .await
+    .expect("open workbench process environment store");
     let process_env_spec = lash::process::ProcessExecutionEnvSpec::new(
         Default::default(),
         lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
@@ -185,11 +197,12 @@ async fn inject_message_scopes_emission_to_requested_session() {
     .expect("deserialize delivery");
 
     let operation_id = "workbench-test-mail-delivery";
-    let scoped_effect_controller = lash::runtime::ScopedEffectController::shared(
-        Arc::new(lash::runtime::NativeRuntimeEffectController::default()),
+    let scoped_effect_controller = lash::durability::EffectHost::scoped_static(
+        state.core.effect_host().as_ref(),
         lash::runtime::AdmittedScope::runtime_operation(format!("trigger:{operation_id}")),
     )
-    .expect("scoped effect controller");
+    .expect("scoped effect controller")
+    .expect("the backend host lends an owned controller");
 
     let report = enqueue_mail_received_trigger_command(
         &state,

@@ -330,9 +330,8 @@ fn embedded_host(current: &CurrentSessionCapability) -> EmbeddedRuntimeHost {
 
 fn session_creation_store_guidance() -> &'static str {
     "A session-creation factory must return a distinct store bound to the requested session id. \
-     Do not wrap a single pre-opened store in LashCoreBuilder::store_factory; pass that exact \
-     store with SessionBuilder::store(...) and configure \
-     LashCoreBuilder::session_creation_store_factory(...) for sessions created from a running session."
+     A backend's session catalog opens one store per session; do not stand a single pre-opened \
+     store in for the catalog."
 }
 
 fn session_creation_store_factory_error(session_id: &SessionId, message: String) -> String {

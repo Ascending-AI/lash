@@ -12,8 +12,8 @@ use crate::durable_wait::{
 };
 use crate::process_attach::{LashProcessAttach, LashProcessAttachImpl};
 use crate::{
-    RestateBindingCheckError, RestateEffectGroupServices, RestateProcessDeployment,
-    RestateTurnDeployment, assert_services_bound, bound_service_names,
+    RestateBackend, RestateBindingCheckError, RestateEffectGroupServices, RestateProcessDeployment,
+    assert_services_bound, bound_service_names,
 };
 use restate_sdk::endpoint::Endpoint;
 
@@ -45,13 +45,28 @@ async fn assert_services_bound_passes_on_a_complete_surface() {
     let endpoint = Endpoint::builder()
         .bind(LashDurableWaitWorkflowImpl.serve())
         .bind(LashDurableWaitIndexImpl.serve())
+        .bind(LashProcessAttachImpl.serve())
         .build();
     assert_services_bound(
         &endpoint,
-        RestateTurnDeployment::required_service_names().as_slice(),
+        &[
+            "LashDurableWaitWorkflow",
+            "LashDurableWaitIndex",
+            "LashProcessAttach",
+        ],
     )
     .await
-    .expect("endpoint binding both durable-wait services validates");
+    .expect("endpoint binding every named service validates");
+}
+
+#[test]
+fn restate_backend_requires_the_process_surface() {
+    // One Restate backend runs both turns and processes, so its endpoint
+    // must bind the durable-wait pair and the process services together.
+    assert_eq!(
+        RestateBackend::required_service_names(),
+        RestateProcessDeployment::required_service_names()
+    );
 }
 
 #[tokio::test]

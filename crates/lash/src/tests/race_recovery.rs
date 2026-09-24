@@ -22,8 +22,6 @@
 
 use super::*;
 
-use lash_core::ProcessEventLog as _;
-
 const SESSION: &str = "race-recovery";
 const INTENT_PROCESS: &str = "race-recovery-intent-target";
 const INTENT_EVENT: &str = "race.recovery.loser";
@@ -165,7 +163,7 @@ fn message_plugin() -> Arc<dyn PluginFactory> {
     ))
 }
 
-async fn register_intent_target(registry: &TestLocalProcessRegistry) {
+async fn register_intent_target(registry: &dyn ProcessRegistry) {
     registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
@@ -237,38 +235,22 @@ async fn race_recovery_worker() -> Result<()> {
         })
         .build()
         .into_handle();
-    let registry = Arc::new(TestLocalProcessRegistry::default());
-    register_intent_target(registry.as_ref()).await;
-    let core = explicit_ephemeral_facets(rlm_core_builder())
-        .provider(provider)
-        .model(mock_model_spec())
-        .tools(Arc::new(RaceTools {
-            crash,
-            loser_ran: Arc::new(tokio::sync::Notify::new()),
-        }))
-        .clock(Arc::clone(&clock));
-    let core = match database_url {
-        None => core
-            .effect_host(Arc::new(
-                lash_sqlite_store::SqliteEffectHost::open_with_clock(
-                    &directory.join("effects.sqlite"),
+    let (backend, lease_timings): (Arc<dyn lash_core::Backend>, _) = match database_url {
+        // The durable execution-environment store is the backend's own:
+        // the loser's retained request names the environment its dead worker
+        // published, and a recovered child never invents one (ADR 0099 §3).
+        None => (
+            Arc::new(
+                lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+                    directory.join("sessions"),
+                    lash_sqlite_store::SqliteBackendOptions::default(),
                     Arc::clone(&clock),
                 )
                 .await
                 .unwrap(),
-            ))
-            .store_factory(Arc::new(
-                lash_sqlite_store::SqliteSessionStoreFactory::new(directory.join("sessions"))
-                    .with_clock(clock),
-            ))
-            // A durable execution-environment store: the loser's retained
-            // request names the environment its dead worker published, and a
-            // recovered child never invents one (ADR 0099 §3).
-            .process_env_store(Arc::new(
-                lash_sqlite_store::Store::open(&directory.join("artifacts.db"))
-                    .await
-                    .unwrap(),
-            )),
+            ),
+            None,
+        ),
         Some(url) => {
             let storage = lash_postgres_store::PostgresStorage::connect(&url)
                 .await
@@ -277,23 +259,41 @@ async fn race_recovery_worker() -> Result<()> {
                 std::time::Duration::from_secs(3),
             )
             .expect("a three-second lease holds three renew intervals");
-            core.lease_timings(lease_timings)
-                .effect_host(Arc::new(
-                    lash_postgres_store::PostgresEffectHost::with_options_and_clock(
+            (
+                Arc::new(
+                    lash_postgres_store::PostgresBackend::with_options_and_clock(
                         &storage,
-                        lash_postgres_store::PostgresEffectReplayOptions {
-                            lease_timings,
-                            drain_budget: Default::default(),
+                        Arc::new(crate::persistence::FileAttachmentStore::new(
+                            directory.join("attachments"),
+                        )),
+                        lash_postgres_store::PostgresBackendOptions {
+                            effect_replay: lash_postgres_store::PostgresEffectReplayOptions {
+                                lease_timings,
+                                drain_budget: Default::default(),
+                            },
+                            ..Default::default()
                         },
                         Arc::clone(&clock),
                     ),
-                ))
-                .store_factory(Arc::new(storage.session_store_factory().with_clock(clock)))
-                .process_env_store(Arc::new(storage.process_env_store()))
+                ),
+                Some(lease_timings),
+            )
         }
     };
+    let registry = backend.process_registry();
+    register_intent_target(registry.as_ref()).await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
+        .provider(provider)
+        .model(mock_model_spec())
+        .tools(Arc::new(RaceTools {
+            crash,
+            loser_ran: Arc::new(tokio::sync::Notify::new()),
+        }));
+    let core = match lease_timings {
+        Some(lease_timings) => core.lease_timings(lease_timings),
+        None => core,
+    };
     let core = core
-        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
         .plugin(message_plugin())
         .build(crate::testing::runtime_lease_owner())?;
     // The PostgreSQL tier times its session lease on the database's clock,

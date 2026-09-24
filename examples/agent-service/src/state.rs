@@ -182,11 +182,7 @@ impl AppStateData {
     }
 
     pub(crate) async fn discard_pending_chat_fork(&self, chat_id: &str) -> AppResult<()> {
-        let administration = self
-            .core
-            .session_administration()
-            .await
-            .map_err(|err| AppError::internal(err.to_string()))?;
+        let administration = self.core.session_administration().await;
         let context = administration
             .delete_context(chat_id)
             .map_err(|err| AppError::internal(err.to_string()))?;
@@ -377,6 +373,7 @@ pub(crate) mod test_support {
         tools: Option<Arc<dyn lash::tools::ToolProvider>>,
         tool_source_policy: lash::tools::ToolSourcePolicy,
     ) -> LashCore {
+        let backend = test_backend(data_dir).await;
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
@@ -384,14 +381,9 @@ pub(crate) mod test_support {
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(
-                lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-                    .await
-                    .expect("artifact store"),
-            ),
+            backend.process_env_store(),
         );
-        let mut builder = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-            .with_native_queued_work()
+        let mut builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .tool_source_policy(tool_source_policy)
             .provider(provider);
         if let Some(tools) = tools {
@@ -399,33 +391,25 @@ pub(crate) mod test_support {
         }
         builder
             .model(mock_model_spec())
-            .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-                data_dir.join("lash-sessions"),
-            )))
-            .effect_host(Arc::new(
-                lash::durability::NativeEffectHost::default()
-                    .allow_process_lifetime_completion_keys(),
-            ))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(Arc::new(
-                lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
-                    .await
-                    .expect("process env store"),
-            ))
-            .trigger_store(Arc::new(
-                lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-                    .await
-                    .expect("trigger store"),
-            ))
-            .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-                data_dir.join("attachments"),
-            )))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "agent-service-test-support",
                 "test",
             ))
             .expect("core")
+    }
+
+    /// The Local durability backend the service opens: a file
+    /// `SqliteBackend` on the data directory's sessions root.
+    pub(crate) async fn test_backend(
+        data_dir: &std::path::Path,
+    ) -> Arc<lash_sqlite_store::SqliteBackend> {
+        Arc::new(
+            lash_sqlite_store::SqliteBackend::open(data_dir.join("lash-sessions"))
+                .await
+                .expect("open the Local SQLite backend"),
+        )
     }
 
     /// A core with an extra host tool source, for seeding a chat whose
@@ -452,8 +436,7 @@ pub(crate) mod test_support {
         {
             AppStateData::from_shared_db(
                 core.clone(),
-                core.turn_work_driver()
-                    .expect("test core has a session catalog"),
+                core.turn_work_driver(),
                 Arc::new(Mutex::new(db)),
                 "mock-model".to_string(),
                 None,
@@ -466,8 +449,7 @@ pub(crate) mod test_support {
         {
             AppStateData::new(
                 core.clone(),
-                core.turn_work_driver()
-                    .expect("test core has a session catalog"),
+                core.turn_work_driver(),
                 db,
                 "mock-model".to_string(),
                 None,

@@ -281,10 +281,6 @@ impl EffectHost for StoreDelegatedTurnControlHost {
         self.owner.reinstate_effect_scope(scope).await
     }
 
-    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
-        self.owner.effect_scope_fence_database()
-    }
-
     fn bind_process_registry(&self, binding: crate::ProcessRegistryBinding) {
         self.owner.bind_process_registry(binding);
     }

@@ -73,10 +73,10 @@ use tokio::sync::OnceCell;
 /// How this handle obtains the session's store.
 #[derive(Clone)]
 enum DurableAcquisition {
-    Catalog(Arc<dyn SessionStoreFactory>),
-    /// A host-supplied exact store; existence is still proven before use.
-    Exact(Arc<dyn RuntimePersistence>),
-    /// An open session's owner-issued store; the open already proved existence.
+    /// Resolve an existing session through the catalog's non-creating seam.
+    Catalog,
+    /// An open or just-created session's store; the open or the creation
+    /// already proved existence.
     Bound(Arc<dyn RuntimePersistence>),
 }
 
@@ -89,7 +89,7 @@ pub struct DurableSession {
     session_id: SessionId,
     ops: DurableSessionOps,
     acquisition: DurableAcquisition,
-    catalog: Option<Arc<dyn SessionStoreFactory>>,
+    catalog: Arc<dyn SessionStoreFactory>,
     /// Shared by every clone so concurrent operations acquire the store once.
     store: Arc<OnceCell<Arc<dyn RuntimePersistence>>>,
 }
@@ -103,39 +103,21 @@ impl DurableSession {
     ) -> Self {
         Self {
             ops: DurableSessionOps::new(session_id.clone(), queued, live_replay_store),
-            acquisition: DurableAcquisition::Catalog(Arc::clone(&catalog)),
-            catalog: Some(catalog),
-            store: Arc::new(OnceCell::new()),
-            session_id,
-        }
-    }
-
-    pub(crate) fn from_exact_store(
-        session_id: SessionId,
-        store: Arc<dyn RuntimePersistence>,
-        queued: Arc<dyn QueuedWorkSubstrate>,
-        live_replay_store: Arc<dyn LiveReplayStore>,
-        catalog: Option<Arc<dyn SessionStoreFactory>>,
-    ) -> Self {
-        Self {
-            ops: DurableSessionOps::new(session_id.clone(), queued, live_replay_store),
-            acquisition: DurableAcquisition::Exact(store),
+            acquisition: DurableAcquisition::Catalog,
             catalog,
             store: Arc::new(OnceCell::new()),
             session_id,
         }
     }
 
-    /// The binding's store and ports are reused as-is: an exact binding never
-    /// manufactures a catalog, so catalog-only reads stay optional here with
-    /// the same typed error a root opened with an explicit store already
-    /// returns.
+    /// The binding's store and ports are reused as-is, beside the catalog the
+    /// store came from.
     pub(crate) fn from_binding(
         session_id: SessionId,
         store: Arc<dyn RuntimePersistence>,
         queued: Arc<dyn QueuedWorkSubstrate>,
         live_replay_store: Arc<dyn LiveReplayStore>,
-        catalog: Option<Arc<dyn SessionStoreFactory>>,
+        catalog: Arc<dyn SessionStoreFactory>,
     ) -> Self {
         Self {
             ops: DurableSessionOps::new(session_id.clone(), queued, live_replay_store),
@@ -159,18 +141,14 @@ impl DurableSession {
     async fn acquire(&self) -> Result<Arc<dyn RuntimePersistence>> {
         let resolved = match &self.acquisition {
             DurableAcquisition::Bound(store) => return Ok(Arc::clone(store)),
-            DurableAcquisition::Exact(store) => store
-                .load_session_meta()
-                .await
-                .map_err(EmbedError::Store)?
-                .map(|_| Arc::clone(store)),
             // The seam's two negative answers are kept apart: `Err` is a
             // catalog that cannot resolve by id, and surfaces as
             // `StoreFactory` naming that capability; only `Ok(None)` below
             // becomes "no such session". The method is required on the trait
             // precisely so an implementor cannot inherit the second answer
             // while meaning the first.
-            DurableAcquisition::Catalog(catalog) => catalog
+            DurableAcquisition::Catalog => self
+                .catalog
                 .open_existing_store_by_id(&self.session_id)
                 .await
                 .map_err(|error| EmbedError::StoreFactory {
@@ -187,20 +165,18 @@ impl DurableSession {
     /// Distinguish "never created" from "used and deleted" for a caller whose
     /// acquisition found no store.
     async fn absent_session_error(&self) -> EmbedError {
-        if let Some(catalog) = self.catalog.as_ref() {
-            match catalog.session_was_deleted(&self.session_id).await {
-                Ok(true) => {
-                    return EmbedError::Store(lash_core::StoreError::SessionDeleted {
-                        session_id: self.session_id.clone(),
-                    });
-                }
-                Ok(false) => {}
-                Err(message) => {
-                    return EmbedError::StoreFactory {
-                        session_id: self.session_id.clone(),
-                        message,
-                    };
-                }
+        match self.catalog.session_was_deleted(&self.session_id).await {
+            Ok(true) => {
+                return EmbedError::Store(lash_core::StoreError::SessionDeleted {
+                    session_id: self.session_id.clone(),
+                });
+            }
+            Ok(false) => {}
+            Err(message) => {
+                return EmbedError::StoreFactory {
+                    session_id: self.session_id.clone(),
+                    message,
+                };
             }
         }
         EmbedError::UnknownSession {
@@ -216,12 +192,6 @@ impl DurableSession {
             | Err(EmbedError::Store(lash_core::StoreError::SessionDeleted { .. })) => Ok(None),
             Err(err) => Err(err),
         }
-    }
-
-    fn catalog(&self, operation: &'static str) -> Result<&Arc<dyn SessionStoreFactory>> {
-        self.catalog
-            .as_ref()
-            .ok_or(EmbedError::SessionCatalogUnavailable { operation })
     }
 
     /// Creates a builder for durably enqueueing turn input.
@@ -380,7 +350,7 @@ impl DurableSession {
     /// backends return
     /// [`StoreError::UnsupportedStoreOperation`](lash_core::StoreError::UnsupportedStoreOperation).
     pub async fn read(&self) -> Result<Option<crate::persistence::SessionReadView>> {
-        self.catalog("read")?
+        self.catalog
             .read_session(&self.session_id)
             .await
             .map_err(EmbedError::Store)
@@ -405,7 +375,7 @@ impl DurableSession {
     /// session id cannot become live again. Compose this read with
     /// [`exists`](Self::exists) when deciding live/retired/unknown disposition.
     pub async fn was_deleted(&self) -> Result<bool> {
-        self.catalog("was_deleted")?
+        self.catalog
             .session_was_deleted(&self.session_id)
             .await
             .map_err(|message| EmbedError::StoreFactory {

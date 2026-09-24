@@ -1,26 +1,31 @@
 use super::*;
 
-async fn approval_test_core(
+/// The file backend an approval test runs on: its effect journal is the
+/// durable host the parked approval resumes through.
+async fn approval_backend(
     data_dir: &std::path::Path,
+    clock: Option<Arc<lash::testing::TestClock>>,
+) -> Arc<lash_sqlite_store::SqliteBackend> {
+    let root = data_dir.join("lash-sessions");
+    let backend = match clock {
+        Some(clock) => {
+            lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+                &root,
+                lash_sqlite_store::SqliteBackendOptions::default(),
+                clock,
+            )
+            .await
+        }
+        None => lash_sqlite_store::SqliteBackend::open(&root).await,
+    };
+    Arc::new(backend.expect("open the approval test backend"))
+}
+
+async fn approval_test_core(
+    backend: &Arc<lash_sqlite_store::SqliteBackend>,
     provider: ProviderHandle,
     approvals: approvals::WorkbenchApprovals,
-    effect_host: Arc<dyn lash::durability::EffectHost>,
 ) -> LashCore {
-    let artifact_store = Arc::new(
-        lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-            .await
-            .expect("open approval test artifact store"),
-    ) as Arc<dyn lash::persistence::LashlangArtifactStore>;
-    let process_env_store = Arc::new(
-        lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
-            .await
-            .expect("open approval test process env store"),
-    ) as Arc<dyn lash::persistence::ProcessExecutionEnvStore>;
-    let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-            .await
-            .expect("open approval test trigger store"),
-    );
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -29,24 +34,14 @@ async fn approval_test_core(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        artifact_store,
+        backend.process_env_store(),
     );
-    let runtime_host_config = lash::durability::RuntimeHostConfig::new(
-        effect_host,
-        Arc::new(lash::persistence::FileAttachmentStore::new(
-            data_dir.join("attachments"),
-        )),
-        process_env_store,
-        lash::CommitBudget::bounded(1024 * 1024, 512),
-        lash::QueuedWorkBatchingConfig::new(1),
-    );
-    LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(backend.clone(), lash::TurnBudget::Unbounded, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(test_model())
-        .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            data_dir.join("lash-sessions"),
-        )))
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
@@ -54,10 +49,7 @@ async fn approval_test_core(
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_approvals(approvals),
         ))
-        .trigger_store(trigger_store)
         .without_queued_work()
-        .advanced()
-        .runtime_host_config(runtime_host_config)
         .build(crate::test_core_owner())
         .expect("build approval test core")
 }
@@ -87,11 +79,8 @@ fn approval_approve_resumes_parked_lashlang_instruction_with_success() {
         let directory = tempfile::tempdir().expect("approval tempdir");
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
             .expect("open approval ledger");
-        let effect_host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(&directory.path().join("effects.db"))
-                .await
-                .expect("open durable effect host"),
-        );
+        let backend = approval_backend(directory.path(), None).await;
+        let effect_host = backend.effect_host();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-approve")
             .complete(|_| async {
@@ -104,13 +93,7 @@ finish(result);
             })
             .build()
             .into_handle();
-        let core = approval_test_core(
-            directory.path(),
-            provider,
-            approvals.clone(),
-            effect_host.clone(),
-        )
-        .await;
+        let core = approval_test_core(&backend, provider, approvals.clone()).await;
         let session = core
             .session("approval-approve")
             .open()
@@ -228,11 +211,8 @@ fn a_decided_but_unresolved_approval_repairs_on_retry() {
         let directory = tempfile::tempdir().expect("approval tempdir");
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
             .expect("open approval ledger");
-        let effect_host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(&directory.path().join("effects.db"))
-                .await
-                .expect("open durable effect host"),
-        );
+        let backend = approval_backend(directory.path(), None).await;
+        let effect_host = backend.effect_host();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-repair")
             .complete(|_| async {
@@ -245,13 +225,7 @@ finish(result);
             })
             .build()
             .into_handle();
-        let core = approval_test_core(
-            directory.path(),
-            provider,
-            approvals.clone(),
-            effect_host.clone(),
-        )
-        .await;
+        let core = approval_test_core(&backend, provider, approvals.clone()).await;
         let session = core
             .session("approval-repair")
             .open()
@@ -287,7 +261,10 @@ finish(result);
 
         let process_registry = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open(
-                &directory.path().join("processes.db"),
+                &directory
+                    .path()
+                    .join("lash-sessions")
+                    .join("process-registry.db"),
                 directory.path().join("processes-sessions"),
             )
             .await
@@ -301,7 +278,7 @@ finish(result);
             core,
             attachment_store: test_attachment_store(),
             session_store_factory,
-            trigger_store: in_memory_trigger_store(),
+            trigger_store: detached_trigger_store(),
             process_observer: lash::process::ProcessWorkObserver::new(process_registry),
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
@@ -349,11 +326,8 @@ fn approval_denial_preserves_typed_failure_fields_through_lashlang_bridge() {
         let directory = tempfile::tempdir().expect("approval tempdir");
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
             .expect("open approval ledger");
-        let effect_host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(&directory.path().join("effects.db"))
-                .await
-                .expect("open durable effect host"),
-        );
+        let backend = approval_backend(directory.path(), None).await;
+        let effect_host = backend.effect_host();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-deny")
             .complete(|_| async {
@@ -370,13 +344,7 @@ try {
             })
             .build()
             .into_handle();
-        let core = approval_test_core(
-            directory.path(),
-            provider,
-            approvals.clone(),
-            effect_host.clone(),
-        )
-        .await;
+        let core = approval_test_core(&backend, provider, approvals.clone()).await;
         let session = core
             .session("approval-deny")
             .open()
@@ -440,14 +408,10 @@ fn approval_restart_reopens_the_ledger_and_durable_effect_host() {
     run_async_test_on_stack_budget("workbench-approval-restart", || async {
         let directory = tempfile::tempdir().expect("approval tempdir");
         let approval_path = directory.path().join("approvals.db");
-        let effect_path = directory.path().join("effects.db");
         let approvals =
             approvals::WorkbenchApprovals::open(&approval_path).expect("open approval ledger");
-        let effect_host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(&effect_path)
-                .await
-                .expect("open durable effect host"),
-        );
+        let backend = approval_backend(directory.path(), None).await;
+        let effect_host = backend.effect_host();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-restart")
             .complete(|_| async {
@@ -460,13 +424,7 @@ finish(result.status);
             })
             .build()
             .into_handle();
-        let core = approval_test_core(
-            directory.path(),
-            provider,
-            approvals.clone(),
-            effect_host.clone(),
-        )
-        .await;
+        let core = approval_test_core(&backend, provider, approvals.clone()).await;
         let session = core
             .session("approval-restart")
             .open()
@@ -499,12 +457,16 @@ finish(result.status);
             .expect("parked approval survives reopen");
         assert_eq!(after_restart.key, before_restart.key);
         assert_eq!(after_restart.arguments, before_restart.arguments);
-        let reopened_effect_host = lash_sqlite_store::SqliteEffectHost::open(&effect_path)
+        // Fresh handles on the same backend root: what the next process
+        // opens after the loss.
+        let reopened_effect_host = backend
+            .reopen()
             .await
-            .expect("reopen durable effect host after process loss");
+            .expect("reopen durable backend after process loss")
+            .effect_host();
         assert_eq!(
             lash::runtime::AwaitEventResolver::resolve_await_event(
-                &reopened_effect_host,
+                reopened_effect_host.as_ref(),
                 &reopened_approvals
                     .completion_key(&after_restart.key)
                     .expect("read reopened completion key"),
@@ -528,14 +490,10 @@ finish(result.status);
 async fn async_completion_reopen_and_redrive(resolution: lash::Resolution, slug: &str) {
     let directory = tempfile::tempdir().expect("async completion directory");
     let approval_path = directory.path().join("approvals.db");
-    let effect_path = directory.path().join("effects.db");
     let clock = Arc::new(lash::testing::TestClock::new(1_000_000));
     let approvals = approvals::WorkbenchApprovals::open(&approval_path).unwrap();
-    let effect_host = Arc::new(
-        lash_sqlite_store::SqliteEffectHost::open_with_clock(&effect_path, clock.clone())
-            .await
-            .unwrap(),
-    );
+    let backend = approval_backend(directory.path(), Some(clock.clone())).await;
+    let effect_host = backend.effect_host();
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let provider = lash::testing::TestProvider::builder()
         .kind("async-completion-redrive")
@@ -559,13 +517,7 @@ try {
         })
         .build()
         .into_handle();
-    let core = approval_test_core(
-        directory.path(),
-        provider.clone(),
-        approvals.clone(),
-        effect_host.clone(),
-    )
-    .await;
+    let core = approval_test_core(&backend, provider.clone(), approvals.clone()).await;
     let session_id = format!("async-completion-{slug}");
     let session = core.session(&session_id).open().await.unwrap();
     let scope = lash::durability::EffectHost::scoped_static(
@@ -590,22 +542,14 @@ try {
     assert!(turn.await.unwrap_err().is_cancelled());
     drop(core);
     drop(effect_host);
+    drop(backend);
     drop(approvals);
     // Worker loss leaves the effect claim leased. Expire it without waiting.
     clock.advance(60_000);
     let approvals = approvals::WorkbenchApprovals::open(&approval_path).unwrap();
-    let effect_host = Arc::new(
-        lash_sqlite_store::SqliteEffectHost::open_with_clock(&effect_path, clock.clone())
-            .await
-            .unwrap(),
-    );
-    let core = approval_test_core(
-        directory.path(),
-        provider,
-        approvals.clone(),
-        effect_host.clone(),
-    )
-    .await;
+    let backend = approval_backend(directory.path(), Some(clock.clone())).await;
+    let effect_host = backend.effect_host();
+    let core = approval_test_core(&backend, provider, approvals.clone()).await;
     let session = core.session(&session_id).open().await.unwrap();
     let key = approvals.completion_key(&pending.key).unwrap();
     assert_eq!(
@@ -736,7 +680,7 @@ try {
     drop(session);
     drop(core);
     let reopened = approval_test_core(
-        directory.path(),
+        &backend,
         // The reopen must present the recorded provider pin: a different
         // provider id is refused as `ProviderMismatch` (ADR 0066). The
         // panicking completer still proves the read never reaches it.
@@ -746,7 +690,6 @@ try {
             .build()
             .into_handle(),
         approvals,
-        effect_host,
     )
     .await;
     let session = reopened.session(&session_id).open().await.unwrap();

@@ -55,16 +55,14 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
                     Ok(outcome(format!("task:{args}"), "completed"))
                 }
             });
-        let core =
-            explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-                .provider(mock_provider())
-                .model(mock_model_spec())
-                .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))
-                .store_factory(Arc::new(
-                    crate::persistence::InMemorySessionStoreFactory::new(),
-                ))
-                .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-                .build(crate::testing::runtime_lease_owner())?;
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(
+            memory_backend().await,
+            crate::TurnBudget::Unbounded,
+        ))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("plugin-accept").open().await?;
         let ops = session.plugin_operations();
         let probe = || "cobalt-583".to_string();

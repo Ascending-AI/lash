@@ -17,8 +17,6 @@
 
 use super::*;
 
-use lash_core::ProcessQuery as _;
-
 /// The events the intent target recorded for `event_type`, by leaf id.
 async fn emitted_ids(run: &OracleRun, event_type: &str) -> Vec<String> {
     run.registry
@@ -442,6 +440,7 @@ async fn a_session_with_a_live_group_refuses_deletion_before_deleting_anything(
         tier.name
     );
     driven.theatre.release("held");
+    let catalog = Arc::clone(&driven.core.store_factory);
     let run = driven.finish().await?;
     assert_eq!(
         run.final_value(),
@@ -449,8 +448,7 @@ async fn a_session_with_a_live_group_refuses_deletion_before_deleting_anything(
         "{}: the turn whose session deletion was refused commits normally",
         tier.name
     );
-    let remaining = tier
-        .factory()
+    let remaining = catalog
         .read_session(&SessionId::from(session_id))
         .await
         .expect("read the session catalog row");
@@ -472,11 +470,12 @@ async fn a_turn_cancelled_while_parked_on_rank_n_ends_cancelled(
 ) -> Result<()> {
     let session_id = "aggregate-oracle-any-cancelled";
     let theatre = Arc::new(OracleTheatre::default());
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let backend = tier.backend().await;
+    let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     register_intent_target(registry.as_ref(), session_id).await;
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let core = oracle_core(
-        tier,
+        backend,
         session_id,
         vec![typescript_block(
             r#"try {
@@ -490,7 +489,6 @@ async fn a_turn_cancelled_while_parked_on_rank_n_ends_cancelled(
 }"#,
         )],
         Arc::clone(&theatre),
-        Arc::clone(&registry),
         Arc::clone(&requests),
     )?;
     let session = core.session(session_id).open().await?;

@@ -124,6 +124,11 @@ pub use lash_core::{
     facade_support::WorkerSlotKind, facade_support::WorkerSlotPermit,
     facade_support::WorkerSlotSupplier,
 };
+/// The one substrate a [`LashCore`] takes every persistence port and its
+/// effect host from (ADR 0102). [`LashCore::builder`] requires one:
+/// `lash::sqlite::SqliteBackend` (file or memory), the PostgreSQL
+/// backend, or the Restate backend.
+pub use lash_core::{Backend, BackendQueuedWork};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -182,10 +187,6 @@ pub mod observe {
 pub mod triggers {
     /// Trigger catalog state exposed to protocol and engine integrators.
     pub use lash_core::TriggerEventCatalog;
-    /// Process-free [`TriggerStore`] for tests and single-process hosts, matching
-    /// the in-memory backends [`persistence`](crate::persistence) and
-    /// [`observe`](crate::observe) offer for their own store contracts.
-    pub use lash_core::facade_support::InMemoryTriggerStore;
     pub use lash_core::facade_support::deterministic_subscription_id;
     pub use lash_core::{
         LashSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
@@ -324,15 +325,15 @@ pub mod persistence {
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
         AcceptedTurnInputDrive, AcceptedTurnInputRefusal, ActiveTurnIngress, DeliveryPolicy,
-        ForkPoint, ForkSessionReceipt, ForkSessionRequest, InMemorySessionStore,
-        InMemorySessionStoreFactory, LiveReplayOutcome, LiveReplaySubscription,
-        PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-        ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedTurnWork,
-        QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
-        QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy,
-        QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-        QueuedWorkKind, QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
-        SessionCommandPayload, SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory,
+        ForkPoint, ForkSessionReceipt, ForkSessionRequest, LiveReplayOutcome,
+        LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics,
+        PendingTurnInputDraft, ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork,
+        QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+        QueuedWorkBatchPayloads, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
+        QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+        QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload,
+        RuntimeCheckpointComponents, RuntimeSessionState, SessionCommandPayload,
+        SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory,
         TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
         TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
         TurnInputState, TurnInputStateKind, TurnWorkPayload,
@@ -375,7 +376,6 @@ pub mod persistence {
         AttachmentWriteToken, EmptyRootSetPolicy, ProcessExecutionEnvStore, StoredAttachment,
         StoredBlobRef, attachments::AttachmentReclamationFailure,
         facade_support::AttachmentGcFence, facade_support::AttachmentReclamationReport,
-        facade_support::InMemoryAttachmentStore, facade_support::InMemoryProcessExecutionEnvStore,
         facade_support::SessionAttachmentStore, facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
@@ -759,36 +759,37 @@ pub mod process {
         PROCESS_EVENT_VOCABULARY_VERSION, ParentScope, ParentScopeStorageError,
         ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor,
         ProcessClockRebind, ProcessCompletionAuthority, ProcessContinuationStore,
-        ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-        ProcessDefinitionValue, ProcessEffectNodeSummary, ProcessEffectOmissions,
-        ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectSummary,
-        ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngineKind, ProcessEvent,
-        ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHistoryRetention,
-        ProcessEventLite, ProcessEventLog, ProcessEventPage, ProcessEventPageEvents,
-        ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventType,
-        ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-        ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessIncarnation, ProcessInput,
-        ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeases,
-        ProcessLifecycle, ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode,
-        ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
-        ProcessOriginator, ProcessOriginatorFilter, ProcessProvenance, ProcessPruneReport,
-        ProcessQuery, ProcessRecord, ProcessRef, ProcessRegistrar, ProcessRegistration,
-        ProcessRegistry, ProcessRetention, ProcessService, ProcessSessionDeleteReport,
-        ProcessSignature, ProcessStartOptions, ProcessStartRequest, ProcessStarted, ProcessStatus,
-        ProcessStatusFilter, ProcessTerminalWait, ProcessToolIntents, ProcessWakeDelivery,
-        ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring,
-        ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RecoveryContract,
-        SessionScope, WatchedRegistry, facade_support::ObservedProcess,
-        facade_support::ObservedProcessEvent, facade_support::ObservedProcessEventLite,
-        facade_support::ObservedProcessEventPage, facade_support::ObservedProcessEventReadOutcome,
-        facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,
-        facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionIntake,
-        facade_support::ProcessAdmissionReport, facade_support::ProcessChangeHub,
-        facade_support::ProcessEventSink, facade_support::ProcessRuntimeHost,
-        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
-        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
-        facade_support::ProcessWorkerFault, facade_support::SessionScopeId,
-        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
+        ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionRegistry,
+        ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEffectNodeSummary,
+        ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
+        ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence,
+        ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+        ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
+        ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+        ProcessEventReadOutcome, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
+        ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView, ProcessIdentity,
+        ProcessIncarnation, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
+        ProcessLeaseCompletion, ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy,
+        ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
+        ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter,
+        ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef,
+        ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessRetention, ProcessService,
+        ProcessSessionDeleteReport, ProcessSignature, ProcessStartOptions, ProcessStartRequest,
+        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait,
+        ProcessToolIntents, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
+        ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
+        ProjectionWatermark, RecoveryContract, SessionScope, WatchedRegistry,
+        facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
+        facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
+        facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,
+        facade_support::ObservedWorkItemState, facade_support::ProcessAdmissionDeferred,
+        facade_support::ProcessAdmissionIntake, facade_support::ProcessAdmissionReport,
+        facade_support::ProcessChangeHub, facade_support::ProcessEventSink,
+        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
+        facade_support::ProcessWake, facade_support::ProcessWorkObserver,
+        facade_support::ProcessWorkSnapshot, facade_support::ProcessWorkerFault,
+        facade_support::SessionScopeId, facade_support::watch_process_registry,
+        facade_support::watch_process_registry_with_sink,
     };
     /// Test-only registry probes and the conformance-suite registry type that
     /// carries them (`testing` feature only; no production trait requires them).
@@ -838,10 +839,10 @@ pub mod durability {
         RuntimeSubject, SegmentProgress, ToolAttemptLaunch, TriggerLocalExecution,
     };
     pub use lash_core::{
-        EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,
-        facade_support::LeaseTimingsError, facade_support::NativeEffectHost,
-        facade_support::ProcessDrainReport, facade_support::RuntimeEnvironment,
-        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
+        EffectHost, StoreSet, TurnCancellationAuthority, facade_support::LeaseTimings,
+        facade_support::LeaseTimingsError, facade_support::ProcessDrainReport,
+        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
+        facade_support::TerminationPolicy,
     };
     pub use lash_core_worker::{
         DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork,
@@ -874,29 +875,27 @@ pub mod runtime {
         DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
         EffectJournaling, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
         GroupSettlement, GroupWakePolicy, LashRuntime, LlmRequestSpec, LoserPolicy,
-        NativeQueuedWork, NativeRuntimeEffectController, NativeSubstrateConfig,
-        NativeSubstrateConfigError, NoQueuedWork, NoopEventSink, NoopTurnActivitySink,
-        ProcessCommand, ProcessEffectOutcome, QueuedLaneAcquisition, QueuedLaneAttempt,
-        QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, QueuedWorkExecutionConcurrencyError,
-        QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress,
-        QueuedWorkRunRequest, QueuedWorkSlowWake, QueuedWorkSubstrate, QueuedWorkWakeContended,
-        QueuedWorkWakeFailure, QueuedWorkWakeOutcome, RuntimeAttribution, RuntimeControlConfig,
-        RuntimeDurabilityConfig, RuntimeEffectCommand, RuntimeEffectController,
-        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
-        RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
-        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
-        RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
-        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionWorkTarget, SleepSpec, ToolIntentOutcomeSink, ToolIntentPreparation,
-        ToolIntentSubmissionGuard, TurnContext, TurnControlBinding, WorkCadencePolicy,
-        WorkerSweepPolicy, effect_groups_unsupported,
+        NativeQueuedWork, NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork,
+        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
+        QueuedLaneProbe, QueuedWorkExecutionConcurrencyError, QueuedWorkRunError,
+        QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest,
+        QueuedWorkSlowWake, QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure,
+        QueuedWorkWakeOutcome, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
+        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
+        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
+        RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
+        RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
+        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkTarget, SleepSpec,
+        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnContext,
+        TurnControlBinding, WorkCadencePolicy, WorkerSweepPolicy, effect_groups_unsupported,
     };
-    /// The host clock accepted by
-    /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for
-    /// runtime sleeps and embedded
-    /// store timestamps. [`SystemClock`] is the wall-clock default; tests supply
-    /// their own to make expiry deterministic.
+    /// The host clock a [`Backend`](crate::Backend) is opened on, used
+    /// for runtime sleeps and store timestamps. [`SystemClock`] is the
+    /// wall-clock default; tests open a backend on their own to make expiry
+    /// deterministic.
     pub use lash_core::{Clock, ClockWallTime, facade_support::SystemClock};
     /// Session and turn extension handles exposed to runtime integrators.
     pub use lash_core::{

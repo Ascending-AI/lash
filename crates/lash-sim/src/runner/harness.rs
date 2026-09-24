@@ -2,12 +2,9 @@ use super::*;
 
 pub(super) fn runtime_core_for_scripts(
     scripts: Vec<ProviderWireScript>,
-    store_factory: Arc<dyn SessionStoreFactory>,
-    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-    process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
+    backend: Arc<dyn lash::Backend>,
     provider_schedule: Option<ScriptedTransportSchedule>,
     disable_native_queued_work_driver: bool,
-    clock: Arc<SimClock>,
 ) -> Result<(lash::LashCore, Arc<ScriptedLlmHttpTransport>, String), FixedScriptRunnerError> {
     let provider_kind = scripts
         .first()
@@ -34,24 +31,15 @@ pub(super) fn runtime_core_for_scripts(
     let (provider_handle, model, provider_kind) =
         runtime_provider_components(&provider_kind, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let mut builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
-        .attachment_store(attachment_store)
+    let mut builder = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(process_env_store)
-        .store_factory(store_factory)
-        .clock(clock)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .provider(provider_handle)
         .model(model);
-    builder = if disable_native_queued_work_driver {
-        builder.without_queued_work()
-    } else {
-        builder.with_native_queued_work()
-    };
+    if disable_native_queued_work_driver {
+        builder = builder.without_queued_work();
+    }
     let core = builder
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;

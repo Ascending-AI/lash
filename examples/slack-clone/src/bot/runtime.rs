@@ -1,6 +1,6 @@
 //! Building the bot's `LashCore` — the standard-mode embedding.
 //!
-//! `LashCore::standard_builder(lash::TurnBudget::Unbounded)` gives a native tool loop and plain chat turns:
+//! `LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)` gives a native tool loop and plain chat turns:
 //! the model answers in prose and calls host tools directly. That is the classic
 //! chat-bot shape and the reason this example, not `agent-workbench`, is the
 //! repo's standard-mode reference. Nothing here touches Lashlang, code cells,
@@ -158,11 +158,10 @@ pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {
 
 /// Durability choices, all of them deliberate for an example:
 ///
-/// * **SQLite session stores** — the committed transcript, and any queued turn
-///   input not yet drained, survive a restart. This is the load-bearing one.
-/// * **Native effect host** — process-local effect journalling. Enough to make
-///   the bot correct within a boot; not enough to make a turn interrupted
-///   mid-flight resume itself. The README documents the Restate upgrade.
+/// * **One SQLite file backend** on the data directory's sessions root —
+///   the committed transcript, any queued turn input not yet drained, and the
+///   effect journal all survive a restart. This is the load-bearing one. The
+///   README documents the Restate upgrade.
 /// * **No queued-work driver** — see [`LashCore::disable_queued_work_driver`]
 ///   below; the bot alone decides when a turn runs.
 pub async fn build_core(
@@ -177,13 +176,14 @@ pub async fn build_core(
     std::fs::create_dir_all(data_dir)
         .with_context(|| format!("create bot data dir {}", data_dir.display()))?;
 
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
-    let process_env_store = Arc::new(
-        lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
+    crate::prior_store_layout::refuse_prior_store_layout(
+        data_dir,
+        &["process-env.db", "attachments"],
+    )?;
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open(data_dir.join("lash-sessions"))
             .await
-            .map_err(|error| anyhow::anyhow!("open process env store: {error}"))?,
+            .map_err(|error| anyhow::anyhow!("open the bot's SQLite backend: {error}"))?,
     );
 
     // The factory is built even with no configured servers: it carries this
@@ -214,7 +214,7 @@ pub async fn build_core(
             status.last_error.as_ref().map_or("none", |f| f.message())
         );
     }
-    let mut builder = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let mut builder = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(provider)
         // `session_spec` replaces the builder's whole spec, so it must precede
         // `model`, which writes into that same spec.
@@ -226,14 +226,8 @@ pub async fn build_core(
                 )),
         )
         .model(model)
-        .store_factory(store_factory)
-        .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-            data_dir.join("attachments"),
-        )))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(process_env_store)
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .tools(tools::workspace_tools(api))
         .trace_sink(trace_sink(config))
         .trace_level(TraceLevel::Extended)

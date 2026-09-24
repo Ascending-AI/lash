@@ -7,16 +7,15 @@ use lash_sansio::SessionId;
 /// Immutable owner-issued capabilities for one successfully opened session.
 ///
 /// Construction stays inside the facade open/materialize paths. The store,
-/// effect host, process/queue ports, trigger store, and optional catalog are
-/// captured together so later per-session operations cannot independently
-/// consult a core override. Backend adapters remain responsible for supplying
-/// a truthful deployment composition when they wire these capabilities.
+/// effect host, process/queue ports, trigger store, and catalog are captured
+/// together from the core's one backend so later per-session operations
+/// cannot independently consult a core override.
 #[derive(Clone)]
 pub(crate) struct BoundSession {
     session_id: SessionId,
     store: Arc<dyn RuntimePersistence>,
     effect_host: Arc<dyn EffectHost>,
-    process: Option<ProcessWorkWiring>,
+    process: ProcessWorkWiring,
     queued: Arc<dyn QueuedWorkSubstrate>,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
     process_definitions: Option<Arc<dyn lash_core::ProcessDefinitionRegistry>>,
@@ -24,7 +23,7 @@ pub(crate) struct BoundSession {
     attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
-    catalog: Option<Arc<dyn SessionStoreFactory>>,
+    catalog: Arc<dyn SessionStoreFactory>,
 }
 
 impl BoundSession {
@@ -32,9 +31,9 @@ impl BoundSession {
         session_id: SessionId,
         store: Arc<dyn RuntimePersistence>,
         env: &RuntimeEnvironment,
-        process: Option<ProcessWorkWiring>,
+        process: ProcessWorkWiring,
         queued: Arc<dyn QueuedWorkSubstrate>,
-        catalog: Option<Arc<dyn SessionStoreFactory>>,
+        catalog: Arc<dyn SessionStoreFactory>,
     ) -> Result<Self, lash_core::RuntimeError> {
         let effect_host = lash_core::facade_support::bind_store_turn_control_authority(
             Arc::clone(&env.core.control.effect_host),
@@ -68,8 +67,8 @@ impl BoundSession {
         Arc::clone(&self.effect_host)
     }
 
-    pub(crate) fn process(&self) -> Option<&ProcessWorkWiring> {
-        self.process.as_ref()
+    pub(crate) fn process(&self) -> &ProcessWorkWiring {
+        &self.process
     }
 
     /// The owner-issued queued-work port. The binding-derived Durable Session
@@ -78,21 +77,19 @@ impl BoundSession {
         Arc::clone(&self.queued)
     }
 
-    pub(crate) fn catalog(&self) -> Option<Arc<dyn SessionStoreFactory>> {
-        self.catalog.clone()
+    pub(crate) fn catalog(&self) -> Arc<dyn SessionStoreFactory> {
+        Arc::clone(&self.catalog)
     }
 
-    pub(crate) fn administration(&self) -> Option<lash_core::SessionAdministration> {
-        self.catalog().map(|catalog| {
-            lash_core::SessionAdministration::new(
-                catalog,
-                self.effect_host(),
-                self.process.clone(),
-                self.trigger_store.clone(),
-                Arc::clone(&self.process_env_store),
-                self.process_engines.clone(),
-            )
-        })
+    pub(crate) fn administration(&self) -> lash_core::SessionAdministration {
+        lash_core::SessionAdministration::new(
+            self.catalog(),
+            self.effect_host(),
+            Some(self.process.clone()),
+            self.trigger_store.clone(),
+            Arc::clone(&self.process_env_store),
+            self.process_engines.clone(),
+        )
     }
 
     /// Apply only lifecycle-owner services to a destination core environment.
@@ -107,6 +104,6 @@ impl BoundSession {
         env.session_store_factory = self.child_store_provider.clone();
         env.core.durability.attachment_store = Arc::clone(&self.attachment_store);
         env.core.durability.process_env_store = Arc::clone(&self.process_env_store);
-        env.with_work_ports(self.process.clone(), Arc::clone(&self.queued))
+        env.with_work_ports(Some(self.process.clone()), Arc::clone(&self.queued))
     }
 }

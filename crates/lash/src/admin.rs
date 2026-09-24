@@ -104,7 +104,7 @@ impl CoreTriggerAdmin {
     ) -> Result<lash_core::facade_support::TriggerEmitReport> {
         let store = self.store()?;
         let ports = self.core.substrate_slot.ports().await;
-        let process_work = ports.process.ok_or(EmbedError::MissingProcessRegistry)?;
+        let process_work = ports.process;
         let router = lash_core::facade_support::TriggerRouter::new(store, process_work)
             .with_process_artifacts(
                 Arc::clone(&self.core.env.core.durability.process_env_store),
@@ -133,7 +133,7 @@ impl CoreTriggerAdmin {
 /// Facade handle for session administration.
 pub struct SessionAdmin {
     pub(crate) runtime: RuntimeHandle,
-    pub(crate) process_work: Option<Arc<dyn lash_core::ProcessWorkSubstrate>>,
+    pub(crate) process_work: Arc<dyn lash_core::ProcessWorkSubstrate>,
 }
 
 impl SessionAdmin {
@@ -436,11 +436,7 @@ impl SessionAdmin {
         &self,
         process_id: &ProcessId,
     ) -> Result<lash_core::ProcessAwaitOutput> {
-        let process_work = self.process_work.as_ref().ok_or_else(|| {
-            EmbedError::Plugin(lash_core::PluginError::Session(
-                "process work is unavailable in this runtime".to_string(),
-            ))
-        })?;
+        let process_work = &self.process_work;
         let process_ref = self
             .process_registry()?
             .resolve_process_ref(process_id)

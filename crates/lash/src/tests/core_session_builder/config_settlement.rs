@@ -2,13 +2,13 @@ use super::*;
 
 #[tokio::test]
 async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("parked-config").open().await?;
     session
@@ -49,13 +49,13 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
 /// reconciliation).
 #[tokio::test]
 async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("incidental-reopen").open().await?;
     session
@@ -100,15 +100,19 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
 /// time `open()` returns.
 #[tokio::test]
 async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
+    let backend = memory_backend().await;
+    let factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let mut policy = core.policy.clone();
     policy.session_id = Some(lash_core::SessionId::from("seeded-reopen"));
     let store = lash_core::SessionStoreFactory::create_store(
-        &factory,
+        factory.as_ref(),
         &lash_core::SessionStoreCreateRequest {
             session_id: lash_core::SessionId::from("seeded-reopen"),
             relation: lash_core::SessionRelation::Root,
@@ -119,11 +123,7 @@ async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Resul
     .await?;
 
     // Establish a durable head carrying the original model.
-    let session = core
-        .session("seeded-reopen")
-        .store(Arc::clone(&store))
-        .open()
-        .await?;
+    let session = core.session("seeded-reopen").open().await?;
     session
         .turn(TurnInput::text("establish head"))
         .run()
@@ -134,7 +134,6 @@ async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Resul
     let host_model = model_spec("host-seeded-model", None, 64_000);
     let reopened = core
         .session("seeded-reopen")
-        .store(Arc::clone(&store))
         .session_spec(crate::SessionSpec::new().model(host_model.clone()))
         .open()
         .await?;
@@ -153,7 +152,7 @@ async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Resul
 
     // A subsequent incidental reopen inherits it from the head, proving the
     // value is durable rather than resident-only.
-    let reloaded = core.session("seeded-reopen").store(store).open().await?;
+    let reloaded = core.session("seeded-reopen").open().await?;
     assert_eq!(
         reloaded.policy_snapshot().model,
         host_model,

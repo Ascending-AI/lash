@@ -91,19 +91,18 @@ fn aborting_provider(
 }
 
 #[cfg(feature = "rlm")]
-fn usage_durability_core(provider: ProviderHandle) -> Result<LashCore> {
-    Ok(usage_durability_core_with_store(provider)?.0)
+async fn usage_durability_core(provider: ProviderHandle) -> Result<LashCore> {
+    Ok(usage_durability_core_with_store(provider).await?.0)
 }
 
 #[cfg(feature = "rlm")]
-fn usage_durability_core_with_store(
+async fn usage_durability_core_with_store(
     provider: ProviderHandle,
-) -> Result<(
-    LashCore,
-    Arc<lash_core::facade_support::InMemorySessionStoreFactory>,
-)> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+) -> Result<(LashCore, Arc<lash_sqlite_store::SqliteSessionStoreFactory>)> {
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        backend.clone(),
         lash_core::TurnBudget::Unbounded,
         rlm_factory(),
     ))
@@ -112,8 +111,6 @@ fn usage_durability_core_with_store(
     // The default 2000 ms drain would make every witness below wait on a
     // deadline that is not what is under test.
     .abort_drain_grace(Duration::from_millis(50))
-    .store_factory(Arc::clone(&store_factory) as Arc<dyn SessionStoreFactory>)
-    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
     .build(crate::testing::runtime_lease_owner())?;
     Ok((core, store_factory))
 }
@@ -131,7 +128,8 @@ fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<
             vec![Some("gen-alpha"), None],
             |_| None,
             Arc::clone(&log),
-        ))?;
+        ))
+        .await?;
 
         let session = core.session("fig2765-hole").open().await?;
         let first = session.turn(TurnInput::text("one")).run().await?;
@@ -197,7 +195,8 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
             vec![Some("gen-alpha")],
             |generation_id| (generation_id == "gen-alpha").then(|| reconciled(334)),
             Arc::clone(&log),
-        ))?;
+        ))
+        .await?;
 
         let session = core.session("fig2765-correction").open().await?;
         session.turn(TurnInput::text("one")).run().await?;
@@ -306,7 +305,7 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
                 })
                 .build()
                 .into_handle();
-            usage_durability_core(provider)?
+            usage_durability_core(provider).await?
         };
 
         let session = core.session("fig2765-cancel").open().await?;
@@ -387,7 +386,8 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
             vec![Some("gen-alpha")],
             |generation_id| (generation_id == "gen-alpha").then(|| reconciled(334)),
             Arc::clone(&log),
-        ))?;
+        ))
+        .await?;
         let session_id = "fig2765-park";
         let head_revision = || {
             let store_factory = Arc::clone(&store_factory);

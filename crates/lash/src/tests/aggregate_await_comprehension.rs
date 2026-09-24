@@ -94,14 +94,10 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::new(RetailTools))
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("fig2764-comprehension").open().await?;
     let events = RecordingEvents::default();

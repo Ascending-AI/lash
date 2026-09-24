@@ -3,7 +3,6 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core::SessionStoreFactory;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -202,37 +201,22 @@ impl ReplayBackend for SqliteReplayBackend {
     const TARGET: &str = "SQLite";
     const ASSERT_INGRESS_SESSION_ID: bool = true;
 
-    fn session_store_factory(
+    async fn backend(
         &self,
         clock: &Arc<crate::clock::SimClock>,
-    ) -> Arc<dyn SessionStoreFactory> {
-        let effect_replay_path = self.database_root.join("runtime-effects.sqlite");
-        let process_registry_path = effect_replay_path.with_extension("process-registry.sqlite");
-        Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
-                self.database_root.clone(),
-                process_registry_path,
-            )
-            .with_clock(clock.clone()),
+    ) -> Result<Arc<dyn lash::Backend>, Self::Error> {
+        let backend = lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+            &self.database_root,
+            crate::backend::sim_sqlite_options(lash_sqlite_store::SqliteBackendOptions::default()),
+            clock.clone(),
         )
+        .await
+        .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?;
+        Ok(Arc::new(backend))
     }
 
     fn effect_replay_store(&self) -> RuntimeEffectReplayStore {
         RuntimeEffectReplayStore::sqlite_file(self.database_root.join("runtime-effects.sqlite"))
-    }
-
-    async fn process_env_store(
-        &self,
-    ) -> Result<Arc<dyn lash::persistence::ProcessExecutionEnvStore>, Self::Error> {
-        Ok(Arc::new(
-            lash_sqlite_store::Store::open(&self.database_root.join("process-env.sqlite"))
-                .await
-                .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?,
-        ))
-    }
-
-    fn attachment_root(&self) -> PathBuf {
-        self.database_root.join("attachments")
     }
 
     fn write_divergence_artifact(

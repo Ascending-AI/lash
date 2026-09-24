@@ -62,20 +62,15 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
         &transport,
     )
     .map_err(|error| error.to_string())?;
-    let mut builder = lash::LashCore::standard_builder(lash::TurnBudget::bounded(1))
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .map_err(|error| error.to_string())?,
+    );
+    let mut builder = lash::LashCore::standard_builder(backend, lash::TurnBudget::bounded(1))
         .without_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
         .provider(provider)
         .model(model);
     if let Some(marker) = crate::shutdown_marker::factory_from_env("agent-workbench-valid-empty")? {

@@ -2,7 +2,7 @@ use super::*;
 use lash::SessionId;
 
 async fn register_cron_test_subscription(
-    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
     session_id: &SessionId,
     source_key: &str,
 ) {
@@ -16,7 +16,7 @@ async fn register_cron_test_subscription(
 }
 
 async fn register_cron_test_subscription_record(
-    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
     session_id: &SessionId,
     subscription_key: &str,
     source_key: &str,
@@ -32,7 +32,7 @@ async fn register_cron_test_subscription_record(
 }
 
 async fn register_test_subscription_record(
-    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
     session_id: &SessionId,
     subscription_key: &str,
     source_type: &str,
@@ -70,7 +70,7 @@ async fn register_test_subscription_record(
 }
 
 async fn disable_cron_test_subscription(
-    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
     record: &lash::triggers::TriggerSubscriptionRecord,
 ) {
     lash::triggers::TriggerStore::execute_command(
@@ -89,7 +89,7 @@ async fn disable_cron_test_subscription(
 }
 
 async fn delete_cron_test_subscription(
-    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
     record: &lash::triggers::TriggerSubscriptionRecord,
 ) {
     let filter = lash::triggers::TriggerSubscriptionFilter {
@@ -207,7 +207,7 @@ async fn spawn_scripted_cron_object_surface(surface: ScriptedCronObjectSurface) 
 }
 
 async fn register_fig1067_cron_subscription(
-    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
     session_id: &SessionId,
 ) -> lash::triggers::TriggerSubscriptionRecord {
     let source_key = "cron-source:fig1067";
@@ -299,7 +299,7 @@ fn fig1067_cron_registration(
 }
 
 async fn register_fig1067_button_subscription(
-    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
     session_id: &SessionId,
 ) -> lash::triggers::TriggerSubscriptionRecord {
     let source_key = lash::triggers::empty_trigger_source_key(crate::BUTTON_TRIGGER_SOURCE_TYPE)
@@ -428,7 +428,7 @@ fn undecodable_cron_registration_remains_cancellable() {
 #[tokio::test]
 async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let mut state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -481,7 +481,7 @@ async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
 #[tokio::test]
 async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let mut state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -555,7 +555,7 @@ async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
 #[tokio::test]
 async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let mut state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -609,7 +609,7 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
 #[tokio::test]
 async fn deleting_a_trigger_cancels_its_cron_without_opening_a_contended_session() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let store_factory = Arc::new(ContendedSessionStoreFactory::new());
     let mut state = crate::tests::recoverable_chat_test_state_with_store_factory_and_trigger_store(
         data_dir.path(),
@@ -660,7 +660,7 @@ async fn deleting_a_trigger_cancels_its_cron_without_opening_a_contended_session
 #[tokio::test]
 async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let mut state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -732,7 +732,7 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
 #[tokio::test]
 async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let mut state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -768,7 +768,7 @@ async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
 #[tokio::test]
 async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let mut state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -822,7 +822,7 @@ async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
 #[tokio::test]
 async fn a_failed_disable_sync_still_traces_the_committed_mutation() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let mut state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -875,7 +875,7 @@ async fn a_failed_disable_sync_still_traces_the_committed_mutation() {
 #[tokio::test]
 async fn a_failed_delete_cancel_preserves_the_registration() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let mut state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -923,7 +923,7 @@ async fn a_failed_delete_cancel_preserves_the_registration() {
 }
 
 struct MetaLossSessionStoreFactory {
-    inner: lash::persistence::InMemorySessionStoreFactory,
+    inner: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
     absent_session_ids: std::sync::Mutex<std::collections::HashSet<SessionId>>,
 }
 
@@ -959,7 +959,7 @@ impl lash::persistence::RuntimePersistenceDecorator for ContendedRuntimePersiste
 }
 
 struct ContendedSessionStoreFactory {
-    inner: lash::persistence::InMemorySessionStoreFactory,
+    inner: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
     contend: Arc<std::sync::atomic::AtomicBool>,
     contended_attempts: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -967,7 +967,7 @@ struct ContendedSessionStoreFactory {
 impl ContendedSessionStoreFactory {
     pub(crate) fn new() -> Self {
         Self {
-            inner: lash::persistence::InMemorySessionStoreFactory::new(),
+            inner: crate::tests::memory_session_store_factory(),
             contend: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             contended_attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
@@ -994,7 +994,7 @@ impl lash::persistence::AttachmentRootSet for ContendedSessionStoreFactory {
         lash::persistence::StoreError,
     > {
         lash::persistence::AttachmentRootSet::live_attachment_refs(
-            &self.inner,
+            self.inner.as_ref(),
             intent_grace_cutoff_epoch_ms,
         )
         .await
@@ -1006,7 +1006,7 @@ impl lash::persistence::AttachmentRootSet for ContendedSessionStoreFactory {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, lash::persistence::StoreError> {
         lash::persistence::AttachmentRootSet::has_live_attachment_ref(
-            &self.inner,
+            self.inner.as_ref(),
             id,
             intent_grace_cutoff_epoch_ms,
         )
@@ -1025,7 +1025,7 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
     {
         Ok(
             lash::persistence::SessionStoreFactory::open_existing_store_by_id(
-                &self.inner,
+                self.inner.as_ref(),
                 session_id,
             )
             .await?
@@ -1044,7 +1044,8 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
         request: &lash::persistence::SessionStoreCreateRequest,
     ) -> Result<Arc<dyn lash::persistence::RuntimePersistence>, lash::persistence::StoreError> {
         let inner =
-            lash::persistence::SessionStoreFactory::create_store(&self.inner, request).await?;
+            lash::persistence::SessionStoreFactory::create_store(self.inner.as_ref(), request)
+                .await?;
         Ok(Arc::new(ContendedRuntimePersistence {
             inner,
             contend: Arc::clone(&self.contend),
@@ -1053,28 +1054,30 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        lash::persistence::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
+        lash::persistence::SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id)
+            .await
     }
 
     async fn delete_session(
         &self,
         session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
-        lash::persistence::SessionStoreFactory::delete_session(&self.inner, session_id).await
+        lash::persistence::SessionStoreFactory::delete_session(self.inner.as_ref(), session_id)
+            .await
     }
 
     // A decorator forwards the deployment turn count to the catalog it wraps.
     async fn count_unsettled_turns(
         &self,
     ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::count_unsettled_turns(&self.inner).await
+        lash::persistence::SessionStoreFactory::count_unsettled_turns(self.inner.as_ref()).await
     }
 }
 
 impl MetaLossSessionStoreFactory {
     pub(crate) fn new() -> Self {
         Self {
-            inner: lash::persistence::InMemorySessionStoreFactory::new(),
+            inner: crate::tests::memory_session_store_factory(),
             absent_session_ids: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
@@ -1098,7 +1101,7 @@ impl lash::persistence::AttachmentRootSet for MetaLossSessionStoreFactory {
         lash::persistence::StoreError,
     > {
         lash::persistence::AttachmentRootSet::live_attachment_refs(
-            &self.inner,
+            self.inner.as_ref(),
             intent_grace_cutoff_epoch_ms,
         )
         .await
@@ -1110,7 +1113,7 @@ impl lash::persistence::AttachmentRootSet for MetaLossSessionStoreFactory {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, lash::persistence::StoreError> {
         lash::persistence::AttachmentRootSet::has_live_attachment_ref(
-            &self.inner,
+            self.inner.as_ref(),
             id,
             intent_grace_cutoff_epoch_ms,
         )
@@ -1124,7 +1127,7 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         &self,
         request: &lash::persistence::SessionStoreCreateRequest,
     ) -> Result<Arc<dyn lash::persistence::RuntimePersistence>, lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::create_store(&self.inner, request).await
+        lash::persistence::SessionStoreFactory::create_store(self.inner.as_ref(), request).await
     }
 
     async fn open_existing_store(
@@ -1138,7 +1141,8 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         {
             return Ok(None);
         }
-        lash::persistence::SessionStoreFactory::open_existing_store(&self.inner, request).await
+        lash::persistence::SessionStoreFactory::open_existing_store(self.inner.as_ref(), request)
+            .await
     }
 
     // A Durable Session acquires by id; the fixture's meta loss must be
@@ -1152,26 +1156,31 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         if self.absent_session_ids.lock_recover().contains(session_id) {
             return Ok(None);
         }
-        lash::persistence::SessionStoreFactory::open_existing_store_by_id(&self.inner, session_id)
-            .await
+        lash::persistence::SessionStoreFactory::open_existing_store_by_id(
+            self.inner.as_ref(),
+            session_id,
+        )
+        .await
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        lash::persistence::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
+        lash::persistence::SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id)
+            .await
     }
 
     async fn delete_session(
         &self,
         session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
-        lash::persistence::SessionStoreFactory::delete_session(&self.inner, session_id).await
+        lash::persistence::SessionStoreFactory::delete_session(self.inner.as_ref(), session_id)
+            .await
     }
 
     // A decorator forwards the deployment turn count to the catalog it wraps.
     async fn count_unsettled_turns(
         &self,
     ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::count_unsettled_turns(&self.inner).await
+        lash::persistence::SessionStoreFactory::count_unsettled_turns(self.inner.as_ref()).await
     }
 }
 
@@ -1187,11 +1196,7 @@ async fn materialize_cron_test_session(state: &crate::AppState, session_id: &Ses
 }
 
 async fn retire_cron_test_session(state: &crate::AppState, session_id: &SessionId) {
-    let administration = state
-        .core
-        .session_administration()
-        .await
-        .expect("build cron test session administration");
+    let administration = state.core.session_administration().await;
     let context = administration
         .delete_context(session_id)
         .expect("issue cron test session deletion");
@@ -1522,7 +1527,7 @@ fn corrupt_journaled_cron_disposition_carries_a_typed_terminal_code() {
 #[tokio::test]
 async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a_tombstone() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let store_factory = Arc::new(MetaLossSessionStoreFactory::new());
     let state = crate::tests::recoverable_chat_test_state_with_store_factory_and_trigger_store(
         data_dir.path(),
@@ -1585,7 +1590,7 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
 #[tokio::test]
 async fn cron_tick_allows_a_live_non_current_session_to_emit_a_delivery() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -1657,7 +1662,7 @@ async fn cron_tick_allows_a_live_non_current_session_to_emit_a_delivery() {
 #[tokio::test]
 async fn a_cron_schedule_registered_without_a_timezone_is_not_refused_for_its_source() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -1781,7 +1786,7 @@ async fn a_cron_schedule_registered_without_a_timezone_is_not_refused_for_its_so
 #[tokio::test]
 async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -1872,7 +1877,7 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
 #[tokio::test]
 async fn cron_registration_disposition_aggregates_duplicate_registrations() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -1934,7 +1939,7 @@ async fn cron_registration_disposition_aggregates_duplicate_registrations() {
 #[tokio::test]
 async fn cron_registration_disposition_ignores_record_order() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -1995,7 +2000,7 @@ async fn cron_registration_disposition_ignores_record_order() {
 #[tokio::test]
 async fn cron_registration_disposition_confines_matches_to_session_source_type_and_key() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -2060,7 +2065,7 @@ async fn cron_registration_disposition_confines_matches_to_session_source_type_a
 #[tokio::test]
 async fn cron_registration_disposition_is_absent_after_delete() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -2129,7 +2134,7 @@ async fn cron_registration_disposition_propagates_classified_store_failures() {
 #[tokio::test]
 async fn cron_tick_cancels_a_live_session_with_a_deleted_registration_without_rearming() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,

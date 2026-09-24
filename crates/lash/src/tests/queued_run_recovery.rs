@@ -74,6 +74,13 @@ impl lash_core::facade_support::SessionPlugin for RetryHook {
     }
 }
 
+/// The effect journal of the backend rooted at `directory/sessions`.
+fn effect_journal(directory: &std::path::Path) -> std::path::PathBuf {
+    directory
+        .join("sessions")
+        .join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name())
+}
+
 fn recorded_effects(path: &std::path::Path) -> Vec<(String, String, serde_json::Value)> {
     let database = rusqlite::Connection::open(path).expect("inspect durable journal");
     let mut statement = database.prepare("SELECT scope_id, replay_key, envelope_json FROM runtime_effect_replay WHERE outcome_json IS NOT NULL ORDER BY rowid").unwrap();
@@ -154,29 +161,27 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
         })
         .build()
         .into_handle();
-    let effect_host = Arc::new(
-        lash_sqlite_store::SqliteEffectHost::open(&directory.path().join("effects.sqlite"))
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open(directory.path().join("sessions"))
             .await
-            .expect("SQLite journal"),
+            .expect("open the SQLite backend"),
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .plugin(Arc::new(RetryHook(Arc::clone(&probe))))
-        .effect_host(effect_host)
-        .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            directory.path().join("sessions"),
-        )))
-        .with_native_queued_work()
-        .native_substrate_config(lash_core::NativeSubstrateConfig {
-            work_cadence: lash_core::WorkCadencePolicy {
-                retry_initial: std::time::Duration::from_millis(50),
-                retry_max: std::time::Duration::from_millis(50),
-                ..Default::default()
-            },
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .plugin(Arc::new(RetryHook(Arc::clone(&probe))))
+    .native_substrate_config(lash_core::NativeSubstrateConfig {
+        work_cadence: lash_core::WorkCadencePolicy {
+            retry_initial: std::time::Duration::from_millis(50),
+            retry_max: std::time::Duration::from_millis(50),
             ..Default::default()
-        })
-        .build(crate::testing::runtime_lease_owner())?;
+        },
+        ..Default::default()
+    })
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("automatic-queued-retry").open().await?;
     session
         .durable()
@@ -191,7 +196,7 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
     .await
     .expect("automatic scheduler reaches first hook");
     assert_eq!(probe.provider_calls.load(Ordering::SeqCst), 1);
-    let first_journal = recorded_provider_effects(&directory.path().join("effects.sqlite"));
+    let first_journal = recorded_provider_effects(&effect_journal(directory.path()));
     assert_eq!(
         first_journal.len(),
         1,
@@ -221,7 +226,7 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
         "retry must reuse the recorded completion at the admitted physical position"
     );
     assert_eq!(
-        recorded_provider_effects(&directory.path().join("effects.sqlite")),
+        recorded_provider_effects(&effect_journal(directory.path())),
         first_journal,
         "retry reaches phase 2 with the same recorded scope, replay key and physical attribution"
     );
@@ -278,7 +283,7 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
     })
     .await
     .expect("new submission settles independently");
-    let journal = recorded_provider_effects(&directory.path().join("effects.sqlite"));
+    let journal = recorded_provider_effects(&effect_journal(directory.path()));
     assert_eq!(journal.len(), 3);
     assert_ne!(
         journal[0].0, journal[2].0,
@@ -351,25 +356,22 @@ async fn cold_queued_child_process() -> Result<()> {
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .tools(Arc::new(AgentFrameSwitchTools))
-        .clock(Arc::clone(&clock))
-        .plugin(Arc::new(RetryHook(Arc::clone(&probe))))
-        .effect_host(Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open_with_clock(
-                &directory.join("effects.sqlite"),
-                Arc::clone(&clock),
-            )
-            .await
-            .unwrap(),
-        ))
-        .store_factory(Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(directory.join("sessions"))
-                .with_clock(clock),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+        directory.join("sessions"),
+        lash_sqlite_store::SqliteBackendOptions::default(),
+        clock,
+    )
+    .await
+    .expect("open the SQLite backend");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        Arc::new(backend),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .tools(Arc::new(AgentFrameSwitchTools))
+    .plugin(Arc::new(RetryHook(Arc::clone(&probe))))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("cold-queued-recovery").open().await?;
     let boundary_reached = Arc::new(tokio::sync::Notify::new());
     if crash && boundary != "completion" {
@@ -535,10 +537,10 @@ async fn run_cold_queued_boundary(boundary: &str) {
     }
     crashed.kill().await.unwrap();
     assert!(!crashed.wait().await.unwrap().success());
-    let recorded = recorded_provider_effects(&directory.path().join("effects.sqlite"));
+    let recorded = recorded_provider_effects(&effect_journal(directory.path()));
     if boundary == "checkpoint" {
         assert!(
-            recorded_effects(&directory.path().join("effects.sqlite"))
+            recorded_effects(&effect_journal(directory.path()))
                 .iter()
                 .any(|(_, _, envelope)| envelope["command"]["type"] == "checkpoint"),
             "checkpoint outcome is journaled before process death"
@@ -560,7 +562,7 @@ async fn run_cold_queued_boundary(boundary: &str) {
         "provider counter outside both workers proves cold replay"
     );
     assert_eq!(
-        recorded_provider_effects(&directory.path().join("effects.sqlite")),
+        recorded_provider_effects(&effect_journal(directory.path())),
         recorded
     );
 }
@@ -610,33 +612,28 @@ async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Res
             })
             .build()
             .into_handle();
-        let factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            directory.path().join("sessions"),
-        ));
-        let core =
-            explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-                .provider(provider)
-                .model(mock_model_spec())
-                .plugin(Arc::new(RetryHook(Arc::clone(&probe))))
-                .effect_host(Arc::new(
-                    lash_sqlite_store::SqliteEffectHost::open(
-                        &directory.path().join("effects.sqlite"),
-                    )
-                    .await
-                    .unwrap(),
-                ))
-                .store_factory(factory)
-                .with_native_queued_work()
-                .native_substrate_config(lash_core::NativeSubstrateConfig {
-                    work_cadence: lash_core::WorkCadencePolicy {
-                        max_transient_attempts: std::num::NonZeroU32::new(1).unwrap(),
-                        retry_initial: std::time::Duration::from_millis(50),
-                        retry_max: std::time::Duration::from_millis(50),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .build(crate::testing::runtime_lease_owner())?;
+        let backend = Arc::new(
+            lash_sqlite_store::SqliteBackend::open(directory.path().join("sessions"))
+                .await
+                .expect("open the SQLite backend"),
+        );
+        let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+            backend.clone(),
+            crate::TurnBudget::Unbounded,
+        ))
+        .provider(provider)
+        .model(mock_model_spec())
+        .plugin(Arc::new(RetryHook(Arc::clone(&probe))))
+        .native_substrate_config(lash_core::NativeSubstrateConfig {
+            work_cadence: lash_core::WorkCadencePolicy {
+                max_transient_attempts: std::num::NonZeroU32::new(1).unwrap(),
+                retry_initial: std::time::Duration::from_millis(50),
+                retry_max: std::time::Duration::from_millis(50),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("exhausted-queued-run").open().await?;
         session
             .durable()
@@ -650,7 +647,7 @@ async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Res
         )
         .await
         .unwrap();
-        let recorded = recorded_provider_effects(&directory.path().join("effects.sqlite"));
+        let recorded = recorded_provider_effects(&effect_journal(directory.path()));
         probe.hook_release.add_permits(1);
         tokio::time::timeout(std::time::Duration::from_secs(10), exhausted.notified())
             .await
@@ -706,7 +703,7 @@ async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Res
                 .await?;
             assert_eq!(probe.provider_calls.load(Ordering::SeqCst), 1);
             assert_eq!(
-                recorded_provider_effects(&directory.path().join("effects.sqlite")),
+                recorded_provider_effects(&effect_journal(directory.path())),
                 recorded
             );
             assert_eq!(probe.hook_calls.load(Ordering::SeqCst), 2);
@@ -790,15 +787,13 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        memory_backend().await,
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
     .provider(provider)
     .model(mock_model_spec())
     .tools(Arc::new(StopQueuedTool))
-    .store_factory(Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
     .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("stopped-withheld").open().await?;

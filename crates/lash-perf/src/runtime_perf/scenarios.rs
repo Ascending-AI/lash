@@ -142,7 +142,6 @@ pub(crate) struct ScenarioWiring {
     pub(crate) oblique_tools_plugin: bool,
     pub(crate) large_tool_catalog_plugin: bool,
     pub(crate) workbench_trigger_plugin: bool,
-    pub(crate) process_registry: bool,
     pub(crate) queued_work: bool,
     pub(crate) measure_commit_bytes: bool,
     pub(crate) session_store_handle: bool,
@@ -158,7 +157,6 @@ impl ScenarioWiring {
         oblique_tools_plugin: false,
         large_tool_catalog_plugin: false,
         workbench_trigger_plugin: false,
-        process_registry: true,
         queued_work: true,
         measure_commit_bytes: true,
         session_store_handle: false,
@@ -458,7 +456,7 @@ impl RuntimePerfScenario {
             Rlm,
             RlmProtocolScenario,
             "Measures RLM protocol prompt/context handling for fixed session-scoped projected bindings.",
-            wiring { process_registry = false, queued_work = false }
+            wiring { queued_work = false }
         ),
         runtime_perf_metadata!(
             RlmLargePrint,

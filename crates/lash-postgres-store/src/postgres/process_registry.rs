@@ -385,12 +385,11 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
 
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
         // The fence shares this registry's database and its registration
-        // transaction; a host reaches it through its own connection, so no
-        // file is handed over, only the registration truth.
+        // transaction; a host reaches it through its own connection, so the
+        // binding carries only the registration truth.
         self.scope_fence_hosts.bind(
             effect_host,
             lash_core_execution::ProcessRegistryBinding {
-                fence_database: None,
                 registrations: Arc::new(PostgresRegistrationProbe {
                     pool: self.pool.clone(),
                 }),

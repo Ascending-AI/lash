@@ -5,30 +5,7 @@ fn deferred_tools_test_core(
     provider: ProviderHandle,
     deferred: deferred_tools::WorkbenchDeferredTools,
 ) -> LashCore {
-    let artifact_store = Arc::new(sync_await({
-        let path = data_dir.join("artifacts.db");
-        async move {
-            lash_sqlite_store::Store::open(&path)
-                .await
-                .expect("open deferred test artifact store")
-        }
-    })) as Arc<dyn lash::persistence::LashlangArtifactStore>;
-    let process_env_store = Arc::new(sync_await({
-        let path = data_dir.join("process-env.db");
-        async move {
-            lash_sqlite_store::Store::open(&path)
-                .await
-                .expect("open deferred test process env store")
-        }
-    })) as Arc<dyn lash::persistence::ProcessExecutionEnvStore>;
-    let trigger_store = Arc::new(sync_await({
-        let path = data_dir.join("triggers.db");
-        async move {
-            lash_sqlite_store::SqliteTriggerStore::open(&path)
-                .await
-                .expect("open deferred test trigger store")
-        }
-    }));
+    let backend = test_file_backend(data_dir);
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -37,23 +14,15 @@ fn deferred_tools_test_core(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        artifact_store,
+        backend.process_env_store(),
     )
     .with_deferred_tool_resolver(deferred.resolver());
-    let runtime_host_config = lash::durability::RuntimeHostConfig::new(
-        Arc::new(lash::durability::NativeEffectHost::default()),
-        test_attachment_store(),
-        process_env_store,
-        lash::CommitBudget::bounded(1024 * 1024, 512),
-        lash::QueuedWorkBatchingConfig::new(1),
-    );
-    LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(test_model())
-        .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            data_dir.join("lash-sessions"),
-        )))
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
@@ -61,10 +30,7 @@ fn deferred_tools_test_core(
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_deferred_tools(deferred),
         ))
-        .trigger_store(trigger_store)
         .without_queued_work()
-        .advanced()
-        .runtime_host_config(runtime_host_config)
         .build(crate::test_core_owner())
         .expect("build deferred-tool test core")
 }

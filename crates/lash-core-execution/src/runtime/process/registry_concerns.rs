@@ -231,15 +231,16 @@ pub trait ProcessRegistrar: Send + Sync {
     ///
     /// Binding runs in both directions. The registry hands the host a
     /// [`ProcessRegistryBinding`] through [`EffectHost::bind_process_registry`]:
-    /// the database that holds the process-scope fence when the registry
-    /// keeps it (the SQLite registry file, whose registration transaction
-    /// inserts the process row and deletes the fence row as one commit; the
-    /// PostgreSQL registry does the same inside its one database) and a probe
-    /// answering whether a process id is registered, which a host whose own
-    /// fence is a cache of the registry's (the Restate durable-wait index)
-    /// reads through to. A fence the host keeps where the registry cannot
-    /// reach it is lifted through [`EffectHost::reinstate_effect_scope`]
-    /// after the registration write.
+    /// a probe answering whether a process id is registered, which a host
+    /// whose own fence is a cache of the registry's (the Restate durable-wait
+    /// index) reads through to. Where the process-scope fence lives is the
+    /// backend's wiring, not the binding's: a SQLite backend attaches
+    /// its registry to its journal by location, so the registration
+    /// transaction inserts the process row and deletes the fence row as one
+    /// commit, and the PostgreSQL registry does the same inside its one
+    /// database. A fence the host keeps where the registry cannot reach it is
+    /// lifted through [`EffectHost::reinstate_effect_scope`] after the
+    /// registration write.
     fn bind_effect_host(&self, effect_host: &Arc<dyn EffectHost>);
 
     /// Attach a durable backend reference to a registered process.
@@ -1114,14 +1115,6 @@ pub trait ProcessRegistrationProbe: Send + Sync {
 /// ([`EffectHost::bind_process_registry`]).
 #[derive(Clone)]
 pub struct ProcessRegistryBinding {
-    /// The SQLite database file in which the registry keeps the process-scope
-    /// fence beside the process rows, so registration deletes the fence and
-    /// inserts the row in one single-file commit and retirement's fence
-    /// insert is its one commit point. `None` for a registry with no file of
-    /// its own (a database the host reaches through its own connection, or a
-    /// SQLite memory deployment, whose host is wired to its registry by the
-    /// deployment's location rather than by this binding).
-    pub fence_database: Option<std::path::PathBuf>,
     /// The registry's registration truth.
     pub registrations: Arc<dyn ProcessRegistrationProbe>,
 }
@@ -1129,7 +1122,6 @@ pub struct ProcessRegistryBinding {
 impl std::fmt::Debug for ProcessRegistryBinding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProcessRegistryBinding")
-            .field("fence_database", &self.fence_database)
             .finish_non_exhaustive()
     }
 }

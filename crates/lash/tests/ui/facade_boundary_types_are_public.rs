@@ -558,11 +558,15 @@ fn generation_disposition_is_readable(
     Some((disposition, requested_temperature_survived))
 }
 
-fn advanced_builder_accepts_runtime_host_config(
+fn advanced_builder_accepts_a_plugin_host(
     builder: AdvancedLashCoreBuilder,
-    config: RuntimeHostConfig,
+    plugin_host: lash::plugins::PluginHost,
 ) -> AdvancedLashCoreBuilder {
-    builder.runtime_host_config(config)
+    builder.plugin_host(plugin_host)
+}
+
+fn a_core_is_built_over_one_backend(backend: Arc<dyn lash::Backend>) -> lash::LashCoreBuilder {
+    lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
 }
 
 fn tool_contract_types_are_nameable(
@@ -736,7 +740,8 @@ fn main() {
     let _ = direct_response_type_is_nameable;
     let _ = direct_payload_types_are_nameable;
     let _ = generation_option_types_are_nameable;
-    let _ = advanced_builder_accepts_runtime_host_config;
+    let _ = advanced_builder_accepts_a_plugin_host;
+    let _ = a_core_is_built_over_one_backend;
     let _ = tool_contract_types_are_nameable;
     let _ = tool_catalog_types_are_nameable;
     let _ = message_role_type_is_nameable;

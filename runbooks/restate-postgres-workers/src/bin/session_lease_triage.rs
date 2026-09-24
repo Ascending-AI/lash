@@ -258,15 +258,18 @@ impl<S: tracing::Subscriber> Layer<S> for LeaseTraceCapture {
 /// requires the same observations from both.
 struct Backend {
     name: &'static str,
+    /// The one substrate every core of the phase runs on.
+    backend: Arc<dyn lash::Backend>,
     factory: Arc<dyn SessionStoreFactory>,
-    /// Held so the SQLite root outlives the phase.
-    _scratch: Option<tempfile::TempDir>,
-    postgres: Option<PostgresStorage>,
+    artifacts: Arc<dyn lash::persistence::LashlangArtifactStore>,
+    /// Held so the SQLite root (and the PostgreSQL attachment root) outlive
+    /// the phase.
+    _scratch: tempfile::TempDir,
 }
 
 impl Backend {
     async fn configured() -> Result<Vec<Self>> {
-        let mut backends = vec![Self::sqlite()?];
+        let mut backends = vec![Self::sqlite().await?];
         match std::env::var("LASH_POSTGRES_DATABASE_URL") {
             Ok(url) if !url.trim().is_empty() => backends.push(Self::postgres(&url).await?),
             _ => eprintln!(
@@ -276,16 +279,19 @@ impl Backend {
         Ok(backends)
     }
 
-    fn sqlite() -> Result<Self> {
+    async fn sqlite() -> Result<Self> {
         let scratch = tempfile::tempdir().context("scratch dir for the SQLite backend")?;
-        let factory: Arc<dyn SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(scratch.path().join("sessions")),
+        let backend = Arc::new(
+            lash_sqlite_store::SqliteBackend::open(scratch.path().join("sessions"))
+                .await
+                .context("open the SQLite backend")?,
         );
         Ok(Self {
             name: "sqlite",
-            factory,
-            _scratch: Some(scratch),
-            postgres: None,
+            factory: backend.session_store_factory(),
+            artifacts: backend.process_env_store(),
+            backend,
+            _scratch: scratch,
         })
     }
 
@@ -293,13 +299,19 @@ impl Backend {
         let storage = PostgresStorage::connect(database_url)
             .await
             .context("connect the PostgreSQL backend")?;
-        let factory: Arc<dyn SessionStoreFactory> =
-            Arc::new(storage.session_store_factory_with_shared_process_registry());
+        let scratch = tempfile::tempdir().context("attachment root for the PostgreSQL backend")?;
+        let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+            &storage,
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                scratch.path().to_path_buf(),
+            )),
+        ));
         Ok(Self {
             name: "postgres",
-            factory,
-            _scratch: None,
-            postgres: Some(storage),
+            factory: backend.session_store_factory(),
+            artifacts: backend.process_env_store(),
+            backend,
+            _scratch: scratch,
         })
     }
 
@@ -311,11 +323,6 @@ impl Backend {
         owner: LeaseOwnerIdentity,
         timings: lash::durability::LeaseTimings,
     ) -> Result<TurnCore> {
-        let attachments = tempfile::tempdir().context("attachment dir for a triage turn")?;
-        let artifacts: Arc<dyn lash::persistence::LashlangArtifactStore> = match &self.postgres {
-            Some(storage) => Arc::new(storage.lashlang_artifact_store()),
-            None => Arc::new(lash::persistence::InMemoryLashlangArtifactStore::default()),
-        };
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -323,35 +330,26 @@ impl Backend {
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            artifacts,
+            Arc::clone(&self.artifacts),
         );
-        let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-            .with_native_queued_work()
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("session-lease-triage-mock")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .map_err(anyhow::Error::msg)?,
-            )
-            .store_factory(Arc::clone(&self.factory))
-            .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-                attachments.path().to_path_buf(),
-            )))
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(match &self.postgres {
-                Some(storage) => Arc::new(storage.process_env_store()),
-                None => Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::default()),
-            })
-            .lease_timings(timings)
-            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-            .build(owner)
-            .context("build a session-lease-triage core")?;
-        Ok(TurnCore {
-            core,
-            _attachments: attachments,
-        })
+        let core = lash::LashCore::rlm_builder(
+            Arc::clone(&self.backend),
+            lash::TurnBudget::Unbounded,
+            factory,
+        )
+        .provider(provider)
+        .model(
+            lash::ModelSpec::builder("session-lease-triage-mock")
+                .context_window_tokens(200_000)
+                .build()
+                .map_err(anyhow::Error::msg)?,
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .lease_timings(timings)
+        .build(owner)
+        .context("build a session-lease-triage core")?;
+        Ok(TurnCore { core })
     }
 
     /// The durable store for one session, opened without creating it.
@@ -367,7 +365,6 @@ impl Backend {
 
 struct TurnCore {
     core: lash::LashCore,
-    _attachments: tempfile::TempDir,
 }
 
 impl TurnCore {

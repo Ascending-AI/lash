@@ -19,16 +19,23 @@ pub(super) struct AgentContractExecution {
     pub(super) checkpoint_writes: Vec<CheckpointWriteEvent>,
 }
 
-fn contract_store_factory(clock: Arc<dyn lash_core::Clock>) -> Arc<dyn SessionStoreFactory> {
-    let inner: Arc<dyn SessionStoreFactory> = Arc::new(
-        lash::persistence::InMemorySessionStoreFactory::with_clock(clock),
-    );
-    CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| {
-        slot.borrow().as_ref().map_or(inner.clone(), |collector| {
-            Arc::new(ObservedSessionStoreFactory::new(inner, collector.clone()))
-                as Arc<dyn SessionStoreFactory>
-        })
-    })
+/// The contract world's backend: a SQLite memory backend on `clock`,
+/// observed when a checkpoint collector is installed, with `effect_layer` over
+/// its host when a boundary test supplies one.
+async fn contract_backend(
+    clock: Arc<crate::clock::SimClock>,
+    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
+) -> Result<Arc<dyn lash::Backend>, FixedScriptRunnerError> {
+    let collector = CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| slot.borrow().clone());
+    let mut backend =
+        crate::backend::DecoratedBackend::over(crate::backend::sim_memory_backend(clock).await?);
+    if let Some(collector) = collector {
+        backend = backend.observing(collector);
+    }
+    if let Some(layer) = effect_layer {
+        backend = backend.with_effect_layer(layer);
+    }
+    Ok(Arc::new(backend))
 }
 
 fn observe_contract_checkpoints<T>(
@@ -442,7 +449,8 @@ await task.fail({ reason: "parent observed child failure" });
         None,
         true,
         Some(1),
-    )?;
+    )
+    .await?;
     let session = core
         .session("sim-agent-failed-child-contract")
         .open()
@@ -596,24 +604,11 @@ async fn facade_final_value_execution_inner(
             .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .with_native_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
+    let backend = contract_backend(clock, None).await?;
+    let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(contract_store_factory(clock.clone()))
-        .clock(clock.clone())
-        .process_registry(
-            Arc::new(lash_core::TestLocalProcessRegistry::default().with_clock(clock))
-                as Arc<dyn lash_core::ProcessRegistry>,
-        )
         .provider(fixed_texts_provider(provider_kind, provider_responses))
         .model(
             lash_core::ModelSpec::builder(provider_kind)
@@ -734,7 +729,8 @@ async fn facade_agent_process_execution_with_options(
         tools,
         install_subagents,
         max_turns,
-    )?;
+    )
+    .await?;
     let session = core
         .session(session_id)
         .open()
@@ -770,9 +766,7 @@ async fn facade_agent_durable_input_execution() -> Result<Value, FixedScriptRunn
     facade_agent_durable_input_execution_with(
         Arc::clone(&tools),
         tools as Arc<dyn lash_core::ToolProvider>,
-        Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ),
+        None,
         &mut key_rx,
     )
     .await
@@ -781,10 +775,10 @@ async fn facade_agent_durable_input_execution() -> Result<Value, FixedScriptRunn
 async fn facade_agent_durable_input_execution_with(
     tools: Arc<ContractDurableInputTools>,
     registered_tools: Arc<dyn lash_core::ToolProvider>,
-    effect_host: Arc<dyn lash_core::EffectHost>,
+    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
     key_rx: &mut tokio::sync::oneshot::Receiver<Result<lash_core::AwaitEventKey, String>>,
 ) -> Result<Value, FixedScriptRunnerError> {
-    let (core, graph_store) = agent_process_contract_core_with_effect_host(
+    let (core, graph_store) = agent_process_contract_core_with_effect_layer(
         "lash_runtime agent durable input",
         vec![
             r#"<typescript>
@@ -801,8 +795,9 @@ finish({ recovered: true });
 </typescript>"#,
         ],
         Some(registered_tools),
-        effect_host,
-    )?;
+        effect_layer,
+    )
+    .await?;
     let session = core
         .session("sim-agent-durable-input-contract")
         .open()
@@ -821,7 +816,16 @@ finish({ recovered: true });
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
     });
     let key = wait_for_contract_durable_input_key(key_rx).await?;
-    let completed_before_resolution = events.tool_completed_count().await;
+    // The input request is what must still be open: the turn's own
+    // `start_process` call completes as soon as the process is admitted, and
+    // whether its event lands before the key does is scheduling, not
+    // suspension.
+    let completed_before_resolution = events
+        .tool_completed_outputs()
+        .await
+        .iter()
+        .filter(|(name, _)| name == "mock_input_request")
+        .count();
     let suspended_before_resolution = !turn.is_finished() && completed_before_resolution == 0;
     let await_tool_call_id_present = match &key.wait {
         lash_core::AwaitEventWaitIdentity::ToolCompletion { tool_call_id } => {
@@ -873,52 +877,53 @@ finish({ recovered: true });
     .await
 }
 
-fn agent_process_contract_core_with_effect_host(
+async fn agent_process_contract_core_with_effect_layer(
     provider_kind: &'static str,
     provider_responses: Vec<&'static str>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
-    effect_host: Arc<dyn lash_core::EffectHost>,
+    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
 ) -> Result<(lash::LashCore, Arc<lash::tracing::TraceLashlangGraphStore>), FixedScriptRunnerError> {
-    agent_process_contract_core_with_options_and_effect_host(
+    agent_process_contract_core_with_options_and_effect_layer(
         provider_kind,
         provider_responses,
         tools,
         false,
         None,
-        effect_host,
+        effect_layer,
     )
+    .await
 }
 
-fn agent_process_contract_core_with_options(
+async fn agent_process_contract_core_with_options(
     provider_kind: &'static str,
     provider_responses: Vec<&'static str>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     install_subagents: bool,
     max_turns: Option<usize>,
 ) -> Result<(lash::LashCore, Arc<lash::tracing::TraceLashlangGraphStore>), FixedScriptRunnerError> {
-    agent_process_contract_core_with_options_and_effect_host(
+    agent_process_contract_core_with_options_and_effect_layer(
         provider_kind,
         provider_responses,
         tools,
         install_subagents,
         max_turns,
-        Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ),
+        None,
     )
+    .await
 }
 
-// Full specification of the simulator's facade-level process harness. The
-// effect host is injectable so boundary tests can observe the same production
-// execution path without creating a parallel runner.
+// Full specification of the simulator's facade-level process harness. An
+// effect layer over the backend's host is injectable so boundary tests can
+// observe the same production execution path without creating a parallel
+// runner.
 #[allow(clippy::too_many_arguments)]
-fn agent_process_contract_core_with_options_and_effect_host(
+async fn agent_process_contract_core_with_options_and_effect_layer(
     provider_kind: &'static str,
     provider_responses: Vec<&'static str>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     install_subagents: bool,
     max_turns: Option<usize>,
-    effect_host: Arc<dyn lash_core::EffectHost>,
+    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
 ) -> Result<(lash::LashCore, Arc<lash::tracing::TraceLashlangGraphStore>), FixedScriptRunnerError> {
     let clock = crate::clock::SimClock::new();
     let graph_store = Arc::new(lash::tracing::TraceLashlangGraphStore::default());
@@ -932,7 +937,8 @@ fn agent_process_contract_core_with_options_and_effect_host(
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
-    let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    let backend = contract_backend(clock, effect_layer).await?;
+    let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         // The process surface is rendered from the tool catalogue, so a host that
         // wants `processes.*` inside a cell installs the plugin that supplies it.
         // Without it every fixed process contract's first cell dies on
@@ -941,21 +947,9 @@ fn agent_process_contract_core_with_options_and_effect_host(
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
         ))
-        .with_native_queued_work()
-        .effect_host(effect_host)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(contract_store_factory(clock.clone()))
-        .clock(clock.clone())
-        .process_registry(
-            Arc::new(lash_core::TestLocalProcessRegistry::default().with_clock(clock))
-                as Arc<dyn lash_core::ProcessRegistry>,
-        )
         .provider(fixed_texts_provider(provider_kind, provider_responses))
         .model(
             lash_core::ModelSpec::builder(provider_kind)
@@ -1438,15 +1432,25 @@ fn normalize_contract_tool_output(value: Value) -> Value {
     // contract payload that kept the digest would compare two fresh runs on an
     // identity neither is meant to share. Keep the handle's shape -- the
     // sequence prefix and the replay-key scheme -- and mask the digest, the
-    // same way process refs and labels already travel as masked hashes.
+    // same way process refs and labels already travel as masked hashes. The
+    // prefix's number is the registry's incarnation, which counts every
+    // registration the backend admitted before this one; parallel starts take
+    // theirs in whatever order the backend's writes land, so the number is
+    // masked too and only its shape kept.
     if object.contains_key("__handle__") && object.contains_key("process_id") {
         let process_id = object.get("process_id").and_then(Value::as_str);
         let id = object.get("id").and_then(Value::as_str);
+        let id_prefix = id
+            .and_then(|id| process_id.and_then(|key| id.strip_suffix(key)))
+            .unwrap_or_default();
+        let incarnation_masked = id_prefix
+            .strip_prefix("p.")
+            .and_then(|rest| rest.strip_suffix('.'))
+            .filter(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+            .map_or_else(|| id_prefix.to_string(), |_| "p.<incarnation>.".to_string());
         return json!({
             "__handle__": object.get("__handle__").cloned().unwrap_or(Value::Null),
-            "id_prefix": id
-                .and_then(|id| process_id.and_then(|key| id.strip_suffix(key)))
-                .unwrap_or_default(),
+            "id_prefix": incarnation_masked,
             "process_id_scheme": process_id
                 .and_then(|key| key.rsplit_once(':').map(|(scheme, _)| scheme))
                 .unwrap_or_default(),

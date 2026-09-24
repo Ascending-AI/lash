@@ -344,22 +344,12 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
             .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .with_native_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    let backend = crate::backend::memory_backend()
+        .await
+        .expect("SQLite memory backend");
+    let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-            as Arc<dyn lash_core::ProcessRegistry>)
         .provider(provider)
         .model(
             lash_core::ModelSpec::builder("cache-regression-model")
@@ -499,24 +489,14 @@ async fn captured_checkpoint_feedback() -> Vec<LlmRequest> {
         })
         .build()
         .into_handle();
-    let builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let backend = crate::backend::memory_backend()
+        .await
+        .expect("SQLite memory backend");
+    let builder = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .plugin(Arc::new(FeedbackPlugin));
     let core = builder
-        .with_native_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-            as Arc<dyn lash_core::ProcessRegistry>)
         .provider(provider)
         .model(
             lash_core::ModelSpec::builder("cache-regression-model")

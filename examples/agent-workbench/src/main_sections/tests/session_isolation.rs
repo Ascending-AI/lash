@@ -12,42 +12,10 @@ async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() 
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open process registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-            .await
-            .expect("open trigger store"),
-    );
-    let artifact_store = Arc::new(
-        lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-            .await
-            .expect("open artifact store"),
-    ) as Arc<dyn lashlang::LashlangArtifactStore>;
-    let process_env_store = Arc::new(
-        lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
-            .await
-            .expect("open process env store"),
-    );
-    let core = test_workbench_core(
-        session_store_factory,
-        Arc::clone(&process_registry),
-        Arc::clone(&trigger_store),
-        artifact_store,
-        Arc::new(lash::persistence::FileAttachmentStore::new(
-            data_dir.join("attachments"),
-        )),
-        process_env_store,
-    );
+    let backend = test_file_backend(&data_dir);
+    let process_registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
+    let trigger_store = backend.trigger_store();
+    let core = test_workbench_core(backend);
     let session_a_id = "workbench-isolation-a";
     let session_b_id = "workbench-isolation-b";
     let session_a = core

@@ -72,7 +72,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
         postgres_session_id,
     ) = run
         .build(async {
-            let memory_factory = lash::persistence::InMemorySessionStoreFactory::new();
+            let memory_factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
             let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
             let sqlite_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&sqlite_root);
             let postgres = lash_postgres_store::PostgresStorage::connect_with(

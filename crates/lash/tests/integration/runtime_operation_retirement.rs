@@ -29,7 +29,6 @@ use lash_core::{
     RuntimeEffectOutcome,
 };
 use lash_sansio::sync::MutexExt;
-use lash_sqlite_store::SqliteEffectHost;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
@@ -351,21 +350,9 @@ fn executor() -> RuntimeEffectLocalExecutor<'static> {
     })
 }
 
-fn core_with_host(effect_host: Arc<dyn EffectHost>) -> LashCore {
-    core_with_host_and_store(
-        effect_host,
-        Some(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        )),
-    )
-}
-
-/// A core over `effect_host`; with a store factory the session's receipts
-/// persist, which is what the reclaim sweep reads as its proof.
-fn core_with_host_and_store(
-    effect_host: Arc<dyn EffectHost>,
-    store_factory: Option<Arc<dyn lash::persistence::SessionStoreFactory>>,
-) -> LashCore {
+/// A core over `backend`; the backend's catalog persists the
+/// session's receipts, which is what the reclaim sweep reads as its proof.
+fn core_over(backend: Arc<dyn lash::Backend>) -> LashCore {
     let provider = lash_core::testing::TestProvider::builder()
         .complete(|_request| async {
             Ok(lash::provider::LlmResponse {
@@ -379,7 +366,7 @@ fn core_with_host_and_store(
         })
         .build()
         .into_handle();
-    let builder = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
         .model(
@@ -387,19 +374,9 @@ fn core_with_host_and_store(
                 .context_window_tokens(16_000)
                 .build()
                 .expect("valid model spec"),
-        );
-    let builder = match store_factory {
-        Some(store_factory) => builder.store_factory(store_factory),
-        None => builder,
-    };
-    builder
-        .effect_host(effect_host)
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "op-retirement-test-worker",
             "op-retirement-test-boot",
@@ -407,15 +384,77 @@ fn core_with_host_and_store(
         .expect("core")
 }
 
+/// A SQLite file backend under `root`, and the path of its effect journal.
+async fn sqlite_backend(
+    root: &std::path::Path,
+) -> (Arc<lash_sqlite_store::SqliteBackend>, std::path::PathBuf) {
+    let backend = lash_sqlite_store::SqliteBackend::open(root)
+        .await
+        .expect("SQLite file backend");
+    (
+        Arc::new(backend),
+        root.join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name()),
+    )
+}
+
+/// One backend with its effect host replaced by a fault double over it,
+/// which keeps the inner host's binding.
+struct WithHost {
+    inner: Arc<dyn lash::Backend>,
+    host: Arc<dyn EffectHost>,
+}
+
+impl lash::Backend for WithHost {
+    fn binding_identity(&self) -> &str {
+        self.inner.binding_identity()
+    }
+
+    fn clock(&self) -> Arc<dyn lash::runtime::Clock> {
+        self.inner.clock()
+    }
+
+    fn session_store_factory(&self) -> Arc<dyn lash::persistence::SessionStoreFactory> {
+        self.inner.session_store_factory()
+    }
+
+    fn effect_host(&self) -> Arc<dyn EffectHost> {
+        Arc::clone(&self.host)
+    }
+
+    fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
+        self.inner.process_registry()
+    }
+
+    fn trigger_store(&self) -> Arc<dyn lash::triggers::TriggerStore> {
+        self.inner.trigger_store()
+    }
+
+    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
+        self.inner.process_definition_registry()
+    }
+
+    fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessExecutionEnvStore> {
+        self.inner.process_env_store()
+    }
+
+    fn attachment_store(&self) -> Arc<dyn lash::persistence::AttachmentStore> {
+        self.inner.attachment_store()
+    }
+
+    fn process_work(&self) -> Option<lash::process::ProcessWorkWiring> {
+        self.inner.process_work()
+    }
+
+    fn queued_work(&self) -> lash::BackendQueuedWork {
+        self.inner.queued_work()
+    }
+}
+
 #[tokio::test]
 async fn plugin_task_scopes_retire_after_their_receipt_and_leave_other_operations_alone() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("runtime-operation-retirement.db");
-    let host: Arc<dyn EffectHost> = Arc::new(
-        SqliteEffectHost::open(&path)
-            .await
-            .expect("SQLite effect host"),
-    );
+    let (backend, path) = sqlite_backend(dir.path()).await;
+    let host: Arc<dyn EffectHost> = backend.effect_host();
 
     // A runtime operation the facade did not mint: nothing here may touch it.
     let in_flight = ExecutionScope::runtime_operation(IN_FLIGHT_OPERATION);
@@ -435,7 +474,7 @@ async fn plugin_task_scopes_retire_after_their_receipt_and_leave_other_operation
         .to_string();
 
     let minted = Minted::default();
-    let core = core_with_host(Arc::clone(&host));
+    let core = core_over(backend.clone());
     let session = core
         .session("op-retirement")
         .plugin::<JournalPlugin>(JournalConfig {
@@ -532,13 +571,9 @@ fn scope_key_operation_id(scope_key: &str) -> String {
 #[tokio::test]
 async fn plugin_command_scopes_retire_after_their_receipt() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("command-retirement.db");
-    let host: Arc<dyn EffectHost> = Arc::new(
-        SqliteEffectHost::open(&path)
-            .await
-            .expect("SQLite effect host"),
-    );
-    let core = core_with_host(Arc::clone(&host));
+    let (backend, path) = sqlite_backend(dir.path()).await;
+    let host: Arc<dyn EffectHost> = backend.effect_host();
+    let core = core_over(backend.clone());
     let session = core
         .session("command-retirement")
         .plugin::<JournalPlugin>(JournalConfig {
@@ -588,17 +623,16 @@ async fn plugin_command_scopes_retire_after_their_receipt() {
 #[tokio::test]
 async fn plugin_task_retirement_failure_is_surfaced_after_durable_work() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("retirement-failure.db");
-    let inner: Arc<dyn EffectHost> = Arc::new(
-        SqliteEffectHost::open(&path)
-            .await
-            .expect("SQLite effect host"),
-    );
+    let (backend, path) = sqlite_backend(dir.path()).await;
+    let inner: Arc<dyn EffectHost> = backend.effect_host();
     let host: Arc<dyn EffectHost> = Arc::new(RetirementFailsHost {
         inner: Arc::clone(&inner),
     });
     let minted = Minted::default();
-    let core = core_with_host(Arc::clone(&host));
+    let core = core_over(Arc::new(WithHost {
+        inner: backend,
+        host: Arc::clone(&host),
+    }));
     let session = core
         .session("retirement-failure")
         .plugin::<JournalPlugin>(JournalConfig {
@@ -703,7 +737,7 @@ impl lash_core::AwaitEventResolver for RetirementFailsHost {
 #[async_trait::async_trait]
 impl EffectHost for RetirementFailsHost {
     fn turn_control_binding_id(&self) -> String {
-        "retirement-fails-host".to_string()
+        self.inner.turn_control_binding_id()
     }
 
     fn scoped<'run>(
@@ -788,6 +822,15 @@ impl Journal {
     }
 }
 
+/// The backend, its effect host, its journal and its session store factory
+/// for one reclaim-sweep backend.
+type SweepBackend = (
+    Arc<dyn lash::Backend>,
+    Arc<dyn EffectHost>,
+    Journal,
+    Arc<dyn lash::persistence::SessionStoreFactory>,
+);
+
 /// A task that returns while a run-to-completion loser is still draining
 /// keeps its journal: the receipt is not proof that the scope is quiescent,
 /// so the facade leaves the scope alone and the reclaim sweep — the durable
@@ -799,11 +842,7 @@ async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
     let dir = tempfile::tempdir().expect("tempdir");
     let gate = format!("drain-{}", if pg { "postgres" } else { "sqlite" });
     let mut postgres = None;
-    let (host, journal, store_factory): (
-        Arc<dyn EffectHost>,
-        Journal,
-        Arc<dyn lash::persistence::SessionStoreFactory>,
-    ) = if pg {
+    let (backend, host, journal, store_factory): SweepBackend = if pg {
         let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
             assert!(
                 std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
@@ -825,23 +864,26 @@ async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
         let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
             .await
             .expect("connect the private database");
-        let host = storage.effect_host();
+        let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+            &storage,
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                dir.path().join("attachments"),
+            )),
+        ));
+        let host = backend.effect_host();
         host.register_group_executors(Arc::new(DrainExecutors { gate: gate.clone() }))
             .expect("register group executors");
-        let factory = storage.session_store_factory_with_shared_process_registry();
+        let factory = backend.session_store_factory();
         let pool = storage.pool().clone();
         postgres = Some(storage);
-        (Arc::new(host), Journal::Postgres(pool), Arc::new(factory))
+        (backend, host, Journal::Postgres(pool), factory)
     } else {
-        let path = dir.path().join("drain-retirement.db");
-        let host = SqliteEffectHost::open(&path)
-            .await
-            .expect("SQLite effect host");
+        let (backend, path) = sqlite_backend(dir.path()).await;
+        let host = backend.effect_host();
         host.register_group_executors(Arc::new(DrainExecutors { gate: gate.clone() }))
             .expect("register group executors");
-        let factory =
-            lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path().join("sessions"));
-        (Arc::new(host), Journal::Sqlite(path), Arc::new(factory))
+        let factory = backend.session_store_factory();
+        (backend, host, Journal::Sqlite(path), factory)
     };
     let _postgres = postgres.take();
 
@@ -863,7 +905,7 @@ async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
         .key()
         .to_string();
 
-    let core = core_with_host_and_store(Arc::clone(&host), Some(Arc::clone(&store_factory)));
+    let core = core_over(Arc::clone(&backend));
     let session = core
         .session(format!("{gate}-session"))
         .plugin::<JournalPlugin>(JournalConfig {
@@ -973,11 +1015,7 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
     let label = if pg { "postgres" } else { "sqlite" };
     let mut postgres = None;
     let mut catalog = None;
-    let (host, journal, store_factory): (
-        Arc<dyn EffectHost>,
-        Journal,
-        Arc<dyn lash::persistence::SessionStoreFactory>,
-    ) = if pg {
+    let (backend, host, journal, store_factory): SweepBackend = if pg {
         let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
             assert!(
                 std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
@@ -999,28 +1037,30 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
         let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
             .await
             .expect("connect the private database");
-        let host = storage.effect_host();
-        let factory = storage.session_store_factory_with_shared_process_registry();
+        let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+            &storage,
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                dir.path().join("attachments"),
+            )),
+        ));
+        let host = backend.effect_host();
+        let factory = backend.session_store_factory();
         let pool = storage.pool().clone();
         postgres = Some(storage);
-        (Arc::new(host), Journal::Postgres(pool), Arc::new(factory))
+        (backend, host, Journal::Postgres(pool), factory)
     } else {
-        let path = dir.path().join("caller-sweep.db");
-        let host = SqliteEffectHost::open(&path)
-            .await
-            .expect("SQLite effect host");
-        let factory =
-            lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path().join("sessions"));
+        let (backend, path) = sqlite_backend(dir.path()).await;
+        let host = backend.effect_host();
+        let factory = backend.session_store_factory();
         catalog = Some(
             dir.path()
-                .join("sessions")
                 .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
         );
-        (Arc::new(host), Journal::Sqlite(path), Arc::new(factory))
+        (backend, host, Journal::Sqlite(path), factory)
     };
     let _postgres = postgres.take();
     store_factory.bind_effect_host(&host);
-    let core = core_with_host_and_store(Arc::clone(&host), Some(Arc::clone(&store_factory)));
+    let core = core_over(Arc::clone(&backend));
     let session_id = SessionId::from(format!("caller-sweep-{label}"));
     // The catalog the sweep reads receipts from exists once a session does.
     let session = core
@@ -1180,11 +1220,7 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
     let label = if pg { "postgres" } else { "sqlite" };
     let mut postgres = None;
     let mut sqlite_catalog = None;
-    let (host, journal, factory): (
-        Arc<dyn EffectHost>,
-        Journal,
-        Arc<dyn lash::persistence::SessionStoreFactory>,
-    ) = if pg {
+    let (_, host, journal, factory): SweepBackend = if pg {
         let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
             assert!(
                 std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
@@ -1204,25 +1240,26 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
         let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
             .await
             .expect("connect the private database");
-        let host = storage.effect_host();
-        let factory = storage.session_store_factory_with_shared_process_registry();
+        let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+            &storage,
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                dir.path().join("attachments"),
+            )),
+        ));
+        let host = backend.effect_host();
+        let factory = backend.session_store_factory();
         let pool = storage.pool().clone();
         postgres = Some(storage);
-        (Arc::new(host), Journal::Postgres(pool), Arc::new(factory))
+        (backend, host, Journal::Postgres(pool), factory)
     } else {
-        let effect_path = dir.path().join("pinned-sweep-effects.db");
-        let catalog_root = dir.path().join("pinned-sweep-sessions");
-        let host = SqliteEffectHost::open(&effect_path)
-            .await
-            .expect("SQLite effect host");
-        let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&catalog_root);
-        sqlite_catalog =
-            Some(catalog_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()));
-        (
-            Arc::new(host),
-            Journal::Sqlite(effect_path),
-            Arc::new(factory),
-        )
+        let (backend, effect_path) = sqlite_backend(dir.path()).await;
+        let host = backend.effect_host();
+        let factory = backend.session_store_factory();
+        sqlite_catalog = Some(
+            dir.path()
+                .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+        );
+        (backend, host, Journal::Sqlite(effect_path), factory)
     };
     let _postgres = postgres.take();
     factory.bind_effect_host(&host);
@@ -1503,20 +1540,13 @@ async fn participant_crash_handles(
             .await
             .expect("connect participant-crash PostgreSQL database");
         (
-            Arc::new(storage.effect_host()),
-            Arc::new(storage.session_store_factory_with_shared_process_registry()),
+            Arc::new(storage.effect_host()) as Arc<dyn EffectHost>,
+            Arc::new(storage.session_store_factory_with_shared_process_registry())
+                as Arc<dyn lash_core::SessionStoreFactory>,
         )
     } else {
-        let root = std::path::Path::new(locator);
-        let host = SqliteEffectHost::open(&root.join("effects.db"))
-            .await
-            .expect("open participant-crash SQLite owner");
-        (
-            Arc::new(host),
-            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-                root.join("catalog"),
-            )),
-        )
+        let (backend, _) = sqlite_backend(std::path::Path::new(locator)).await;
+        (backend.effect_host(), backend.session_store_factory())
     }
 }
 

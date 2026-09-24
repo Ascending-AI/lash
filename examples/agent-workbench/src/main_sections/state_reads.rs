@@ -52,7 +52,6 @@ impl AppState {
                 state
             });
         self.observer_session_builder(session_id.to_string())
-            .store(store)
             .open_with_state(state)
             .await
     }

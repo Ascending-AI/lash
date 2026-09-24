@@ -145,7 +145,14 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        &storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    ));
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("embed-test")
@@ -154,16 +161,8 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
                 .unwrap(),
         )
         .plugin(Arc::new(RetryHook(Arc::clone(&probe))))
-        .effect_host(Arc::new(storage.effect_host()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(storage.process_env_store()))
-        .store_factory(Arc::new(
-            storage.session_store_factory_with_shared_process_registry(),
-        ))
-        .process_registry(Arc::new(storage.process_registry()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .with_native_queued_work()
         .native_substrate_config(lash_core_execution::NativeSubstrateConfig {
             work_cadence: lash_core_execution::WorkCadencePolicy {
                 retry_initial: std::time::Duration::from_millis(50),

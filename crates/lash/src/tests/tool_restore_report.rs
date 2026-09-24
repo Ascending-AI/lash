@@ -68,24 +68,28 @@ impl lash_core::facade_support::SessionPlugin for OpenLifecycleProbePlugin {
 /// has the tool's source, and hand back the catalog it lives in.
 async fn seed_session_with_a_persisted_tool(
     session_id: &SessionId,
-) -> Result<Arc<dyn SessionStoreFactory>> {
-    let factory: Arc<dyn SessionStoreFactory> =
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let granting_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .tools(Arc::new(AppTools))
-            .store_factory(Arc::clone(&factory))
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+) -> Result<(
+    Arc<lash_sqlite_store::SqliteBackend>,
+    Arc<dyn SessionStoreFactory>,
+)> {
+    let backend = memory_backend().await;
+    let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
+    let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core.session(session_id.clone()).open().await?;
     granted
         .turn(TurnInput::text("persist a checkpoint with tool state"))
         .run()
         .await?;
     Box::pin(granted.close()).await?;
-    Ok(factory)
+    Ok((backend, factory))
 }
 
 async fn durable_head_revision(
@@ -110,15 +114,16 @@ async fn durable_head_revision(
 #[tokio::test]
 async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     let session_id = SessionId::from("fig-3367-tolerate");
-    let factory = seed_session_with_a_persisted_tool(&session_id).await?;
+    let (backend, _) = seed_session_with_a_persisted_tool(&session_id).await?;
 
-    let grantless_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .store_factory(Arc::clone(&factory))
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+    let grantless_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let opened = grantless_core.session(session_id.clone()).open().await?;
 
     let report = opened
@@ -141,21 +146,22 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
 #[tokio::test]
 async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     let session_id = SessionId::from("fig-3367-require");
-    let factory = seed_session_with_a_persisted_tool(&session_id).await?;
+    let (backend, factory) = seed_session_with_a_persisted_tool(&session_id).await?;
     let head_before = durable_head_revision(factory.as_ref(), &session_id).await?;
 
     let counters = Arc::new(OpenLifecycleCounters::default());
-    let strict_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .store_factory(Arc::clone(&factory))
-            .plugin(Arc::new(OpenLifecycleProbeFactory {
-                counters: Arc::clone(&counters),
-            }))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Require)
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+    let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(Arc::new(OpenLifecycleProbeFactory {
+        counters: Arc::clone(&counters),
+    }))
+    .tool_source_policy(lash_core::ToolSourcePolicy::Require)
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
 
     let refusal = match strict_core.session(session_id.clone()).open().await {
         Ok(_) => panic!("Require must refuse an open whose persisted member has no source"),
@@ -188,13 +194,14 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
 
     // The lease the refused open claimed was released: a following open takes
     // it. Tolerate here, because the point is the lease, not the policy.
-    let tolerant_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .store_factory(Arc::clone(&factory))
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+    let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let reopened = tolerant_core.session(session_id.clone()).open().await?;
     Box::pin(reopened.close()).await?;
     Ok(())
@@ -205,15 +212,16 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
 #[tokio::test]
 async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     let session_id = SessionId::from("fig-3367-per-open");
-    let factory = seed_session_with_a_persisted_tool(&session_id).await?;
+    let (backend, _) = seed_session_with_a_persisted_tool(&session_id).await?;
 
-    let tolerant_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .store_factory(Arc::clone(&factory))
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+    let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
 
     let refusal = match tolerant_core
         .session(session_id.clone())
@@ -255,16 +263,17 @@ async fn require_makes_a_queued_work_rebuild_a_terminal_failure() -> Result<()> 
     use lash_core::facade_support::QueuedWorkRunHandle as _;
 
     let session_id = SessionId::from("fig-3367-queued");
-    let factory = seed_session_with_a_persisted_tool(&session_id).await?;
+    let (backend, factory) = seed_session_with_a_persisted_tool(&session_id).await?;
 
-    let strict_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .store_factory(Arc::clone(&factory))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Require)
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+    let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .tool_source_policy(lash_core::ToolSourcePolicy::Require)
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
 
     // The driver the core would run for this session.
     let handle = native_queued_work_handle_for_tests(&strict_core, Arc::clone(&factory));

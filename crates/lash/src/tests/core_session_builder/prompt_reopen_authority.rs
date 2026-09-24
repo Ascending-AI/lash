@@ -75,32 +75,31 @@ fn rendered_system_prompt(request: &lash_core::LlmRequest) -> String {
 async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt() -> Result<()> {
     use crate::PromptLayerSink as _;
 
-    let store = Arc::new(SnapshotStore::default());
+    let backend = memory_backend().await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core_v1 =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .instructions("CORE PROMPT V1")
-            .provider(prompt_capture_provider(Arc::clone(&captures)))
-            .model(mock_model_spec())
-            .build(crate::testing::runtime_lease_owner())?;
-    let session = core_v1
-        .session("core-prompt-redeploy")
-        .store(store.clone() as Arc<dyn lash_core::RuntimePersistence>)
-        .open()
-        .await?;
+    let core_v1 = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .instructions("CORE PROMPT V1")
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core_v1.session("core-prompt-redeploy").open().await?;
     session.turn(TurnInput::text("commit V1")).run().await?;
     drop(session);
     drop(core_v1);
 
-    let core_v2 =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .instructions("CORE PROMPT V2")
-            .provider(prompt_capture_provider(Arc::clone(&captures)))
-            .model(mock_model_spec())
-            .build(crate::testing::runtime_lease_owner())?;
+    let core_v2 = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+    ))
+    .instructions("CORE PROMPT V2")
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     core_v2
         .session("core-prompt-redeploy")
-        .store(store as Arc<dyn lash_core::RuntimePersistence>)
         .open()
         .await?
         .turn(TurnInput::text("render V2"))
@@ -123,10 +122,13 @@ async fn open_with_state_without_builder_prompt_renders_supplied_snapshot_prompt
             "OPEN WITH STATE SUPPLIED PROMPT",
         ));
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
     core.session("open-with-state-supplied-prompt")
         .open_with_state(prompt_probe_state(
@@ -152,10 +154,13 @@ async fn open_with_state_builder_prompt_replaces_supplied_snapshot_prompt() -> R
         lash_core::PromptContribution::guidance("Supplied snapshot", "OPEN WITH STATE OLD PROMPT"),
     );
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
     core.session("open-with-state-builder-prompt")
         .instructions("OPEN WITH STATE NEW PROMPT")
@@ -182,14 +187,16 @@ async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_in_memory()
 
     let store = snapshot_store_from_literal_head(LEGACY_PROMPTLESS_HEAD_JSON);
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend_serving(store.clone()).await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
         .session("legacy-promptless")
-        .store(store)
         .instructions("HOST SUPPLIED AT REOPEN")
         .open()
         .await?;
@@ -207,20 +214,27 @@ async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_in_memory()
 #[tokio::test]
 async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_in_memory() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
     let fresh = core.session("fresh-prompt-baseline").open().await?;
     fresh.turn(TurnInput::text("fresh probe")).run().await?;
-    let legacy = core
-        .session("legacy-promptless")
-        .store(snapshot_store_from_literal_head(
+    let legacy_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend_serving(snapshot_store_from_literal_head(
             LEGACY_PROMPTLESS_HEAD_JSON,
         ))
-        .open()
-        .await?;
+        .await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let legacy = legacy_core.session("legacy-promptless").open().await?;
     legacy.turn(TurnInput::text("legacy probe")).run().await?;
 
     let requests = captures.lock_recover();
@@ -242,12 +256,15 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_in_memory
         prompt_probe_state(&SessionId::from("committed-prompt"), committed),
     ));
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend_serving(store).await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("committed-prompt").store(store).open().await?;
+    let session = core.session("committed-prompt").open().await?;
     session.turn(TurnInput::text("probe")).run().await?;
 
     let requests = captures.lock_recover();
@@ -266,17 +283,16 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_m
     );
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .instructions("INHERITED CORE DEFAULT")
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend_serving(store.clone()).await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .instructions("INHERITED CORE DEFAULT")
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core
-        .session("explicit-empty-prompt")
-        .store(store)
-        .open()
-        .await?;
+    let session = core.session("explicit-empty-prompt").open().await?;
     session.turn(TurnInput::text("probe")).run().await?;
 
     let requests = captures.lock_recover();
@@ -301,16 +317,18 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_in_memory() -> Resul
     )));
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let trace = tempfile::NamedTempFile::new().expect("composition trace");
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .instructions("CORE DEFAULT MUST NOT WIN")
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .trace_jsonl_path(trace.path())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend_serving(store.clone()).await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .instructions("CORE DEFAULT MUST NOT WIN")
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .trace_jsonl_path(trace.path())
+    .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
         .session("host-reprompt")
-        .store(store.clone() as Arc<dyn lash_core::RuntimePersistence>)
         .instructions("NEW HOST PROMPT")
         .open()
         .await?;
@@ -345,11 +363,16 @@ async fn sqlite_prompt_probe_store(
     prompt: lash_core::PromptLayer,
 ) -> (
     tempfile::TempDir,
-    lash_sqlite_store::SqliteSessionStoreFactory,
+    Arc<lash_sqlite_store::SqliteBackend>,
     Arc<dyn lash_core::RuntimePersistence>,
 ) {
     let dir = tempfile::tempdir().expect("SQLite prompt probe directory");
-    let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path());
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open(dir.path())
+            .await
+            .expect("open the SQLite prompt probe backend"),
+    );
+    let factory = backend.session_store_factory();
     let mut policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
     policy.provider_id = "embed-test".to_string();
     policy.model = mock_model_spec();
@@ -377,17 +400,21 @@ async fn sqlite_prompt_probe_store(
         ))
         .await
         .expect("commit SQLite prompt probe head");
-    (dir, factory, store)
+    (dir, backend, store)
 }
 
-async fn sqlite_store_from_literal_legacy_head()
--> (tempfile::TempDir, Arc<dyn lash_core::RuntimePersistence>) {
-    let (dir, factory, store) = sqlite_prompt_probe_store(
+async fn sqlite_store_from_literal_legacy_head() -> (
+    tempfile::TempDir,
+    Arc<lash_sqlite_store::SqliteBackend>,
+    Arc<dyn lash_core::RuntimePersistence>,
+) {
+    let (dir, backend, store) = sqlite_prompt_probe_store(
         &SessionId::from("legacy-promptless"),
         lash_core::PromptLayer::new(),
     )
     .await;
-    let raw = rusqlite::Connection::open(factory.catalog_uri()).expect("open SQLite catalog");
+    let raw = rusqlite::Connection::open(backend.session_store_factory().catalog_uri())
+        .expect("open SQLite catalog");
     // The literal keeps the pre-prompt config bytes for the field-defaulting
     // probe, while the real store decoder still requires this binary's exact
     // session-head envelope generation.
@@ -407,22 +434,24 @@ async fn sqlite_store_from_literal_legacy_head()
         1
     );
     drop(raw);
-    (dir, store)
+    (dir, backend, store)
 }
 
 #[tokio::test]
 async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_sqlite() -> Result<()> {
     use crate::PromptLayerSink as _;
 
-    let (_dir, store) = sqlite_store_from_literal_legacy_head().await;
+    let (_dir, backend, _) = sqlite_store_from_literal_legacy_head().await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("legacy-promptless")
-        .store(store)
         .instructions("SQLITE HOST PROMPT")
         .open()
         .await?;
@@ -433,12 +462,15 @@ async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_sqlite() ->
 
 #[tokio::test]
 async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_sqlite() -> Result<()> {
-    let (_dir, store) = sqlite_store_from_literal_legacy_head().await;
+    let (_dir, backend, _) = sqlite_store_from_literal_legacy_head().await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     core.session("fresh-sqlite-baseline")
         .open()
         .await?
@@ -446,7 +478,6 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_sqlite(
         .run()
         .await?;
     core.session("legacy-promptless")
-        .store(store)
         .open()
         .await?
         .turn(TurnInput::text("legacy"))
@@ -465,15 +496,17 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_sqlite() 
     let committed = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Committed", "SQLITE COMMITTED PROMPT"),
     );
-    let (_dir, _factory, store) =
+    let (_dir, backend, _) =
         sqlite_prompt_probe_store(&SessionId::from("sqlite-committed"), committed).await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     core.session("sqlite-committed")
-        .store(store)
         .open()
         .await?
         .turn(TurnInput::text("probe"))
@@ -489,19 +522,21 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_sqlite() 
 async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqlite() -> Result<()> {
     use crate::PromptLayerSink as _;
 
-    let (_dir, _factory, store) = sqlite_prompt_probe_store(
+    let (_dir, backend, _) = sqlite_prompt_probe_store(
         &SessionId::from("sqlite-explicit-empty"),
         lash_core::PromptLayer::new(),
     )
     .await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .instructions("SQLITE INHERITED DEFAULT")
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .instructions("SQLITE INHERITED DEFAULT")
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     core.session("sqlite-explicit-empty")
-        .store(store)
         .open()
         .await?
         .turn(TurnInput::text("probe"))
@@ -520,17 +555,19 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<(
     let old = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Old", "SQLITE OLD PROMPT"),
     );
-    let (_dir, _factory, store) =
+    let (_dir, backend, store) =
         sqlite_prompt_probe_store(&SessionId::from("sqlite-host-reprompt"), old).await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let trace = tempfile::NamedTempFile::new().expect("SQLite composition trace");
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(prompt_capture_provider(Arc::clone(&captures)))
-        .model(mock_model_spec())
-        .trace_jsonl_path(trace.path())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(prompt_capture_provider(Arc::clone(&captures)))
+    .model(mock_model_spec())
+    .trace_jsonl_path(trace.path())
+    .build(crate::testing::runtime_lease_owner())?;
     core.session("sqlite-host-reprompt")
-        .store(Arc::clone(&store))
         .instructions("SQLITE NEW HOST PROMPT")
         .open()
         .await?
@@ -565,16 +602,18 @@ async fn successive_reopens_with_distinct_host_prompts_each_recommit_sqlite() ->
     let old = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Old", "SQLITE ORIGINAL PROMPT"),
     );
-    let (_dir, _factory, store) =
+    let (_dir, backend, store) =
         sqlite_prompt_probe_store(&SessionId::from("sqlite-reseed-twice"), old).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
     Box::pin(
         core.session("sqlite-reseed-twice")
-            .store(Arc::clone(&store))
             .instructions("FIRST RECONCILED PROMPT")
             .open()
             .await?
@@ -587,7 +626,6 @@ async fn successive_reopens_with_distinct_host_prompts_each_recommit_sqlite() ->
     // instead of tripping the journaled-determinism guard (FIG-1875).
     Box::pin(
         core.session("sqlite-reseed-twice")
-            .store(Arc::clone(&store))
             .instructions("SECOND RECONCILED PROMPT")
             .open()
             .await?
@@ -606,7 +644,6 @@ async fn successive_reopens_with_distinct_host_prompts_each_recommit_sqlite() ->
     let before = head.head_revision;
     Box::pin(
         core.session("sqlite-reseed-twice")
-            .store(Arc::clone(&store))
             .instructions("SECOND RECONCILED PROMPT")
             .open()
             .await?

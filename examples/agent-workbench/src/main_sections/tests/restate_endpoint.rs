@@ -12,61 +12,40 @@ impl LiveRestateEndpoint {
     pub(crate) async fn start(
         admin_url: &str,
         state: AppState,
-        process_deployment: lash_restate::RestateProcessDeployment,
+        backend: Arc<lash_restate::RestateBackend>,
         process_worker: lash::durability::DurableProcessWorker,
     ) -> Self {
         let listener = std::net::TcpListener::bind("127.0.0.1:0")
             .expect("bind immutable workbench Restate endpoint");
-        Self::start_on_listener(
-            admin_url,
-            listener,
-            state,
-            process_deployment,
-            process_worker,
-            true,
-        )
-        .await
+        Self::start_on_listener(admin_url, listener, state, backend, process_worker, true).await
     }
 
     pub(crate) async fn restart(
         addr: SocketAddr,
         state: AppState,
-        process_deployment: lash_restate::RestateProcessDeployment,
+        backend: Arc<lash_restate::RestateBackend>,
         process_worker: lash::durability::DurableProcessWorker,
         deployment_id: String,
     ) -> Self {
         let listener = std::net::TcpListener::bind(addr)
             .unwrap_or_else(|error| panic!("rebind immutable Restate endpoint {addr}: {error}"));
-        Self::start_on_listener(
-            "",
-            listener,
-            state,
-            process_deployment,
-            process_worker,
-            false,
-        )
-        .await
-        .with_deployment_id(deployment_id)
+        Self::start_on_listener("", listener, state, backend, process_worker, false)
+            .await
+            .with_deployment_id(deployment_id)
     }
 
     pub(crate) async fn start_replacing_for_mutation(
         admin_url: &str,
         addr: SocketAddr,
         state: AppState,
-        process_deployment: lash_restate::RestateProcessDeployment,
+        backend: Arc<lash_restate::RestateBackend>,
         process_worker: lash::durability::DurableProcessWorker,
     ) -> Self {
         let listener = std::net::TcpListener::bind(addr)
             .unwrap_or_else(|error| panic!("bind mutable Restate endpoint {addr}: {error}"));
-        let mut endpoint = Self::start_on_listener(
-            admin_url,
-            listener,
-            state,
-            process_deployment,
-            process_worker,
-            false,
-        )
-        .await;
+        let mut endpoint =
+            Self::start_on_listener(admin_url, listener, state, backend, process_worker, false)
+                .await;
         endpoint.deployment_id =
             register_restate_deployment_request(admin_url, &endpoint.endpoint_url, true, true)
                 .await;
@@ -77,7 +56,7 @@ impl LiveRestateEndpoint {
         admin_url: &str,
         listener: std::net::TcpListener,
         state: AppState,
-        process_deployment: lash_restate::RestateProcessDeployment,
+        backend: Arc<lash_restate::RestateBackend>,
         process_worker: lash::durability::DurableProcessWorker,
         register: bool,
     ) -> Self {
@@ -108,7 +87,7 @@ impl LiveRestateEndpoint {
                     let task = restate::spawn_owned_restate_endpoint(
                         listener,
                         state,
-                        process_deployment,
+                        backend,
                         process_worker,
                         shutdown_rx,
                     );

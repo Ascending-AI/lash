@@ -460,7 +460,7 @@ async fn replay_fixture(
     data_dir: &tempfile::TempDir,
     source_key: &str,
 ) -> (crate::AppState, SessionId, String) {
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -595,7 +595,7 @@ async fn unfinished_basis_run_replay_reissues_the_same_run_identity() {
 }
 
 async fn register_then_disable(
-    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
     session_id: &SessionId,
     source_key: &str,
 ) {
@@ -646,7 +646,7 @@ async fn register_then_disable(
 
 async fn handler_cancels_without_rearming_or_emitting(register_and_disable: bool) {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,

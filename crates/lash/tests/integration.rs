@@ -20,7 +20,5 @@ mod process_scope_fence;
 mod runtime_operation_retirement;
 #[path = "integration/stores_evidence.rs"]
 mod stores_evidence;
-#[path = "integration/testing_conformance.rs"]
-mod testing_conformance;
 #[path = "integration/tool_intent_ingress_observability.rs"]
 mod tool_intent_ingress_observability;

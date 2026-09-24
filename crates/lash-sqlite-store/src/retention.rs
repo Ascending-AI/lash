@@ -33,11 +33,7 @@ pub(crate) async fn reclaim(
         .open_catalog_for_maintenance_without_registry("evidence retention")
         .await
         .map_err(failed_before_any_work)?;
-    let effect_journal = factory
-        .effect_journal
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
+    let effect_journal = factory.effect_journal.clone();
     let journal_identity = effect_journal
         .as_ref()
         .map(|journal| Arc::clone(journal.identity()));

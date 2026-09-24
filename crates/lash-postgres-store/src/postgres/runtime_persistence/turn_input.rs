@@ -138,7 +138,22 @@ impl TurnInputStore for PostgresSessionStore {
             owner
                 .register(authorization.admitted_scope(), authorization.binding_id())
                 .await
-                .map_err(|error| StoreError::Backend(error.to_string()))?;
+                .map_err(|error| {
+                    // The owner refuses a participant under a retired scope:
+                    // the same refusal this catalog's own retired-scope row
+                    // answers, so it keeps the same type.
+                    match authorization.admitted_scope().journal_identity() {
+                        Ok(identity)
+                            if error.code
+                                == lash_core_execution::RuntimeErrorCode::EffectScopeRetired =>
+                        {
+                            StoreError::TurnCancelClosureScopeRetired {
+                                scope_id: identity.key().to_string(),
+                            }
+                        }
+                        _ => StoreError::Backend(error.to_string()),
+                    }
+                })?;
         }
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;

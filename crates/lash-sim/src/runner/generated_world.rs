@@ -16,13 +16,13 @@ pub(super) struct GeneratedRuntimeWorld {
     backend_faults: GeneratedBackendFaultHarness,
     provider_mutations: SimProviderMutationHarness,
     trigger_harness: SimTriggerHarness,
-    store_factory: Arc<dyn SessionStoreFactory>,
+    /// The world's backend with its session factory under the commit
+    /// observer; every runtime core of the world runs on it.
+    backend: Arc<dyn lash::Backend>,
     /// The backend factory underneath the commit observer, for reading the
-    /// in-memory lane back through a fresh handle once the run is over.
+    /// in-process lane back through a fresh handle once the run is over.
     reopen_factory: Arc<dyn SessionStoreFactory>,
     durable_writes: CheckpointWriteCollector,
-    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-    process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     runtime_boundaries: RuntimeBoundaryHarness,
     suspending_turns: BTreeMap<String, SuspendingTurn>,
     /// Boundaries the host has discovered but the simulated schedule has not
@@ -115,43 +115,35 @@ struct ActiveProviderTurn {
 const SCHEDULE_TICK_MS: u64 = 40_000;
 
 impl GeneratedRuntimeWorld {
-    pub(super) fn new() -> Self {
-        // The in-memory reference / generated SEARCH lane keeps full preserved
+    pub(super) async fn new() -> Result<Self, FixedScriptRunnerError> {
+        // The in-process reference / generated SEARCH lane keeps full preserved
         // cross-session concurrency (serialize_provider_turns = false).
         let clock = SimClock::new();
-        Self::with_backend(
-            Arc::new(lash::persistence::InMemorySessionStoreFactory::with_clock(
-                clock.clone(),
-            )),
+        Ok(Self::with_backend(
+            crate::backend::sim_memory_backend(clock.clone()).await?,
             RuntimeEffectReplayStore::Memory,
-            Arc::new(lash::persistence::InMemoryAttachmentStore::new()),
-            Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::new()),
             false,
             clock,
-        )
+        ))
     }
 
-    /// Build the generated runtime world over an explicit backend (session store
-    /// factory + durable-effect replay store + attachment/process-env stores). The
-    /// reference in-memory run and the cross-backend SQLite re-run drive the SAME
-    /// workload through the SAME scheduler-driven, concurrency-faithful driver,
-    /// differing ONLY in this backend. That makes the cross-backend comparison
-    /// genuinely apples-to-apples: any divergence is a real store divergence, not
-    /// an artifact of a separate, fixed-order, provider-event-gated re-drive. A
-    /// durable session store requires durable attachment/process-env stores, so
-    /// those are supplied per backend rather than hard-coded to in-memory.
+    /// Build the generated runtime world over an explicit backend (one
+    /// backend + durable-effect replay store). The reference in-process run
+    /// and the cross-backend SQLite re-run drive the SAME workload through the
+    /// SAME scheduler-driven, concurrency-faithful driver, differing ONLY in
+    /// this backend. That makes the cross-backend comparison genuinely
+    /// apples-to-apples: any divergence is a real store divergence, not an
+    /// artifact of a separate, fixed-order, provider-event-gated re-drive.
     pub(super) fn with_backend(
-        store_factory: Arc<dyn SessionStoreFactory>,
+        backend: Arc<dyn lash::Backend>,
         effect_replay_store: RuntimeEffectReplayStore,
-        attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-        process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
         serialize_provider_turns: bool,
         clock: Arc<SimClock>,
     ) -> Self {
         let durable_writes = CheckpointWriteCollector::default();
-        let reopen_factory = Arc::clone(&store_factory);
-        let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
-            ObservedSessionStoreFactory::new(store_factory, durable_writes.clone()),
+        let reopen_factory = backend.session_store_factory();
+        let backend: Arc<dyn lash::Backend> = Arc::new(
+            crate::backend::DecoratedBackend::over(backend).observing(durable_writes.clone()),
         );
         Self {
             clock: Arc::clone(&clock),
@@ -162,15 +154,13 @@ impl GeneratedRuntimeWorld {
             provider_mutations: SimProviderMutationHarness::default(),
             trigger_harness: SimTriggerHarness::default(),
             runtime_boundaries: RuntimeBoundaryHarness::new(
-                Arc::clone(&store_factory),
+                backend.session_store_factory(),
                 effect_replay_store,
                 clock,
             ),
-            store_factory,
+            backend,
             reopen_factory,
             durable_writes,
-            attachment_store,
-            process_env_store,
             suspending_turns: BTreeMap::new(),
             staged_admissions: BTreeMap::new(),
             suspends_spawned: 0,
@@ -318,9 +308,7 @@ impl GeneratedRuntimeWorld {
         let provider_schedule = ScriptedTransportSchedule::new();
         let (core, transport, provider_kind) = runtime_core_for_scripts(
             scripts,
-            Arc::clone(&self.store_factory),
-            Arc::clone(&self.attachment_store),
-            Arc::clone(&self.process_env_store),
+            Arc::clone(&self.backend),
             Some(provider_schedule.clone()),
             // The generated harness owns provider execution through explicit
             // `Provider` boundaries. Each modeled success turn gets one scripted
@@ -332,7 +320,6 @@ impl GeneratedRuntimeWorld {
             // queued work inert so modeled provider boundaries remain the only
             // provider exchanges in the session.
             true,
-            self.clock.clone(),
         )?;
         let session = core
             .session(event.actor_alias.clone())
@@ -1017,32 +1004,20 @@ impl GeneratedRuntimeWorld {
         let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(
             suspend_scripts.clone(),
         )?);
-        let suspend_store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::with_clock(self.clock.clone()),
-        );
+        let suspend_backend = crate::backend::sim_memory_backend(self.clock.clone()).await?;
+        let suspend_store_factory: Arc<dyn SessionStoreFactory> =
+            suspend_backend.session_store_factory();
         let (provider_handle, model, _provider_kind) =
             runtime_provider_components(OPENAI_COMPATIBLE, &transport)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-            .with_native_queued_work()
-            .effect_host(Arc::new(
-                lash::durability::NativeEffectHost::default()
-                    .allow_process_lifetime_completion_keys(),
-            ))
-            .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        let backend = Arc::new(
+            crate::backend::DecoratedBackend::over(suspend_backend)
+                .observing(self.durable_writes.clone()),
+        );
+        let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(Arc::new(
-                lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-            ))
-            .store_factory(Arc::new(ObservedSessionStoreFactory::new(
-                Arc::clone(&suspend_store_factory),
-                self.durable_writes.clone(),
-            )))
-            .clock(self.clock.clone())
             .lease_timings(crate::lease::sim_runtime_lease_timings())
-            .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-                as Arc<dyn lash_core::ProcessRegistry>)
             .provider(provider_handle)
             .model(model)
             .tools(Arc::new(SuspendToolProvider::new(

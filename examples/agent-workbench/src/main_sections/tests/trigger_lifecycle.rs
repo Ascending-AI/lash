@@ -16,7 +16,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let db_path = data_dir.join("processes.db");
+    let db_path = crate::tests::sessions_root(&data_dir).join("process-registry.db");
     let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         data_dir.join("lash-sessions"),
     ));
@@ -31,9 +31,11 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .expect("open registry"),
     ) as Arc<dyn lash::process::ProcessRegistry>;
     let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-            .await
-            .expect("open trigger store"),
+        lash_sqlite_store::SqliteTriggerStore::open(
+            &crate::tests::sessions_root(&data_dir).join("triggers.db"),
+        )
+        .await
+        .expect("open trigger store"),
     );
     let provider = trigger_registration_provider();
     let model = lash::ModelSpec::builder("test-model")
@@ -45,10 +47,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
-        .process_registry(Arc::clone(&process_registry))
-        .trigger_store(trigger_store.clone())
         .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build core");
@@ -346,7 +345,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
 #[tokio::test]
 async fn host_cutoff_preserves_a_live_sessions_safe_redrive() {
     let data_dir = tempfile::tempdir().expect("receipt prune tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,

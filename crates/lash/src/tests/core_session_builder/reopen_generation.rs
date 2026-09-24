@@ -3,15 +3,19 @@ use lash_sansio::SessionId;
 
 #[tokio::test]
 async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
+    let backend = memory_backend().await;
+    let factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let mut policy = core.policy.clone();
     policy.session_id = Some(SessionId::from("generation-merge"));
     let store = lash_core::SessionStoreFactory::create_store(
-        &factory,
+        factory.as_ref(),
         &lash_core::SessionStoreCreateRequest {
             session_id: SessionId::from("generation-merge"),
             relation: lash_core::SessionRelation::Root,
@@ -22,7 +26,6 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
     .await?;
     let session = core
         .session("generation-merge")
-        .store(store.clone())
         .session_spec(
             crate::SessionSpec::new().generation(lash_core::GenerationOptions {
                 seed: Some(73),
@@ -48,7 +51,6 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
     drop(session);
     let reopened = core
         .session("generation-merge")
-        .store(store.clone())
         .session_spec(crate::SessionSpec::new().generation(Default::default()))
         .open()
         .await?;
@@ -56,7 +58,6 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
     drop(reopened);
     let merged = core
         .session("generation-merge")
-        .store(store.clone())
         .session_spec(
             crate::SessionSpec::new().generation(lash_core::GenerationOptions {
                 output_token_cap: std::num::NonZeroUsize::new(37),
@@ -80,7 +81,6 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
     drop(merged);
     let replaced = core
         .session("generation-merge")
-        .store(store.clone())
         .session_spec(
             crate::SessionSpec::new().replace_generation(lash_core::GenerationOptions {
                 seed: Some(91),
@@ -94,7 +94,6 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
     drop(replaced);
     let cleared = core
         .session("generation-merge")
-        .store(store.clone())
         .session_spec(crate::SessionSpec::new().clear_generation())
         .open()
         .await?;

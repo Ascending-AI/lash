@@ -490,33 +490,34 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
 
-    fn test_process_observer(
-        registry: Arc<dyn lash::process::ProcessRegistry>,
-    ) -> lash::process::ProcessWorkObserver {
-        let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-            .with_native_queued_work()
+    /// A process observer over a fresh SQLite memory backend, and the
+    /// backend's registry the test writes process rows into.
+    async fn test_process_observer() -> (
+        lash::process::ProcessWorkObserver,
+        Arc<dyn lash::process::ProcessRegistry>,
+    ) {
+        let backend = Arc::new(
+            lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .expect("SQLite memory backend"),
+        );
+        let registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
+        let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .model(
                 lash::ModelSpec::builder("test-model")
                     .context_window_tokens(4096)
                     .build()
                     .expect("model spec"),
             )
-            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-            .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-            .store_factory(Arc::new(
-                lash::persistence::InMemorySessionStoreFactory::new(),
-            ))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(Arc::new(
-                lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-            ))
-            .process_registry(registry)
             .build(crate::test_core_owner())
             .expect("build core");
-        core.processes()
+        let observer = core
+            .processes()
             .observer()
-            .expect("process observer configured")
+            .expect("process observer configured");
+        (observer, registry)
     }
 
     fn test_graph(
@@ -569,9 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn graph_index_resolves_subagent_bridge_to_child_session_effect_graph() {
-        let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default())
-            as Arc<dyn lash::process::ProcessRegistry>;
-        let observer = test_process_observer(Arc::clone(&registry));
+        let (observer, registry) = test_process_observer().await;
         let child_session_id = "child-session";
         let create_request = lash::SessionCreateRequest::child_session(
             "root",
@@ -704,9 +703,7 @@ mod tests {
 
     #[tokio::test]
     async fn graph_index_filters_to_current_session_and_reachable_children() {
-        let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default())
-            as Arc<dyn lash::process::ProcessRegistry>;
-        let observer = test_process_observer(Arc::clone(&registry));
+        let (observer, registry) = test_process_observer().await;
         let current_session_id = &SessionId::from("current-session");
         let child_session_id = &SessionId::from("child-session");
         let old_session_id = &SessionId::from("old-session");

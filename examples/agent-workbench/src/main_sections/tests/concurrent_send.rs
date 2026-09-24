@@ -191,7 +191,7 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         data_dir.path(),
         64,
         provider,
-        in_memory_trigger_store(),
+        detached_trigger_store(),
         store_factory.clone(),
         Some(inert_queued_work_port()),
     )
@@ -356,7 +356,7 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
         data_dir.path(),
         64,
         provider,
-        in_memory_trigger_store(),
+        detached_trigger_store(),
         store_factory.clone(),
         Some(inert_queued_work_port()),
     )
@@ -659,7 +659,7 @@ pub(crate) async fn queued_send_test_state(
         data_dir,
         64,
         provider,
-        in_memory_trigger_store(),
+        detached_trigger_store(),
         store_factory,
         Some(inert_queued_work_port()),
     )

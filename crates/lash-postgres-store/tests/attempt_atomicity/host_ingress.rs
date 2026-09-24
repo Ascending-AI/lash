@@ -25,7 +25,14 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
     let scope_id = format!("pg-tool-intent-ingress-scope-{suffix}");
     let process_id = ProcessId::from(format!("pg-tool-intent-ingress-process-{suffix}"));
     let event_type = "pg.tool_intent_ingress.realized";
-    let registry = Arc::new(storage.process_registry());
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        &storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    ));
+    let registry = backend.process_registry();
     registry
         .register_process_with_observers(
             lash::process::ProcessRegistration::new(
@@ -50,8 +57,7 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
         .await
         .expect("register the PostgreSQL host-ingress target");
 
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .with_native_queued_work()
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(lash::provider::ProviderHandle::unconfigured())
         .model(
             lash::ModelSpec::builder("pg-tool-intent-ingress-model")
@@ -59,13 +65,6 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
                 .build()
                 .expect("valid PostgreSQL ingress model"),
         )
-        .effect_host(Arc::new(storage.effect_host()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(storage.process_env_store()))
-        .store_factory(Arc::new(
-            storage.session_store_factory_with_shared_process_registry(),
-        ))
-        .process_registry(Arc::clone(&registry) as Arc<dyn lash::process::ProcessRegistry>)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

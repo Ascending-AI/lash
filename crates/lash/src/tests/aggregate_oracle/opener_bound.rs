@@ -15,18 +15,23 @@ use super::*;
 /// loop runs to its end.
 async fn a_loop_of_races_well_past_the_bound_runs_to_its_end(tier: &JournaledTier) -> Result<()> {
     const RACES: usize = 600;
-    let run = run_cell(
+    // Every race journals its group and both leaves, so the loop is a
+    // throughput case: it gets a deadlock budget sized for it.
+    const LOOP_BUDGET: std::time::Duration = std::time::Duration::from_secs(120);
+    let run = drive_cells(
         tier,
         "aggregate-oracle-opener-bound-loop",
-        &format!(
+        vec![typescript_block(&format!(
             r#"let won = 0;
 for (let i = 0; i < {RACES}; i++) {{
   await Promise.race([oracle.step({{ id: "winner" }}), oracle.step({{ id: "loser" }})]);
   won = won + 1;
 }}
 finish(won);"#
-        ),
+        ))],
     )
+    .await?
+    .finish_within(LOOP_BUDGET)
     .await?;
     assert_eq!(
         run.final_value().as_f64(),

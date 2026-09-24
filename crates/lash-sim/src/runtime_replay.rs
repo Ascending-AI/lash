@@ -1,9 +1,8 @@
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
-use lash_core::SessionStoreFactory;
 use serde_json::{Value, json};
 
 use crate::oracles::replay_determinism;
@@ -21,7 +20,6 @@ use crate::runtime_providers::{
 use crate::scheduler::{BoundaryEvent, BoundaryKind, QueuedIngressMode};
 use crate::store::{
     BackendCheckpointReplayEvidence, CheckpointWriteCollector, CheckpointWriteEvent, ModelStore,
-    ObservedSessionStoreFactory,
 };
 use crate::trace::{AbstractWorldSummary, OracleVerdict, SimulationTrace, TraceIoError};
 
@@ -60,22 +58,15 @@ pub(crate) trait ReplayBackend {
     /// Historically a SQLite-only check; kept per-backend deliberately.
     const ASSERT_INGRESS_SESSION_ID: bool;
 
-    /// Session store factory for the world's observed store stack.
-    fn session_store_factory(
+    /// The backend every replay core runs on, its stamps following
+    /// `clock`. The world observes its session factory.
+    async fn backend(
         &self,
         clock: &Arc<crate::clock::SimClock>,
-    ) -> Arc<dyn SessionStoreFactory>;
+    ) -> Result<Arc<dyn lash::Backend>, Self::Error>;
 
     /// Effect-replay store backing the runtime boundary harness.
     fn effect_replay_store(&self) -> RuntimeEffectReplayStore;
-
-    /// Process execution env store handed to each replay core.
-    async fn process_env_store(
-        &self,
-    ) -> Result<Arc<dyn lash::persistence::ProcessExecutionEnvStore>, Self::Error>;
-
-    /// Directory root for file attachments written by replay cores.
-    fn attachment_root(&self) -> PathBuf;
 
     /// Backend-specific observed-value normalization applied on top of the
     /// shared rules before comparing replayed and recorded observations.
@@ -122,7 +113,7 @@ pub(crate) async fn replay_trace_through_backend<B: ReplayBackend>(
 ) -> Result<RuntimeReplayOutcome, B::Error> {
     let model_replay = replay_trace(trace_path, trace)?;
 
-    let mut world = RuntimeReplayWorld::new(backend, trace);
+    let mut world = RuntimeReplayWorld::new(backend, trace).await?;
     let mut store = ModelStore::default();
     let mut provider_mutation_cache = ProviderMutationMatrixCache::default();
     let mut runtime_replayed_boundary_count = 0;
@@ -272,7 +263,9 @@ struct RuntimeReplayWorld<B: ReplayBackend> {
     sessions: BTreeMap<String, RuntimeReplaySession>,
     provider_completion_events: BTreeMap<String, BoundaryEvent>,
     queued_inputs: BTreeMap<String, String>,
-    store_factory: Arc<dyn SessionStoreFactory>,
+    /// The replayed backend with its session factory under the commit
+    /// observer.
+    runtime_backend: Arc<dyn lash::Backend>,
     checkpoint_writes: CheckpointWriteCollector,
     runtime_boundaries: RuntimeBoundaryHarness,
 }
@@ -292,12 +285,12 @@ struct ActiveProviderTurn {
 }
 
 impl<B: ReplayBackend> RuntimeReplayWorld<B> {
-    fn new(backend: B, trace: &SimulationTrace) -> Self {
+    async fn new(backend: B, trace: &SimulationTrace) -> Result<Self, B::Error> {
         let clock = crate::clock::SimClock::new();
         let checkpoint_writes = CheckpointWriteCollector::default();
-        let backend_factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory(&clock);
-        let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
-            ObservedSessionStoreFactory::new(backend_factory, checkpoint_writes.clone()),
+        let runtime_backend: Arc<dyn lash::Backend> = Arc::new(
+            crate::backend::DecoratedBackend::over(backend.backend(&clock).await?)
+                .observing(checkpoint_writes.clone()),
         );
         let provider_completion_events = trace
             .events
@@ -305,9 +298,9 @@ impl<B: ReplayBackend> RuntimeReplayWorld<B> {
             .filter(|event| event.kind == BoundaryKind::Provider)
             .map(|event| (event.boundary_id.clone(), event.as_event()))
             .collect();
-        Self {
+        Ok(Self {
             runtime_boundaries: RuntimeBoundaryHarness::new(
-                Arc::clone(&store_factory),
+                runtime_backend.session_store_factory(),
                 backend.effect_replay_store(),
                 clock,
             ),
@@ -316,8 +309,8 @@ impl<B: ReplayBackend> RuntimeReplayWorld<B> {
             provider_completion_events,
             queued_inputs: BTreeMap::new(),
             checkpoint_writes,
-            store_factory,
-        }
+            runtime_backend,
+        })
     }
 
     fn checkpoint_write_events(&self) -> Vec<CheckpointWriteEvent> {
@@ -378,9 +371,8 @@ impl<B: ReplayBackend> RuntimeReplayWorld<B> {
         let scripts = runtime_scripts_for_turns(provider_kind, &provider_turns)
             .map_err(|err| B::Error::runtime(err.to_string()))?;
         let provider_schedule = ScriptedTransportSchedule::new();
-        let (core, transport, provider_kind) = runtime_core_for_scripts(
-            &self.backend,
-            Arc::clone(&self.store_factory),
+        let (core, transport, provider_kind) = runtime_core_for_scripts::<B>(
+            Arc::clone(&self.runtime_backend),
             provider_kind,
             scripts.clone(),
             Some(provider_schedule.clone()),
@@ -766,9 +758,8 @@ impl<B: ReplayBackend> RuntimeReplayWorld<B> {
     async fn reopen_sessions(&self) -> Result<Vec<ReopenedSessionObservation>, B::Error> {
         let mut evidence = Vec::new();
         for (session_id, runtime_session) in &self.sessions {
-            let (core, _, _) = runtime_core_for_scripts(
-                &self.backend,
-                Arc::clone(&self.store_factory),
+            let (core, _, _) = runtime_core_for_scripts::<B>(
+                Arc::clone(&self.runtime_backend),
                 &runtime_session.provider_kind,
                 Vec::new(),
                 None,
@@ -901,8 +892,7 @@ async fn run_provider_turn_task<B: ReplayBackend>(
 }
 
 async fn runtime_core_for_scripts<B: ReplayBackend>(
-    backend: &B,
-    store_factory: Arc<dyn SessionStoreFactory>,
+    backend: Arc<dyn lash::Backend>,
     provider_kind: &str,
     scripts: Vec<ProviderWireScript>,
     provider_schedule: Option<ScriptedTransportSchedule>,
@@ -916,23 +906,14 @@ async fn runtime_core_for_scripts<B: ReplayBackend>(
     let (provider_handle, model, provider_kind) =
         runtime_provider_components(provider_kind, &transport)
             .map_err(|err| B::Error::runtime(err.to_string()))?;
-    let process_env_store = backend.process_env_store().await?;
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         // Recorded provider boundaries own execution, just as in generation.
         // A native queued-input wake can acquire an admission lease before the
         // spawned provider task starts, making replay depend on task scheduling.
         // Dedicated runtime boundaries exercise queued work separately.
         .without_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
-        .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-            backend.attachment_root(),
-        )))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(process_env_store)
-        .store_factory(store_factory)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .provider(provider_handle)
         .model(model)

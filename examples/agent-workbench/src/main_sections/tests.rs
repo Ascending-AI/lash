@@ -117,15 +117,34 @@ mod done_stream_items_tests;
 #[cfg(test)]
 #[path = "tests/tool_loss.rs"]
 mod tool_loss_tests;
+/// The file `SqliteBackend` a durable workbench test core runs on, rooted
+/// at the data directory's sessions root.
+pub(super) fn test_file_backend(
+    data_dir: &std::path::Path,
+) -> Arc<lash_sqlite_store::SqliteBackend> {
+    let root = data_dir.join("lash-sessions");
+    Arc::new(sync_await(async move {
+        lash_sqlite_store::SqliteBackend::open(&root)
+            .await
+            .expect("open the workbench test backend")
+    }))
+}
+
 pub(super) fn explicit_durable_test_facets(data_dir: &std::path::Path) -> lash::LashCoreBuilder {
-    let artifact_store = Arc::new(sync_await({
-        let path = data_dir.join("artifacts.db");
-        async move {
-            lash_sqlite_store::Store::open(&path)
-                .await
-                .expect("open artifact store")
-        }
-    })) as Arc<dyn lash::persistence::LashlangArtifactStore>;
+    explicit_durable_test_facets_over(test_file_backend(data_dir))
+}
+
+pub(super) fn explicit_durable_test_facets_over(
+    backend: Arc<lash_sqlite_store::SqliteBackend>,
+) -> lash::LashCoreBuilder {
+    let artifact_store = backend.process_env_store();
+    explicit_durable_test_facets_on(backend, artifact_store)
+}
+
+pub(super) fn explicit_durable_test_facets_on(
+    backend: Arc<dyn lash::Backend>,
+    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
+) -> lash::LashCoreBuilder {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -136,30 +155,9 @@ pub(super) fn explicit_durable_test_facets(data_dir: &std::path::Path) -> lash::
             .with_lashlang_abilities(workbench_lashlang_abilities()),
         artifact_store,
     );
-    lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .with_native_queued_work()
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-            data_dir.join("attachments"),
-        )))
+    lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(sync_await({
-            let path = data_dir.join("process-env.db");
-            async move {
-                lash_sqlite_store::Store::open(&path)
-                    .await
-                    .expect("open process env store")
-            }
-        })))
-        .trigger_store(Arc::new(sync_await({
-            let path = data_dir.join("triggers.db");
-            async move {
-                lash_sqlite_store::SqliteTriggerStore::open(&path)
-                    .await
-                    .expect("open trigger store")
-            }
-        })))
         // The `processes` module is catalogue presence, not an ability bit
         // (ADR 0095): the workbench's scripted sources author `processes.*`,
         // so the surface exists only where this factory is installed. Every
@@ -484,13 +482,9 @@ finish("observed through live replay");
         })
         .build()
         .into_handle();
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model.clone())
-        .store_factory(Arc::clone(&store_factory))
         .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build core");
@@ -577,13 +571,9 @@ finish("gap source");
         })
         .build()
         .into_handle();
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model.clone())
-        .store_factory(Arc::clone(&store_factory))
         .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
             lash::observe::InMemoryLiveReplayStoreConfig {
                 max_events_per_session: 1,
@@ -661,14 +651,6 @@ async fn state_snapshot_cursor_attaches_to_the_live_incarnation_without_a_gap_in
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
     );
@@ -686,8 +668,6 @@ finish("snapshot cursor");
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(test_model())
-        .store_factory(Arc::clone(&core_store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -699,7 +679,7 @@ finish("snapshot cursor");
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
@@ -821,14 +801,6 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
     let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         data_dir.join("lash-sessions"),
     ));
@@ -843,8 +815,6 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -856,7 +826,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -940,7 +910,6 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     let duplicate = state
         .core
         .turn_work_driver()
-        .expect("workbench core has a session catalog")
         .request_cancel(lash::TurnCancelRequest::new(
             session.turn_address("turn-cancel"),
             "duplicate",
@@ -967,18 +936,6 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
     let data_dir =
         std::env::temp_dir().join(format!("agent-workbench-inbox-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
     let mail_world = mail::MailWorld::new();
     mail_world.add_account("test").expect("add test");
     let provider = catalog_lifecycle_provider();
@@ -987,11 +944,9 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let session = core.session(session_id).open().await.expect("open session");
@@ -1038,18 +993,6 @@ async fn parallel_inbox_lists_complete_in_durable_workbench_turn_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
     let mail_world = mail::MailWorld::new();
     mail_world.add_account("test").expect("add test");
     mail_world.add_account("test2").expect("add test2");
@@ -1070,11 +1013,9 @@ finish({ test: boxes[0], test2: boxes[1] });
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let session = core.session(session_id).open().await.expect("open session");
@@ -1116,14 +1057,6 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         data_dir.join("lash-sessions"),
     ));
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
     let mail_world = mail::MailWorld::new();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -1135,11 +1068,9 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -1151,7 +1082,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions,
@@ -1281,34 +1212,9 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-            .await
-            .expect("open trigger store"),
-    );
-    let artifact_store = Arc::new(
-        lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-            .await
-            .expect("open artifact store"),
-    );
-    let artifact_store_for_core: Arc<dyn lashlang::LashlangArtifactStore> = artifact_store.clone();
-    let process_env_store = Arc::new(
-        lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
-            .await
-            .expect("open process env store"),
-    );
+    let backend = test_file_backend(&data_dir);
+    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        backend.session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete(|_| async { Ok(trigger_registration_response()) })
@@ -1327,32 +1233,19 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        artifact_store_for_core,
+        backend.process_env_store(),
     );
-    let runtime_host_config = lash::durability::RuntimeHostConfig::new(
-        Arc::new(lash::durability::NativeEffectHost::default()),
-        Arc::new(lash::persistence::FileAttachmentStore::new(
-            data_dir.join("attachments"),
-        )),
-        process_env_store,
-        lash::CommitBudget::bounded(1024 * 1024, 512),
-        lash::QueuedWorkBatchingConfig::new(1),
-    );
-    let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .with_native_queued_work()
+    let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
         .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
-        .process_registry(Arc::clone(&process_registry))
-        .trigger_store(trigger_store)
-        .advanced()
-        .runtime_host_config(runtime_host_config)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -1364,7 +1257,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -1758,7 +1651,7 @@ async fn assert_no_active_lash_restate_invocations(state: &AppState, timeout: Du
 struct LiveWorkbenchRestateHarness {
     state: AppState,
     process_worker: lash::durability::DurableProcessWorker,
-    process_deployment: lash_restate::RestateProcessDeployment,
+    backend: Arc<lash_restate::RestateBackend>,
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     trace_path: PathBuf,
 }
@@ -1812,23 +1705,26 @@ async fn live_workbench_restate_state_with_provider_and_database(
     let stores = WorkbenchStores::open(data_dir, database_url)
         .await
         .expect("open live workbench stores");
-    let mut core_store_factory = Arc::clone(&stores.session_store_factory);
+    let mut core_store_factory = stores.stores.session_store_factory();
     let session_id = sessions.current();
     let admission_gate = registered_session_open_admission_gates()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .get(&SessionId::from(&session_id))
         .cloned();
+    let mut store_set = Arc::clone(&stores.stores);
     if let Some(gate) = admission_gate {
         core_store_factory = Arc::new(GatedSessionStoreFactory {
             inner: core_store_factory,
             gate,
         });
+        store_set = Arc::new(GatedStoreSet {
+            inner: store_set,
+            catalog: Arc::clone(&core_store_factory),
+        });
     }
-    let process_registry = Arc::clone(&stores.process_registry);
-    let process_continuations = Arc::clone(&stores.process_continuations);
-    let trigger_store = Arc::clone(&stores.trigger_store);
-    let process_env_store = Arc::clone(&stores.process_env_store);
+    let trigger_store = store_set.trigger_store();
+    let process_env_store = store_set.process_env_store();
     let artifact_store = Arc::clone(&stores.artifact_store);
     let trace_path = data_dir.join("trace.jsonl");
     let lashlang_execution_path = data_dir.join("lashlang-execution.jsonl");
@@ -1846,20 +1742,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
         .build()
         .expect("model spec");
     let model = with_workbench_model_capability(model);
-    let process_deployment = lash_restate::RestateProcessDeployment::new(
-        restate_ingress_url.clone(),
-        live_restate_authority_id(),
-        Arc::clone(&process_registry),
-        process_continuations,
-    );
     let restate_http = reqwest::Client::new();
-    let turn_deployment = lash_restate::RestateTurnDeployment::new(
-        lash_restate::RestateConnection::with_client(
-            restate_ingress_url.clone(),
-            restate_http.clone(),
-        ),
-        live_restate_authority_id(),
-    );
     let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
         sessions: sessions.clone(),
         store_factory: Arc::clone(&core_store_factory),
@@ -1869,6 +1752,15 @@ async fn live_workbench_restate_state_with_provider_and_database(
     });
     let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle.clone());
     let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
+    let backend = Arc::new(lash_restate::RestateBackend::new(
+        lash_restate::RestateConnection::with_client(
+            restate_ingress_url.clone(),
+            restate_http.clone(),
+        ),
+        live_restate_authority_id(),
+        store_set,
+        lash_restate::RestateQueuedWork::Engine(queued_work_port),
+    ));
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -1880,17 +1772,15 @@ async fn live_workbench_restate_state_with_provider_and_database(
         artifact_store,
     )
     .with_lashlang_execution_sink(lashlang_execution_sink);
-    let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    let core = LashCore::rlm_builder(
+        Arc::clone(&backend) as Arc<dyn lash::Backend>,
+        lash::TurnBudget::Unbounded,
+        factory,
+    )
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
-        .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-            data_dir.join("attachments"),
-        )))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::clone(&process_env_store))
-        .trigger_store(Arc::clone(&trigger_store))
         .trace_sink(Arc::clone(&trace_sink))
         .trace_level(TraceLevel::Extended)
         // The `processes` module is catalogue presence, not an ability bit (ADR
@@ -1899,9 +1789,6 @@ async fn live_workbench_restate_state_with_provider_and_database(
         .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
-        .effect_host(turn_deployment.effect_host())
-        .process_work(process_deployment.process_work())
-        .with_queued_work(queued_work_port)
         .lease_timings(lease_timings)
         .build(crate::test_core_owner())
         .expect("build core");
@@ -1947,7 +1834,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
     LiveWorkbenchRestateHarness {
         state,
         process_worker,
-        process_deployment,
+        backend,
         process_env_store,
         trace_path,
     }
@@ -2051,51 +1938,10 @@ async fn persisted_trigger_route_fires_after_reopening_sqlite_artifact_store_inn
     let data_dir =
         std::env::temp_dir().join(format!("agent-workbench-trigger-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
-    let process_registry_path = data_dir.join("processes.db");
-    let trigger_store_path = data_dir.join("triggers.db");
-    let artifact_store_path = data_dir.join("artifacts.db");
-    let process_env_store_path = data_dir.join("process-env.db");
     let session_id = WorkbenchSessions::fresh().current();
 
     {
-        let artifact_store = Arc::new(
-            lash_sqlite_store::Store::open(&artifact_store_path)
-                .await
-                .expect("open artifacts"),
-        );
-        let artifact_store_for_core: Arc<dyn lashlang::LashlangArtifactStore> =
-            artifact_store.clone();
-        let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(
-                &process_registry_path,
-                process_registry_path.with_extension("sessions"),
-            )
-            .await
-            .expect("open registry"),
-        ) as Arc<dyn lash::process::ProcessRegistry>;
-        let trigger_store = Arc::new(
-            lash_sqlite_store::SqliteTriggerStore::open(&trigger_store_path)
-                .await
-                .expect("open trigger store"),
-        );
-        let process_env_store = Arc::new(
-            lash_sqlite_store::Store::open(&process_env_store_path)
-                .await
-                .expect("open process env store"),
-        );
-        let core = test_workbench_core(
-            session_store_factory.clone(),
-            process_registry,
-            trigger_store,
-            artifact_store_for_core,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                data_dir.join("attachments"),
-            )),
-            process_env_store,
-        );
+        let core = test_workbench_core(test_file_backend(&data_dir));
         let session = core
             .session(session_id.clone())
             .open()
@@ -2106,40 +1952,11 @@ async fn persisted_trigger_route_fires_after_reopening_sqlite_artifact_store_inn
         drop(core);
     }
 
-    let artifact_store = Arc::new(
-        lash_sqlite_store::Store::open(&artifact_store_path)
-            .await
-            .expect("reopen artifacts"),
-    );
-    let artifact_store_for_core: Arc<dyn lashlang::LashlangArtifactStore> = artifact_store.clone();
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_registry_path,
-            process_registry_path.with_extension("sessions"),
-        )
-        .await
-        .expect("reopen registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(&trigger_store_path)
-            .await
-            .expect("reopen trigger store"),
-    );
-    let process_env_store = Arc::new(
-        lash_sqlite_store::Store::open(&process_env_store_path)
-            .await
-            .expect("reopen process env store"),
-    );
-    let core = test_workbench_core(
-        session_store_factory,
-        Arc::clone(&process_registry),
-        trigger_store,
-        artifact_store_for_core,
-        Arc::new(lash::persistence::FileAttachmentStore::new(
-            data_dir.join("attachments"),
-        )),
-        process_env_store,
-    );
+    // A fresh backend over the same root: the registered trigger, its
+    // compiled artifacts and the process registry are read back from disk.
+    let backend = test_file_backend(&data_dir);
+    let process_registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
+    let core = test_workbench_core(backend);
     let _reopened = core
         .session(session_id)
         .open()
@@ -2183,14 +2000,7 @@ mod queued_work_tests;
 #[path = "tests/session_isolation.rs"]
 mod session_isolation_tests;
 pub(crate) use queued_work_tests::queued_work_test_draft;
-fn test_workbench_core(
-    session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    process_registry: Arc<dyn lash::process::ProcessRegistry>,
-    trigger_store: Arc<lash_sqlite_store::SqliteTriggerStore>,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
-    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-    process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
-) -> LashCore {
+fn test_workbench_core(backend: Arc<lash_sqlite_store::SqliteBackend>) -> LashCore {
     let provider = trigger_registration_provider();
     let model = test_model();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -2201,30 +2011,19 @@ fn test_workbench_core(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        artifact_store,
+        backend.process_env_store(),
     );
-    let runtime_host_config = lash::durability::RuntimeHostConfig::new(
-        Arc::new(lash::durability::NativeEffectHost::default()),
-        attachment_store,
-        process_env_store,
-        lash::CommitBudget::bounded(1024 * 1024, 512),
-        lash::QueuedWorkBatchingConfig::new(1),
-    );
-    LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .with_native_queued_work()
+    LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(model)
-        .store_factory(session_store_factory)
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
         .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
-        .process_registry(process_registry)
-        .trigger_store(trigger_store)
-        .advanced()
-        .runtime_host_config(runtime_host_config)
         .build(crate::test_core_owner())
         .expect("build core")
 }
@@ -2292,11 +2091,12 @@ async fn emit_test_button_trigger_with_scope(
         button.as_str(),
         uuid::Uuid::new_v4()
     );
-    let scoped_effect_controller = lash::runtime::ScopedEffectController::shared(
-        Arc::new(lash::runtime::NativeRuntimeEffectController::default()),
+    let scoped_effect_controller = lash::durability::EffectHost::scoped_static(
+        core.effect_host().as_ref(),
         lash::runtime::AdmittedScope::runtime_operation(format!("trigger:{idempotency_key}")),
     )
-    .expect("inline trigger occurrence execution scope");
+    .expect("trigger occurrence execution scope")
+    .expect("the backend host lends an owned controller");
     let mut request = lash::triggers::TriggerOccurrenceRequest::new(
         BUTTON_TRIGGER_SOURCE_TYPE,
         source_key,
@@ -2369,8 +2169,9 @@ mod session_fence_tests;
 #[path = "tests/session_open_admission.rs"]
 mod session_open_admission_tests;
 pub(crate) use session_open_admission_tests::{
-    GatedSessionStoreFactory, SessionOpenAdmissionGate, register_session_open_admission_gate,
-    registered_session_open_admission_gates, unregister_session_open_admission_gate,
+    GatedSessionStoreFactory, GatedStoreSet, SessionOpenAdmissionGate,
+    register_session_open_admission_gate, registered_session_open_admission_gates,
+    unregister_session_open_admission_gate,
 };
 
 pub(crate) use session_open_admission_tests::arm_registered_session_open_admission_gate;

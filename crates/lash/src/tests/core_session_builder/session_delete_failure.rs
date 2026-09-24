@@ -8,11 +8,13 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
         retained_blob_count: 1,
         deleted_blob_count: 2,
     };
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(factory.clone())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend_with_catalog(factory.clone()).await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("delete-partial-report").open().await?);
     factory.fail_next_delete(lash_core::MaintenanceFailure::failed(
         lash_core::StoreError::Backend("injected facade delete failure".to_string()),

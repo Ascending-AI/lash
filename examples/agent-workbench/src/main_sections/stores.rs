@@ -1,12 +1,10 @@
 use super::*;
 
+/// The SQL store set the workbench runs its Restate backend over: SQLite
+/// under the data directory, or PostgreSQL when a database URL is configured.
 pub(crate) struct WorkbenchStores {
-    pub(crate) session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    pub(crate) process_registry: Arc<dyn lash::process::ProcessRegistry>,
-    pub(crate) process_continuations: Arc<dyn lash::process::ProcessContinuationStore>,
-    pub(crate) trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+    pub(crate) stores: Arc<dyn lash::durability::StoreSet>,
     pub(crate) artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
-    pub(crate) process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     pub(crate) backend: &'static str,
 }
 
@@ -16,53 +14,30 @@ impl WorkbenchStores {
         database_url: Option<&str>,
     ) -> AnyhowResult<Self> {
         match database_url {
-            Some(database_url) => Self::open_postgres(database_url).await,
+            Some(database_url) => Self::open_postgres(data_dir, database_url).await,
             None => Self::open_sqlite(data_dir).await,
         }
     }
 
     pub(crate) async fn open_sqlite(data_dir: &std::path::Path) -> AnyhowResult<Self> {
-        let process_registry_path = data_dir.join("processes.db");
-        let session_store_root = data_dir.join("lash-sessions");
-        let session_store_factory = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
-                &session_store_root,
-                &process_registry_path,
-            ),
-        ) as Arc<dyn lash::persistence::SessionStoreFactory>;
-        let process_store = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(
-                &process_registry_path,
-                session_store_root,
-            )
+        crate::prior_store_layout::refuse_prior_store_layout(
+            data_dir,
+            &["processes.db", "triggers.db", "artifacts.db", "attachments"],
+        )?;
+        let stores = lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash-sessions"))
             .await
-            .context("open SQLite process registry")?,
-        );
-        let process_registry = process_store.clone() as Arc<dyn lash::process::ProcessRegistry>;
-        let process_continuations =
-            process_store as Arc<dyn lash::process::ProcessContinuationStore>;
-        let trigger_store = Arc::new(
-            lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-                .await
-                .context("open SQLite trigger store")?,
-        ) as Arc<dyn lash::triggers::TriggerStore>;
-        let artifacts = Arc::new(
-            lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-                .await
-                .context("open SQLite Lashlang store")?,
-        );
+            .context("open the SQLite store set")?;
         Ok(Self {
-            session_store_factory,
-            process_registry,
-            process_continuations,
-            trigger_store,
-            artifact_store: artifacts.clone(),
-            process_env_store: artifacts,
+            artifact_store: stores.process_env_store(),
+            stores: Arc::new(stores),
             backend: "sqlite",
         })
     }
 
-    pub(crate) async fn open_postgres(database_url: &str) -> AnyhowResult<Self> {
+    pub(crate) async fn open_postgres(
+        data_dir: &std::path::Path,
+        database_url: &str,
+    ) -> AnyhowResult<Self> {
         anyhow::ensure!(
             !database_url.trim().is_empty(),
             "AGENT_WORKBENCH_DATABASE_URL must not be empty"
@@ -70,17 +45,15 @@ impl WorkbenchStores {
         let storage = lash_postgres_store::PostgresStorage::connect(database_url)
             .await
             .context("open Postgres workbench storage")?;
-        let artifacts = Arc::new(storage.lashlang_artifact_store());
-        let process_store = Arc::new(storage.process_registry());
+        let stores = lash_postgres_store::PostgresStoreSet::new(
+            &storage,
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                data_dir.join("attachments"),
+            )),
+        );
         Ok(Self {
-            session_store_factory: Arc::new(
-                storage.session_store_factory_with_shared_process_registry(),
-            ),
-            process_registry: process_store.clone(),
-            process_continuations: process_store,
-            trigger_store: Arc::new(storage.trigger_store()),
-            artifact_store: artifacts.clone(),
-            process_env_store: artifacts,
+            artifact_store: stores.process_env_store(),
+            stores: Arc::new(stores),
             backend: "postgres",
         })
     }

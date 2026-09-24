@@ -115,11 +115,13 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
     })
     .with_stream_termination(StreamTermination::RequireTerminalEvidence)
     .with_transport(transport);
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("memory backend"),
+    );
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .provider(ProviderHandle::new(provider.into_components()))
         .model(
             lash::ModelSpec::builder("gemini-test")
@@ -128,13 +130,8 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
                 .expect("valid model spec"),
         )
         .tools(Arc::new(RuntimeLookupTool))
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "google-reasoning-boundaries-test",
             "google-reasoning-boundaries-test-boot",
@@ -212,11 +209,13 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
     })
     .with_stream_termination(StreamTermination::RequireTerminalEvidence)
     .with_transport(transport);
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("memory backend"),
+    );
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .provider(ProviderHandle::new(provider.into_components()))
         .model(
             lash::ModelSpec::builder("gemini-test")
@@ -224,13 +223,8 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
                 .build()
                 .expect("valid model spec"),
         )
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "google-signature-only-reasoning-test",
             "google-signature-only-reasoning-test-boot",

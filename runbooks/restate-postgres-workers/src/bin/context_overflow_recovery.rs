@@ -32,7 +32,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use lash::SessionId;
-use lash::persistence::SessionStoreFactory;
 use lash::plugins::{PluginRegistrar, PluginSessionContext, SessionPlugin};
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
@@ -114,7 +113,7 @@ async fn overflow_and_recovery(
     checkpoint: &str,
     session_tag: &str,
 ) -> Result<Value> {
-    let harness = Harness::new(script)?;
+    let harness = Harness::new(script).await?;
     let session_id = SessionId::from(format!("context-overflow-{session_tag}-{run_id}"));
     let session = harness.open(&session_id).await?;
 
@@ -234,7 +233,7 @@ async fn overflow_and_recovery(
 /// The control: a plain provider error on the same harness must not produce
 /// the overflow outcome.
 async fn provider_error_control(run_id: &str) -> Result<Value> {
-    let harness = Harness::new(Script::ProviderError)?;
+    let harness = Harness::new(Script::ProviderError).await?;
     let session_id = SessionId::from(format!("context-overflow-control-{run_id}"));
     let session = harness.open(&session_id).await?;
 
@@ -293,18 +292,18 @@ struct Harness {
     provider_calls: Arc<AtomicUsize>,
     tool_bytes: Arc<AtomicUsize>,
     _scratch: tempfile::TempDir,
-    _attachments: tempfile::TempDir,
 }
 
 impl Harness {
-    fn new(script: Script) -> Result<Self> {
+    async fn new(script: Script) -> Result<Self> {
         let scratch = tempfile::tempdir().context("scratch dir for the SQLite backend")?;
-        let attachments = tempfile::tempdir().context("attachment dir")?;
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let tool_bytes = Arc::new(AtomicUsize::new(0));
 
-        let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new(scratch.path().join("sessions")),
+        let backend = Arc::new(
+            lash_sqlite_store::SqliteBackend::open(scratch.path().join("sessions"))
+                .await
+                .context("open the SQLite backend")?,
         );
         let rlm = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -313,11 +312,10 @@ impl Harness {
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash::persistence::InMemoryLashlangArtifactStore::default()),
+            backend.process_env_store(),
         );
 
-        let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, rlm)
-            .with_native_queued_work()
+        let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
             .provider(scripted_provider(script, Arc::clone(&provider_calls)))
             .model(
                 lash::ModelSpec::builder("context-overflow-recovery-mock")
@@ -325,16 +323,8 @@ impl Harness {
                     .build()
                     .map_err(anyhow::Error::msg)?,
             )
-            .store_factory(store_factory)
-            .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-                attachments.path().to_path_buf(),
-            )))
             .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(Arc::new(
-                lash::persistence::InMemoryProcessExecutionEnvStore::default(),
-            ))
-            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .trace_jsonl_path(
                 std::env::var_os("LASH_CONTEXT_OVERFLOW_TRACE")
                     .map(std::path::PathBuf::from)
@@ -357,7 +347,6 @@ impl Harness {
             provider_calls,
             tool_bytes,
             _scratch: scratch,
-            _attachments: attachments,
         })
     }
 

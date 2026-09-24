@@ -1,16 +1,16 @@
 use super::*;
-use lash_core::TurnInputStore;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// The backend's effect host with its next journal retirement failing.
 struct FailOnceRetirementHost {
-    inner: lash_core::facade_support::NativeEffectHost,
+    inner: Arc<dyn lash_core::EffectHost>,
     fail_next_retirement: AtomicBool,
 }
 
-impl Default for FailOnceRetirementHost {
-    fn default() -> Self {
+impl FailOnceRetirementHost {
+    fn over(inner: Arc<dyn lash_core::EffectHost>) -> Self {
         Self {
-            inner: lash_core::facade_support::NativeEffectHost::default(),
+            inner,
             fail_next_retirement: AtomicBool::new(true),
         }
     }
@@ -29,7 +29,7 @@ impl lash_core::AwaitEventResolver for FailOnceRetirementHost {
 #[async_trait::async_trait]
 impl lash_core::EffectHost for FailOnceRetirementHost {
     fn turn_control_binding_id(&self) -> String {
-        "fail-once-retirement-host".to_string()
+        self.inner.turn_control_binding_id()
     }
 
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
@@ -41,6 +41,16 @@ impl lash_core::EffectHost for FailOnceRetirementHost {
         scope: lash_core::AdmittedScope,
     ) -> std::result::Result<lash_core::ScopedEffectController<'a>, lash_core::RuntimeError> {
         self.inner.scoped(scope)
+    }
+
+    fn scoped_static(
+        &self,
+        scope: lash_core::AdmittedScope,
+    ) -> std::result::Result<
+        Option<lash_core::ScopedEffectController<'static>>,
+        lash_core::RuntimeError,
+    > {
+        self.inner.scoped_static(scope)
     }
 
     async fn retire_effect_journal(
@@ -58,94 +68,33 @@ impl lash_core::EffectHost for FailOnceRetirementHost {
 }
 
 #[tokio::test]
-async fn facade_refuses_to_open_without_an_explicit_session_store() {
-    let core = core_without_session_store();
-    let error = match core.session("store-less-single-use").open().await {
-        Ok(_) => panic!("facade session open requires an explicit store"),
-        Err(error) => error,
-    };
-    assert!(matches!(error, EmbedError::MissingSessionStore));
-}
-
-#[tokio::test]
-async fn catalog_and_administration_are_typed_unavailable_without_a_root_catalog() {
-    let core = core_without_session_store();
-    assert!(matches!(
-        core.turn_work_driver(),
-        Err(EmbedError::SessionCatalogUnavailable {
-            operation: "turn_work_driver"
-        })
-    ));
-    assert!(matches!(
-        core.session_administration().await,
-        Err(EmbedError::SessionCatalogUnavailable {
-            operation: "session_administration"
-        })
-    ));
-}
-
-/// FIG-3373: the store requirement is admission law on the ordinary open
-/// path, not a property of a creation API — a `.parent(..)` open is refused
-/// exactly as a root open is when the core has no session store.
-#[tokio::test]
-async fn every_opened_session_requires_a_store_regardless_of_relation() -> Result<()> {
-    let core = core_without_session_store();
-    let _parent = core
-        .session("explicit-parent-store")
-        .store(Arc::new(
-            lash_core::facade_support::InMemorySessionStore::default(),
-        ))
-        .open()
-        .await?;
-
-    let root_error = match core.session("created-root-without-catalog").open().await {
-        Ok(_) => panic!("root open without a store must be refused"),
-        Err(error) => error,
-    };
-    assert!(matches!(root_error, EmbedError::MissingSessionStore));
-
-    let child_error = match core
-        .session("created-child-without-catalog")
-        .parent("explicit-parent-store")
-        .open()
-        .await
-    {
-        Ok(_) => panic!("related open without a store must be refused"),
-        Err(error) => error,
-    };
-    assert!(matches!(child_error, EmbedError::MissingSessionStore));
-    Ok(())
-}
-
-#[tokio::test]
 async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identity() -> Result<()> {
     let owner = crate::testing::runtime_lease_owner();
-    let source_host = Arc::new(lash_core::facade_support::NativeEffectHost::default());
-    let receiving_host = Arc::new(lash_core::facade_support::NativeEffectHost::default());
-    let source_catalog = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let receiving_catalog = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let source =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(text_provider(
-                "resume-provider",
-                "resume-model",
-                "source-provider",
-            ))
-            .model(model_spec("resume-model", None, 200_000))
-            .store_factory(source_catalog.clone())
-            .effect_host(source_host.clone())
-            .build(owner.clone())?;
-    let receiving =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(text_provider(
-                "resume-provider",
-                "resume-model",
-                "receiving-provider",
-            ))
-            .model(model_spec("resume-model", None, 200_000))
-            .store_factory(receiving_catalog)
-            .effect_host(receiving_host)
-            .build(owner)?;
+    let backend = memory_backend().await;
+    let source_host = backend.effect_host();
+    let source_catalog = backend.session_store_factory();
+    let source = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(text_provider(
+        "resume-provider",
+        "resume-model",
+        "source-provider",
+    ))
+    .model(model_spec("resume-model", None, 200_000))
+    .build(owner.clone())?;
+    let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(text_provider(
+        "resume-provider",
+        "resume-model",
+        "receiving-provider",
+    ))
+    .model(model_spec("resume-model", None, 200_000))
+    .build(owner)?;
 
     let parked = Box::pin(source.session("owner-preserved").open().await?.park()).await?;
     let resumed = receiving.resume(parked).await?;
@@ -165,11 +114,13 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
         )
         .await?;
 
-    let store = source_catalog
-        .open_existing_store_by_id(&lash_core::SessionId::from("owner-preserved"))
-        .await
-        .expect("read source catalog")
-        .expect("source session store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        source_catalog.as_ref(),
+        &lash_core::SessionId::from("owner-preserved"),
+    )
+    .await
+    .expect("read source catalog")
+    .expect("source session store");
     let source_driver = lash_core::facade_support::TurnWorkDriver::for_session(
         source_host,
         lash_core::SessionId::from("owner-preserved"),
@@ -191,16 +142,17 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
 
 #[tokio::test]
 async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> {
-    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let effect_host = Arc::new(FailOnceRetirementHost::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(factory)
-        .effect_host(effect_host)
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = DecoratedBackend::over(memory_backend().await)
+        .effect_host(|inner| Arc::new(FailOnceRetirementHost::over(inner)));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        Arc::new(backend),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("delete-retry").open().await?);
-    let administration = core.session_administration().await?;
+    let administration = core.session_administration().await;
 
     let first = LashCore::delete_session(administration.delete_context("delete-retry")?)
         .await
@@ -226,106 +178,20 @@ async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> 
     Ok(())
 }
 
-#[tokio::test]
-async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Result<()> {
-    let root_catalog = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let creation_catalog = Arc::new(RecordingStoreFactory::default());
-    let explicit_store = Arc::new(lash_core::facade_support::InMemorySessionStore::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(root_catalog.clone())
-        .session_creation_store_factory(creation_catalog.clone())
-        .build(crate::testing::runtime_lease_owner())?;
-    drop(core.session("catalog-root").open().await?);
-    let session = core
-        .session("explicit-root-store")
-        .store(explicit_store.clone())
-        .open()
-        .await?;
-    assert!(matches!(
-        session.session_administration(),
-        Err(EmbedError::SessionCatalogUnavailable {
-            operation: "session_administration"
-        })
-    ));
-
-    let explicit_turn = lash_sansio::TurnId::from("explicit-root-turn");
-    session
-        .request_turn_cancel(
-            &explicit_turn,
-            "explicit-root-cancel",
-            Some("test".to_string()),
-            None,
-        )
-        .await?;
-    let explicit_address = crate::TurnAddress::new("explicit-root-store", &explicit_turn);
-    assert!(
-        explicit_store
-            .turn_cancel_request(&explicit_address)
-            .await?
-            .is_some(),
-        "the opened root records cancellation in its exact explicit store"
-    );
-
-    let catalog_address = crate::TurnAddress::new("catalog-root", "catalog-turn");
-    core.turn_work_driver()?
-        .request_cancel(crate::TurnCancelRequest::new(
-            catalog_address.clone(),
-            "catalog-cancel",
-            Some("test".to_string()),
-        ))
-        .await?;
-    let catalog_store = root_catalog
-        .open_existing_store_by_id(&lash_core::SessionId::from("catalog-root"))
-        .await
-        .expect("read root catalog")
-        .expect("catalog root store");
-    assert!(
-        catalog_store
-            .turn_cancel_request(&catalog_address)
-            .await?
-            .is_some()
-    );
-
-    let child = core
-        .session("explicit-root-child")
-        .parent("explicit-root-store")
-        .open()
-        .await?;
-    assert_eq!(child.parent_session_id(), Some("explicit-root-store"));
-
-    assert!(
-        root_catalog
-            .open_existing_store_by_id(&lash_core::SessionId::from("explicit-root-child"))
-            .await
-            .expect("read root catalog")
-            .is_some(),
-        "a `.parent(..)` open is admitted through the core store factory like \
-         every other facade open"
-    );
-    assert!(
-        creation_catalog.session_ids().is_empty(),
-        "the session-creation catalog serves the internal creation boundary, \
-         not facade opens"
-    );
-    Ok(())
-}
-
 /// FIG-1559: the handle reports the relation the store recorded, and a rebind
 /// that renames the parent is a typed refusal rather than silent absorption.
 #[tokio::test]
 async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> Result<()> {
-    let store: Arc<dyn lash_core::RuntimePersistence> =
-        Arc::new(lash_core::facade_support::InMemorySessionStore::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
     let child = core
         .session("relation-child")
-        .store(Arc::clone(&store))
         .parent("relation-parent")
         .open()
         .await?;
@@ -334,17 +200,12 @@ async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> R
 
     // A reopen that names no parent still reports the recorded relation: the
     // handle reads the durable fact, not the request it was built from.
-    let reopened = core
-        .session("relation-child")
-        .store(Arc::clone(&store))
-        .open()
-        .await?;
+    let reopened = core.session("relation-child").open().await?;
     assert_eq!(reopened.parent_session_id(), Some("relation-parent"));
     drop(reopened);
 
     let error = match core
         .session("relation-child")
-        .store(Arc::clone(&store))
         .parent("other-parent")
         .open()
         .await
@@ -376,7 +237,7 @@ async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> R
     }
 
     // The refusal left the recorded relation intact.
-    let after = core.session("relation-child").store(store).open().await?;
+    let after = core.session("relation-child").open().await?;
     assert_eq!(after.parent_session_id(), Some("relation-parent"));
     Ok(())
 }
@@ -401,35 +262,34 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     let session_id = "owner-services-preserved";
     let process_id = lash_core::ProcessId::from("owner-services-process");
 
-    let source_registry = Arc::new(crate::testing::TestLocalProcessRegistry::default());
-    let receiving_registry = Arc::new(crate::testing::TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
 
-    let source =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(text_provider(
-                "owner-services-provider",
-                "owner-services-model",
-                "source-provider",
-            ))
-            .model(model_spec("owner-services-model", None, 200_000))
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(source_registry.clone())
-            .build(owner.clone())?;
-    let receiving =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(text_provider(
-                "owner-services-provider",
-                "owner-services-model",
-                "receiving-provider",
-            ))
-            .model(model_spec("owner-services-model", None, 200_000))
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(receiving_registry.clone())
-            .build(owner)?;
+    let source_registry = backend.process_registry();
+    let receiving_backend = memory_backend().await;
+    let receiving_registry = receiving_backend.process_registry();
+
+    let source = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(text_provider(
+        "owner-services-provider",
+        "owner-services-model",
+        "source-provider",
+    ))
+    .model(model_spec("owner-services-model", None, 200_000))
+    .build(owner.clone())?;
+    let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
+        receiving_backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(text_provider(
+        "owner-services-provider",
+        "owner-services-model",
+        "receiving-provider",
+    ))
+    .model(model_spec("owner-services-model", None, 200_000))
+    .build(owner)?;
 
     let session = source.session(session_id).open().await?;
     source_registry

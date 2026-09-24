@@ -149,7 +149,7 @@ mod triggers;
 mod turn_ingress;
 
 pub use attachment_store::SqliteAttachmentStore;
-pub use backend::{SqliteBackend, SqliteBackendOptions};
+pub use backend::{SqliteBackend, SqliteBackendOptions, SqliteStoreSet, SqliteStoreSetOptions};
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
 pub use location::SqliteLocation;
 use location::{DatabaseLocation, DatabaseTarget};
@@ -650,9 +650,9 @@ type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
 
 /// Explicit first-party factory for one SQLite durable-core catalog.
 ///
-/// Hosts opt into this by passing it to `lash::LashCoreBuilder::store_factory`.
-/// The factory never becomes a default: app storage and runtime storage remain
-/// host-owned decisions.
+/// A [`SqliteBackend`] or [`SqliteStoreSet`] opens the one a host's core
+/// runs on; the factory never becomes a default: app storage and runtime
+/// storage remain host-owned decisions.
 #[derive(Clone)]
 pub struct SqliteSessionStoreFactory {
     /// The one durable-core catalog every session of this factory lives in.
@@ -663,10 +663,11 @@ pub struct SqliteSessionStoreFactory {
     clock: Arc<dyn lash_core_execution::Clock>,
     #[cfg(feature = "testing")]
     fault_injector: Option<testing::SqliteFaultInjector>,
-    /// The bound effect host's journal: the retained-evidence sweep attaches
+    /// The backend's effect journal: the retained-evidence sweep attaches
     /// it to retire quiescent operation scopes whose receipt this catalog
-    /// holds (ADR 0067). Shared by every clone of the factory.
-    effect_journal: Arc<std::sync::Mutex<Option<DatabaseLocation>>>,
+    /// holds (ADR 0067). Fixed by the backend's location when the factory
+    /// is opened; `None` when the backend journals effects elsewhere.
+    effect_journal: Option<DatabaseLocation>,
     turn_cancel_closure_owner:
         Arc<std::sync::Mutex<Option<lash_core_execution::TurnCancelClosureOwnerBinding>>>,
     effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
@@ -756,7 +757,7 @@ impl SqliteSessionStoreFactory {
     }
 
     /// The factory over `core` in one backend, with its registry and
-    /// effect journal already known rather than learned from a later bind.
+    /// effect journal fixed by the backend's location.
     pub(crate) fn at(
         core: DatabaseLocation,
         process_registry: Option<DatabaseTarget>,
@@ -771,7 +772,7 @@ impl SqliteSessionStoreFactory {
             clock,
             #[cfg(feature = "testing")]
             fault_injector: None,
-            effect_journal: Arc::new(std::sync::Mutex::new(effect_journal)),
+            effect_journal,
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
@@ -945,13 +946,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .effect_host
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
-        if let Some(path) = effect_host.effect_scope_fence_database() {
-            *self
-                .effect_journal
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                Some(DatabaseLocation::standalone_file(&path));
-        }
     }
 
     fn bind_artifact_stores(

@@ -1,101 +1,29 @@
 //! The suite proves cold rebuild of a trigger-mutated session and durable worker recovery
 //! across every `ProcessInput` variant the worker runs.
 //!
-//! Two backends cover the explicit-facet API: a fully inline backend using
-//! in-memory stores/registry and a fully durable backend using SQLite/file
-//! stores/registry. Peer coherence rejects mixed durable session stores with
-//! inline attachment or artifact stores, so the cases stay tier-consistent.
-
-// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
-// access is sanctioned here (the workspace clippy ban targets production
-// library code).
-#![allow(clippy::disallowed_methods)]
+//! Two backends cover it: a SQLite memory backend and a SQLite file
+//! backend. Each supplies every port, the Lashlang artifact store included,
+//! from its one location.
 
 use super::*;
 use crate::testing::{RuntimeRebuildBackend, runtime_rebuild_and_worker_recovery};
 
-fn sync_await<T, F>(future: F) -> T
-where
-    T: Send + 'static,
-    F: std::future::Future<Output = T> + Send + 'static,
-{
-    std::thread::spawn(move || {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(future)
-    })
-    .join()
-    .expect("runtime thread")
-}
-
-type FreshSqliteSessionBackend = (
-    std::path::PathBuf,
-    Arc<dyn lash_core::SessionStoreFactory>,
-    Arc<dyn lash_core::ProcessRegistry>,
-    Arc<dyn lash_core::TriggerStore>,
-);
-
-fn fresh_sqlite_session_backend(root: &std::path::Path) -> FreshSqliteSessionBackend {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static SCENARIO: AtomicUsize = AtomicUsize::new(0);
-    let dir = root.join(format!(
-        "scenario-{}",
-        SCENARIO.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&dir).expect("create scenario dir");
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        dir.join("sessions"),
-    )) as Arc<dyn lash_core::SessionStoreFactory>;
-    let process_db = dir.join("processes.db");
-    let process_sessions = dir.join("sessions");
-    let registry = Arc::new(sync_await(async move {
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_db, process_sessions)
-            .await
-            .expect("open process registry")
-    })) as Arc<dyn lash_core::ProcessRegistry>;
-    let triggers_db = dir.join("triggers.db");
-    let trigger_store = Arc::new(sync_await(async move {
-        lash_sqlite_store::SqliteTriggerStore::open(&triggers_db)
-            .await
-            .expect("open trigger store")
-    })) as Arc<dyn lash_core::TriggerStore>;
-    (dir, store_factory, registry, trigger_store)
-}
-
-fn fresh_in_memory_backend() -> (
-    Arc<dyn lash_core::SessionStoreFactory>,
-    Arc<dyn lash_core::ProcessRegistry>,
-    Arc<dyn lash_core::TriggerStore>,
-) {
-    (
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new())
-            as Arc<dyn lash_core::SessionStoreFactory>,
-        Arc::new(lash_core::TestLocalProcessRegistry::default())
-            as Arc<dyn lash_core::ProcessRegistry>,
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default())
-            as Arc<dyn lash_core::TriggerStore>,
-    )
+fn backend_over(backend: lash_sqlite_store::SqliteBackend) -> RuntimeRebuildBackend {
+    RuntimeRebuildBackend {
+        artifact_store: backend.process_env_store(),
+        backend: Arc::new(backend),
+    }
 }
 
 #[test]
-fn runtime_rebuild_and_worker_recovery_with_inline_stores() {
-    run_async_test_on_stack_budget("runtime-rebuild-in-memory-stores", || async {
-        runtime_rebuild_and_worker_recovery(move || {
-            let (store_factory, registry, trigger_store) = fresh_in_memory_backend();
-            RuntimeRebuildBackend {
-                process_registry: registry,
-                artifact_store: Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new()),
-                build_core: Box::new(move |builder| {
-                    explicit_ephemeral_facets(builder)
-                        .with_native_queued_work()
-                        .store_factory(Arc::clone(&store_factory))
-                        .trigger_store(Arc::clone(&trigger_store))
-                        .build(crate::testing::runtime_lease_owner())
-                        .expect("build core")
-                }),
-            }
+fn runtime_rebuild_and_worker_recovery_on_a_memory_backend() {
+    run_async_test_on_stack_budget("runtime-rebuild-memory-backend", || async {
+        runtime_rebuild_and_worker_recovery(|| async {
+            backend_over(
+                lash_sqlite_store::SqliteBackend::memory()
+                    .await
+                    .expect("open the memory backend"),
+            )
         })
         .await;
     });
@@ -103,40 +31,20 @@ fn runtime_rebuild_and_worker_recovery_with_inline_stores() {
 
 #[test]
 fn runtime_rebuild_and_worker_recovery_with_durable_stores() {
-    run_async_test_on_stack_budget("runtime-rebuild-durable-stores", || async {
+    run_async_test_on_stack_budget("runtime-rebuild-file-backend", || async {
         let root = tempfile::tempdir().expect("tempdir");
-        let root_path = root.path().to_path_buf();
-        runtime_rebuild_and_worker_recovery(move || {
-            let (dir, store_factory, registry, trigger_store) =
-                fresh_sqlite_session_backend(&root_path);
-            let attachment = Arc::new(crate::persistence::FileAttachmentStore::new(
-                dir.join("attachments"),
-            )) as Arc<dyn lash_core::AttachmentStore>;
-            let artifact_db = dir.join("artifacts.db");
-            let artifact_store = Arc::new(sync_await(async move {
-                lash_sqlite_store::Store::open(&artifact_db)
-                    .await
-                    .expect("open durable artifact store")
-            }));
-            let artifact = Arc::clone(&artifact_store)
-                as Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>;
-            let process_env_store =
-                Arc::clone(&artifact_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>;
-            RuntimeRebuildBackend {
-                process_registry: registry,
-                artifact_store: Arc::clone(&artifact),
-                build_core: Box::new(move |builder| {
-                    builder
-                        .store_factory(Arc::clone(&store_factory))
-                        .attachment_store(Arc::clone(&attachment))
-                        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-                        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-                        .process_env_store(Arc::clone(&process_env_store))
-                        .trigger_store(Arc::clone(&trigger_store))
-                        .effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
-                        .build(crate::testing::runtime_lease_owner())
-                        .expect("build core")
-                }),
+        let scenario = std::sync::atomic::AtomicUsize::new(0);
+        runtime_rebuild_and_worker_recovery(|| {
+            let dir = root.path().join(format!(
+                "scenario-{}",
+                scenario.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            ));
+            async move {
+                backend_over(
+                    lash_sqlite_store::SqliteBackend::open(dir)
+                        .await
+                        .expect("open the file backend"),
+                )
             }
         })
         .await;

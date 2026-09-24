@@ -15,8 +15,7 @@ use lash_core::{
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{
     RestateAdminClient, RestateAuthorityId, RestateConnection, RestateEffectHost,
-    RestateIngressClient, RestateInvocationId, RestateInvocationStatus, RestateProcessDeployment,
-    RestateTurnDeployment,
+    RestateIngressClient, RestateInvocationId, RestateInvocationStatus,
 };
 use lash_restate_postgres_workers_e2e::{
     ATTACHMENT_MIME, BUTTON_SOURCE_TYPE, DEFAULT_SESSION_ID, DirectDurableWaitAwaitRequest,
@@ -25,9 +24,9 @@ use lash_restate_postgres_workers_e2e::{
     EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
     EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, EXPECTED_TOOL_BATCH_TEXT,
     ProcessSignalRequest, TURN_WORKFLOW_NAME, TurnRequest, TurnResponse, TurnScenario,
-    build_e2e_core, e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env,
-    expected_attachment_bytes, process_registry_from_storage, record_terminal_result,
-    reset_e2e_rows, s3_store_from_env, turn_session_id,
+    build_e2e_core, e2e_backend, e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env,
+    expected_attachment_bytes, record_terminal_result, reset_e2e_rows, s3_store_from_env,
+    turn_session_id,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeSet;

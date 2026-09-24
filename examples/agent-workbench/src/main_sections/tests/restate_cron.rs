@@ -140,7 +140,7 @@ pub(crate) async fn start_live_restate_cron_scenario(
     let LiveWorkbenchRestateHarness {
         state,
         process_worker,
-        process_deployment,
+        backend,
         process_env_store: _,
         trace_path,
     } = live_workbench_restate_state_with_provider(
@@ -151,13 +151,8 @@ pub(crate) async fn start_live_restate_cron_scenario(
         ActiveTurns::default(),
     )
     .await;
-    let endpoint = LiveRestateEndpoint::start(
-        &admin_url,
-        state.clone(),
-        process_deployment,
-        process_worker,
-    )
-    .await;
+    let endpoint =
+        LiveRestateEndpoint::start(&admin_url, state.clone(), backend, process_worker).await;
     let turn_invocation_id = run_workbench_turn_via_restate(
         &state,
         "Register the cron trigger used by this cancellation-path test.",

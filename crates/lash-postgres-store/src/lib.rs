@@ -1174,6 +1174,8 @@ mod await_event;
 mod artifact_store;
 #[path = "postgres/attachments.rs"]
 mod attachments;
+#[path = "postgres/backend.rs"]
+mod backend;
 #[path = "postgres/blobs.rs"]
 mod blobs;
 #[path = "postgres/connection_sql.rs"]
@@ -1239,6 +1241,7 @@ mod turn_ingress;
 #[path = "postgres/turn_input_settlement.rs"]
 mod turn_input_settlement;
 
+pub use backend::{PostgresBackend, PostgresBackendOptions, PostgresStoreSet};
 pub use effect_replay::{
     PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
 };

@@ -23,9 +23,6 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create derived-notes dir");
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-derived-notes")
         .complete(|_| async {
@@ -45,7 +42,6 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
                 .build()
                 .expect("model spec"),
         )
-        .store_factory(Arc::clone(&store_factory))
         .plugin(plugin as Arc<dyn PluginFactory>)
         .build(crate::test_core_owner())
         .expect("build derived-notes core");

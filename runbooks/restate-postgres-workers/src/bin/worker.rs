@@ -17,7 +17,7 @@ use lash_postgres_store::PostgresStorage;
 use lash_restate::{
     LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
     LashDurableWaitWorkflowImpl, LashProcessAttach, LashProcessAttachImpl, LashProcessWorkflow,
-    RestateEffectHost, RestateProcessDeployment, RestateRuntimeEffectController,
+    RestateEffectHost, RestateRuntimeEffectController,
 };
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::prelude::{Endpoint, WorkflowContext};
@@ -36,8 +36,8 @@ use lash_restate_postgres_workers_e2e::{
     EXPECTED_FRAME_SWITCH_TEXT, EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT,
     HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core,
     default_session_originator_id, e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env,
-    process_registry_from_storage, record_terminal_result, record_turn_activity,
-    record_worker_event, required_env, s3_store_from_env, turn_session_id,
+    record_terminal_result, record_turn_activity, record_worker_event, required_env,
+    s3_store_from_env, turn_session_id,
 };
 
 fn terminal_error(err: impl Display) -> TerminalError {
@@ -70,8 +70,7 @@ trait E2eTurnWorkflow {
 struct AppState {
     worker_id: String,
     storage: PostgresStorage,
-    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-    process_work_driver: lash::process::ProcessWorkWiring,
+    backend: Arc<lash_restate::RestateBackend>,
     restate_ingress_url: String,
     restate_authority_id: lash_restate::RestateAuthorityId,
     mock_provider_base_url: String,
@@ -80,18 +79,22 @@ struct AppState {
 }
 
 impl AppState {
-    async fn connect(process_work_driver: lash::process::ProcessWorkWiring) -> Result<Self> {
+    async fn connect() -> Result<Self> {
         let worker_id = env("WORKER_INSTANCE_ID", "worker-local");
         let database_url = required_env("DATABASE_URL")?;
         let storage = PostgresStorage::connect(&database_url)
             .await
             .context("connect Postgres storage")?;
         ensure_e2e_schema(storage.pool()).await?;
-        let attachment_store =
-            Arc::new(s3_store_from_env()?) as Arc<dyn lash::persistence::AttachmentStore>;
         let restate_ingress_url = env("RESTATE_INGRESS_URL", "http://restate:8080");
         let restate_authority_id =
             lash_restate::RestateAuthorityId::new(required_env("RESTATE_AUTHORITY_ID")?)?;
+        let backend = lash_restate_postgres_workers_e2e::e2e_backend(
+            &storage,
+            Arc::new(s3_store_from_env()?),
+            restate_ingress_url.clone(),
+            restate_authority_id.clone(),
+        );
         let mock_provider_base_url = env("MOCK_PROVIDER_BASE_URL", "http://mock-provider:18001");
         let trace_dir = std::env::var("LASH_E2E_TRACE_DIR").ok().map(PathBuf::from);
         if let Some(dir) = &trace_dir {
@@ -102,8 +105,7 @@ impl AppState {
         Ok(Self {
             worker_id,
             storage,
-            attachment_store,
-            process_work_driver,
+            backend,
             restate_ingress_url,
             restate_authority_id,
             mock_provider_base_url,
@@ -116,8 +118,7 @@ impl AppState {
         build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
             worker_id: self.worker_id.clone(),
             storage: self.storage.clone(),
-            attachment_store: Arc::clone(&self.attachment_store),
-            process_work_driver: self.process_work_driver.clone(),
+            backend: Arc::clone(&self.backend),
             restate_ingress_url: self.restate_ingress_url.clone(),
             restate_authority_id: self.restate_authority_id.clone(),
             mock_provider_base_url: self.mock_provider_base_url.clone(),
@@ -941,17 +942,8 @@ async fn async_main() -> Result<()> {
         .await
         .context("connect Postgres storage for process deployment")?;
     ensure_e2e_schema(storage.pool()).await?;
-    let registry = process_registry_from_storage(&storage);
-    let continuations =
-        lash_restate_postgres_workers_e2e::process_continuations_from_storage(&storage);
-    let deployment = RestateProcessDeployment::new(
-        env("RESTATE_INGRESS_URL", "http://restate:8080"),
-        lash_restate::RestateAuthorityId::new(required_env("RESTATE_AUTHORITY_ID")?)?,
-        registry,
-        continuations,
-    );
-    let process_work_driver = deployment.process_work();
-    let state = AppState::connect(process_work_driver.clone()).await?;
+    let state = AppState::connect().await?;
+    let backend = Arc::clone(&state.backend);
     if state.fail_once {
         tracing::warn!(worker_id = %state.worker_id, "worker can exit once from crash_once tool");
         let recovering_failover_owner: bool = sqlx::query_scalar(
@@ -1012,7 +1004,8 @@ async fn async_main() -> Result<()> {
 
     let core = state.build_core()?;
     let process_worker = DurableProcessWorker::new(core.durable_process_worker_config()?)?;
-    let process_workflow = deployment
+    let process_workflow = backend
+        .process_deployment()
         .workflow(process_worker)
         .with_segment_effect_budget_selector(|registration| match &*registration.input {
             lash_core::ProcessInput::Engine { payload, .. }
@@ -1075,7 +1068,7 @@ async fn async_main() -> Result<()> {
         .bind(LashDurableWaitIndexImpl.serve())
         .bind(LashProcessAttachImpl.serve())
         .build();
-    deployment
+    backend
         .assert_endpoint_bound(&endpoint)
         .await
         .context("worker Restate endpoint must bind the lash process service surface")?;

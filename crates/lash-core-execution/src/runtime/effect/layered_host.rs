@@ -92,6 +92,16 @@ pub trait EffectLayer: Send + Sync + 'static {
     ) -> Result<Option<Resolution>, RuntimeError> {
         inner.peek_await_event(key).await
     }
+
+    async fn await_await_event(
+        &self,
+        inner: &dyn AwaitEventResolver,
+        key: &AwaitEventKey,
+        cancel: CancellationToken,
+        deadline: Option<Instant>,
+    ) -> Result<Resolution, RuntimeError> {
+        inner.await_await_event(key, cancel, deadline).await
+    }
 }
 
 /// An [`EffectHost`] that delegates to `inner` and wraps each scoped
@@ -208,7 +218,9 @@ impl AwaitEventResolver for LayeredEffectHost {
         cancel: CancellationToken,
         deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
+        self.layer
+            .await_await_event(self.inner.await_event_resolver(), key, cancel, deadline)
+            .await
     }
 
     async fn revoke_await_events_for_session(
@@ -362,10 +374,6 @@ impl EffectHost for LayeredEffectHost {
         self.inner.reinstate_effect_scope(scope).await
     }
 
-    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
-        self.inner.effect_scope_fence_database()
-    }
-
     fn bind_process_registry(&self, binding: crate::ProcessRegistryBinding) {
         self.inner.bind_process_registry(binding);
     }
@@ -454,7 +462,9 @@ impl AwaitEventResolver for LayeredController {
         cancel: CancellationToken,
         deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
+        self.layer
+            .await_await_event(self.inner.as_ref(), key, cancel, deadline)
+            .await
     }
 
     async fn revoke_await_events_for_session(

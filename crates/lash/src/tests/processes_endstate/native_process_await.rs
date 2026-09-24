@@ -7,19 +7,14 @@ use super::*;
 /// prunes the terminal registry rows while the host's projected copies survive.
 #[tokio::test]
 async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
+    let backend = memory_backend().await;
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
-    let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(TestLocalProcessRegistry::default());
-    let process_env_store = in_memory_process_env_store();
+        backend.process_env_store();
+    let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let sink = CollectingProcessEventSink::default();
     let core = process_test_core_with_sink(
+        backend.clone(),
         Arc::clone(&artifact_store),
-        Arc::clone(&trigger_store),
-        Arc::clone(&registry),
-        Arc::clone(&process_env_store),
         Arc::new(sink.clone()),
     )?;
     let process = LinkedTestProcess::new(
@@ -90,7 +85,20 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     );
 
     // The wired sink observed lifecycle, signal, and terminal events in append
-    // order. The await seam remains authoritative for terminal observation.
+    // order. The await seam remains authoritative for terminal observation:
+    // the sink is pushed after the durable write, so the terminal push may
+    // trail the awaiter by a moment.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !sink
+            .collected()
+            .iter()
+            .any(|(event_type, _)| event_type == "process.completed")
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the sink observes the terminal append promptly");
     let collected = sink.collected();
     let sequences: Vec<u64> = collected.iter().map(|(_, sequence)| *sequence).collect();
     let mut sorted = sequences.clone();

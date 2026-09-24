@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod backend_fault;
 #[cfg(test)]
 mod cache_regression;

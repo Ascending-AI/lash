@@ -20,7 +20,6 @@ use std::sync::Arc;
 use lash::LashCore;
 use lash::durability::EffectHost;
 use lash::persistence::SessionStoreFactory as _;
-use lash_core::ProcessRegistrar as _;
 use lash_core::{
     AwaitEventWaitIdentity, EffectAddress, ExecutionScope, Resolution, RuntimeAttribution,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
@@ -49,59 +48,8 @@ fn executor() -> RuntimeEffectLocalExecutor<'static> {
     })
 }
 
-async fn core_with(
-    effect_host: Arc<dyn EffectHost>,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-) -> LashCore {
-    core_with_triggers(
-        effect_host,
-        registry,
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
-    )
-    .await
-}
-
-async fn core_with_triggers(
-    effect_host: Arc<dyn EffectHost>,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    trigger_store: Arc<dyn lash_core::TriggerStore>,
-) -> LashCore {
-    core_with_all(
-        effect_host,
-        registry,
-        trigger_store,
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    )
-    .await
-}
-
-async fn core_with_store(
-    effect_host: Arc<dyn EffectHost>,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-) -> LashCore {
-    core_with_all(
-        effect_host,
-        registry,
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
-        store_factory,
-    )
-    .await
-}
-
-async fn core_with_all(
-    effect_host: Arc<dyn EffectHost>,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    trigger_store: Arc<dyn lash_core::TriggerStore>,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-) -> LashCore {
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("process-exec-env backend")
-            .process_env_store();
-    // The fixture environment every subscription draft here records.
-    lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
+/// The facade core under test, over `backend`.
+fn core_over(backend: Arc<dyn lash::Backend>) -> LashCore {
     let provider = lash_core::testing::TestProvider::builder()
         .complete(|_request| async {
             Ok(lash::provider::LlmResponse {
@@ -115,7 +63,7 @@ async fn core_with_all(
         })
         .build()
         .into_handle();
-    LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
         .plugin(lash_core::testing::process_engine_plugin_fixture())
@@ -125,14 +73,8 @@ async fn core_with_all(
                 .build()
                 .expect("valid model spec"),
         )
-        .store_factory(store_factory)
-        .effect_host(effect_host)
-        .process_registry(registry)
-        .trigger_store(trigger_store)
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(process_env_store)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "process-fence-test-worker",
             "process-fence-test-boot",
@@ -152,15 +94,18 @@ type ColdHost = Box<
         + Sync,
 >;
 
-/// One backend's effect host and process registry, plus the row observations
-/// the durable backends expose.
+/// One substrate under test: its backend, effect host and process registry,
+/// plus the row observations the substrate exposes.
 struct Backend {
+    backend: Arc<dyn lash::Backend>,
     host: Arc<dyn EffectHost>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
     fences: Option<FenceCounter>,
     /// Where a fresh host over the same durable journal comes from: a cold
     /// observer proves persisted state rather than a warm fence cache.
     cold_host: Option<ColdHost>,
+    /// The SQLite backend, for its catalog's retention sweep.
+    sqlite: Option<Arc<lash_sqlite_store::SqliteBackend>>,
     /// The SQLite registry database, for failure injection at the insert.
     sqlite_registry: Option<std::path::PathBuf>,
     /// The SQLite effect journal, for the two-file layout witnesses.
@@ -175,79 +120,77 @@ enum Kind {
     Postgres,
 }
 
+/// A SQLite substrate: fences counted in both its registry and
+/// its journal, and a cold host from a reopen of the same location.
+fn sqlite_backend(
+    backend: lash_sqlite_store::SqliteBackend,
+    dir: tempfile::TempDir,
+    files: Option<(std::path::PathBuf, std::path::PathBuf)>,
+) -> Backend {
+    let backend = Arc::new(backend);
+    let fence_journal = backend.database_uri(lash_sqlite_store::SqliteDatabase::EffectReplay);
+    let fence_registry = backend.database_uri(lash_sqlite_store::SqliteDatabase::ProcessRegistry);
+    let cold_backend = Arc::clone(&backend);
+    let (sqlite_registry, sqlite_journal) = match files {
+        Some((registry, journal)) => (Some(registry), Some(journal)),
+        None => (None, None),
+    };
+    Backend {
+        host: backend.effect_host(),
+        registry: backend.process_registry(),
+        backend: Arc::clone(&backend) as Arc<dyn lash::Backend>,
+        cold_host: Some(Box::new(move || {
+            let backend = Arc::clone(&cold_backend);
+            Box::pin(async move {
+                // A fresh host over the same location: it reaches the
+                // registry's fences through the backend, not a binding.
+                backend
+                    .reopen()
+                    .await
+                    .expect("reopen the backend")
+                    .effect_host() as Arc<dyn EffectHost>
+            })
+        })),
+        sqlite: Some(backend),
+        sqlite_registry,
+        sqlite_journal,
+        fences: Some(Box::new(move |scope_id: &str| {
+            let journal = fence_journal.clone();
+            let registry = fence_registry.clone();
+            let scope_id = scope_id.to_string();
+            Box::pin(async move {
+                // The fence is one row in one of the two databases: count
+                // both so the witness reads the layout, not an assumption
+                // about which one holds it.
+                sqlite_fence_rows(&journal, &scope_id) + sqlite_fence_rows(&registry, &scope_id)
+            })
+        })),
+        _dir: dir,
+        _postgres: None,
+    }
+}
+
 async fn backend(kind: Kind) -> Option<Backend> {
     let dir = tempfile::tempdir().expect("tempdir");
     Some(match kind {
-        Kind::Memory => Backend {
-            host: Arc::new(lash_core::facade_support::NativeEffectHost::default()),
-            registry: Arc::new(lash_core::TestLocalProcessRegistry::default()),
-            fences: None,
-            cold_host: None,
-            sqlite_registry: None,
-            sqlite_journal: None,
-            _dir: dir,
-            _postgres: None,
-        },
-        Kind::Sqlite => {
-            let path = dir.path().join("effect.db");
-            let host = lash_sqlite_store::SqliteEffectHost::open(&path)
+        Kind::Memory => sqlite_backend(
+            lash_sqlite_store::SqliteBackend::memory()
                 .await
-                .expect("SQLite effect host");
-            let registry_path = dir.path().join("registry.db");
-            let registry = lash_sqlite_store::SqliteProcessRegistry::open(
-                &registry_path,
-                dir.path().join("sessions"),
-            )
-            .await
-            .expect("SQLite process registry");
-            let fence_journal = path.clone();
-            let fence_registry = registry_path.clone();
-            let cold_path = path.clone();
-            let cold_registry = registry_path.clone();
-            let cold_sessions = dir.path().join("sessions");
-            Backend {
-                host: Arc::new(host),
-                registry: Arc::new(registry),
-                cold_host: Some(Box::new(move || {
-                    let path = cold_path.clone();
-                    let registry_path = cold_registry.clone();
-                    let sessions = cold_sessions.clone();
-                    Box::pin(async move {
-                        let host = Arc::new(
-                            lash_sqlite_store::SqliteEffectHost::open(&path)
-                                .await
-                                .expect("cold SQLite effect host"),
-                        ) as Arc<dyn EffectHost>;
-                        // A registered process's fence lives in the registry
-                        // file; a cold host reads it once the registry binds
-                        // it, which `LashCore::build` does on every open.
-                        let registry = lash_sqlite_store::SqliteProcessRegistry::open(
-                            &registry_path,
-                            sessions,
-                        )
-                        .await
-                        .expect("cold SQLite process registry");
-                        registry.bind_effect_host(&host);
-                        host
-                    })
-                })),
-                sqlite_registry: Some(registry_path),
-                sqlite_journal: Some(path),
-                fences: Some(Box::new(move |scope_id: &str| {
-                    let journal = fence_journal.clone();
-                    let registry = fence_registry.clone();
-                    let scope_id = scope_id.to_string();
-                    Box::pin(async move {
-                        // The fence is one row in one of the two files:
-                        // count both so the witness reads the layout, not
-                        // an assumption about which file holds it.
-                        sqlite_fence_rows(&journal, &scope_id)
-                            + sqlite_fence_rows(&registry, &scope_id)
-                    })
-                })),
-                _dir: dir,
-                _postgres: None,
-            }
+                .expect("SQLite memory backend"),
+            dir,
+            None,
+        ),
+        Kind::Sqlite => {
+            let backend = lash_sqlite_store::SqliteBackend::open(dir.path())
+                .await
+                .expect("SQLite file backend");
+            let files = (
+                dir.path()
+                    .join(lash_sqlite_store::SqliteDatabase::ProcessRegistry.file_name()),
+                dir.path()
+                    .join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name()),
+            );
+            sqlite_backend(backend, dir, Some(files))
         }
         Kind::Postgres => {
             let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
@@ -271,15 +214,23 @@ async fn backend(kind: Kind) -> Option<Backend> {
             let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
                 .await
                 .expect("connect the private database");
+            let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+                &storage,
+                Arc::new(lash::persistence::FileAttachmentStore::new(
+                    dir.path().join("attachments"),
+                )),
+            ));
             let pool = storage.pool().clone();
             let cold_storage = storage.clone();
             Backend {
-                host: Arc::new(storage.effect_host()),
-                registry: Arc::new(storage.process_registry()),
+                host: backend.effect_host(),
+                registry: backend.process_registry(),
+                backend,
                 cold_host: Some(Box::new(move || {
                     let storage = cold_storage.clone();
                     Box::pin(async move { Arc::new(storage.effect_host()) as Arc<dyn EffectHost> })
                 })),
+                sqlite: None,
                 sqlite_registry: None,
                 sqlite_journal: None,
                 fences: Some(Box::new(move |scope_id: &str| {
@@ -395,7 +346,7 @@ async fn prune_fences_only_what_the_registry_prunes(kind: Kind) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    let core = core_with(Arc::clone(&backend.host), Arc::clone(&backend.registry)).await;
+    let core = core_over(Arc::clone(&backend.backend));
     let process_id = "retained-by-watermark";
     register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
@@ -474,7 +425,7 @@ async fn pruned_process_id_is_fenced_until_registered_again(kind: Kind) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    let core = core_with(Arc::clone(&backend.host), Arc::clone(&backend.registry)).await;
+    let core = core_over(Arc::clone(&backend.backend));
     let process_id = "reused-by-host";
     register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
@@ -632,9 +583,19 @@ fn start_request(process_id: &ProcessId) -> lash_core::ProcessStartRequest {
 
 async fn trigger_delivery_process_id(
     store: &dyn lash_core::TriggerStore,
+    env_store: &dyn lash::persistence::ProcessExecutionEnvStore,
     occurrence: &lash_core::TriggerOccurrenceRequest,
 ) -> String {
-    let process_env_ref = lash_core::testing::process_execution_env_fixture_ref();
+    let process_env_ref = lash_core::testing::publish_process_execution_env_for_testing(
+        env_store,
+        &lash_core::ArtifactOwner::host("process-fence-trigger"),
+        &lash_core::ProcessExecutionEnvSpec::new(
+            lash::plugins::PluginOptions::default(),
+            lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+        ),
+    )
+    .await
+    .expect("publish the subscription's execution environment");
     let draft = lash_core::TriggerSubscriptionDraft::for_process(
         "test/fence-reuse",
         process_env_ref,
@@ -683,14 +644,8 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-    let core = core_with_triggers(
-        Arc::clone(&backend.host),
-        Arc::clone(&backend.registry),
-        Arc::clone(&trigger_store),
-    )
-    .await;
+    let trigger_store = backend.backend.trigger_store();
+    let core = core_over(Arc::clone(&backend.backend));
     let occurrence = lash_core::TriggerOccurrenceRequest::new(
         "ui.button.pressed",
         lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
@@ -710,7 +665,12 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
         RegistrationPath::CoreStart => "reused-core-start".to_string(),
         RegistrationPath::SessionStart => "reused-session-start".to_string(),
         RegistrationPath::TriggerRouter => {
-            trigger_delivery_process_id(trigger_store.as_ref(), &occurrence).await
+            trigger_delivery_process_id(
+                trigger_store.as_ref(),
+                backend.backend.process_env_store().as_ref(),
+                &occurrence,
+            )
+            .await
         }
         RegistrationPath::ToolIntentIngress => ingress_key.identity().replay_key.clone(),
     };
@@ -880,7 +840,7 @@ async fn failed_registration_keeps_the_fence(kind: Kind) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    let core = core_with(Arc::clone(&backend.host), Arc::clone(&backend.registry)).await;
+    let core = core_over(Arc::clone(&backend.backend));
     let process_id = "reused-but-insert-fails";
     register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
@@ -979,9 +939,13 @@ async fn registration_reinstates_every_bound_host(kind: Kind) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    let _core = core_with(Arc::clone(&backend.host), Arc::clone(&backend.registry)).await;
-    let other: Arc<dyn EffectHost> =
-        Arc::new(lash_core::facade_support::NativeEffectHost::default());
+    let _core = core_over(Arc::clone(&backend.backend));
+    // A host whose fence lives outside this registry's store: another
+    // backend's journal, bound to the registry by hand.
+    let other_backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("another memory backend");
+    let other: Arc<dyn EffectHost> = other_backend.effect_host();
     backend.registry.bind_effect_host(&other);
     let process_id = "reused-across-hosts";
     other
@@ -1067,7 +1031,7 @@ async fn postgres_registration_reinstates_every_bound_host() {
     registration_reinstates_every_bound_host(Kind::Postgres).await;
 }
 
-fn sqlite_fence_rows(path: &std::path::Path, scope_id: &str) -> i64 {
+fn sqlite_fence_rows(path: impl AsRef<std::path::Path>, scope_id: &str) -> i64 {
     sqlite_count(
         path,
         "SELECT COUNT(*) FROM effect_scope_retirements WHERE scope_id = ?1",
@@ -1075,8 +1039,8 @@ fn sqlite_fence_rows(path: &std::path::Path, scope_id: &str) -> i64 {
     )
 }
 
-fn sqlite_count(path: &std::path::Path, sql: &str, argument: &str) -> i64 {
-    rusqlite::Connection::open(path)
+fn sqlite_count(path: impl AsRef<std::path::Path>, sql: &str, argument: &str) -> i64 {
+    rusqlite::Connection::open(path.as_ref())
         .expect("open the SQLite file")
         .query_row(sql, [argument], |row| row.get(0))
         .expect("count rows")
@@ -1135,7 +1099,7 @@ async fn sqlite_registration_crash_cut_leaves_the_id_fenced_or_registered_never_
     let backend = backend(Kind::Sqlite).await.expect("SQLite backend");
     let registry_path = backend.sqlite_registry.clone().expect("registry file");
     let journal_path = backend.sqlite_journal.clone().expect("journal file");
-    let core = core_with(Arc::clone(&backend.host), Arc::clone(&backend.registry)).await;
+    let core = core_over(Arc::clone(&backend.backend));
     let process_id = "crash-cut";
     let scope = ExecutionScope::process(process_id);
     let key = scope_key(&scope);
@@ -1283,18 +1247,12 @@ async fn sqlite_fence_committed_before_a_lost_journal_purge_refuses_cold_admissi
     let backend = backend(Kind::Sqlite).await.expect("SQLite backend");
     let registry_path = backend.sqlite_registry.clone().expect("registry file");
     let journal_path = backend.sqlite_journal.clone().expect("journal file");
-    let factory = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
-            backend._dir.path().join("catalog"),
-            registry_path.clone(),
-        ),
-    );
-    let core = core_with_store(
-        Arc::clone(&backend.host),
-        Arc::clone(&backend.registry),
-        Arc::clone(&factory) as Arc<dyn lash::persistence::SessionStoreFactory>,
-    )
-    .await;
+    let factory = backend
+        .sqlite
+        .as_ref()
+        .expect("SQLite backend")
+        .session_store_factory();
+    let core = core_over(Arc::clone(&backend.backend));
     // The catalog the sweep opens exists once a session has been created.
     let session = core
         .session("purge-lost-session")

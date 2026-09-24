@@ -1,7 +1,7 @@
 use super::*;
 
-#[test]
-fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
+#[tokio::test]
+async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     let budget = lash::CommitBudget::new(
         lash::CommitBudgetLimit::bounded(1024 * 1024),
         lash::CommitBudgetLimit::Unbounded,
@@ -30,15 +30,15 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     let default_pending_age = lash::QueuedWorkBatchingConfig::DEFAULT_MAX_PENDING_AGE;
     assert_eq!(default_pending_age, std::time::Duration::from_secs(30));
 
-    let error = match lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("SQLite memory backend"),
+    );
+    let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
         .build(crate::test_core_owner())
     {
         Ok(_) => panic!("builder must not invent a commit budget"),
@@ -46,15 +46,15 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     };
     assert!(matches!(error, lash::EmbedError::MissingCommitBudget));
 
-    let error = match lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("SQLite memory backend"),
+    );
+    let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
         .commit_budget(bounded)
         .build(crate::test_core_owner())
     {
@@ -63,17 +63,17 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     };
     assert!(matches!(error, lash::EmbedError::MissingQueuedWorkBatching));
 
-    let configured = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("SQLite memory backend"),
+    );
+    let configured = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(bounded)
         .queued_work_batching(batching)
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
         .build(crate::test_core_owner());
     assert!(configured.is_ok(), "an explicit commit budget should build");
 }

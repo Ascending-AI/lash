@@ -1,0 +1,15 @@
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+ --> tests/ui/core_builder_requires_a_backend.rs:6:13
+  |
+6 |     let _ = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ --------------------------- argument #1 of type `Arc<(dyn lash::Backend + 'static)>` is missing
+  |
+note: associated function defined here
+ --> src/core.rs
+  |
+  |     pub fn standard_builder(
+  |            ^^^^^^^^^^^^^^^^
+help: provide the argument
+  |
+6 |     let _ = lash::LashCore::standard_builder(/* Arc<(dyn lash::Backend + 'static)> */, lash::TurnBudget::Unbounded);
+  |                                              +++++++++++++++++++++++++++++++++++++++++

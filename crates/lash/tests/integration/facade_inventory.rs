@@ -27,6 +27,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use lash::Backend as _;
 use lash::ModelSpec as _;
 use lash::PendingTurnInput as _;
 use lash::PendingTurnInputCancelOutcome as _;
@@ -48,10 +49,10 @@ use lash::direct::LlmOutputPart as _;
 use lash::direct::LlmTerminalReason as _;
 use lash::direct::LlmUsage as _;
 use lash::durability::BoundaryReason as _;
+use lash::durability::StoreSet as _;
 use lash::durability::ensure_durable_effect_input as _;
 use lash::observe::InMemoryLiveReplayStore as _;
 use lash::persistence::CheckpointKind as _;
-use lash::persistence::InMemorySessionStoreFactory as _;
 use lash::persistence::PendingTurnInputDraft as _;
 use lash::persistence::SessionAttachmentStore as _;
 use lash::persistence::SessionRelation as _;
@@ -142,7 +143,6 @@ use lash::tracing::TraceToolCallStatus as _;
 use lash::tracing::TraceTurnCompletionReason as _;
 use lash::tracing::TraceTurnFailureReason as _;
 use lash::tracing::TraceTurnOutcome as _;
-use lash::triggers::InMemoryTriggerStore as _;
 use lash::triggers::LashSchema as _;
 use lash::triggers::TriggerDeliveryReservation as _;
 use lash::triggers::TriggerInputBinding as _;
@@ -209,7 +209,6 @@ mod rlm_inventory {
 
 #[cfg(feature = "testing")]
 mod testing_inventory {
-    use lash::testing::TestLocalProcessRegistry as _;
     use lash::testing::TestProvider as _;
     use lash::testing::code_execution_context as _;
     use lash::testing::exec_code_invocation as _;
@@ -240,12 +239,17 @@ mod sqlite_inventory {
     use lash::sqlite::SqliteSessionStoreFactory as _;
     // ADR 0102's zero-infra entry point: one backend, file or memory.
     use lash::sqlite::{SqliteBackend as _, SqliteBackendOptions as _, SqliteLocation as _};
+    // The store set a Restate backend journals its effects beside.
+    use lash::sqlite::SqliteStoreSet as _;
 }
 
 #[cfg(feature = "postgres")]
 mod postgres_inventory {
     use lash::postgres::PostgresSessionStoreFactory as _;
     use lash::postgres::PostgresStorage as _;
+    use lash::postgres::{
+        PostgresBackend as _, PostgresBackendOptions as _, PostgresStoreSet as _,
+    };
 }
 
 #[cfg(feature = "s3")]
@@ -256,6 +260,7 @@ mod s3_inventory {
 
 #[cfg(feature = "restate")]
 mod restate_inventory {
+    use lash::restate::RestateBackend as _;
     use lash::restate::RestateEffectHost as _;
 }
 

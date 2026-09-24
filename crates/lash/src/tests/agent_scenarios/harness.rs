@@ -290,11 +290,10 @@ impl AgentScenarioSetup {
         self
     }
 
-    fn build(self) -> Result<AgentScenarioRuntime> {
+    async fn build(self) -> Result<AgentScenarioRuntime> {
         let checkpoint_writes =
             lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
         let graph_store = Arc::new(crate::tracing::TraceLashlangGraphStore::default());
-        let process_registry = Arc::new(TestLocalProcessRegistry::default());
         let prompt_captures = Arc::new(StdMutex::new(Vec::new()));
         let provider = scripted_provider(
             self.scripted_provider_responses,
@@ -304,18 +303,24 @@ impl AgentScenarioSetup {
         let factory = rlm_factory().with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         );
-        let store_factory: Arc<dyn lash_core::SessionStoreFactory> = Arc::new(
-            lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
-                Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-                checkpoint_writes.clone(),
-            ),
-        );
-        let mut builder =
-            explicit_ephemeral_facets(LashCore::rlm_builder(crate::TurnBudget::Unbounded, factory))
-                .provider(provider)
-                .model(mock_model_spec())
-                .store_factory(Arc::clone(&store_factory))
-                .process_registry(Arc::clone(&process_registry) as Arc<dyn ProcessRegistry>);
+        let observed_writes = checkpoint_writes.clone();
+        let backend =
+            DecoratedBackend::over(memory_backend().await).session_store_factory(move |inner| {
+                Arc::new(
+                    lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
+                        inner,
+                        observed_writes,
+                    ),
+                )
+            });
+        let store_factory = lash_core::Backend::session_store_factory(&backend);
+        let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(
+            Arc::new(backend),
+            crate::TurnBudget::Unbounded,
+            factory,
+        ))
+        .provider(provider)
+        .model(mock_model_spec());
         if let Some(tools) = self.tool_provider {
             builder = builder.tools(tools);
         }
@@ -341,8 +346,10 @@ impl AgentScenarioSetup {
         if let Some(max_turns) = self.max_turns {
             builder = builder.turn_budget(lash_core::TurnBudget::bounded(max_turns));
         }
+        let core = builder.build(crate::testing::runtime_lease_owner())?;
+        let process_registry = core.process_registry();
         Ok(AgentScenarioRuntime {
-            core: builder.build(crate::testing::runtime_lease_owner())?,
+            core,
             store_factory,
             graph_store,
             process_registry,
@@ -356,7 +363,7 @@ struct AgentScenarioRuntime {
     core: LashCore,
     store_factory: Arc<dyn lash_core::SessionStoreFactory>,
     graph_store: Arc<crate::tracing::TraceLashlangGraphStore>,
-    process_registry: Arc<TestLocalProcessRegistry>,
+    process_registry: Arc<dyn ProcessRegistry>,
     prompt_captures: Arc<StdMutex<Vec<LlmRequest>>>,
     checkpoint_writes: lash_core::testing::checkpoint_observer::CheckpointWriteCollector,
 }
@@ -391,7 +398,8 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .install_process_controls(case.install_process_controls)
         .install_process_composition(case.install_process_composition)
         .max_turns(case.max_turns)
-        .build()?;
+        .build()
+        .await?;
     let session = runtime.core.session(&case.session_id).open().await?;
     if !case.seeded_attachment_writes.is_empty() {
         // Stand in for the writer that really uploaded these bytes. The
@@ -846,14 +854,14 @@ impl AgentSessionTurnProcessScenario {
         // Boundary: this mini-scenario owns the host session-turn process API,
         // while shared AgentScenario setup still covers the provider, process
         // registry, graph store, and remote DTO assertions.
-        let runtime = self.runtime()?;
+        let runtime = self.runtime().await?;
         let session = runtime.core.session(&self.session_id).open().await?;
         let handle = session
             .admin()
             .processes()
             .start(
                 self.start_request(),
-                native_process_scope(self.process_id.clone()),
+                process_scope(&runtime.core, self.process_id.clone()),
             )
             .await?;
         assert_eq!(handle.process_id, self.process_id);
@@ -863,12 +871,13 @@ impl AgentSessionTurnProcessScenario {
         Ok(())
     }
 
-    fn runtime(&self) -> Result<AgentScenarioRuntime> {
+    async fn runtime(&self) -> Result<AgentScenarioRuntime> {
         AgentScenarioSetup::new(vec![typescript_block(
             r#"finish({ child: "done", scoped: true });"#,
         )])
         .install_subagents(true)
         .build()
+        .await
     }
 
     fn start_request(&self) -> lash_core::ProcessStartRequest {
@@ -984,7 +993,9 @@ impl AgentDurableInputSuspensionScenario {
         // invariant is suspension before resolving the durable await key.
         let (key_tx, key_rx) = oneshot::channel();
         let tools = Arc::new(DurableInputTools::new(key_tx));
-        let runtime = self.runtime(Arc::clone(&tools) as Arc<dyn ToolProvider>)?;
+        let runtime = self
+            .runtime(Arc::clone(&tools) as Arc<dyn ToolProvider>)
+            .await?;
         let session = runtime.core.session(&self.session_id).open().await?;
         let events = Arc::new(RecordingEvents::default());
         let turn_session = session.clone();
@@ -1010,7 +1021,7 @@ impl AgentDurableInputSuspensionScenario {
         Ok(())
     }
 
-    fn runtime(&self, tools: Arc<dyn ToolProvider>) -> Result<AgentScenarioRuntime> {
+    async fn runtime(&self, tools: Arc<dyn ToolProvider>) -> Result<AgentScenarioRuntime> {
         AgentScenarioSetup::new(vec![
             typescript_block(
                 r#"
@@ -1027,6 +1038,7 @@ finish(result.answer);"#,
         .tool_provider(tools)
         .install_process_controls(true)
         .build()
+        .await
     }
 
     async fn await_suspension_key(
@@ -1174,7 +1186,8 @@ finish(await handle);"#,
     ])
     .install_llm_tools()
     .install_process_controls(true)
-    .build()?;
+    .build()
+    .await?;
     let session = runtime
         .core
         .session("agent-scenario-process-llm-query")
@@ -1217,7 +1230,8 @@ finish(await handle);"#,
     ])
     .tool_provider(Arc::new(RetryingDirectTools))
     .install_process_controls(true)
-    .build()?;
+    .build()
+    .await?;
     let session = runtime
         .core
         .session("agent-scenario-direct-completion-attempt-retry")

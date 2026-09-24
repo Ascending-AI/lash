@@ -81,6 +81,7 @@
 //! self-terminates. Draining and purging those invocations before the cutover is
 //! the only remedy.
 
+mod backend;
 mod bindings;
 mod controller;
 mod durable_wait;
@@ -94,6 +95,7 @@ mod turn;
 
 pub use restate_sdk;
 
+pub use backend::{RestateBackend, RestateQueuedWork};
 pub use bindings::{
     RestateBindingCheckError, RestateEndpointDiscoveryError, assert_services_bound,
     bound_service_names,
@@ -148,7 +150,7 @@ pub use process_attach::{
     ServeLashProcessAttach,
 };
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
-pub use turn::{RestateTurnAttach, RestateTurnDeployment};
+pub use turn::RestateTurnAttach;
 
 // Adapter-internal wire and seam types. They are `pub` so the Restate SDK's
 // generated handlers can name them; they are not a host contract.

@@ -2,17 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn deployment_drain_status_keeps_waiting_process_non_drained() {
-    let registry = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open in-memory process registry")
-        .process_registry();
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(crate::TurnBudget::Unbounded)
-            .model(mock_model_spec())
-            .store_factory(Arc::new(
-                crate::persistence::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(registry.clone()),
+        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model(mock_model_spec()),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build core with a process registry");
@@ -73,19 +66,22 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
 /// every store that counts turns, and its commit releases it.
 #[tokio::test]
 async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
-    let sqlite = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open in-memory SQLite backend")
-        .session_store_factory();
-    let factories: Vec<Arc<dyn lash_core::SessionStoreFactory>> = vec![
-        Arc::new(crate::persistence::InMemorySessionStoreFactory::new()),
-        sqlite,
+    // The in-memory catalog and the SQLite one, each as the catalog of a
+    // memory backend.
+    let backends: Vec<Arc<dyn lash_core::Backend>> = vec![
+        Arc::new(
+            DecoratedBackend::over(memory_backend().await).session_store_factory(|_| {
+                Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new())
+            }),
+        ),
+        memory_backend().await,
     ];
-    for factory in factories {
+    for backend in backends {
+        let factory = backend.session_store_factory();
         let core = explicit_ephemeral_facets(
-            LashCore::standard_builder(crate::TurnBudget::Unbounded).model(mock_model_spec()),
+            LashCore::standard_builder(Arc::clone(&backend), crate::TurnBudget::Unbounded)
+                .model(mock_model_spec()),
         )
-        .store_factory(Arc::clone(&factory))
         .build(crate::testing::runtime_lease_owner())
         .expect("build core");
         let idle = core

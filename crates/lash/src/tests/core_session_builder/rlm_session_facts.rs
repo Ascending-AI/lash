@@ -88,13 +88,9 @@ async fn typescript_is_served_on_the_production_session_path_and_survives_resume
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(rlm_core_builder())
-        .with_native_queued_work()
+    let core = explicit_ephemeral_facets_with_backend_work(rlm_core_builder().await)
         .provider(provider)
         .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("rlm-typescript-production").open().await?;
@@ -159,13 +155,12 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
         .complete(|_| async { Ok(text_response("<typescript>\nfinish(42);\n</typescript>")) })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(rlm_core_builder())
-        .with_native_queued_work()
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets_with_backend_work(rlm_core_builder_over(backend.clone()))
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::clone(&tools) as Arc<dyn lash_core::ToolProvider>)
-        .store_factory(Arc::clone(&store_factory) as Arc<dyn lash_core::SessionStoreFactory>)
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -293,11 +288,10 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
         .into_handle();
     // One store factory across both opens: the reopen has to read what the
     // first session's commit actually wrote.
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let backend = memory_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .provider(provider)
         .model(mock_model_spec())
-        .store_factory(store_factory)
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("rlm-dialect-turn-override").open().await?;
@@ -358,7 +352,7 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn create_options_naming_a_dialect_fail_during_session_creation() -> Result<()> {
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -417,7 +411,7 @@ async fn projected_bindings_reach_a_served_prompt_once() -> Result<()> {
             .build()
             .into_handle()
     };
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .provider(provider)
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -468,7 +462,7 @@ async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_
 {
     use crate::rlm::RlmSessionExt as _;
 
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -502,7 +496,7 @@ async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_
 async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -538,7 +532,7 @@ async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone()
 async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -575,7 +569,7 @@ async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
 async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let core = explicit_ephemeral_facets(rlm_core_builder().await)
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -625,12 +619,12 @@ async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Re
 async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_termination() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let backend = memory_backend().await;
+
     let build_core = || {
-        explicit_ephemeral_facets(rlm_core_builder())
+        explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
             .provider(mock_provider())
             .model(mock_model_spec())
-            .store_factory(store_factory.clone())
             .build(crate::testing::runtime_lease_owner())
     };
     let stale_core = build_core()?;
@@ -698,12 +692,12 @@ async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_terminatio
 async fn an_invalidated_same_value_guarded_write_publishes_the_reloaded_config() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let backend = memory_backend().await;
+
     let build_core = || {
-        explicit_ephemeral_facets(rlm_core_builder())
+        explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
             .provider(mock_provider())
             .model(mock_model_spec())
-            .store_factory(store_factory.clone())
             .build(crate::testing::runtime_lease_owner())
     };
     let stale_core = build_core()?;
@@ -759,11 +753,11 @@ async fn an_invalidated_same_value_guarded_write_publishes_the_reloaded_config()
 async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let backend = memory_backend().await;
+
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(store_factory)
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("rlm-write-roundtrip").open().await?;
@@ -795,11 +789,10 @@ async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn stating_a_dialect_at_open_refuses_instead_of_being_dropped() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(rlm_core_builder())
+    let backend = memory_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(store_factory)
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("rlm-open-refusal").open().await?;

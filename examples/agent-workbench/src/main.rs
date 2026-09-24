@@ -6,6 +6,8 @@ mod deferred_tools;
 mod execution_graphs;
 mod failure_provider;
 mod mail;
+#[path = "../../shared/prior_store_layout.rs"]
+mod prior_store_layout;
 mod restate;
 mod restate_ingress;
 #[path = "../../shared/shutdown_marker.rs"]
@@ -87,9 +89,16 @@ pub(crate) const MAIL_EVENT_EVENT: &str = "received";
 pub(crate) const MAIL_RECEIVED_SOURCE_TYPE: &str = "mail.received";
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 8 * 1024 * 1024;
 
+/// An attachment store of its own for a test state whose routes never read
+/// the core's attachments.
 #[cfg(test)]
 fn test_attachment_store() -> Arc<dyn lash::persistence::AttachmentStore> {
-    Arc::new(lash::persistence::InMemoryAttachmentStore::new())
+    Arc::new(lash::persistence::FileAttachmentStore::new(
+        std::env::temp_dir().join(format!(
+            "agent-workbench-attachments-{}",
+            uuid::Uuid::new_v4()
+        )),
+    ))
 }
 /// How long a cancel route stays attached waiting for a terminal before it
 /// reports the cancellation as recorded-but-pending.

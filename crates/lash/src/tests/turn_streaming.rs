@@ -3,8 +3,6 @@ use super::*;
 use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
 use lash_core::AwaitEventResolver as _;
-use lash_core::QueuedWorkStore as _;
-use lash_core::SessionExecutionLeaseStore as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::{LockResultExt, MutexExt};
@@ -292,7 +290,7 @@ impl lash_core::facade_support::SessionPlugin for TurnPersistedGraphAppendPlugin
 }
 
 struct CreateOnlySessionStoreFactory {
-    inner: lash_core::facade_support::InMemorySessionStoreFactory,
+    inner: Arc<dyn lash_core::SessionStoreFactory>,
 }
 
 // The fixture narrows the factory surface, but attachment ownership remains
@@ -307,7 +305,7 @@ impl lash_core::AttachmentRootSet for CreateOnlySessionStoreFactory {
         lash_core::StoreError,
     > {
         lash_core::AttachmentRootSet::live_attachment_refs(
-            &self.inner,
+            self.inner.as_ref(),
             intent_grace_cutoff_epoch_ms,
         )
         .await
@@ -319,7 +317,7 @@ impl lash_core::AttachmentRootSet for CreateOnlySessionStoreFactory {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> std::result::Result<bool, lash_core::StoreError> {
         lash_core::AttachmentRootSet::has_live_attachment_ref(
-            &self.inner,
+            self.inner.as_ref(),
             id,
             intent_grace_cutoff_epoch_ms,
         )
@@ -344,14 +342,15 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
         session_id: &SessionId,
     ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
     {
-        lash_core::SessionStoreFactory::open_existing_store_by_id(&self.inner, session_id).await
+        lash_core::SessionStoreFactory::open_existing_store_by_id(self.inner.as_ref(), session_id)
+            .await
     }
 
     async fn session_was_deleted(
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<bool, String> {
-        lash_core::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
+        lash_core::SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id).await
     }
 
     async fn delete_session(
@@ -564,16 +563,15 @@ impl EffectRecorder {
             .push(serde_json::to_string(outcome).expect("serialize effect outcome"));
     }
 
-    /// A fresh SQLite memory backend's effect host, with this recorder
+    /// A fresh SQLite memory backend whose effect host has this recorder
     /// layered over every controller it lends.
-    async fn effect_host(&self) -> Arc<lash_core::testing::LayeredEffectHost> {
-        let backend = lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a memory backend");
-        Arc::new(lash_core::testing::LayeredEffectHost::new(
-            backend.effect_host(),
-            Arc::new(self.clone()),
-        ))
+    async fn backend(&self) -> Arc<DecoratedBackend> {
+        let layer = Arc::new(self.clone());
+        Arc::new(
+            DecoratedBackend::over(memory_backend().await).effect_host(move |inner| {
+                Arc::new(lash_core::testing::LayeredEffectHost::new(inner, layer))
+            }),
+        )
     }
 }
 
@@ -750,60 +748,6 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
         self.native
             .await_group_child_drain_admission(group_key, commit_seq)
             .await
-    }
-}
-
-#[derive(Default)]
-struct DurableInMemoryProcessEnvStore {
-    inner: lash_core::facade_support::InMemoryProcessExecutionEnvStore,
-}
-
-#[async_trait]
-impl lash_core::ProcessExecutionEnvStore for DurableInMemoryProcessEnvStore {
-    async fn publish_process_execution_env(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-        bytes: &[u8],
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner
-            .publish_process_execution_env(owner, env_ref, bytes)
-            .await
-    }
-
-    async fn transfer_process_execution_env(
-        &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner
-            .transfer_process_execution_env(from, to, env_ref)
-            .await
-    }
-
-    async fn release_process_execution_env(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner
-            .release_process_execution_env(owner, env_ref)
-            .await
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner.retire_process_execution_env_owner(owner).await
-    }
-
-    async fn get_process_execution_env(
-        &self,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<Option<Vec<u8>>, lash_core::PluginError> {
-        self.inner.get_process_execution_env(env_ref).await
     }
 }
 

@@ -120,8 +120,13 @@ pub(super) async fn drive_turn_control_scenarios(
     storage: &PostgresStorage,
     ingress_url: &str,
 ) -> Result<()> {
-    let deployment = RestateTurnDeployment::new(ingress_url.to_string(), restate_authority_id()?);
-    let driver = deployment.turn_work_driver(Arc::new(storage.session_store_factory()));
+    let driver = e2e_backend(
+        storage,
+        Arc::new(s3_store_from_env()?),
+        ingress_url.to_string(),
+        restate_authority_id()?,
+    )
+    .turn_work_driver();
 
     let completed = TurnRequest {
         workflow_id: "e2e-turn-cancel-late-normal".to_string(),
@@ -478,8 +483,13 @@ pub(super) async fn drive_suspended_sleep_cancel_scenario(
     report_workflow_progress(&request.workflow_id, "durable-sleep-suspended");
 
     let evidence_id = "e2e-cancel-suspended-sleep";
-    let driver = RestateTurnDeployment::new(ingress_url.to_string(), restate_authority_id()?)
-        .turn_work_driver(Arc::new(storage.session_store_factory()));
+    let driver = e2e_backend(
+        storage,
+        Arc::new(s3_store_from_env()?),
+        ingress_url.to_string(),
+        restate_authority_id()?,
+    )
+    .turn_work_driver();
     let started = Instant::now();
     let receipt = driver
         .request_cancel(cancel_request(turn_address(&request).await?, evidence_id))
@@ -512,8 +522,13 @@ pub(super) async fn drive_engine_restart_scenario(
     ingress_url: &str,
     admin_url: &str,
 ) -> Result<()> {
-    let driver = RestateTurnDeployment::new(ingress_url.to_string(), restate_authority_id()?)
-        .turn_work_driver(Arc::new(storage.session_store_factory()));
+    let driver = e2e_backend(
+        storage,
+        Arc::new(s3_store_from_env()?),
+        ingress_url.to_string(),
+        restate_authority_id()?,
+    )
+    .turn_work_driver();
     let parked = turn_control_request("e2e-engine-restart-cancel", false);
     submit_workflow(ingress_url, &parked).await?;
     let sleeping = TurnRequest {

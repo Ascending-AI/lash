@@ -10,14 +10,12 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
             "const retained = [{{ payload: {retained_payload:?} }}];\nfinish(\"committed\");"
         );
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            memory_backend().await,
             crate::TurnBudget::Unbounded,
             rlm_factory(),
         ))
         .provider(queued_text_provider(vec![typescript_block(&source)]))
         .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
         .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
         let session = core
@@ -154,16 +152,24 @@ pub(super) async fn frame_switch_state_after_cold_reopen(
     abandoned_global_bytes: usize,
 ) -> Result<ColdReopenFrameState> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let sqlite_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        dir.path().join("sessions"),
-    ));
+    let sqlite_backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
+            .await
+            .expect("open the SQLite backend"),
+    );
+    let sqlite_store_factory = sqlite_backend.session_store_factory();
     let checkpoint_writes =
         lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
-    let store_factory = Arc::new(
-        lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
-            sqlite_store_factory.clone() as Arc<dyn lash_core::SessionStoreFactory>,
-            checkpoint_writes.clone(),
-        ),
+    let observed_writes = checkpoint_writes.clone();
+    let backend = Arc::new(
+        DecoratedBackend::over(sqlite_backend).session_store_factory(move |inner| {
+            Arc::new(
+                lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
+                    inner,
+                    observed_writes,
+                ),
+            )
+        }),
     );
     // The retired surface inlined the whole abandoned payload as a literal; the
     // TypeScript compiler refuses a cell over 64 KiB of source (ADR 0096), so
@@ -176,12 +182,12 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     let first_factory =
         rlm_factory().with_deferred_tool_resolver(Arc::new(FrameStateDeferredResolver));
     let first_core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        backend.clone(),
         crate::TurnBudget::Unbounded,
         first_factory,
     ))
     .provider(queued_text_provider(vec![typescript_block(&switch_source)]))
     .model(mock_model_spec())
-    .store_factory(store_factory.clone())
     .tools(Arc::new(FrameStateDeferredTools))
     .plugin(Arc::new(StopAfterFrameSwitchCommitFactory))
     .without_queued_work()
@@ -294,12 +300,12 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .build()
         .into_handle();
     let reopened_core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        backend.clone(),
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
     .provider(follow_on_provider)
     .model(mock_model_spec())
-    .store_factory(sqlite_store_factory)
     .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core.session(session_id).open().await?;
@@ -407,10 +413,14 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "durable-queued-chained-continue-as";
     let append_count = Arc::new(AtomicUsize::new(0));
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        dir.path().join("sessions"),
-    ));
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
+            .await
+            .expect("open the SQLite backend"),
+    );
+    let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        backend.clone(),
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
@@ -420,7 +430,6 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
         typescript_block(r#"finish("done after chained handoffs");"#),
     ]))
     .model(mock_model_spec())
-    .store_factory(store_factory.clone())
     .plugin(Arc::new(TurnPersistedGraphAppendFactory {
         append_count: Arc::clone(&append_count),
         max_appends: 2,
@@ -469,9 +478,12 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "agent-frame-durable";
     let root_turn_id = "agent-frame-root-turn";
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        dir.path().join("sessions"),
-    ));
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open(dir.path().join("sessions"))
+            .await
+            .expect("open the SQLite backend"),
+    );
+    let store_factory = backend.session_store_factory();
     let controller = Arc::new(RecordingDurableEffectController::default());
     let effect_host = Arc::new(DurableNoopEffectHost {
         controller: Arc::clone(&controller),
@@ -482,19 +494,14 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         lash_core::AdmittedScope::turn(session_id, root_turn_id),
     )
     .expect("scoped durable effect controller");
-    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
+    let backend = DecoratedBackend::over(backend).effect_host(move |_| effect_host);
+    let core = LashCore::standard_builder(Arc::new(backend), crate::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(agent_frame_switch_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AgentFrameSwitchTools))
-        .store_factory(store_factory.clone())
-        .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
-            dir.path().join("attachments"),
-        )))
-        .effect_host(effect_host)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let activities = RecordingEvents::default();
@@ -594,6 +601,7 @@ pub(super) async fn processes_lists_started_lashlang_process_until_awaited_inner
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        memory_backend().await,
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
@@ -612,10 +620,6 @@ finish(value);"#,
     // A started (`start lookup(...)`) process runs in the lease-protected
     // worker's rebuilt runtime, which needs a session store factory; the
     // explicit in-memory factory backs ephemeral process execution.
-    .store_factory(Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
-    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
     // ADR 0095: the `processes` module is catalogue presence, so a cell that
     // authors `processes.start` needs this factory installed.
     .plugin(Arc::new(
@@ -679,6 +683,7 @@ pub(super) async fn lashlang_execution_graph_store_observes_lashlang_process_fro
     let (release_tx, release_rx) = oneshot::channel();
     let graph_store = Arc::new(crate::tracing::TraceLashlangGraphStore::default());
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        memory_backend().await,
         crate::TurnBudget::Unbounded,
         rlm_factory().with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
@@ -696,10 +701,6 @@ finish(value);"#,
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
-    .store_factory(Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
-    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
     // ADR 0095: the `processes` module is catalogue presence, so a cell that
     // authors `processes.start` needs this factory installed.
     .plugin(Arc::new(
@@ -782,6 +783,7 @@ finish(value);"#,
 #[tokio::test]
 pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        memory_backend().await,
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
@@ -825,6 +827,7 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
 #[tokio::test]
 pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        memory_backend().await,
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
@@ -870,6 +873,7 @@ pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Re
 pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_tools() -> Result<()>
 {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        memory_backend().await,
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
@@ -930,26 +934,32 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "fig1573-agent-g1";
     let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
-    let store_factory = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path().join("sessions"))
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+            dir.path().join("sessions"),
+            lash_sqlite_store::SqliteBackendOptions::default(),
+            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+        )
+        .await
+        .expect("open the SQLite backend"),
     );
+    let store_factory = backend.session_store_factory();
 
     // Boot 1: the host accepts a queued turn, then is hard-killed.
-    let first_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(
-                crate::testing::TestProvider::builder()
-                    .kind("fig1573-boot-1")
-                    .complete(|_request| async { Ok(text_response("boot one must not answer")) })
-                    .build()
-                    .into_handle(),
-            )
-            .model(mock_model_spec())
-            .clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-            .store_factory(store_factory.clone())
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+    let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(
+        crate::testing::TestProvider::builder()
+            .kind("fig1573-boot-1")
+            .complete(|_request| async { Ok(text_response("boot one must not answer")) })
+            .build()
+            .into_handle(),
+    )
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     first_session
         .durable()
@@ -993,20 +1003,20 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
     // and merely wait to acquire the lane later; it must first cross the same
     // expiry boundary that makes the queued turn drainable.
     clock.advance(dead_lane_expiry - lash_core::ClockWallTime::timestamp_ms(clock.as_ref()));
-    let second_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(
-                crate::testing::TestProvider::builder()
-                    .kind("fig1573-boot-2")
-                    .complete(|_request| async { Ok(text_response("the migration is green")) })
-                    .build()
-                    .into_handle(),
-            )
-            .model(mock_model_spec())
-            .clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-            .store_factory(store_factory.clone())
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+    let second_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(
+        crate::testing::TestProvider::builder()
+            .kind("fig1573-boot-2")
+            .complete(|_request| async { Ok(text_response("the migration is green")) })
+            .build()
+            .into_handle(),
+    )
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     assert_eq!(
         second_session.durable().pending_turn_inputs().await?.len(),
@@ -1064,9 +1074,14 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
     let session_id = "fig1573-orphaned-active-input";
     let interrupted_turn_id = "fig1573-interrupted-turn";
     let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
-    let store_factory = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path().join("sessions"))
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+            dir.path().join("sessions"),
+            lash_sqlite_store::SqliteBackendOptions::default(),
+            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+        )
+        .await
+        .expect("open the SQLite backend"),
     );
 
     // Boot 1: a turn is running and the host routes an input into it. The
@@ -1074,27 +1089,27 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
     // only writer of the interrupted-input re-defer.
     let provider_entered = Arc::new(tokio::sync::Notify::new());
     let entered = Arc::clone(&provider_entered);
-    let first_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(
-                crate::testing::TestProvider::builder()
-                    .kind("fig1573-hung-boot-1")
-                    .complete(move |_request| {
-                        let entered = Arc::clone(&entered);
-                        async move {
-                            entered.notify_one();
-                            std::future::pending::<()>().await;
-                            unreachable!("the killed boot never answers")
-                        }
-                    })
-                    .build()
-                    .into_handle(),
-            )
-            .model(mock_model_spec())
-            .clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-            .store_factory(store_factory.clone())
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+    let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(
+        crate::testing::TestProvider::builder()
+            .kind("fig1573-hung-boot-1")
+            .complete(move |_request| {
+                let entered = Arc::clone(&entered);
+                async move {
+                    entered.notify_one();
+                    std::future::pending::<()>().await;
+                    unreachable!("the killed boot never answers")
+                }
+            })
+            .build()
+            .into_handle(),
+    )
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     first_session
         .durable()
@@ -1127,20 +1142,20 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
     // fences recovery itself rather than letting a successor hydrate early and
     // wait to acquire the lane only when it starts draining.
     clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms());
-    let second_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(
-                crate::testing::TestProvider::builder()
-                    .kind("fig1573-boot-2")
-                    .complete(|_request| async { Ok(text_response("the migration is green")) })
-                    .build()
-                    .into_handle(),
-            )
-            .model(mock_model_spec())
-            .clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-            .store_factory(store_factory.clone())
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner())?;
+    let second_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(
+        crate::testing::TestProvider::builder()
+            .kind("fig1573-boot-2")
+            .complete(|_request| async { Ok(text_response("the migration is green")) })
+            .build()
+            .into_handle(),
+    )
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     assert_eq!(
         second_session.durable().pending_turn_inputs().await?.len(),
@@ -1235,16 +1250,19 @@ pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary()
     let release = Arc::new(tokio::sync::Notify::new());
     let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let provider_calls = Arc::new(AtomicUsize::new(0));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(gated_app_lookup_provider(
-            Arc::clone(&started),
-            Arc::clone(&release),
-            Arc::clone(&released),
-            Arc::clone(&provider_calls),
-        ))
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(gated_app_lookup_provider(
+        Arc::clone(&started),
+        Arc::clone(&release),
+        Arc::clone(&released),
+        Arc::clone(&provider_calls),
+    ))
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("stop-after-step").open().await?;
     let stopper = session.clone();
 
@@ -1292,16 +1310,19 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
     let provider_calls = Arc::new(AtomicUsize::new(0));
     // The response never arrives, so an after-step stop can never land by
     // itself; the host escalates after its own deadline.
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(gated_app_lookup_provider(
-            Arc::clone(&started),
-            Arc::new(tokio::sync::Notify::new()),
-            Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            Arc::clone(&provider_calls),
-        ))
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(gated_app_lookup_provider(
+        Arc::clone(&started),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        Arc::clone(&provider_calls),
+    ))
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("escalate-after-step").open().await?;
     let stopper = session.clone();
 
@@ -1348,6 +1369,7 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        memory_backend().await,
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
@@ -1360,10 +1382,6 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
     .plugin(Arc::new(
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
     ))
-    .store_factory(Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
-    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-definition-filter").open().await?;
     let turn_session = session.clone();

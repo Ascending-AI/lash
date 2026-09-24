@@ -140,22 +140,16 @@ pub(super) async fn wait_for_queued_work(
     trace_dir: Option<PathBuf>,
     ingress_url: &str,
 ) -> Result<()> {
-    let registry = process_registry_from_storage(storage);
-    let continuations =
-        lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
-    let deployment = RestateProcessDeployment::new(
+    let backend = e2e_backend(
+        storage,
+        Arc::new(s3_store_from_env()?),
         ingress_url.to_string(),
         restate_authority_id()?,
-        registry,
-        continuations,
     );
-    let process_work_driver = deployment.process_work();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner-queue-watch".to_string(),
         storage: storage.clone(),
-        attachment_store: Arc::new(s3_store_from_env()?)
-            as Arc<dyn lash::persistence::AttachmentStore>,
-        process_work_driver,
+        backend,
         restate_ingress_url: ingress_url.to_string(),
         restate_authority_id: restate_authority_id()?,
         mock_provider_base_url: mock_provider_base_url.to_string(),
@@ -215,22 +209,16 @@ pub(super) async fn emit_button_event(
     trace_dir: Option<PathBuf>,
     ingress_url: &str,
 ) -> Result<ProcessId> {
-    let registry = process_registry_from_storage(storage);
-    let continuations =
-        lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
-    let deployment = RestateProcessDeployment::new(
+    let backend = e2e_backend(
+        storage,
+        Arc::new(s3_store_from_env()?),
         ingress_url.to_string(),
         restate_authority_id()?,
-        registry,
-        continuations,
     );
-    let process_work_driver = deployment.process_work();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner".to_string(),
         storage: storage.clone(),
-        attachment_store: Arc::new(s3_store_from_env()?)
-            as Arc<dyn lash::persistence::AttachmentStore>,
-        process_work_driver,
+        backend,
         restate_ingress_url: ingress_url.to_string(),
         restate_authority_id: restate_authority_id()?,
         mock_provider_base_url: mock_provider_base_url.to_string(),
@@ -862,22 +850,16 @@ pub(super) async fn assert_reopened_session_agrees(
     ingress_url: &str,
     responses: &[TurnResponse],
 ) -> Result<()> {
-    let registry = process_registry_from_storage(storage);
-    let continuations =
-        lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
-    let deployment = RestateProcessDeployment::new(
+    let backend = e2e_backend(
+        storage,
+        Arc::new(s3_store_from_env()?),
         ingress_url.to_string(),
         restate_authority_id()?,
-        registry,
-        continuations,
     );
-    let process_work_driver = deployment.process_work();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner-reopen".to_string(),
         storage: storage.clone(),
-        attachment_store: Arc::new(s3_store_from_env()?)
-            as Arc<dyn lash::persistence::AttachmentStore>,
-        process_work_driver,
+        backend,
         restate_ingress_url: ingress_url.to_string(),
         restate_authority_id: restate_authority_id()?,
         mock_provider_base_url: mock_provider_base_url.to_string(),

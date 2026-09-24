@@ -320,28 +320,6 @@ fn processes_area_witnesses_b() {
             lash::runtime::RuntimeErrorCode::MissingProcessExecutionId
         )
     });
-    // W0418: lash::testing::TestLocalProcessRegistry::set_process_lease_claim_error [function]
-    let _ = lash::testing::TestLocalProcessRegistry::set_process_lease_claim_error;
-    // W0419: lash::testing::TestLocalProcessRegistry::set_process_lease_release_error [function]
-    let _ = lash::testing::TestLocalProcessRegistry::set_process_lease_release_error;
-    // W0420: lash::testing::TestLocalProcessRegistry::set_process_lease_renew_error [function]
-    let _ = lash::testing::TestLocalProcessRegistry::set_process_lease_renew_error;
-    // W0421: lash::testing::TestLocalProcessRegistry::set_process_read_absent [function]
-    let _ = lash::testing::TestLocalProcessRegistry::set_process_read_absent;
-    // W0422: lash::testing::TestLocalProcessRegistry::set_process_read_error [function]
-    let _ = lash::testing::TestLocalProcessRegistry::set_process_read_error;
-    // W0423: lash::testing::TestLocalProcessRegistry::set_process_read_error_after [function]
-    let _ = lash::testing::TestLocalProcessRegistry::set_process_read_error_after;
-    // W0424: lash::testing::TestLocalProcessRegistry::set_process_read_override [function]
-    let _ = lash::testing::TestLocalProcessRegistry::set_process_read_override;
-    // W0425: lash::testing::TestLocalProcessRegistry::set_process_terminal_write_error [function]
-    let _ = lash::testing::TestLocalProcessRegistry::set_process_terminal_write_error;
-    // W0426: lash::testing::TestLocalProcessRegistry::set_process_terminal_write_outcome [function]
-    let _ = lash::testing::TestLocalProcessRegistry::set_process_terminal_write_outcome;
-    // W0427: lash::testing::TestLocalProcessRegistry::with_clock [function]
-    let _ = lash::testing::TestLocalProcessRegistry::with_clock;
-    // W0428: lash::testing::TestLocalProcessRegistry::with_wake_delivery_config [function]
-    let _ = lash::testing::TestLocalProcessRegistry::with_wake_delivery_config;
     // W0430: lash::tools::ToolContext::emit_child_process_started [function]
     let _ = lash::tools::ToolContext::emit_child_process_started(
         todo!(),

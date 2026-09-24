@@ -110,7 +110,8 @@ async fn run_task_with_shutdown_witness(
             provider_retries,
             &recorder.base_url,
             shutdown_witness,
-        )?;
+        )
+        .await?;
         Ok::<_, anyhow::Error>((core, recorder))
     }
     .await;
@@ -320,7 +321,7 @@ async fn run_turn(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_turn_core(
+async fn build_turn_core(
     task: &Task,
     model: &str,
     api_key: &str,
@@ -354,8 +355,15 @@ fn build_turn_core(
     } else {
         lash::TurnBudget::Unbounded
     };
+    // Every run is its own in-process substrate: a fresh SQLite memory
+    // backend the core owns and drops with it.
+    let backend = Arc::new(
+        lash::sqlite::SqliteBackend::memory()
+            .await
+            .map_err(|error| anyhow::anyhow!("open a SQLite memory backend: {error}"))?,
+    );
     let builder = match channel {
-        crate::ChannelSelection::Standard => LashCore::standard_builder(budget),
+        crate::ChannelSelection::Standard => LashCore::standard_builder(backend, budget),
         crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
             let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(if channel == crate::ChannelSelection::Cell {
@@ -377,7 +385,7 @@ fn build_turn_core(
                 config,
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
-            LashCore::rlm_builder(budget, factory)
+            LashCore::rlm_builder(backend, budget, factory)
         }
     };
     let shutdown_marker =
@@ -403,14 +411,6 @@ fn build_turn_core(
         } else {
             world.provider()
         })
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

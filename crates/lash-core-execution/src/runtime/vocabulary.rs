@@ -405,11 +405,9 @@ impl TurnActivitySink for NoopTurnActivitySink {
 pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// Bind the effect host whose scope fences and journal rows
     /// [`reclaim_retained_evidence`](Self::reclaim_retained_evidence) reads
-    /// and retires. The facade binds the host it was built with. Only a store
-    /// whose sweep must reach a journal kept in a file of its own (see
-    /// [`EffectHost::effect_scope_fence_database`](crate::EffectHost::effect_scope_fence_database))
-    /// has anything to record; a store sharing the journal's database, and
-    /// one with no durable journal to sweep, ignore it.
+    /// and retires. The facade binds the host its backend supplies. Where
+    /// the journal lives is the backend's own wiring, fixed when the
+    /// backend is opened; the binding carries no location.
     fn bind_effect_host(&self, _effect_host: &Arc<dyn crate::EffectHost>) {}
 
     /// Bind the exact artifact stores whose execution-owner cleanup this

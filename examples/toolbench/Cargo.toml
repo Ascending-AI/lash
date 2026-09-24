@@ -20,7 +20,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 dotenvy = "0.15"
-lash = { workspace = true, features = ["rlm"] }
+lash = { workspace = true, features = ["rlm", "sqlite"] }
 lash-provider-openai = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
 serde = { workspace = true, features = ["derive"] }

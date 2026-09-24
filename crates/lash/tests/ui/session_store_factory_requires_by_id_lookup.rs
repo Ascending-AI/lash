@@ -12,12 +12,12 @@ use std::sync::Arc;
 use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
-    AttachmentRootSet, InMemorySessionStoreFactory, RuntimePersistence, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, UnsettledTurnCounts,
+    AttachmentRootSet, RuntimePersistence, SessionStoreCreateRequest, SessionStoreFactory,
+    StoreError, UnsettledTurnCounts,
 };
 
 struct SilentByIdFactory {
-    inner: InMemorySessionStoreFactory,
+    inner: Arc<dyn SessionStoreFactory>,
 }
 
 #[async_trait::async_trait]
@@ -52,7 +52,7 @@ impl SessionStoreFactory for SilentByIdFactory {
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
+        SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id).await
     }
 
     async fn delete_session(

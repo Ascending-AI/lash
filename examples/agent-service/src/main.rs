@@ -9,7 +9,6 @@ use axum::routing::get;
 #[cfg(feature = "restate")]
 use lash::PluginBinding;
 use lash::{
-    durability::NativeEffectHost,
     provider::{ProviderHandle, ProviderOptions},
     tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink},
 };
@@ -25,6 +24,8 @@ mod fork_compensation_tests;
 #[cfg(test)]
 mod fork_rewind_contract;
 mod lease_triage;
+#[path = "../../shared/prior_store_layout.rs"]
+mod prior_store_layout;
 mod raw_activities;
 #[cfg(feature = "restate")]
 mod restate;
@@ -84,11 +85,19 @@ use lash::durability::DurableProcessWorker;
 #[cfg(feature = "restate")]
 use lash_restate::{
     LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessAttach, LashProcessAttachImpl,
-    LashProcessWorkflow, RestateEffectGroupServices, RestateProcessDeployment,
-    RestateTurnDeployment,
+    LashProcessWorkflow, RestateBackend, RestateEffectGroupServices,
 };
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
+
+/// The backend the service runs on, with the handles on its stores that the
+/// service's own retention pass and RLM factory use.
+struct ServiceBackend {
+    backend: Arc<dyn lash::Backend>,
+    store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
+    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
+    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
+}
 
 /// Ask the store whether its durable data opens under this build, before a
 /// single thing is wired.
@@ -99,8 +108,8 @@ const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 /// a process that died, restarts it, and it dies the same way forever — because
 /// the refusal is permanent and a restart is the one remedy that cannot fix it.
 ///
-/// So the host asks first, on a read-only handle built from the paths it is
-/// about to hand its factories rather than from a store it has already
+/// So the host asks first, on a read-only handle built from the paths its
+/// backend is about to open rather than from a store it has already
 /// constructed. Constructing the store is itself the side-effectful act this
 /// precedes: it takes the write lock and applies the schema batch.
 ///
@@ -114,15 +123,16 @@ const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 /// skips the per-session blob walk that an operator runs deliberately before a
 /// version bump. The report names what it skipped, so the exit code is never
 /// justified by a silence.
-async fn preflight_or_exit(
-    session_store_root: &std::path::Path,
-    process_registry_path: &std::path::Path,
-    trigger_store_path: &std::path::Path,
-) -> anyhow_like::Result<()> {
+async fn preflight_or_exit(session_store_root: &std::path::Path) -> anyhow_like::Result<()> {
     let handle =
         lash_sqlite_store::SqliteStorePreflight::for_session_store_root(session_store_root)
-            .with_process_registry(process_registry_path)
-            .with_trigger_store(trigger_store_path);
+            .with_process_registry(
+                session_store_root
+                    .join(lash_sqlite_store::SqliteDatabase::ProcessRegistry.file_name()),
+            )
+            .with_trigger_store(
+                session_store_root.join(lash_sqlite_store::SqliteDatabase::Triggers.file_name()),
+            );
     let report =
         lash::preflight::probe_store(&handle, lash::preflight::PreflightOptions::summary())
             .await
@@ -239,23 +249,92 @@ async fn async_main() -> anyhow_like::Result<()> {
     });
     let session_owner =
         lash::persistence::LeaseOwnerIdentity::opaque(worker_id, worker_incarnation);
-    let process_registry_path = data_dir.join("processes.db");
     let session_store_root = data_dir.join("lash-sessions");
-    let trigger_store_path = data_dir.join("triggers.db");
-    preflight_or_exit(
-        &session_store_root,
-        &process_registry_path,
-        &trigger_store_path,
+    prior_store_layout::refuse_prior_store_layout(
+        &data_dir,
+        &[
+            "processes.db",
+            "triggers.db",
+            "artifacts.db",
+            "process-env.db",
+            "attachments",
+        ],
     )
-    .await?;
+    .map_err(|refusal| refusal.to_string())?;
+    preflight_or_exit(&session_store_root).await?;
     std::fs::create_dir_all(&session_store_root)
         .map_err(|err| format!("create session store root: {err}"))?;
-    let store_factory = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
-            &session_store_root,
-            &process_registry_path,
-        ),
-    );
+    // One SQLite store set under the sessions root keeps the sessions, the
+    // process registry, the triggers, the process environments and the
+    // attachments. Local durability is the file `SqliteBackend` there, its
+    // effect journal beside the stores; Restate durability puts the Restate
+    // engine host over the same store set.
+    #[cfg(feature = "restate")]
+    let mut restate_backend: Option<Arc<RestateBackend>> = None;
+    let ServiceBackend {
+        backend,
+        store_factory,
+        attachment_store,
+        artifact_store,
+    } = match durability {
+        AgentServiceDurability::Local => {
+            let backend = Arc::new(
+                lash_sqlite_store::SqliteBackend::open(&session_store_root)
+                    .await
+                    .map_err(|err| err.to_string())?,
+            );
+            ServiceBackend {
+                store_factory: backend.session_store_factory(),
+                attachment_store: backend.attachment_store(),
+                artifact_store: backend.process_env_store(),
+                backend,
+            }
+        }
+        AgentServiceDurability::Restate => {
+            #[cfg(feature = "restate")]
+            {
+                let stores = lash_sqlite_store::SqliteStoreSet::open(&session_store_root)
+                    .await
+                    .map_err(|err| err.to_string())?;
+                let store_factory = stores.session_store_factory();
+                let attachment_store =
+                    stores.attachment_store() as Arc<dyn lash::persistence::AttachmentStore>;
+                let artifact_store =
+                    stores.process_env_store() as Arc<dyn lash::persistence::LashlangArtifactStore>;
+                let backend = Arc::new(RestateBackend::new(
+                    restate_ingress_url.clone(),
+                    restate_authority_id
+                        .clone()
+                        .expect("Restate authority configured"),
+                    Arc::new(stores),
+                    // The service runs every turn in the foreground through a
+                    // handler-scoped controller and enqueues no work; an
+                    // in-process queue pump would race the Restate handlers.
+                    lash_restate::RestateQueuedWork::Disabled,
+                ));
+                // Restate-backed turns pass a handler-scoped controller per
+                // turn via `.stream_to_with_effects(..., &controller)`; the
+                // backend host serves paths outside a workflow scope and
+                // fails loudly if an effect tries to execute without a
+                // handler. The worked example keeps its Sleep-only resolver as
+                // the host's one answer, so no tool-child host is installed —
+                // the same shape the conformance suites use.
+                backend
+                    .effect_host()
+                    .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
+                    .map_err(|err| err.to_string())?;
+                restate_backend = Some(Arc::clone(&backend));
+                ServiceBackend {
+                    backend,
+                    store_factory,
+                    attachment_store,
+                    artifact_store,
+                }
+            }
+            #[cfg(not(feature = "restate"))]
+            unreachable!("restate mode is rejected before core construction");
+        }
+    };
     // An unbound handle is the factory-wide reachability-audit target. Vacuum
     // deliberately uses separately opened, session-bound handles in the
     // retention pass below.
@@ -265,23 +344,6 @@ async fn async_main() -> anyhow_like::Result<()> {
         )
         .await
         .map_err(|err| err.to_string())?,
-    );
-    // Deployment-level Lashlang artifact store (compiled module cache), shared
-    // across the session tree and durable in SQLite.
-    let artifact_store = Arc::new(
-        lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-            .await
-            .map_err(|err| err.to_string())?,
-    ) as Arc<dyn lash::persistence::LashlangArtifactStore>;
-    let process_env_store = Arc::new(
-        lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
-            .await
-            .map_err(|err| err.to_string())?,
-    );
-    let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(&trigger_store_path)
-            .await
-            .map_err(|err| err.to_string())?,
     );
     let app_db = AppDb::open(&data_dir.join("app.db")).map_err(|err| err.to_string())?;
     #[cfg(feature = "restate")]
@@ -303,128 +365,41 @@ async fn async_main() -> anyhow_like::Result<()> {
             .build(),
         artifact_store,
     );
-    let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
-        data_dir.join("attachments"),
+    let mut core_builder = lash::LashCore::rlm_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        factory,
+    )
+    .provider(provider)
+    .model(model_spec)
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .trace_sink(Arc::new(TeeTraceSink::new([
+        Arc::new(StderrTraceSink::default()) as Arc<dyn TraceSink>,
+        Arc::new(JsonlTraceSink::new(trace_path)),
+    ])))
+    .trace_level(TraceLevel::Extended)
+    // The `processes` module is catalogue presence, not an ability bit
+    // (ADR 0095): the served cells author `processes.start`, so the surface
+    // exists only where this factory is installed.
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
     ));
-    let mut core_builder =
-        lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-            .with_native_queued_work()
-            .provider(provider)
-            .model(model_spec)
-            .store_factory(
-                Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>
-            )
-            .attachment_store(
-                Arc::clone(&attachment_store) as Arc<dyn lash::persistence::AttachmentStore>
-            )
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(process_env_store)
-            .trace_sink(Arc::new(TeeTraceSink::new([
-                Arc::new(StderrTraceSink::default()) as Arc<dyn TraceSink>,
-                Arc::new(JsonlTraceSink::new(trace_path)),
-            ])))
-            .trace_level(TraceLevel::Extended)
-            // The `processes` module is catalogue presence, not an ability bit
-            // (ADR 0095): the served cells author `processes.start`, so the
-            // surface exists only where this factory is installed.
-            .plugin(Arc::new(
-                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
-            ))
-            .trigger_store(trigger_store);
     if let Some(marker) = shutdown_marker::factory_from_env("agent-service")? {
         core_builder = core_builder.plugin(marker);
     }
-    let process_registry_store = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_registry_path, session_store_root)
-            .await
-            .map_err(|err| err.to_string())?,
-    );
-    let process_registry =
-        Arc::clone(&process_registry_store) as Arc<dyn lash::process::ProcessRegistry>;
-    #[cfg(feature = "restate")]
-    let process_continuations =
-        process_registry_store as Arc<dyn lash::process::ProcessContinuationStore>;
-    #[cfg(feature = "restate")]
-    let process_deployment = (durability == AgentServiceDurability::Restate).then(|| {
-        RestateProcessDeployment::new(
-            restate_ingress_url.clone(),
-            restate_authority_id
-                .clone()
-                .expect("Restate authority configured"),
-            Arc::clone(&process_registry),
-            process_continuations,
-        )
-    });
-    #[cfg(feature = "restate")]
-    let turn_deployment = (durability == AgentServiceDurability::Restate).then(|| {
-        RestateTurnDeployment::new(
-            restate_ingress_url.clone(),
-            restate_authority_id
-                .clone()
-                .expect("Restate authority configured"),
-        )
-    });
-    let core = match durability {
-        AgentServiceDurability::Local => core_builder
-            .effect_host(Arc::new(
-                NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-            ))
-            .process_registry(Arc::clone(&process_registry))
-            .build(session_owner.clone())
-            .map_err(|err| err.to_string())?,
-        AgentServiceDurability::Restate => {
-            #[cfg(feature = "restate")]
-            {
-                // Deployment host for paths outside a Restate workflow scope;
-                // it fails loudly if an effect tries to execute without a
-                // handler. Restate-backed turns pass a handler-scoped
-                // controller per turn via `.stream_to_with_effects(..., &controller)`. The
-                // Restate ingress runner is the sole executor of
-                // out-of-turn/background processes.
-                let effect_host = turn_deployment
-                    .as_ref()
-                    .expect("turn deployment configured for Restate")
-                    .effect_host();
-                // The worked example keeps its Sleep-only resolver as the
-                // deployment's one answer, so `RuntimeHostConfig::new`
-                // installs no tool-child host here — the same shape the
-                // conformance suites use. A deployment that routes tool
-                // children registers nothing and lets the default install win.
-                effect_host
-                    .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
-                    .map_err(|err| err.to_string())?;
-                core_builder
-                    .effect_host(effect_host)
-                    .process_work(
-                        process_deployment
-                            .as_ref()
-                            .expect("process deployment configured for Restate")
-                            .process_work(),
-                    )
-                    .build(session_owner.clone())
-                    .map_err(|err| err.to_string())?
-            }
-            #[cfg(not(feature = "restate"))]
-            unreachable!("restate mode is rejected before core construction");
-        }
-    };
+    let core = core_builder
+        .build(session_owner.clone())
+        .map_err(|err| err.to_string())?;
     let shutdown_core = core.clone();
     let operation = async {
         #[cfg(feature = "restate")]
-        let turn_work_driver = match durability {
-            AgentServiceDurability::Local => {
-                core.turn_work_driver().map_err(|err| err.to_string())?
-            }
-            AgentServiceDurability::Restate => turn_deployment
-                .as_ref()
-                .expect("turn deployment configured for Restate")
-                .turn_work_driver(
-                    Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>
-                ),
+        let turn_work_driver = match &restate_backend {
+            None => core.turn_work_driver(),
+            Some(backend) => backend.turn_work_driver(),
         };
         #[cfg(not(feature = "restate"))]
-        let turn_work_driver = core.turn_work_driver().map_err(|err| err.to_string())?;
+        let turn_work_driver = core.turn_work_driver();
 
         #[cfg(feature = "restate")]
         let process_worker = if durability == AgentServiceDurability::Restate {
@@ -477,14 +452,10 @@ async fn async_main() -> anyhow_like::Result<()> {
             .map_err(|err| format!("recover pending chat forks: {err}"))?;
 
         #[cfg(feature = "restate")]
-        let restate_endpoint = if durability == AgentServiceDurability::Restate {
-            let process_deployment = process_deployment.expect("process deployment configured");
+        let restate_endpoint = if let Some(restate_backend) = restate_backend {
+            let process_deployment = restate_backend.process_deployment();
             let effect_groups = crate::effect_groups::effect_group_services(
-                turn_deployment
-                    .as_ref()
-                    .expect("turn deployment configured for Restate")
-                    .effect_host()
-                    .as_ref(),
+                restate_backend.effect_host().as_ref(),
                 state
                     .restate_ingress_url()
                     .expect("Restate durability configures ingress"),
@@ -509,7 +480,7 @@ async fn async_main() -> anyhow_like::Result<()> {
             // they require, and the built endpoint reports what it bound. A
             // missing bind fails startup here rather than the first call that
             // would 404.
-            let mut required_services = RestateProcessDeployment::required_service_names();
+            let mut required_services = RestateBackend::required_service_names();
             required_services.extend(RestateEffectGroupServices::required_service_names());
             lash_restate::assert_services_bound(&endpoint, &required_services)
                 .await

@@ -39,13 +39,28 @@ pub fn frame_switch_seeds(observations: &[FrameSwitchSeedObservation]) -> Oracle
     )
 }
 
-/// Match runtime claim/completion trace records by `(claim kind, claim id)` and
-/// require a single terminal settlement for every claimed ingress.
+/// Match runtime claim/completion trace records by claim kind, claim id and
+/// the ingress rows the claim holds, and require a single terminal settlement
+/// for every claimed ingress. The rows are part of a claim's identity because
+/// a store may hand the same claim id to a later claim over different rows:
+/// SQLite derives it from a rowid that a deleted batch frees for reuse.
 pub fn logical_turn_claims_settle_exactly_once(
     records: &[lash_core::facade_support::TraceRecord],
 ) -> OracleVerdict {
-    let mut claimed = BTreeMap::<(String, String), usize>::new();
-    let mut completed = BTreeMap::<(String, String), usize>::new();
+    type ClaimKey = (String, String, Vec<String>);
+    fn held_rows(claim: &Value) -> Vec<String> {
+        let mut rows = ["batch_ids", "input_ids"]
+            .into_iter()
+            .filter_map(|field| claim.get(field).and_then(Value::as_array))
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        rows.sort();
+        rows
+    }
+    let mut claimed = BTreeMap::<ClaimKey, usize>::new();
+    let mut completed = BTreeMap::<ClaimKey, usize>::new();
     for record in records {
         let lash_core::TraceEvent::Custom { name, payload } = &record.event else {
             continue;
@@ -62,6 +77,7 @@ pub fn logical_turn_claims_settle_exactly_once(
                     .entry((
                         name.trim_end_matches(".claimed").to_string(),
                         claim_id.to_string(),
+                        held_rows(payload),
                     ))
                     .or_default() += 1;
             }
@@ -83,6 +99,7 @@ pub fn logical_turn_claims_settle_exactly_once(
                         .entry((
                             name.trim_end_matches(".completed").to_string(),
                             claim_id.to_string(),
+                            held_rows(claim),
                         ))
                         .or_default() += 1;
                 }
@@ -102,8 +119,8 @@ pub fn logical_turn_claims_settle_exactly_once(
             return OracleVerdict::failed(
                 LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
                 format!(
-                    "{} claim `{}` was claimed {claim_count} times and settled {completion_count} times",
-                    claim.0, claim.1
+                    "{} claim `{}` over {:?} was claimed {claim_count} times and settled {completion_count} times",
+                    claim.0, claim.1, claim.2
                 ),
             );
         }
@@ -115,8 +132,8 @@ pub fn logical_turn_claims_settle_exactly_once(
         return OracleVerdict::failed(
             LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
             format!(
-                "{} claim `{}` had {count} terminal settlements without one matching claim",
-                claim.0, claim.1
+                "{} claim `{}` over {:?} had {count} terminal settlements without one matching claim",
+                claim.0, claim.1, claim.2
             ),
         );
     }
@@ -381,4 +398,53 @@ pub fn generated_final_value_semantic_channel(
             expectations.provider_turn_count
         ),
     )
+}
+
+#[cfg(test)]
+mod claim_identity_tests {
+    use super::*;
+
+    fn record(name: &str, payload: Value) -> lash_core::facade_support::TraceRecord {
+        lash_core::facade_support::TraceRecord {
+            schema_version: 1,
+            id: format!("{name}-record"),
+            timestamp: chrono::DateTime::<chrono::Utc>::UNIX_EPOCH,
+            context: lash_core::TraceContext::default(),
+            event: lash_core::TraceEvent::Custom {
+                name: name.to_string(),
+                payload,
+            },
+        }
+    }
+
+    fn claim_and_settle(batch: &str) -> [lash_core::facade_support::TraceRecord; 2] {
+        [
+            record(
+                "queued_work.claimed",
+                serde_json::json!({"claim_id": "qwc:1:1", "batch_ids": [batch]}),
+            ),
+            record(
+                "queued_work.completed",
+                serde_json::json!({"claims": [{"claim_id": "qwc:1:1", "batch_ids": [batch]}]}),
+            ),
+        ]
+    }
+
+    /// A claim id a store hands to successive claims over different batches
+    /// is two claims, each settled once.
+    #[test]
+    fn a_reused_claim_id_over_distinct_rows_is_distinct_claims() {
+        let records = [claim_and_settle("qwb:a"), claim_and_settle("qwb:b")].concat();
+        let verdict = logical_turn_claims_settle_exactly_once(&records);
+        assert!(verdict.is_passed(), "{verdict:?}");
+    }
+
+    /// The same claim over the same batch, claimed and settled twice, is a
+    /// double settlement.
+    #[test]
+    fn the_same_claim_over_the_same_rows_twice_is_refused() {
+        let records = [claim_and_settle("qwb:a"), claim_and_settle("qwb:a")].concat();
+        let verdict = logical_turn_claims_settle_exactly_once(&records);
+        assert!(!verdict.is_passed(), "{verdict:?}");
+    }
 }
