@@ -21,6 +21,40 @@ use super::corpora::{self, CorpusProgram};
 
 const REFUSALS: &str = include_str!("round_trip_refusals.tsv");
 
+/// Programs that break the law through an open lens defect, each with the
+/// ticket that owns it. A ratchet like the refusal rows: a listed program
+/// that stops violating the law fails until its row is removed.
+const OPEN_VIOLATIONS: [(&str, &str); 7] = [
+    (
+        "test262:test/language/expressions/call/S11.2.4_A1.4_T4.js",
+        "FIG-3663",
+    ),
+    (
+        "test262:test/language/expressions/does-not-equals/S11.9.2_A6.2_T2.js",
+        "FIG-3663",
+    ),
+    (
+        "test262:test/language/expressions/less-than-or-equal/S11.8.3_A4.4.js",
+        "FIG-3663",
+    ),
+    (
+        "test262:test/language/expressions/logical-or/S11.11.2_A4_T4.js",
+        "FIG-3663",
+    ),
+    (
+        "test262:test/language/line-terminators/comment-multi-lf.js",
+        "FIG-3663",
+    ),
+    (
+        "test262:test/language/literals/numeric/S7.8.3_A1.1_T2.js",
+        "FIG-3663",
+    ),
+    (
+        "test262:test/language/literals/numeric/S7.8.3_A3.4_T2.js",
+        "FIG-3663",
+    ),
+];
+
 /// What the round trip did with one program.
 #[derive(Debug, PartialEq)]
 enum Trip {
@@ -123,10 +157,21 @@ fn allowlist() -> BTreeMap<&'static str, (&'static str, &'static str)> {
 #[test]
 fn every_corpus_program_round_trips_or_is_an_allowlisted_refusal() {
     let mut allowlist = allowlist();
+    let mut open_violations = OPEN_VIOLATIONS.into_iter().collect::<BTreeMap<_, _>>();
     let mut failures = Vec::new();
     let mut agreed = 0usize;
     for program in corpora::all() {
         let listed = allowlist.remove(program.id.as_str());
+        if let Some(ticket) = open_violations.remove(program.id.as_str()) {
+            match round_trip(&program) {
+                Ok(Trip::Violates(_)) => {}
+                other => failures.push(format!(
+                    "{}: no longer violates the law ({other:?}); remove its OPEN_VIOLATIONS row ({ticket})",
+                    program.id
+                )),
+            }
+            continue;
+        }
         match (round_trip(&program), listed) {
             (Ok(Trip::Agrees), None) => agreed += 1,
             (Ok(Trip::Agrees), Some(_)) => failures.push(format!(
@@ -149,8 +194,8 @@ fn every_corpus_program_round_trips_or_is_an_allowlisted_refusal() {
             (Err(error), _) => failures.push(format!("{}: {error}", program.id)),
         }
     }
-    for id in allowlist.keys() {
-        failures.push(format!("{id}: the refusal row names no corpus program"));
+    for id in allowlist.keys().chain(open_violations.keys()) {
+        failures.push(format!("{id}: the row names no corpus program"));
     }
     assert!(
         failures.is_empty(),

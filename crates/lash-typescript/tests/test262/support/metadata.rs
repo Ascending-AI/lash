@@ -13,7 +13,6 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Metadata {
-    pub(crate) description: Box<str>,
     #[serde(default)]
     pub(crate) features: Box<[Box<str>]>,
     #[serde(default)]
@@ -40,6 +39,23 @@ pub(crate) enum ErrorType {
     RangeError,
     TypeError,
     EvalError,
+}
+
+impl TestFlag {
+    /// The flag as Test262 spells it, which is its census row's name.
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::OnlyStrict => "onlyStrict",
+            Self::NoStrict => "noStrict",
+            Self::Module => "module",
+            Self::Raw => "raw",
+            Self::Async => "async",
+            Self::Generated => "generated",
+            Self::CanBlockIsFalse => "CanBlockIsFalse",
+            Self::CanBlockIsTrue => "CanBlockIsTrue",
+            Self::NonDeterministic => "non-deterministic",
+        }
+    }
 }
 
 impl ErrorType {

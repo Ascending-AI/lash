@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 158,
+  "cargo_target_count": 160,
   "feature_lane_units": [
     {
       "features": [],
@@ -18007,7 +18007,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 217,
+  "generated_label_count": 219,
   "packages": [
     {
       "declared_features": [
@@ -20329,11 +20329,29 @@
           "tags": [
             "dev-deferred"
           ]
+        },
+        {
+          "cargo": "test262",
+          "kind": "test",
+          "label": "//crates/lash-typescript:test262__test",
+          "tags": []
+        },
+        {
+          "cargo": "test262_full",
+          "cargo_only": "the full Test262 selection runs about 19,000 programs; the developer loop runs its stratified sample, and the PR tail and the nightly Test262 workflow run it whole",
+          "kind": "test",
+          "label": "//crates/lash-typescript:test262_full__test",
+          "tags": [
+            "dev-deferred"
+          ]
         }
       ],
       "test_batch": {
-        "label": null,
-        "members": []
+        "label": "//crates/lash-typescript:test_batch",
+        "members": [
+          "//crates/lash-typescript:lash-typescript__unit_test",
+          "//crates/lash-typescript:test262__test"
+        ]
       }
     },
     {

@@ -92,6 +92,24 @@ class SourceOwnershipTests(unittest.TestCase):
         self.assertIn("ui", seen)
         self.assertIn("lash", seen)
 
+    def test_shared_test_data_reaches_each_owner_and_no_other_target(self):
+        """A pattern several test targets own is data of each of them."""
+        directory = "crates/lash-typescript"
+        owners = generator.SOURCE_OWNERSHIP[directory]["test_data"]
+        shared = expanded(directory, ["tests/test262/test/**/*.js"])
+        self.assertTrue(shared)
+        functions = {"lash_rust_unit_test", "lash_rust_integration_test", "lash_rust_feature_test"}
+        seen = set()
+        for args in declarations(directory, functions):
+            name = ast.literal_eval(args["crate_name"])
+            seen.add(name)
+            excluded = expanded(directory, ast.literal_eval(args["data_exclude"])) if "data_exclude" in args else set()
+            if name in owners:
+                self.assertFalse(excluded & shared, name)
+            else:
+                self.assertTrue(shared <= excluded, name)
+        self.assertTrue({"test262", "test262_full", "corpus_laws", "integration"} <= seen)
+
     def test_named_feature_tests_keep_both_targets_without_a_unit_harness(self):
         command = feature_variants.parse_command([
             "cargo", "test", "-p", "lash-internal-core-execution",

@@ -445,15 +445,17 @@ register's own text, so a new refusing entry without a probe fails it, as does
 a probe whose refusal stops firing. Entry 5 is why: it promised a read-path
 refusal no code produced, and nothing connected the promise to the code.
 
-**A curated test262 slice** carries the specification's own cases, adapted from
-a pinned test262 commit, with the upstream harness replaced by a single
-`finish(boolean)` and the semantic expression unchanged. Fixtures run through
-the real parse → normalized AST → shared AST → heap VM path. The selection rule
-is at least one positive case per accepted semantic class that does not depend
-on a rejected feature. The complementary rule matters more: **a test262 case is
-never admitted by weakening the dialect.** If its dependencies fall outside the
-accepted set, it becomes a named rejection test or waits until the feature is
-implemented exactly.
+**Test262** carries the specification's own cases. Every test at a pinned
+test262 commit whose census rows (directory, flags, feature tags) are all
+accepted is vendored and run through the real lower → link → compile → heap VM
+path, with the upstream harness rendered in-dialect (FIG-3646). Each selected
+test has exactly one ratcheted outcome: pass, refused by a named `TS_*` code a
+census row backs, fail owned by a ticket, or a named harness capability the
+dialect lacks. The selection is derived rather than curated, so the pass rate
+it reports is the dialect's, not a sample's. The complementary rule matters
+more: **a test262 case is never admitted by weakening the dialect.** A test
+whose constructs fall outside the accepted set is a named refusal until the
+construct is implemented exactly.
 
 ### Beyond one script (FIG-3599)
 
@@ -495,7 +497,7 @@ pair of cells. The mapping from a cell to its Script is stated here once:
   crate README's open-defect list, ratcheted the same way.
 
 **The round-trip law** holds every program of every corpus — the expression
-table, the test262 slice, every session cell and the workflow-graph goldens —
+table, the Test262 selection, every session cell and the workflow-graph goldens —
 to: lower, admit, project, print through the lens, reparse and admit again,
 reaching the same `module_ref` and `source_identity`. A program the printer
 cannot spell is refused with a typed `TypeScriptSourceError`, and every
@@ -711,7 +713,7 @@ that each entry is a limit taken knowingly.
   the register promises has a probe that must fire it.
 - Two conformance mechanisms must both stay green, and they fail differently —
   the Node oracle catches real-engine divergence in accepted operations, the
-  test262 slice catches specification divergence the oracle's corpus never
+  Test262 selection catches specification divergence the oracle's corpus never
   thought to express.
 - The SWC pin is an exact-version dependency. Upgrading it re-opens the
   parse-stack measurement and the AST-classification coverage test, both of

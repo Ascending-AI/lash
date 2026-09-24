@@ -3,3 +3,7 @@
 # "# keep: reason" comment preserves an entry intentionally reserved for future use.
 # Bazel's generated module lock records the complete pinned dependency graph.
 MODULE.bazel.lock
+
+# The generated Test262 outcome record, one row per selected test (FIG-3646),
+# ratcheted by scripts/check_test262_ratchet.py.
+crates/lash-typescript/tests/test262/outcomes.tsv

@@ -455,6 +455,7 @@ jobs:
           python3 scripts/test_bazel_diagnostics.py
           python3 scripts/check_feature_coverage.py check
           python3 scripts/test_check_version_bumps.py
+          python3 scripts/test_check_test262_ratchet.py
           python3 scripts/test_check_format_registry.py
           python3 scripts/test_generate_workflow_schemas.py
           python3 scripts/test_schema_validation.py
@@ -1158,6 +1159,25 @@ jobs:
             echo "unexpected event $GITHUB_EVENT_NAME for the bump gate"; exit 1
           fi
           python3 scripts/check_version_bumps.py --base "$base"
+
+      # FIG-3646: the Test262 outcome record only improves against the base
+      # its tree sits on (the same base the bump gate uses): nothing that
+      # passed may stop passing, and nothing that ran cleanly may start
+      # failing.
+      - name: Check the Test262 outcome ratchet
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base="$(git merge-base origin/main HEAD)"
+          elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
+            base="$MERGE_GROUP_BASE_SHA"
+            [ -n "$base" ] || { echo "merge_group event carried no base_sha"; exit 1; }
+          else
+            echo "unexpected event $GITHUB_EVENT_NAME for the Test262 ratchet"; exit 1
+          fi
+          python3 scripts/check_test262_ratchet.py --base "$base"
 
       - name: Explain skipped versioned surface bump gate
         if: github.event_name == 'workflow_dispatch'

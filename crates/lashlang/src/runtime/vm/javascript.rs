@@ -972,10 +972,18 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
                 if !point.is_finite()
                     || point.fract() != 0.0
                     || !(0.0..=0x10ffff as f64).contains(&point)
-                    || (0xd800 as f64..=0xdfff as f64).contains(&point)
                 {
                     return Err(js_stdlib_error(
                         "String.fromCodePoint received an invalid code point",
+                    ));
+                }
+                // A surrogate code point is a valid argument: ECMA returns a
+                // string holding that lone code unit. The value model cannot
+                // hold one, which is the registered lone-surrogate refusal,
+                // not an invalid argument.
+                if (0xd800 as f64..=0xdfff as f64).contains(&point) {
+                    return Err(js_stdlib_error(
+                        "TS_LONE_SURROGATE_UNSUPPORTED: String.fromCodePoint would create an unrepresentable lone surrogate",
                     ));
                 }
                 output.push(char::from_u32(point as u32).expect("validated code point"));

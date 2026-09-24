@@ -47,6 +47,9 @@ lash_rust_unit_test(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    data_exclude = [
+        "tests/test262/test/**/*.js",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -63,6 +66,9 @@ lash_rust_integration_test(
     crate_root = "tests/main.rs",
     declared_features = [
         "testing",
+    ],
+    data_exclude = [
+        "tests/test262/test/**/*.js",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "3", "test.memory_kb": "12058624"},
     extra_compile_data = [
@@ -91,6 +97,9 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
+    data_exclude = [
+        "tests/test262/test/**/*.js",
+    ],
     exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     library = ":lash-typescript",
@@ -113,6 +122,9 @@ lash_rust_integration_test(
     crate_root = "tests/carrier_laws.rs",
     declared_features = [
         "testing",
+    ],
+    data_exclude = [
+        "tests/test262/test/**/*.js",
     ],
     exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
@@ -152,6 +164,50 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "test262__test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "test262",
+    crate_root = "tests/test262_sample.rs",
+    declared_features = [
+        "testing",
+    ],
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    extra_compile_data = [],
+    library = ":lash-typescript",
+    library_crate_name = "lash_typescript",
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "test262_full__test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "test262_full",
+    crate_root = "tests/test262_full.rs",
+    declared_features = [
+        "testing",
+    ],
+    exec_properties = {"test.cpu_count": "8", "test.memory_kb": "4194304"},
+    extra_compile_data = [],
+    library = ":lash-typescript",
+    library_crate_name = "lash_typescript",
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    rustc_env = {},
+    tags = [
+        "dev-deferred",
+    ],
+    version = "0.0.0-dev",
+)
+
 filegroup(
     name = "session_oracle_corpus",
     srcs = [
@@ -159,6 +215,19 @@ filegroup(
         "tests/differential/sessions/expectations.json",
         "tests/differential/sessions/generated.json",
         "tests/test262/census.tsv",
+    ],
+)
+
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    cpu_count = 5,
+    jobs = 2,
+    memory_kb = 5242880,
+    tests = [
+        ":lash-typescript__unit_test",
+        ":test262__test",
     ],
 )
 

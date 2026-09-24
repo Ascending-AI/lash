@@ -24,6 +24,10 @@ mod corpora;
 #[path = "workflow_graph/goldens.rs"]
 mod goldens;
 #[path = "test262/support/ingest.rs"]
+#[allow(
+    dead_code,
+    reason = "the corpus laws read each test's script and harness bindings, not the runner's one-cell program"
+)]
 mod ingest;
 #[path = "corpus_laws/invariants.rs"]
 mod invariants;

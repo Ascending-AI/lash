@@ -99,8 +99,20 @@ timeout = "long"
 [[rule]]
 packages = ["lash-internal-typescript"]
 kinds = ["test"]
+targets = ["carrier_laws", "corpus_laws", "integration", "race_any_runtime"]
 tags = ["dev-deferred"]
 reason = "the no-abort stress binary runs 43 s; too slow for the developer loop; the merge group runs it in the Bazel tail"
+
+# The whole Test262 selection (FIG-3646): about 19,000 programs, measured at
+# 165 s of one core. The developer loop runs the stratified sample
+# (`test262`); the PR partition's tail runs this, and so does the nightly
+# Test262 workflow, uncached.
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["test"]
+targets = ["test262_full"]
+tags = ["dev-deferred"]
+reason = "the full Test262 selection runs about 19,000 programs; the developer loop runs its stratified sample, and the PR tail and the nightly Test262 workflow run it whole"
 
 [[rule]]
 packages = ["lash-regress"]
@@ -381,6 +393,9 @@ contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
 # deliberately deep sources up to the stack bound. Measured 2026-09-23 as one
 # cgroup at four test threads: 7612 MiB peak, 2.6 cores over 37 s.
 "lash-internal-typescript/integration" = { cpu_count = 4, memory_kb = 12058624 }
+# The full Test262 selection spreads its programs over every core it gets;
+# measured 2026-09-24 at 165 s of one core in total, 37 s for the slowest test.
+"lash-internal-typescript/test262_full" = { cpu_count = 8, memory_kb = 4194304 }
 "lash-runtime/lash" = { cpu_count = 8, memory_kb = 4194304 }
 
 # --- Service jobs --------------------------------------------------------------

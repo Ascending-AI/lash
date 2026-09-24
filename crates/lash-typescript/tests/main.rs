@@ -63,8 +63,6 @@ mod scoping_regressions;
 mod session_globals;
 #[path = "structural_contract.rs"]
 mod structural_contract;
-#[path = "test262_conformance.rs"]
-mod test262_conformance;
 #[path = "trigger_inputs.rs"]
 mod trigger_inputs;
 #[path = "url_runtime.rs"]

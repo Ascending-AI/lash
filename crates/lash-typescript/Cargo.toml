@@ -75,3 +75,16 @@ path = "tests/carrier_laws.rs"
 [[test]]
 name = "corpus_laws"
 path = "tests/corpus_laws.rs"
+
+# The Test262 PR lane (FIG-3646): census and record checks plus a stratified
+# sample of the selection. Its own binary so the PR partition runs it without
+# the integration binary.
+[[test]]
+name = "test262"
+path = "tests/test262_sample.rs"
+
+# The whole Test262 selection against the same record: the workspace
+# partition's tail and the nightly run.
+[[test]]
+name = "test262_full"
+path = "tests/test262_full.rs"

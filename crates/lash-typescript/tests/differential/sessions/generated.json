@@ -1947,8 +1947,8 @@
           }
         },
         {
-          "source": "class A { #x = 1; static has(o: any) { return #x in o; } }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "isNaN(1, 2);\n",
+          "reject": "TS_EXPRESSION_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -3345,8 +3345,8 @@
           }
         },
         {
-          "source": "Uint8Array.fromBase64('AAA=');\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "class A { static { } }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -4031,8 +4031,8 @@
           }
         },
         {
-          "source": "namespace N { }\n",
-          "reject": "TS_NAMESPACE_UNSUPPORTED",
+          "source": "const x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]];\n",
+          "reject": "TS_SOURCE_NESTING_LIMIT",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5333,8 +5333,8 @@
           }
         },
         {
-          "source": "const o = { m() { super.x; } };\n",
-          "reject": "TS_SUPER_UNSUPPORTED",
+          "source": "class A { static #x = 1; }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5603,8 +5603,8 @@
           }
         },
         {
-          "source": "const o = { m() { super.x; } };\n",
-          "reject": "TS_SUPER_UNSUPPORTED",
+          "source": "const x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]];\n",
+          "reject": "TS_SOURCE_NESTING_LIMIT",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5672,8 +5672,8 @@
           }
         },
         {
-          "source": "Array.fromAsync([1]);\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "const d = new Date(0); d.setUTCHours(1);\n",
+          "reject": "TS_DATE_IMMUTABLE",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -6486,8 +6486,8 @@
           }
         },
         {
-          "source": "import x from 'mod' with { type: 'json' };\n",
-          "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
+          "source": "function f() { return new.target; }\n",
+          "reject": "TS_META_PROPERTY_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -7957,8 +7957,8 @@
           }
         },
         {
-          "source": "RegExp.escape('a');\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "const s = String.raw`a`;\n",
+          "reject": "TS_TAGGED_TEMPLATE_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8638,8 +8638,8 @@
           }
         },
         {
-          "source": "const o = { m() { super.x; } };\n",
-          "reject": "TS_SUPER_UNSUPPORTED",
+          "source": "const o: any = {}; o.__lookupGetter__('x');\n",
+          "reject": "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9053,8 +9053,8 @@
           }
         },
         {
-          "source": "class A { static x = 1; }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "const r = /a/v;\n",
+          "reject": "TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
