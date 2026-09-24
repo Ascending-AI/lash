@@ -104,7 +104,7 @@ agent-service-restate-e2e:
   set -euo pipefail
   source "{{repo}}/scripts/worktree-gate-env.sh"
   lash_gate_acquire agent-service-restate-e2e
-  image="${AGENT_SERVICE_RESTATE_IMAGE:-restatedev/restate:1.7.0}"
+  image="${AGENT_SERVICE_RESTATE_IMAGE:-restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b}"
   container="${AGENT_SERVICE_RESTATE_CONTAINER:-lash-agent-service-restate-${LASH_GATE_WORKTREE_SLUG}}"
   admin_port="${RESTATE_ADMIN_PORT:-$((LASH_E2E_PORT_BASE + 20))}"
   ingress_port="${RESTATE_INGRESS_PORT:-$((LASH_E2E_PORT_BASE + 21))}"
