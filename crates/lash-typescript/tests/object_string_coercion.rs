@@ -196,15 +196,12 @@ fn primitives_keep_their_exact_ecma_string() {
 }
 
 #[test]
-fn a_date_keeps_its_pre_existing_refusal() {
-    // `Date` string coercion was already a refusal with its own code
-    // (`TS_DATE_STRING_COERCION_PENDING`); FIG-3166 does not touch it, and does
-    // not shadow it with the new one.
-    let text = refusal(r#"finish("" + new Date(0));"#);
-    assert!(
-        text.contains("TS_DATE_STRING_COERCION_PENDING")
-            && !text.contains("TS_OBJECT_STRING_COERCION"),
-        "the Date refusal is unchanged: {text}"
+fn a_date_coerces_to_its_ecma_date_string() {
+    // FIG-3704 gave `Date` a real ECMA string, so the FIG-3166 refusal no
+    // longer applies to it — `+` answers the deterministic UTC DateString.
+    assert_eq!(
+        finished_string(r#"finish("" + new Date(0));"#),
+        "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"
     );
 }
 

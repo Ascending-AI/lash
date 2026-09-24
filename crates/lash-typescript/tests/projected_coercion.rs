@@ -282,19 +282,6 @@ fn assert_pending_projection_is_not_read(source: &'static str, expected: Value) 
     );
 }
 
-fn assert_pending_projection_fails(source: &'static str, expected_error: &str) {
-    let (result, pending_polls) = run_pending_projection(source, Value::String("hello".into()));
-    assert!(
-        pending_polls > 0,
-        "`{source}` must observe a deliberately pending materialization"
-    );
-    let error = result.expect_err("Date addition should be rejected");
-    assert!(
-        error.to_string().contains(expected_error),
-        "`{source}` returned the wrong error: {error}"
-    );
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn pending_projected_operands_redispatch_without_blocking_the_runtime() {
     for (source, value, expected) in [
@@ -349,12 +336,19 @@ async fn pending_projected_object_comparisons_preserve_identity_without_reading_
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn pending_projected_date_addition_preserves_rejection_in_both_operand_positions() {
-    for source in [
-        r#"finish(new Date(0) + pending);"#,
-        r#"finish(pending + new Date(0));"#,
+async fn pending_projected_date_addition_concatenates_in_both_operand_positions() {
+    // FIG-3704: a Date's default ToPrimitive hint is string, so `+` with a
+    // materialized projection concatenates the deterministic UTC DateString.
+    const DATE: &str = "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)";
+    for (source, expected) in [
+        (r#"finish(new Date(0) + pending);"#, format!("{DATE}hello")),
+        (r#"finish(pending + new Date(0));"#, format!("hello{DATE}")),
     ] {
-        assert_pending_projection_fails(source, "TS_DATE_STRING_COERCION_PENDING");
+        assert_pending_projection_completes(
+            source,
+            Value::String("hello".into()),
+            Value::String(expected.into()),
+        );
     }
 }
 

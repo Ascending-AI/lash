@@ -478,9 +478,11 @@ no probe that fires it fails that test.
   `getUTC*` replacement; locale and local string methods direct the author to
   `toISOString()`.
 - Date numeric coercion is supported, including subtraction and relational
-  comparison. String coercion—directly or through an array/Error-message join—
-  rejects as `TS_DATE_STRING_COERCION_PENDING` and directs the author to
-  `.toISOString()`; the VM never substitutes a host-local date string.
+  comparison. String coercion—`d.toString()`, `d.toUTCString()`, `String(d)`,
+  `d + ''`, template interpolation, or through an array/Error-message join—
+  produces the deterministic UTC-pinned ECMA DateString, such as
+  `Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)`; the VM
+  never substitutes a host-local date string.
 - Map, Set, and URLSearchParams `forEach` all use live durable cursors: entries
   appended during a callback are visited, while entries deleted before their
   turn are skipped. Deleting and reinserting a Map key or Set value schedules

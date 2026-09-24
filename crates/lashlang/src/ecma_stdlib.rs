@@ -262,6 +262,7 @@ pub const INSTANCE_STDLIB_SIGNATURES: &[StdlibSignature] = instance_signatures![
     ("getUTCSeconds", "", On::NONE),
     ("getUTCMilliseconds", "", On::NONE),
     ("toISOString", "", On::NONE),
+    ("toUTCString", "", On::NONE),
 ];
 
 /// The fixed positional arity a signature row declares, or `None` when the

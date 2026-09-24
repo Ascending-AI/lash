@@ -317,6 +317,14 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "const o=JSON.parse('{\"a\":1,\"b\":2}',(k,v)=>k==='b'?undefined:v); const l=JSON.parse('[1,2,3]',(k,v)=>k==='1'?undefined:v); finish(Object.keys(o).join(',')+'|'+l.length+'|'+l[1]+'|'+JSON.parse('{\"n\":5}',(k,v)=>typeof v==='number'?v*2:v).n+'|'+JSON.parse('4',7));",
             "a|3|undefined|10|4",
         ),
+        (
+            "const d=new Date('2014-03-27T00:00:00Z'); const e=new Date('0020-01-01T00:00:00Z'); const n=new Date(NaN); finish(d.toUTCString()+'|'+d.toString()+'|'+e.toUTCString()+'|'+n.toUTCString()+'|'+n.toString()+'|'+String(d));",
+            "Thu, 27 Mar 2014 00:00:00 GMT|Thu Mar 27 2014 00:00:00 GMT+0000 (Coordinated Universal Time)|Wed, 01 Jan 0020 00:00:00 GMT|Invalid Date|Invalid Date|Thu Mar 27 2014 00:00:00 GMT+0000 (Coordinated Universal Time)",
+        ),
+        (
+            "const g=new Date('-000123-07-01T00:00Z'); finish(g.toUTCString()+'|'+g.toString());",
+            "Sun, 01 Jul -0123 00:00:00 GMT|Sun Jul 01 -0123 00:00:00 GMT+0000 (Coordinated Universal Time)",
+        ),
         ("finish([1,[2,[3]]].flat(Infinity).join(','));", "1,2,3"),
         (
             "const a=[3,1,2]; const b=a.toReversed(); const c=a.toSpliced(1,1,9); const d=a.with(-1,8); finish(a.join(',')+'|'+b.join(',')+'|'+c.join(',')+'|'+d.join(','));",

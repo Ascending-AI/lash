@@ -351,6 +351,59 @@ pub(crate) fn to_iso_string(milliseconds: f64) -> Option<String> {
     ))
 }
 
+const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// The year field the date strings share: at least four digits, negative
+/// years signed, and no `+` on extended positive ones — `0020`, `-0001`,
+/// `275760`.
+fn date_year_text(year: i64) -> String {
+    if year < 0 {
+        format!("-{:04}", year.unsigned_abs())
+    } else {
+        format!("{:04}", year)
+    }
+}
+
+/// `Date.prototype.toUTCString`, ECMA-262 21.4.4.42: `Thu, 01 Jan 1970
+/// 00:00:00 GMT`, and `Invalid Date` for a NaN time value.
+pub(crate) fn date_utc_string(milliseconds: f64) -> String {
+    let Some(parts) = date_parts(milliseconds) else {
+        return "Invalid Date".to_string();
+    };
+    format!(
+        "{}, {:02} {} {} {:02}:{:02}:{:02} GMT",
+        WEEKDAY_NAMES[parts.weekday as usize],
+        parts.date,
+        MONTH_NAMES[parts.month as usize],
+        date_year_text(parts.year),
+        parts.hour,
+        parts.minute,
+        parts.second,
+    )
+}
+
+/// `Date.prototype.toString`, ECMA-262 21.4.4.41: `Thu Jan 01 1970 00:00:00
+/// GMT+0000 (Coordinated Universal Time)` — the VM's only timezone is UTC —
+/// and `Invalid Date` for a NaN time value.
+pub(crate) fn date_to_string(milliseconds: f64) -> String {
+    let Some(parts) = date_parts(milliseconds) else {
+        return "Invalid Date".to_string();
+    };
+    format!(
+        "{} {} {:02} {} {:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)",
+        WEEKDAY_NAMES[parts.weekday as usize],
+        MONTH_NAMES[parts.month as usize],
+        parts.date,
+        date_year_text(parts.year),
+        parts.hour,
+        parts.minute,
+        parts.second,
+    )
+}
+
 impl<H: ExecutionHost> Vm<'_, H> {
     #[expect(
         clippy::expect_used,
@@ -495,12 +548,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             | "setUTCSeconds" | "setUTCMilliseconds" => Err(js_stdlib_error(format!(
                 "TS_DATE_IMMUTABLE: {method} is unavailable because durable Date values are immutable; use new Date(d.getTime() + n)"
             ))),
-            "toString" | "toDateString" | "toTimeString" | "toUTCString" | "toGMTString"
-            | "toLocaleString" | "toLocaleDateString" | "toLocaleTimeString" => {
-                Err(js_stdlib_error(format!(
-                    "TS_DATE_STRING_COERCION_PENDING: {method} is unavailable; use .toISOString()"
-                )))
-            }
+            "toUTCString" => Ok(Some(Value::String(date_utc_string(milliseconds).into()))),
+            "toString" => Ok(Some(Value::String(date_to_string(milliseconds).into()))),
             _ => Err(js_stdlib_error(format!(
                 "TS_METHOD_UNSUPPORTED: Date.{method} is not in the TypeScript runtime surface"
             ))),

@@ -308,10 +308,6 @@ const PROBES: &[Probe] = &[
         "const d = new Date(0); d.setUTCFullYear(2020); finish(1);",
     ),
     readme_probe(
-        "TS_DATE_STRING_COERCION_PENDING",
-        "finish('' + new Date(0));",
-    ),
-    readme_probe(
         "TS_URL_SCHEME_UNSUPPORTED",
         "finish(new URL('file:///tmp/x').href);",
     ),

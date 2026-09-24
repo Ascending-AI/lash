@@ -686,7 +686,6 @@ impl Lowerer {
             method,
             "toDateString"
                 | "toTimeString"
-                | "toUTCString"
                 | "toGMTString"
                 | "toLocaleDateString"
                 | "toLocaleTimeString"
