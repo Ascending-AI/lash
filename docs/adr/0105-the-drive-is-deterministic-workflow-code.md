@@ -137,6 +137,13 @@ impl<'c, C: DriveContext> Fenced<'c, C> {
 verdict and is never part of an envelope hash (L-S12). An effect without a
 fence is unrepresentable.
 
+`DriveFence` and `AdmissionId` live in `lash-core-store` (`store::drive_fence`),
+because the stores check the fence, and `lash_core::engine` re-exports them
+unchanged. The drive epoch and the id of the admission that last raised it are
+columns of the session's `session_meta` row; the store half of `seal` is a
+compare-and-set on them, idempotent per admission, and every ingress claim,
+reclaim and settlement checks the fence against them in its own transaction.
+
 ### 3. A race keeps its loser
 
 `race` reborrows both arms. It completes with the first arm the engine records

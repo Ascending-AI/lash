@@ -75,6 +75,8 @@ use lash_conformance::cold_process_turn_parent;
 mod scope_retirement;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
+#[path = "conformance/session_ingress.rs"]
+mod session_ingress;
 #[path = "conformance/wake_delivery.rs"]
 mod wake_delivery;
 #[path = "conformance/worklist_collation.rs"]

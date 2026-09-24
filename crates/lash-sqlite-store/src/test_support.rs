@@ -9,6 +9,47 @@ use lash_core_execution::store::{
 
 #[async_trait::async_trait]
 impl StoreTestSupport for Store {
+    async fn settle_session_ingress_for_testing(
+        &self,
+        fence: &lash_core_execution::store::DriveFence,
+        settlement: lash_core_execution::store::IngressClaimSettlement,
+    ) -> Result<lash_core_execution::store::IngressSettlementReceipt, StoreError> {
+        let fence = fence.clone();
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                Ok(
+                    match crate::persistence::apply_session_ingress_settlement_conn(
+                        tx,
+                        &fence,
+                        &settlement,
+                        now,
+                    ) {
+                        Ok(receipt) => TxOutcome::Commit(Ok(receipt)),
+                        Err(error) => TxOutcome::Rollback(Err(error)),
+                    },
+                )
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn session_ingress_rows_for_testing(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core_execution::store::IngressItem>, StoreError> {
+        let session_id = session_id.clone();
+        self.conn
+            .call(move |conn| {
+                Ok(crate::persistence::session_ingress_rows_conn(
+                    conn,
+                    &session_id,
+                ))
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn rewrite_session_tool_access_for_testing(
         &self,
         schema_version: u32,

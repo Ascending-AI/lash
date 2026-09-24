@@ -153,6 +153,7 @@ touches = [
     "queued_work_batches",
     "queued_work_items",
     "session_execution_leases",
+    "session_ingress",
     "turn_cancel_closure_authorizations",
     "turn_cancel_requests",
     "turn_cancellation_bindings",
@@ -292,6 +293,19 @@ owner = "crates/lash-postgres-store/src/postgres/attachments.rs"
 touches = ["graph_nodes"]
 reason = """
 PostgreSQL's copy of the same forget; see the SQLite entry.
+"""
+
+[[cross_family]]
+statement = "session_ingress.vacuum"
+owner = "crates/lash-store-sql/src/session_ingress.rs"
+touches = ["wake_redelivery_fences"]
+reason = """
+Vacuum removes a wake tombstone only at or below its process's redelivery
+floor (ADR 0101 §9): a tombstone above the floor is the only row that absorbs
+that wake's redelivery. The floor is the process family's row, and reading it
+in a separate statement would let a floor move between the read and the
+delete, so the ingress family owns the whole predicate and reads the fence
+inside it.
 """
 
 [families.artifact]
@@ -592,6 +606,25 @@ shared = [
 sqlite = ["crates/lash-sqlite-store/src/session_sql.rs"]
 postgres = ["crates/lash-postgres-store/src/postgres/session_sql.rs"]
 # Provisioning, not persistence.
+[families.session_ingress]
+tables = ["session_ingress"]
+statement_prefixes = ["session_ingress"]
+shared = ["crates/lash-store-sql/src/session_ingress.rs"]
+sqlite = ["crates/lash-sqlite-store/src/session_ingress.rs"]
+postgres = ["crates/lash-postgres-store/src/postgres/session_ingress.rs"]
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+[families.session_ingress.table_modules]
+session_ingress = "crates/lash-store-sql/src/session_ingress.rs"
+
 [families.turn_ingress]
 tables = [
     "pending_turn_inputs",
@@ -3661,3 +3694,32 @@ statement = "effect_group.select_session_pins"
 backends = ["sqlite", "postgres"]
 kind = "JSON operator"
 reason = "Same phase-tag JSON fork as effect_group.transition_lifecycle."
+
+# ---------------------------------------------------------------------------
+# session_ingress family
+# ---------------------------------------------------------------------------
+
+[[dialect_only]]
+statement = "session_ingress.insert"
+backends = ["sqlite", "postgres"]
+kind = "generated key"
+reason = """
+enqueue_seq is an INTEGER PRIMARY KEY AUTOINCREMENT on SQLite, drawn inside the
+BEGIN IMMEDIATE transaction whose database write lock is the session lock, and
+is never bound; PostgreSQL draws it from the column's sequence with an explicit
+nextval after the session history lock, because the item id of an input
+without a provisioned id is minted from it. The durable column is the same
+column either way.
+"""
+
+[[dialect_only]]
+statement = "session_ingress.select_next_enqueue_seq"
+backends = ["postgres"]
+kind = "generated key"
+reason = """
+PostgreSQL draws `enqueue_seq` from the column's own sequence before the insert
+so admission knows the value it is about to write; SQLite lets the row allocate
+its own. `pg_get_serial_sequence` takes its relation as *text*, so the table
+name is spelled with the `lash_` prefix inside a string literal the renderer
+leaves alone.
+"""

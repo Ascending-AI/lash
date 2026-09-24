@@ -175,6 +175,10 @@ use queued_run::*;
 use queued_run_selection::*;
 mod session_commit;
 mod session_execution_lease;
+mod session_ingress;
 mod turn_input;
 
 use claim_support::*;
+pub(crate) use session_ingress::{
+    apply_session_ingress_settlement_conn, session_ingress_rows_conn,
+};

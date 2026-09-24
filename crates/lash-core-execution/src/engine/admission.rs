@@ -15,6 +15,7 @@ use crate::{
     AwaitEventKey, ExecutionScope, Resolution, SessionId, SessionStateVersionRefusal,
     TurnCancellationEvidence, TurnId,
 };
+pub use lash_core_store::store::{AdmissionId, DriveFence};
 
 /// Unfenced admission. Each operation is a recorded step.
 pub trait DriveAdmission: EngineContext {
@@ -250,32 +251,6 @@ impl Admitted {
     }
 }
 
-/// The authority of one drive over one session.
-///
-/// It has no public constructor: it is decoded only from a recorded
-/// [`SealVerdict::Sealed`] or [`InheritVerdict::Valid`]. It is never part of
-/// an envelope hash (ADR 0105 law L-S12).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct DriveFence {
-    session: SessionId,
-    epoch: u64,
-    admission: AdmissionId,
-}
-
-impl DriveFence {
-    pub fn session(&self) -> &SessionId {
-        &self.session
-    }
-
-    pub fn epoch(&self) -> u64 {
-        self.epoch
-    }
-
-    pub fn admission(&self) -> &AdmissionId {
-        &self.admission
-    }
-}
-
 /// The authority a child inherits from the drive that started it. It is built
 /// only from a [`Fenced`] handle, so it always names a sealed fence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -347,22 +322,6 @@ pub enum ChildOutcome {
 pub struct DriveRequestId(String);
 
 impl DriveRequestId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// The nonce one admission is keyed by. Retried seal bodies with the same
-/// nonce are idempotent.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct AdmissionId(String);
-
-impl AdmissionId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }

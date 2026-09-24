@@ -33,12 +33,15 @@ pub use queued_run::{
     BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunOrigin,
     QueuedRunPosition, QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal, SelectedQueuedRun,
 };
+mod drive_fence;
 mod realization;
 mod retention;
 pub mod runtime_commit;
 mod runtime_commit_plan;
 mod semantic_boundary;
 pub mod session_execution_lease;
+mod session_ingress;
+pub mod session_ingress_plan;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
@@ -47,6 +50,14 @@ mod usage;
 pub mod work_claim;
 
 pub use crate::session_graph::RealizedNodeTimestamp;
+pub use crate::session_ingress_vocabulary::{
+    ClaimMode, Delivery, IngressAffectedItem, IngressCancelReason, IngressClaim,
+    IngressClaimIdentity, IngressEnqueueOutcome, IngressItem, IngressItemDraft, IngressItemId,
+    IngressItemRead, IngressKind, IngressLane, IngressPayload, IngressReadStatus,
+    IngressReclaimOutcome, IngressState, IngressSuffixWithdrawOutcome, IngressTerminalCause,
+    IngressUndeliveredDisposition, IngressWithdrawOutcome, IngressWithdrawReceipt,
+    IngressWithdrawSelector, IngressWithdrawTarget, SESSION_INGRESS_SUBMISSION_FAMILY_VERSION,
+};
 pub use attachment_manifest::{
     AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
@@ -67,6 +78,10 @@ pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, OperationId, RuntimeCommitReceiptDecision,
     decide_runtime_commit_receipt, derive_history_node_id,
+};
+pub use drive_fence::{
+    AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
+    StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{
@@ -131,6 +146,11 @@ pub use session_execution_lease::{
     LeaseClaimNonce, LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseDisplacement, SessionExecutionLeaseObservation,
+};
+pub use session_ingress::{
+    IngressClaimPolicy, IngressClaimRef, IngressClaimSettlement, IngressCommandOutcome,
+    IngressCommandResult, IngressSettlementIntent, IngressSettlementReceipt, IngressTurnCancel,
+    SessionIngressStore,
 };
 pub use state_version::{
     CURRENT_SESSION_STATE_VERSION, OLDEST_SUPPORTED_SESSION_STATE_VERSION, SessionStateAdmission,

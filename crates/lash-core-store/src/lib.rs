@@ -41,6 +41,7 @@ pub mod session_graph;
 pub(crate) mod session_graph_cache;
 pub(crate) mod session_graph_integrity;
 pub mod session_identity;
+pub mod session_ingress_vocabulary;
 pub mod session_policy;
 mod session_policy_serde;
 pub mod session_read_view;

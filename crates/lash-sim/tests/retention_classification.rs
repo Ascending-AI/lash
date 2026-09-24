@@ -179,6 +179,12 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
+        "session_ingress",
+        LifecycleOwned {
+            scope: "claim settlement to tombstone, uniform tombstone vacuum, and session deletion",
+        },
+    ),
+    (
         "attachment_manifest",
         Bounded {
             lever: "explicit forget and attachment GC; retained fork/pin graph prefixes are prune preconditions",
@@ -419,7 +425,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 54, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 55, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

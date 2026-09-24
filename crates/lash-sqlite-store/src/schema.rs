@@ -9,7 +9,7 @@
 //! 15-second `busy_timeout` (see `conn.rs`).
 
 use super::*;
-use crate::schema_fragments::{AWAIT_EVENT_TABLES, SCOPE_RETIREMENT_TABLE};
+use crate::schema_fragments::{AWAIT_EVENT_TABLES, SCOPE_RETIREMENT_TABLE, SESSION_INGRESS_TABLE};
 
 #[derive(Clone, Copy)]
 struct SqliteDatabaseDefinition {
@@ -73,7 +73,7 @@ impl SqliteDatabase {
             Self::DurableCore => SqliteDatabaseDefinition {
                 name: "durable core",
                 schema: SCHEMA,
-                fragments: &[AWAIT_EVENT_TABLES],
+                fragments: &[AWAIT_EVENT_TABLES, SESSION_INGRESS_TABLE],
                 version: SCHEMA_VERSION,
             },
             Self::ProcessRegistry => SqliteDatabaseDefinition {
@@ -262,6 +262,8 @@ CREATE TABLE IF NOT EXISTS session_meta (
     caused_by_node_id                 TEXT,
     source_session_id                 TEXT,
     source_node_id                    TEXT,
+    drive_epoch                       INTEGER NOT NULL DEFAULT 0,
+    drive_admission_id                TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
     CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
@@ -849,7 +851,17 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `worker_replacement_abort` with the engine-neutral, parking
 /// `effect_replay_divergence`, and the retired code is not aliased. No
 /// relation changes; a pre-84 database is rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 84;
+/// Bumped to 86 for FIG-3540 (S3): the catalog gains `session_ingress`, the
+/// one session ingress of ADR 0101: one row per admitted item, one per-session
+/// order under the database write lock, two class-level lanes. Its
+/// `delivery_*` columns hold the submitted delivery, written once and never
+/// rewritten, and `submission_digest` likewise; a claim's columns are set
+/// exactly on an `accepted` row, and a tombstone carries its closed cause and
+/// no claim. Partial indexes keep tombstones off the claim path. A pre-86
+/// database has no such table and is rejected at open and recreated. The
+/// number is provisional: the ingress store merges with the FIG-3540
+/// cutover, which takes the next free version at its merge.
+pub(crate) const SCHEMA_VERSION: i32 = 86;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

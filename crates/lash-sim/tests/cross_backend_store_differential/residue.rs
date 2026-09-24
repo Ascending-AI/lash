@@ -379,6 +379,12 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
          runs against; the rows this session can reach are compared by `checkpoint_blobs`",
     ),
     (
+        "session_ingress",
+        "the one session ingress (ADR 0101) is not yet a `RuntimePersistence` component, so no \
+         store-trait operation this differential drives writes it; owned by the session-ingress \
+         conformance registrations on both backends until the FIG-3540 cutover wires it in",
+    ),
+    (
         "attachment_blobs",
         "SQLite-only attachment byte store (`SqliteAttachmentStore`): no store-trait operation \
          this differential drives writes it, and a PostgreSQL deployment takes an external \
