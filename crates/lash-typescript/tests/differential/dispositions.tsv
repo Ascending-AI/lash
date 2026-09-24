@@ -38,16 +38,14 @@
 "`${{a:1}}`"	runtime-reject	TS_OBJECT_STRING_COERCION
 # `var`, parameter and catch bindings are not assignable after their
 # declaration in v1; the refusal is by name (the code says const, which
-# over-states it) and keeps them out of the unimplemented capture-read check
-# below.
+# over-states it).
 "(() => { var v = 1; v = 2; return v; })()"	reject	TS_ASSIGN_CONST
 "(() => { function h(p) { p = p + 1; return p; } return h(1); })()"	reject	TS_ASSIGN_CONST
 "(() => { try { throw 1; } catch (e) { e = 2; return e; } })()"	reject	TS_ASSIGN_CONST
-# Open defects the oracles found (FIG-3599), pending their tickets: the row
-# pins the current wrong answer's divergence, so a fix fails it until it is
-# promoted to `accept`. The third column names the defect in the README's
-# open-defect list.
-"(() => { let x = 1; const f = () => x; x = 2; return f(); })()"	open-defect	mutable-capture-read
+# FIG-3604: a closure copies what it captures, so one created before its
+# binding is reassigned refuses rather than reading the stale copy (register
+# entry 5, the read path).
+"(() => { let x = 1; const f = () => x; x = 2; return f(); })()"	reject	TS_MUTABLE_CAPTURE_UNSUPPORTED
 # The linker infers an object literal's type and refuses a read or write of
 # a field the type lacks, as TypeScript's checker does. These rows still run
 # Node-exact through the VM (a value whose type is not a literal's — parsed

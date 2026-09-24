@@ -35,6 +35,13 @@ invariants** run over every corpus, and the corpus rule extends to all three.
 The cell-to-Script mapping, register entries 17–21 and retired entry 14 are
 recorded below, in ["Beyond one script"](#beyond-one-script-fig-3599).
 
+Amended 2026-09-24 (FIG-3604): register entry 5's read path is implemented —
+until then only captured *writes* were refused, and a closure reading a `let`
+reassigned after it was created answered a stale value — and every register
+entry that promises a refusal now carries an executable probe that must fire
+it, checked against the text of this register. See entry 5 and "Conformance
+evidence" below.
+
 ## Context
 
 Lash accepts model-authored code, and a model's prior on TypeScript is far
@@ -116,8 +123,10 @@ deferral. Self-recursion, named self-recursive function *expressions*, nested
 declarations and acyclic chains are unaffected.
 
 **Mutable lexical captures** reject, on both captured reads and captured writes,
-until durable lexical cells exist. Immutable captures and mutation *through* a
-captured object reference are supported.
+until durable lexical cells exist. A capture is mutable when an assignment to
+the binding can run after the closure copied it; a binding nothing assigns
+after that point is captured exactly, however it was declared. Immutable
+captures and mutation *through* a captured object reference are supported.
 
 ### The agent surface
 
@@ -426,6 +435,16 @@ can drift from the corpus in silence. The standing rule is that every fixed
 dialect case the oracle can express lands in the corpus: the hand-written test
 is the diagnosis, the corpus row is the permanent guard.
 
+**Every refusal the register promises is executable.** An entry below that
+says it rejects, refuses or fails closed carries at least one probe — a source
+that must be refused with the named diagnostic, or fail at run time with the
+named error — and every `TS_*` code the entry names is fired by one of them;
+the crate README's register is held to the same rule for the codes it names.
+The check (`crates/lash-typescript/tests/deviation_register.rs`) reads this
+register's own text, so a new refusing entry without a probe fails it, as does
+a probe whose refusal stops firing. Entry 5 is why: it promised a read-path
+refusal no code produced, and nothing connected the promise to the code.
+
 **A curated test262 slice** carries the specification's own cases, adapted from
 a pinned test262 commit, with the upstream harness replaced by a single
 `finish(boolean)` and the semantic expression unchanged. Fixtures run through
@@ -520,7 +539,13 @@ that each entry is a limit taken knowingly.
    byte-for-byte. Cycle-capable durable graph encoding is deferred, and the
    front end never silently copies a cycle to avoid the question.
 5. **Mutable captures.** Rejected on both the read and the write path until
-   durable lexical cells exist.
+   durable lexical cells exist, as `TS_MUTABLE_CAPTURE_UNSUPPORTED`. A closure
+   copies what it captures when it is created, so the read path refuses a
+   capture that an assignment can reach afterwards: later in the same frame, in
+   a later iteration of a loop the binding outlives, or through a
+   `globalThis.name` write. The write path refuses an assignment to a captured
+   binding from inside the closure. A `const`, a `let` assigned only before the
+   closure exists, and a per-iteration loop binding are captured exactly.
 6. **Mutual recursion.** Rejected, for the durable-cycle reason above.
 7. **The JSON-shaped host boundary.** Object properties whose value is
    `undefined` are omitted and array elements become `null`; incoming JSON
@@ -638,9 +663,10 @@ that each entry is a limit taken knowingly.
 - Model output that uses a construct outside the surface fails at parse or link
   with a named code, early and visibly, rather than running with an
   approximated meaning.
-- The register is a maintained artifact with a mechanical guard: the
+- The register is a maintained artifact with mechanical guards: the
   standard-library pin asserts equality in both directions, so growing the
-  lowerer without documenting the growth fails the build.
+  lowerer without documenting the growth fails the build, and every refusal
+  the register promises has a probe that must fire it.
 - Two conformance mechanisms must both stay green, and they fail differently —
   the Node oracle catches real-engine divergence in accepted operations, the
   test262 slice catches specification divergence the oracle's corpus never

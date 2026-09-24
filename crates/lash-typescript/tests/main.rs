@@ -24,6 +24,8 @@ mod console_observation;
 mod constructs;
 #[path = "depth_guard.rs"]
 mod depth_guard;
+#[path = "deviation_register.rs"]
+mod deviation_register;
 #[path = "dialect.rs"]
 mod dialect;
 #[path = "differential_oracle.rs"]
@@ -34,6 +36,8 @@ mod ecma_regressions;
 mod fluency_smoke;
 #[path = "grammar_coverage.rs"]
 mod grammar_coverage;
+#[path = "mutable_captures.rs"]
+mod mutable_captures;
 #[path = "no_abort_guarantee.rs"]
 mod no_abort_guarantee;
 #[path = "object_string_coercion.rs"]

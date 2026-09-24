@@ -217,7 +217,10 @@ pinned commit, harness shims, and deliberate inventory-first sync procedure.
 
 These are the only deliberate deviations from an otherwise accepted
 ECMA-262 operation. They are runtime-system constraints rather than alternate
-language semantics:
+language semantics. Every refusal an item below names is proven by an
+executable probe in `tests/deviation_register.rs`, which holds ADR 0062's
+numbered register to the same rule: an entry that promises a refusal and has
+no probe that fires it fails that test.
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
@@ -331,9 +334,18 @@ language semantics:
   therefore detects an existing cycle before invoking a function replacer: a
   replacer cannot erase that cycle first, unlike Node. This is an explicit v1
   deviation until the durable graph encoding can represent cycles.
-- Captures are by value. A closure may read a `let` (including a classic-for
-  iteration value), but assigning to a captured lexical binding still rejects
-  with `TS_MUTABLE_CAPTURE_UNSUPPORTED` until durable lexical cells exist.
+- Captures are by value: a closure copies each binding it captures when it is
+  created, which is exact only while nothing assigns that binding afterwards.
+  Until durable lexical cells exist, a capture that an assignment can reach
+  after the closure is created rejects with `TS_MUTABLE_CAPTURE_UNSUPPORTED`,
+  on the read path as well as the write path: an assignment later in the same
+  frame, one in a later iteration of a loop the binding outlives, a
+  `globalThis.name` write, or an assignment from inside the closure itself. A
+  `const`, a `let` assigned only before the closure exists, and a binding
+  declared inside the loop body or head (including a classic-for iteration
+  value, whose `i++` writes the next iteration's copy) are captured exactly.
+  A closure never outlives its cell (`closure-boundary`), so only its own
+  cell can reassign what it captured.
 - The host boundary is JSON-shaped: object properties whose value is
   `undefined` are omitted and array elements become `null`; incoming JSON
   cannot manufacture `undefined`.
@@ -466,10 +478,6 @@ rulings: each corpus row that shows one states the current wrong answer, and
 the row fails once the defect is fixed, until it is promoted to an ordinary
 row. They are listed here so no divergence is silent while its fix is owed.
 
-- `mutable-capture-read`: a closure captures a `let` by value, so a closure
-  created before the binding is reassigned reads the old value; Node reads the
-  current one. Register entry 5 of ADR 0062 promises a rejection on the read
-  path as well as the write path; only the write path is refused.
 - `exotic-session-globals`: a top-level binding holding a `Map`, `Set`,
   `Date`, `RegExp`, `URL` or `URLSearchParams` is live in the session's
   runtime roots but absent from its host view, and a later cell links against

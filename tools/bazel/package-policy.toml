@@ -178,13 +178,18 @@ kinds = ["bin", "test", "example", "bench"]
 compile_data = ["//examples:shared_rust_sources"]
 
 # The codemode parity module links the checked-in `examples/codemode-parity/*.ts`
-# cells with `include_str!`, and the schema agreement test compiles the
-# published graph schema in and validates real serialized graph documents.
+# cells with `include_str!`, the schema agreement test compiles the published
+# graph schema in and validates real serialized graph documents, and the
+# deviation-register census reads ADR 0062's register the same way.
 [[rule]]
 packages = ["lash-internal-typescript"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["integration"]
-compile_data = ["//examples:codemode_parity_cells", "//:workflow_graph_schema"]
+compile_data = [
+    "//examples:codemode_parity_cells",
+    "//:workflow_graph_schema",
+    "//:dialect_deviation_register",
+]
 
 # The corpus laws (FIG-3599) run over every corpus, the codemode parity cells
 # among them.

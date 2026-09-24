@@ -133,6 +133,7 @@ impl Lowerer {
             ));
         }
         let nested_function = self.current_function() != 0;
+        let id = self.declare_in_ledger(name, BindingKind::Var);
         let index = self.root_scope_depth.saturating_sub(1);
         #[expect(
             clippy::expect_used,
@@ -145,6 +146,7 @@ impl Lowerer {
         scope.bindings.insert(
             name.to_string(),
             Binding {
+                id,
                 internal: name.to_string(),
                 kind: BindingKind::Var,
                 initialized: true,
@@ -203,6 +205,20 @@ impl Lowerer {
         self.position.loop_depth += 1;
         let result = lower(self);
         self.position.loop_depth = outer_depth;
+        result
+    }
+
+    /// Lowers one loop statement — its head and test as well as its body,
+    /// since all of them run again on every iteration — as a loop of the
+    /// capture ledger.
+    pub(super) fn in_loop_statement<T>(
+        &mut self,
+        lower: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let id = self.capture_ledger.open_loop();
+        self.position.loops.push(id);
+        let result = lower(self);
+        self.position.loops.pop();
         result
     }
 
@@ -591,7 +607,14 @@ impl Lowerer {
             Pattern::Ident(name, _) => {
                 let target = match mode {
                     PatternMode::Initialize => {
-                        let internal = self.binding(name)?.internal.clone();
+                        let binding = self.binding(name)?;
+                        let (internal, binding_id) = (binding.internal.clone(), binding.id);
+                        // A `var` exists (holding `undefined`) before its
+                        // declaration runs, so its initializer is an
+                        // assignment a closure may already have copied past.
+                        if binding.kind == BindingKind::Var {
+                            self.record_write(binding_id);
+                        }
                         self.initialize(name);
                         AssignTarget::variable(internal.into())
                     }
@@ -727,6 +750,7 @@ impl Lowerer {
                         ));
                     }
                     let created = self.ensure_global_binding(global)?;
+                    self.record_global_write(global);
                     let target = AssignTarget::variable(global.into());
                     let setup = created
                         .then(|| Self::temp_assignment(global, LashExpr::Undefined))
@@ -801,6 +825,7 @@ impl Lowerer {
             && let Some(global) = global_this_member_name(object, property)
         {
             self.ensure_global_binding(global)?;
+            self.record_global_write(global);
             let result = self.temporary("global_assignment");
             if self.current_function() != 0 {
                 return Ok(LashExpr::Block(vec![
@@ -957,6 +982,7 @@ impl Lowerer {
         property: &MemberProperty,
     ) -> Result<LashExpr, Diagnostic> {
         if let Some(global) = global_this_member_name(object, property) {
+            self.record_global_write(global);
             return Ok(LashExpr::BuiltinCall {
                 name: "__typescript_global_delete".into(),
                 args: vec![LashExpr::String(global.into())],
