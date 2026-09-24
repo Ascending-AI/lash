@@ -309,6 +309,14 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "try { String.raw({raw:undefined}); finish('no'); } catch(e) { finish(e.name); }",
             "TypeError",
         ),
+        (
+            "const calls=[]; JSON.parse('{\"p1\":0,\"p2\":0,\"p1\":0,\"2\":0,\"1\":0}',(k,v)=>{calls.push(k);return v;}); finish(calls.join(','));",
+            "1,2,p1,p2,",
+        ),
+        (
+            "const o=JSON.parse('{\"a\":1,\"b\":2}',(k,v)=>k==='b'?undefined:v); const l=JSON.parse('[1,2,3]',(k,v)=>k==='1'?undefined:v); finish(Object.keys(o).join(',')+'|'+l.length+'|'+l[1]+'|'+JSON.parse('{\"n\":5}',(k,v)=>typeof v==='number'?v*2:v).n+'|'+JSON.parse('4',7));",
+            "a|3|undefined|10|4",
+        ),
         ("finish([1,[2,[3]]].flat(Infinity).join(','));", "1,2,3"),
         (
             "const a=[3,1,2]; const b=a.toReversed(); const c=a.toSpliced(1,1,9); const d=a.with(-1,8); finish(a.join(',')+'|'+b.join(',')+'|'+c.join(',')+'|'+d.join(','));",

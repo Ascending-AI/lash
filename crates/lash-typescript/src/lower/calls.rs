@@ -605,8 +605,18 @@ impl Lowerer {
             }
         }
         if matches!(object, Expr::Ident(name, _) if name == "JSON") && !self.has_binding("JSON") {
-            if method == "parse" && args.len() > 1 {
-                return Err(reject_json_parse_reviver());
+            if method == "parse" {
+                if args.len() > 2 {
+                    return Err(Diagnostic::defect(
+                        DiagnosticCode::MethodUnsupported,
+                        "JSON.parse expects text and an optional reviver",
+                        None,
+                    )
+                    .with_hint("call JSON.parse(text) or JSON.parse(text, reviver)"));
+                }
+                if let [text, reviver] = args {
+                    return self.lower_json_parse(text, reviver);
+                }
             }
             if method == "stringify" {
                 if args.len() > 3 {
