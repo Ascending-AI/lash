@@ -1083,18 +1083,9 @@ fn drive_plugin_stream(
                 }
             }
 
-            let transforms = plugins
-                .transform_assistant_response(
-                    &SessionId::from("rlm-protocol-scenario-hooks"),
-                    response.clone(),
-                )
-                .await
-                .expect("protocol-scenario response hook succeeds");
-            let response = transforms
-                .last()
-                .map(|owned| owned.value.response.clone())
-                .unwrap_or(response);
-            plugins
+            // The staged boundary's order: the stream ends in phase 1, whose
+            // stream-hook end states phase 2's response hooks read.
+            let stream_hook_states = plugins
                 .finish_assistant_stream(
                     &SessionId::from("rlm-protocol-scenario-hooks"),
                     if abort_requested {
@@ -1105,6 +1096,18 @@ fn drive_plugin_stream(
                 )
                 .await
                 .expect("protocol-scenario stream-finished hook succeeds");
+            let transforms = plugins
+                .transform_assistant_response(
+                    &SessionId::from("rlm-protocol-scenario-hooks"),
+                    response.clone(),
+                    &stream_hook_states,
+                )
+                .await
+                .expect("protocol-scenario response hook succeeds");
+            let response = transforms
+                .last()
+                .map(|owned| owned.value.response.clone())
+                .unwrap_or(response);
 
             PluginStreamRun {
                 visible_text,

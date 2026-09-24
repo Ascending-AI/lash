@@ -672,6 +672,7 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
             "strict-tool-call",
         ),
         RuntimeEffectCommand::LlmCall {
+            provider_id: "test".to_string(),
             request: Box::new(effect_request_spec(&provider_request)),
         },
     );
@@ -703,6 +704,7 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
                     result: Box::new(Ok(completion.response)),
                     text_streamed: false,
                     call_record: Some(completion.call_record),
+                    stream: Box::default(),
                 })
             }),
         )
@@ -741,6 +743,7 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
                     result: Box::new(Ok(completion.response)),
                     text_streamed: false,
                     call_record: Some(completion.call_record),
+                    stream: Box::default(),
                 })
             }),
         )

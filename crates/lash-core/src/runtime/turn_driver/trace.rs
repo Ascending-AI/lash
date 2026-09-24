@@ -12,12 +12,20 @@ impl RuntimeTurnDriver<'_> {
             .for_turn(self.turn_id.clone())
     }
 
-    pub(super) fn llm_call_id(&mut self, protocol_iteration: usize) -> String {
-        let ordinal = self.next_llm_ordinal;
-        self.next_llm_ordinal += 1;
+    /// The trace id of one model call, named by the effect that made it, so a
+    /// step body on any worker names the call the same way without a counter
+    /// carried between steps.
+    pub(super) fn llm_call_id(
+        &self,
+        protocol_iteration: usize,
+        invocation: &crate::RuntimeInvocation,
+    ) -> String {
         format!(
             "{}:{}:{}:{}",
-            self.session_id, self.turn_index, protocol_iteration, ordinal
+            self.session_id,
+            self.turn_index,
+            protocol_iteration,
+            invocation.effect_id().unwrap_or_default()
         )
     }
 

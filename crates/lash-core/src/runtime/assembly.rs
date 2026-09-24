@@ -39,6 +39,16 @@ pub(super) struct ReasoningPublicationState {
 }
 
 impl ReasoningPublicationState {
+    /// The state a recorded LLM-call outcome carries: the blocks its live
+    /// stream published.
+    pub(super) fn from_published_blocks(published_blocks: Vec<StreamBlockIdentity>) -> Self {
+        Self { published_blocks }
+    }
+
+    pub(super) fn into_published_blocks(self) -> Vec<StreamBlockIdentity> {
+        self.published_blocks
+    }
+
     /// Records a reasoning block that streamed (start or delta), so the
     /// completed part for its item does not re-publish it.
     pub(super) fn record_streamed_block(&mut self, block: &StreamBlockIdentity) {

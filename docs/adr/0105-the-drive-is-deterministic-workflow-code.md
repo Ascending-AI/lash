@@ -342,6 +342,28 @@ worker. `SessionServices` has no members yet; P10a defines them.
   `RuntimeEffectOutcome::{LlmCall, ExecCode, Checkpoint, SyncExecutionEnvironment}`
   gain the decision half of today's turn-effect state update (P7). None uses
   `#[serde(default)]`: the P1 gate refuses old bytes.
+- **Implemented (P7, first part).** The turn-effect state update is deleted: a
+  step body runs on a copy of the driver and hands back nothing but its
+  outcome.
+  - The checkpoint's claims reach the driver only through its recorded claim
+    set, folded in before its result is read, so a failed checkpoint hands
+    its claims to the failure path on replay as on the live pass.
+  - A model call runs on a copy of the provider the turn was admitted with;
+    nothing the provider object learns during a call reaches the next one.
+    The `LlmCall` command names the policy's provider beside the request's
+    model.
+  - The `LlmCall` outcome carries what the provider stream left for later
+    steps: the reasoning blocks it already published, and each plugin's
+    stream-hook end state. The `AssistantResponseHooks` command carries those
+    states, and a response hook reads them, never its plugin's memory, so
+    phase 2 derives the same response on any worker. The stream-finished hook
+    returns the state.
+  - Trace ids for model calls are named by their effect, not by a counter
+    carried between steps.
+  - Effect-journal generation 2.
+  - Held for a ruling: the tool surface (the sync body's catalog cache, the
+    drive-side machine preparation, catalog drift checks and plugin tool
+    overlays).
 
 ### 11. Validation and laws
 

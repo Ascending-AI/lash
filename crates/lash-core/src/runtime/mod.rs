@@ -135,7 +135,6 @@ pub use lash_core_store::usage;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::usage;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -171,7 +170,7 @@ use turn_driver::*;
 pub use crate::store::QueuedWorkClass;
 use assembly::{
     LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
-    LlmStreamState, LlmStreamSummary, ReasoningPublicationState, fold_llm_stream_event,
+    LlmStreamState, ReasoningPublicationState, fold_llm_stream_event,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -201,32 +200,32 @@ pub use clock::{Clock, ClockWallTime, SystemClock};
 pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION};
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
-    AdmittedScope, AdmittedScopeError, AssistantResponseHookEvents, AwaitEventKey,
-    AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
-    CausalRef, CheckpointClaimSet, ChildDrainOutcome, CommandJournalGuard,
-    CompletionKeyPreparation, DrainedChild, EffectAddress, EffectGroupDrainBudget,
-    EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalIdentity,
-    EffectJournalRetirement, EffectJournaling, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, GroupChildBinding, GroupDrainReport, GroupExecutors,
-    GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement, GroupWakePolicy,
-    LlmRequestSpec, LoserPolicy, NativeEffectHost, NativeRuntimeEffectController,
-    OpenerFinalizationSteps, ProcessCommand, ProcessEffectOutcome, ProcessLocalExecution,
-    ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
-    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RankedGroupSettlement, RecordedJournal,
-    RecordedKeyFence, RecordedKeyRange, RecordedKeys, Resolution, ResolveOutcome,
-    RuntimeAssistantResponseHooksOutcome, RuntimeAttribution, RuntimeAwaitEventOptions,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
-    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
-    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnlyFence,
-    SleepSpec, StoreEffectGroupClosing, StoreEffectGroupDrain, ToolAttemptEffectOutcome,
-    ToolAttemptLaunch, ToolChildDriver, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
-    TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
-    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, UnsettledEffectGroup,
-    concrete_turn_cancellation_authority, effect_groups_unsupported,
+    AdmittedScope, AdmittedScopeError, AssistantResponseHookEvents, AssistantStreamHookState,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
+    CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet, ChildDrainOutcome,
+    CommandJournalGuard, CompletionKeyPreparation, DrainedChild, EffectAddress,
+    EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
+    EffectJournalIdentity, EffectJournalRetirement, EffectJournaling, EffectOpener,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildBinding,
+    GroupDrainReport, GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen,
+    GroupSettlement, GroupWakePolicy, LlmRequestSpec, LlmStreamRecord, LoserPolicy,
+    NativeEffectHost, NativeRuntimeEffectController, OpenerFinalizationSteps, ProcessCommand,
+    ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
+    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
+    RankedGroupSettlement, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
+    Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
+    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
+    RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
+    RuntimeSleepOptions, RuntimeSubject, ScopeBoundController, ScopedEffectController,
+    SegmentProgress, ServedOnlyFence, SleepSpec, StoreEffectGroupClosing, StoreEffectGroupDrain,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolChildDriver, ToolIntentOutcomeSink,
+    ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
+    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
+    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
+    UnsettledEffectGroup, concrete_turn_cancellation_authority, effect_groups_unsupported,
     refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
     validate_replayed_effect_envelope,
 };

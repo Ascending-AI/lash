@@ -874,13 +874,13 @@ pub mod runtime {
     /// Runtime host configuration, control, observation, and effect contracts.
     pub use lash_core::runtime::{
         AdmittedScope, AdmittedScopeError, ApplyConfigPatch, AssembledTurn,
-        AssistantResponseHookEvents, AwaitEventResolver, CheckpointClaimSet,
-        CompletionKeyPreparation, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
+        AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventResolver,
+        CheckpointClaimSet, CompletionKeyPreparation, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
         DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
         EffectJournaling, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
-        GroupSettlement, GroupWakePolicy, LashRuntime, LlmRequestSpec, LoserPolicy,
-        NativeQueuedWork, NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork,
-        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        GroupSettlement, GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord,
+        LoserPolicy, NativeQueuedWork, NativeSubstrateConfig, NativeSubstrateConfigError,
+        NoQueuedWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
         QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
         QueuedLaneProbe, QueuedWorkExecutionConcurrencyError, QueuedWorkRunError,
         QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest,

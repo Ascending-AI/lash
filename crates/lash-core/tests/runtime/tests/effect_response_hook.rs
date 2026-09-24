@@ -393,6 +393,7 @@ async fn recording_response_hook_terminal_error_replays() {
             ),
             RuntimeEffectCommand::AssistantResponseHooks {
                 response: Box::default(),
+                stream_hook_states: Vec::new(),
             },
         );
         controller
@@ -418,4 +419,140 @@ async fn recording_response_hook_terminal_error_replays() {
             .expect_err("terminal replays");
         assert_eq!(error.message, "terminal derivation error");
     }
+}
+
+/// A plugin whose response hook derives the response from what its stream
+/// hooks saw. Each built instance has its own memory, as each worker does.
+fn stream_state_plugin() -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(|_| {
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: None,
+                presentation_steps: vec![],
+                runtime_event: None,
+                external_registrar: Some(Arc::new(|reg| {
+                    let seen = Arc::new(std::sync::Mutex::new(String::new()));
+                    let stream_seen = Arc::clone(&seen);
+                    reg.output().stream(Arc::new(move |context| {
+                        stream_seen.lock_recover().push_str(&context.chunk);
+                        Box::pin(async move {
+                            Ok(lash_core::plugin::AssistantStreamTransform {
+                                chunk: context.chunk,
+                                reasoning_deltas: Vec::new(),
+                                events: Vec::new(),
+                                abort_stream: false,
+                            })
+                        })
+                    }));
+                    let finished_seen = Arc::clone(&seen);
+                    reg.output().stream_finished(Arc::new(move |_| {
+                        let seen = std::mem::take(&mut *finished_seen.lock_recover());
+                        Box::pin(async move { Ok(Some(serde_json::json!({ "seen": seen }))) })
+                    }));
+                    reg.output().response(Arc::new(move |context| {
+                        let seen = context
+                            .stream_state
+                            .as_ref()
+                            .and_then(|state| state["seen"].as_str())
+                            .unwrap_or("<nothing>")
+                            .to_string();
+                        let mut response = context.response;
+                        response.parts = vec![LlmOutputPart::Text {
+                            text: format!("derived from the stream: {seen}"),
+                            response_meta: None,
+                        }];
+                        Box::pin(async move {
+                            Ok(lash_core::facade_support::AssistantResponseTransform {
+                                response,
+                                events: Vec::new(),
+                            })
+                        })
+                    }));
+                    Ok(())
+                })),
+            }))
+        }),
+    })
+}
+
+/// Anchor (e): phase 2 redriven alone on another worker derives what the
+/// streaming worker would have.
+///
+/// The worker that streamed the completion dies between the phases. A fresh
+/// runtime, whose plugin instance never saw the stream, redrives phase 2 from
+/// the journal: the stream hooks' end state rides phase 1's recorded outcome
+/// and phase 2's command, so the derivation reads it rather than the memory of
+/// a worker that is gone.
+#[tokio::test]
+async fn phase_two_on_another_worker_derives_from_the_journaled_stream_state() {
+    let backend = memory_backend().await;
+    let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let transport = || {
+        let provider_calls = Arc::clone(&provider_calls);
+        TestProvider::builder()
+            .kind("mock")
+            .requires_streaming(true)
+            .complete(move |request| {
+                provider_calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if let Some(stream) = request.stream_events.as_ref() {
+                        for text in ["alpha ", "beta"] {
+                            stream.send(LlmStreamEvent::Delta {
+                                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                                text: text.to_string(),
+                            });
+                        }
+                    }
+                    Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text: "alpha beta".to_string(),
+                            response_meta: None,
+                        }],
+                        terminal_reason: lash_core::LlmTerminalReason::Stop,
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    })
+                }
+            })
+            .build()
+    };
+    let recorder = RecordingEffectController::default()
+        .with_local_llm_execution()
+        .with_replay_by_key()
+        .with_crash_before_first_response_hooks();
+    let turn_id = TurnId::from("phase-two-elsewhere");
+
+    let mut streaming_worker = runtime_with_plugins_and_tools_and_host(
+        vec![stream_state_plugin()],
+        Arc::new(EmptyTools),
+        transport(),
+        host_with_effect_recorder(&backend, recorder.clone()),
+    )
+    .await;
+    drive_turn(&mut streaming_worker, &backend, &recorder, &turn_id)
+        .await
+        .expect_err("the streaming worker dies between the phases");
+    drop(streaming_worker);
+
+    let mut other_worker = runtime_with_plugins_and_tools_and_host(
+        vec![stream_state_plugin()],
+        Arc::new(EmptyTools),
+        transport(),
+        host_with_effect_recorder(&backend, recorder.clone()),
+    )
+    .await;
+    let redriven = drive_turn(&mut other_worker, &backend, &recorder, &turn_id)
+        .await
+        .expect("another worker completes phase 2 from the journal");
+
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        1,
+        "the completion is served from the journal"
+    );
+    assert_eq!(
+        redriven.assistant_output.safe_text, "derived from the stream: alpha beta",
+        "phase 2 reads the recorded stream state, not the redriving worker's memory"
+    );
 }

@@ -451,6 +451,7 @@ async fn lease_fencing_rejects_stale_derivation_release(
     let mut envelope = lease_fencing_envelope(&key);
     envelope.command = RuntimeEffectCommand::AssistantResponseHooks {
         response: Box::default(),
+        stream_hook_states: Vec::new(),
     };
     let (first_entered, entered) = tokio::sync::oneshot::channel();
     let (fail, failing) = tokio::sync::oneshot::channel();

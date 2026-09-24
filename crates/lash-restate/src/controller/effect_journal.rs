@@ -25,7 +25,12 @@ use serde::{Deserialize, Serialize};
 ///
 /// 1: the first stamped generation (FIG-3672). Every entry written before the
 /// stamp existed is refused.
-pub const EFFECT_JOURNAL_VERSION: u32 = 1;
+/// 2: a turn's decision state rides its recorded outcomes (FIG-3672 P7). The
+/// model call names its provider, its outcome carries what the provider stream
+/// left for later steps (the published reasoning and each plugin's stream-hook
+/// end state), and the assistant-response step's command carries those
+/// stream-hook states.
+pub const EFFECT_JOURNAL_VERSION: u32 = 2;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

@@ -112,8 +112,13 @@ pub type AssistantStreamHook =
 /// re-bought from the provider. The price of that guarantee is that a crash,
 /// redrive, or hook failure replays the *same* raw completion into this hook
 /// again. Treat every invocation as a pure derivation of
-/// [`AssistantResponseHookContext::response`]: same input, same
-/// [`AssistantResponseTransform`], no ambient side effects. Side effects belong
+/// [`AssistantResponseHookContext::response`] and
+/// [`AssistantResponseHookContext::stream_state`]: same input, same
+/// [`AssistantResponseTransform`], no ambient side effects. In particular the
+/// hook never reads state its plugin's stream hooks left in memory: phase 2
+/// may run on another worker, or after a restart, from the journal alone. What
+/// the stream hooks learned reaches it only as the state its
+/// [`AssistantStreamFinishedHook`] returned. Side effects belong
 /// on the effect seam, where they are journaled — not in this hook, where a
 /// second invocation would repeat them.
 ///
@@ -134,8 +139,17 @@ pub type AssistantStreamHook =
 pub type AssistantResponseHook = Arc<
     dyn Fn(AssistantResponseHookContext) -> PluginFuture<AssistantResponseTransform> + Send + Sync,
 >;
-pub type AssistantStreamFinishedHook =
-    Arc<dyn Fn(AssistantStreamFinishedContext) -> PluginFuture<()> + Send + Sync>;
+/// Runs once the provider stream of an LLM call finished, in phase 1 of the
+/// staged boundary. The value it returns for a stream that produced a
+/// response ([`AssistantStreamFinishReason::Complete`] or
+/// [`AssistantStreamFinishReason::Aborted`]) is the plugin's stream end state:
+/// it is journaled with the raw completion and handed to the same plugin's
+/// [`AssistantResponseHook`] as [`AssistantResponseHookContext::stream_state`].
+/// Return `None` when phase 2 needs nothing from the stream. The hook should
+/// leave no per-stream state behind: the next stream starts from nothing.
+pub type AssistantStreamFinishedHook = Arc<
+    dyn Fn(AssistantStreamFinishedContext) -> PluginFuture<Option<serde_json::Value>> + Send + Sync,
+>;
 
 #[derive(Clone)]
 pub struct PromptHookContext {
@@ -365,6 +379,10 @@ pub struct AssistantStreamTransform {
 pub struct AssistantResponseHookContext {
     pub session_id: SessionId,
     pub response: crate::LlmResponse,
+    /// The state this plugin's [`AssistantStreamFinishedHook`] returned when
+    /// the completion's stream finished, as phase 1 journaled it. `None` when
+    /// the hook returned nothing or the completion did not stream.
+    pub stream_state: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug)]

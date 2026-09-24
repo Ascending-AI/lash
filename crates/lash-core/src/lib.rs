@@ -692,9 +692,7 @@ pub use provider::{
     ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
-pub(crate) use provider::{
-    ProviderBinding, ProviderCompletion, ProviderCompletionError, RuntimeProviderResolver,
-};
+pub(crate) use provider::{ProviderCompletion, ProviderCompletionError, RuntimeProviderResolver};
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ConformanceProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
@@ -722,8 +720,8 @@ pub use process_registry::{
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AcceptedTurnInputDrive,
     AcceptedTurnInputRefusal, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
-    AdmittedScopeError, ArtifactOwner, AssistantResponseHookEvents, AwaitEventKey,
-    AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
+    AdmittedScopeError, ArtifactOwner, AssistantResponseHookEvents, AssistantStreamHookState,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
     CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, DeclaredProcessIdentity,
     DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild, EffectAddress, EffectCommitState,
@@ -734,10 +732,10 @@ pub use runtime::{
     GroupOnlyFinalization, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
     InMemoryProcessExecutionEnvStore, InputItem, LedgerUsageDisposition, LiveReplayEventDraft,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
-    LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LoserPolicy,
-    NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError, NativeSubstrateConfig,
-    NativeSubstrateConfigError, NoQueuedWork, OnParentEnd, OpenerFinalizationSteps,
-    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_EFFECT_OCCURRENCE_CAP,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord,
+    LoserPolicy, NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError,
+    NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, OnParentEnd,
+    OpenerFinalizationSteps, PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_EFFECT_OCCURRENCE_CAP,
     PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
     PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
     ParentEndPlan, ParentScope, ParentScopeStorageError, PendingTurnInput,
@@ -838,7 +836,6 @@ pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
     SessionGraphScopeError, SessionNodePayload, SessionNodeRecord,
 };
-pub(crate) use session_model::RuntimeSessionPolicy;
 
 pub use session_model::{ChargeSafetyPolicy, NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};

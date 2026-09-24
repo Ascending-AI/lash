@@ -54,6 +54,7 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             RuntimeEffectCommand::LlmCall {
+                provider_id: "test".to_string(),
                 request: Box::new(llm_spec()),
             },
             "journaled_run",
@@ -1104,9 +1105,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v6-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v6-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v6-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v7-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v7-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v7-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1135,62 +1136,93 @@ pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with
     }
 }
 
-/// Journals captured before the effect-journal generation stamp (ADR 0105
-/// §12) replay their shape unchanged, so they reach the generation gate: the
-/// tool attempt's journal entry carries no generation and is refused, typed,
-/// before the attempt's outcome is acted on. Nothing is dispatched, so the
-/// recorded signal effect never reaches a fresh registry.
+/// Journals another effect-journal generation wrote (ADR 0105 §12) replay
+/// their shape unchanged, so they reach the generation gate: the tool
+/// attempt's journal entry carries no generation (it predates the stamp) or a
+/// retired one, and is refused, typed, before the attempt's outcome is acted
+/// on. Nothing is dispatched, so the recorded signal effect never reaches a
+/// fresh registry.
 #[tokio::test]
-pub(super) async fn checked_in_pre_stamp_tool_intent_journals_refuse_at_the_generation_gate() {
-    for (name, checked_in) in [
+pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_at_the_generation_gate()
+ {
+    const PRE_STAMP: &str = "carries no effect-journal generation";
+    const GENERATION_ONE: &str = "carries effect-journal generation 1;";
+    for (name, checked_in, refusal) in [
         (
             "v1-full-drain",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v1-full-drain.json")
                 .as_slice(),
+            PRE_STAMP,
         ),
         (
             "v2-mid-drain",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v2-mid-drain.json")
                 .as_slice(),
+            PRE_STAMP,
         ),
         (
             "v2-mid-intent",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v2-mid-intent.json")
                 .as_slice(),
+            PRE_STAMP,
         ),
         (
             "v2-full-drain",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v2-full-drain.json")
                 .as_slice(),
+            PRE_STAMP,
         ),
         (
             "v3-mid-intent",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v3-mid-intent.json")
                 .as_slice(),
+            PRE_STAMP,
         ),
         (
             "v3-full-drain",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v3-full-drain.json")
                 .as_slice(),
+            PRE_STAMP,
         ),
         (
             "v5-mid-drain",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v5-mid-drain.json")
                 .as_slice(),
+            PRE_STAMP,
         ),
         (
             "v5-mid-intent",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v5-mid-intent.json")
                 .as_slice(),
+            PRE_STAMP,
         ),
         (
             "v5-full-drain",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v5-full-drain.json")
                 .as_slice(),
+            PRE_STAMP,
+        ),
+        (
+            "v6-mid-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v6-mid-drain.json")
+                .as_slice(),
+            GENERATION_ONE,
+        ),
+        (
+            "v6-mid-intent",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v6-mid-intent.json")
+                .as_slice(),
+            GENERATION_ONE,
+        ),
+        (
+            "v6-full-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v6-full-drain.json")
+                .as_slice(),
+            GENERATION_ONE,
         ),
     ] {
         let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(checked_in)
-            .expect("decode the pre-stamp endpoint corpus fixture");
+            .expect("decode the checked-in endpoint corpus fixture");
         let (endpoint, registry) = tool_intent_corpus_endpoint().await;
         let response = invoke_endpoint_body(
             &endpoint,
@@ -1199,7 +1231,7 @@ pub(super) async fn checked_in_pre_stamp_tool_intent_journals_refuse_at_the_gene
             bytes::Bytes::from(fixture.invocation_body_bytes),
         )
         .await
-        .expect("feed the pre-stamp journal through the current endpoint");
+        .expect("feed the retired journal through the current endpoint");
         let error = restate_output_failure_message(&response)
             .or_else(|| restate_error_message(&response))
             .unwrap_or_else(|| {
@@ -1210,8 +1242,7 @@ pub(super) async fn checked_in_pre_stamp_tool_intent_journals_refuse_at_the_gene
                 )
             });
         assert!(
-            error.contains("effect_replay_divergence")
-                && error.contains("carries no effect-journal generation"),
+            error.contains("effect_replay_divergence") && error.contains(refusal),
             "{name} must refuse at the effect-journal generation gate: {error}"
         );
         assert_eq!(
@@ -1299,16 +1330,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v6-mid-drain",
+            "v7-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v6-mid-intent",
+            "v7-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v6-full-drain", "full_drain", full),
+        ("v7-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
