@@ -17,7 +17,9 @@ use super::*;
 /// 2: the close and the retirement release their cancel-decided wait
 /// children's waits, and admission answers such a child `CancelDecided`
 /// (FIG-3630).
-pub const EFFECT_GROUP_INDEX_PROTOCOL_VERSION: u32 = 2;
+/// 3: a rank read says whether it is the caller's own await, and the index
+/// refuses a caller's read of a group closed to it (FIG-3676).
+pub const EFFECT_GROUP_INDEX_PROTOCOL_VERSION: u32 = 3;
 
 /// The record field the protocol version is stamped under.
 const PROTOCOL_VERSION_FIELD: &str = "protocol_version";
