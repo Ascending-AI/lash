@@ -9,6 +9,8 @@ mod builtin_contract;
 mod diagnostic_rendering;
 #[path = "functions.rs"]
 mod functions;
+#[path = "intrinsic_fuel.rs"]
+mod intrinsic_fuel;
 #[path = "language.rs"]
 mod language;
 #[path = "nesting_cap.rs"]

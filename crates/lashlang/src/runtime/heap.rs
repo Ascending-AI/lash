@@ -94,7 +94,11 @@ pub(crate) struct Heap {
     /// one process-wide clock, so no two writes anywhere share one, and a
     /// clone that diverges from its original can never present a stamp the
     /// other recorded for different contents. Not part of the heap's value:
-    /// equality ignores them and no wire carries them.
+    /// equality ignores them and no wire carries them. A stamp decides only
+    /// how much a capture re-encodes, never what it persists — a rewritten
+    /// fragment re-encodes to the canonical bytes an unchanged one holds — so
+    /// the clock is not a decision input: warm and cold workers persist the
+    /// same state (`warm_and_cold_captures_persist_byte_identical_state`).
     revisions: FxHashMap<HeapId, u64>,
     /// The stamp every object not in `revisions` answers with: drawn when the
     /// heap is built, so a heap rebuilt from a wire reads as entirely unlike

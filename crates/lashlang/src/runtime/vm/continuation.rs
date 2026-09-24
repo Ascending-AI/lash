@@ -78,9 +78,17 @@ use super::exceptions::PendingErrorOrigin;
 /// them — `f.name` answering `undefined` where the live run reported a name —
 /// so the boundary is a version rather than a decode failure.
 ///
+/// v23 (FIG-3672) resumes under a changed intrinsic fuel schedule:
+/// `JSON.parse` and `JSON.stringify` charge one instruction per byte of text
+/// to the instruction budget. A continuation's `instructions_executed` and the
+/// segment it resumes are metered on one schedule, so a v22 continuation
+/// resumed here could exhaust its budget at an instruction the recorded run
+/// passed. The wire shape is unchanged; the meaning of the meter is not, so an
+/// older continuation is refused typed before any effect rather than resumed.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 22;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 23;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
