@@ -139,8 +139,6 @@ impl ConformanceTurnRunner for JournalCutRunner {
 // Restate's positional journal has none (FIG-3719). The cases that cut before
 // the result is recorded pass here.
 mod on_the_server_double {
-    use std::sync::Arc;
-
     use super::super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 
     lash_conformance::cell_binding_drift_tests!(
@@ -157,22 +155,13 @@ mod on_the_server_double {
             let prefix: &'static str = Box::leak(
                 format!("restate-binding-drift-{}", harness.run_nonce()).into_boxed_str(),
             );
-            let rlm: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
-                lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash_protocol_rlm::RlmChannel::Cell)
-                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
-                        1_000_000,
-                    ))
-                    .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build(),
-                &*super::super::conformance_and_poison::RECOVERY_ARTIFACT_BACKEND,
+            (
+                harness,
+                prefix,
+                host,
+                runner,
+                vec![super::super::conformance_and_poison::drift_law_rlm_factory()],
             )
-            // The law's turn starts no process: there is no process substrate.
-            .with_process_lifecycle(false),
-            );
-            (harness, prefix, host, runner, vec![rlm])
         }
     );
 }
