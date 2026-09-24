@@ -7,6 +7,41 @@
 //! is the early SyntaxError ECMA writes down, and a cooked lone surrogate is
 //! as unrepresentable as the string-literal form.
 
+use swc_ecma_ast as swc;
+
+use super::{Adapter, Expr, early_errors, source_span};
+use crate::Diagnostic;
+
+impl Adapter<'_> {
+    /// An untagged template literal: each quasi's cooked text, then its
+    /// substitutions. An uncookable escape is the early SyntaxError, and a
+    /// cooked lone surrogate refuses like the string-literal form.
+    pub(super) fn convert_template(&self, template: &swc::Tpl) -> Result<Expr, Diagnostic> {
+        let mut quasis = Vec::with_capacity(template.quasis.len());
+        for quasi in &template.quasis {
+            self.check_template_text(quasi.span)?;
+            match cook_template_quasi(&quasi.raw) {
+                Ok(cooked) => quasis.push(cooked),
+                Err(TemplateEscapeError::InvalidEscape) => {
+                    return Err(early_errors::syntax_error(
+                        "invalid escape sequence in untagged template literal",
+                        Some(source_span(quasi.span)),
+                    ));
+                }
+                Err(TemplateEscapeError::LoneSurrogate) => return Ok(Expr::LoneSurrogateString),
+            }
+        }
+        Ok(Expr::Template {
+            quasis,
+            expressions: template
+                .exprs
+                .iter()
+                .map(|expr| self.convert_expr(expr))
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
 /// Why one template quasi cannot produce a dialect string.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TemplateEscapeError {
