@@ -103,9 +103,9 @@ the driver's guess is a screenshot of prose, not reproducible evidence.
 
 Ask the model to fetch one array of three work items, iterate that returned
 array with `for...of`, and finish with an ordered summary. The loop body may
-call helpers; what the documented v1 iterator guard forbids is mutating,
-aliasing, or passing the iterable itself. Require one tool outcome, all three
-ordered items, and no `TS_FOR_OF_UNSUPPORTED`. Save
+call helpers, and it may also change the iterable, which the loop follows
+live as ECMA-262 does (FIG-3625). Require one tool outcome and all three
+ordered items. Save
 `02-for-of-{dom,state,trace}.json` and `02-for-of.png`.
 
 ## Phase 3 — Durable process start and suspension

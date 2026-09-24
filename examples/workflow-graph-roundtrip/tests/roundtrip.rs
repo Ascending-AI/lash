@@ -663,10 +663,12 @@ async fn projected_available_vars_follow_ssa_and_nested_lexical_scope() {
         nested.data.available_vars,
         ["first", "item", "record", "state"]
     );
-    // FIG-3033: `for (const item of xs)` lowers through an iterable copy whose
-    // result type is opaque, so the loop binding projects as `any` where the
-    // Lashlang `for item in [1]` projected `int`. The scope property the test
-    // exists for -- the binding is visible, and only inside the loop -- holds.
+    // `for (const item of xs)` hands the loop its iterable itself (FIG-3625),
+    // so the loop binding projects as `[1]`'s element type, `int`, as the
+    // Lashlang `for item in [1]` did. (Through FIG-3033 it lowered through an
+    // opaque iterable copy and projected `any`.) The lash-typescript law
+    // `a_for_of_body_sees_its_loop_binding_typed_by_the_iterable` holds the
+    // same in PR CI.
     assert_eq!(
         nested
             .data
@@ -675,7 +677,7 @@ async fn projected_available_vars_follow_ssa_and_nested_lexical_scope() {
             .find(|variable| variable.name == "item")
             .expect("typed loop binding")
             .variable_type,
-        "any"
+        "int"
     );
     let terminal = document
         .nodes

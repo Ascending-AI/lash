@@ -157,15 +157,17 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
     assert!(summarize.data.expected_arg_types.iter().any(|argument| {
         argument.slot == "arg[0][\"task\"]" && argument.expected_type == "str"
     }));
-    // FIG-3033: `for (const email of emails)` lowers through an iterable copy,
-    // so the loop binding itself projects as `any`; the mocked element type
-    // still reaches the call through the list it iterates.
+    // `for (const email of emails)` hands the loop its iterable itself
+    // (FIG-3625), so the loop binding projects as the list's element: an
+    // object, open (`dict`) because the body passes it to a tool, which may
+    // hold on to it (the closed-shape field guard, FIG-3626). Through
+    // FIG-3033 it lowered through an opaque iterable copy and projected `any`.
     assert!(
         summarize
             .data
             .available_vars
             .iter()
-            .any(|variable| variable.name == "email")
+            .any(|variable| { variable.name == "email" && variable.variable_type == "dict" })
     );
     assert!(summarize.data.available_vars.iter().any(|variable| {
         variable.name == "emails"
