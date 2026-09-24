@@ -17,7 +17,8 @@ During an edit, run the narrowest command that proves the change:
 - Before calling an implementation done, inspect
   `python3 scripts/dev-test.py --dry-run`, then run `python3 scripts/dev-test.py`
   for the change-scoped developer tests and mapped script checks. It selects
-  complete test batches once, excludes deferred/manual service tests, and
+  complete test batches once plus the `dev-deferred` labels of every package
+  the change directly touches, excludes manual and pr-deferred tests, and
   widens for shared or unknown inputs. A docs-only diff needs no Rust build.
   Use `just test-changed` only when reverse-dependent test coverage adds value.
 

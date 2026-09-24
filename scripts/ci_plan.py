@@ -519,7 +519,7 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
 # The plan outputs a `ci.yml` job may read that are not families. A job's
 # families are the family outputs it reads (`_job_families`); an output in
 # neither set counts as every family. `postgres_compatibility` is the schema
-# family's PG14/PG18 selection.
+# family's PG14/PG18 selection; `pr_tail_labels` is a label list, not a gate.
 PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     **{family: frozenset({family}) for family in FAMILIES},
     "postgres_compatibility": frozenset({"schema"}),
@@ -528,6 +528,7 @@ PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     "docs_only": frozenset(),
     "reason": frozenset(),
     "postgres_primary": frozenset(),
+    "pr_tail_labels": frozenset(),
 }
 _PLAN_OUTPUT = re.compile(r"needs\.plan\.outputs\.([A-Za-z0-9_]+)")
 
@@ -1167,11 +1168,90 @@ def dev_test_scope(
     )
 
 
+# The checked-in output of `tools/bazel/generate_build_files.py`: each Cargo
+# package's manifest path and every generated label's kind and test-policy
+# tags. The plan job runs before any toolchain, so the label -> package map is
+# read out of this file rather than queried from Bazel.
+TARGET_INVENTORY = "tools/bazel/target-inventory.json"
+# The target kinds the generator counts as executable tests.
+EXECUTABLE_TEST_KINDS = frozenset({"bin-unit-test", "test", "unit-test"})
+
+
+@lru_cache(maxsize=None)
+def _dev_deferred_labels(root: str | None = None) -> Mapping[str, tuple[str, ...]]:
+    """Each package directory's `dev-deferred` test labels.
+
+    `manual`, `pr-deferred` and `//examples/` labels stay out even if a policy
+    edit ever combines the tags: a service-backed label proves nothing without
+    its service, a pr-deferred suite is trunk work, and an examples leaf is in
+    the tail for wall-clock reasons the PR leg deliberately sheds.
+    """
+
+    base = Path(root) if root is not None else REPO_ROOT
+    inventory = json.loads((base / TARGET_INVENTORY).read_text(encoding="utf-8"))
+    labels: dict[str, list[str]] = {}
+    for package in inventory["packages"]:
+        directory = PurePosixPath(package["manifest"]).parent.as_posix()
+        for target in package["targets"]:
+            label = target.get("label")
+            tags = target.get("tags") or ()
+            if (
+                label is None
+                or target.get("kind") not in EXECUTABLE_TEST_KINDS
+                or "dev-deferred" not in tags
+                or "manual" in tags
+                or "pr-deferred" in tags
+                or label.startswith("//examples/")
+            ):
+                continue
+            labels.setdefault(directory, []).append(label)
+    return {
+        directory: tuple(sorted(members)) for directory, members in labels.items()
+    }
+
+
+def _all_dev_deferred_labels(root: str | None = None) -> list[str]:
+    return sorted(
+        label for labels in _dev_deferred_labels(root).values() for label in labels
+    )
+
+
+def pr_tail_labels(paths: list[str], root: Path | None = None) -> list[str]:
+    """The sorted `dev-deferred` labels of every package a path touches.
+
+    `bazel-tests-tail` runs only on merge groups and dispatches, and lash PRs
+    are often admin-merged past the queue: a change under a package's
+    directory otherwise lands without that package's deferred tests ever
+    running, which is how #2109's `corpus_laws__test` expectations edit turned
+    main red. The plan emits this list as `pr_tail_labels` and `bazel-tests`
+    names it after its `-//:workspace_tail_tests` subtraction -- Bazel applies
+    target patterns in order, so a positive label after the negative pattern
+    re-adds it. Package ownership comes from `classify_path`, the one path
+    table; adding a second table is how the old consumers drifted apart.
+    """
+
+    labels = _dev_deferred_labels(str(root) if root is not None else None)
+    selected: set[str] = set()
+    for path in paths:
+        path_class = classify_path(path, root)
+        if path_class.kind is PathKind.PACKAGE and path_class.package is not None:
+            selected.update(labels.get(path_class.package, ()))
+    return sorted(selected)
+
+
 def fail_open(reason: str) -> dict[str, str]:
+    # An unclassifiable diff can touch any package, so its PR leg re-adds every
+    # dev-deferred label. If the inventory itself cannot be read, the suite
+    # label re-adds the whole tail, examples included.
+    try:
+        tail = " ".join(_all_dev_deferred_labels())
+    except (OSError, ValueError, KeyError):
+        tail = "//:workspace_tail_tests"
     outputs = {
         "docs_only": "false",
         "fail_open": "true",
         "reason": reason,
+        "pr_tail_labels": tail,
     }
     outputs.update({family: "true" for family in FAMILIES})
     return outputs
@@ -1247,6 +1327,10 @@ def classify(
             if only_workbench and not ci_families
             else "production-relevant diff"
         ),
+        # The dev-deferred labels of every package the diff touches. A
+        # docs-only diff can name none; a diff that runs everything can touch
+        # any package, so it re-adds the whole dev-deferred set.
+        "pr_tail_labels": " ".join(pr_tail_labels(paths)),
     }
     if docs_only:
         outputs.update({family: "false" for family in FAMILIES})
@@ -1254,6 +1338,7 @@ def classify(
         return outputs
     if run_everything:
         outputs.update({family: "true" for family in FAMILIES})
+        outputs["pr_tail_labels"] = " ".join(_all_dev_deferred_labels())
         return outputs
     # `rust` gates the Bazel partition, which owns every agent-workbench unit
     # case, including browser projection with a pinned Node interpreter. The
