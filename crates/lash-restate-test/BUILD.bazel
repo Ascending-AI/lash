@@ -63,6 +63,23 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "suspended_turn__test",
+    crate_features = [],
+    crate_name = "suspended_turn",
+    crate_root = "tests/suspended_turn.rs",
+    declared_features = [],
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "turn_crash_replay__test",
     crate_features = [],
     crate_name = "turn_crash_replay",
@@ -89,6 +106,7 @@ lash_batch_test(
     tests = [
         ":lash-restate-test__unit_test",
         ":server_semantics__test",
+        ":suspended_turn__test",
         ":turn_crash_replay__test",
     ],
 )

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 48,
-  "cargo_target_count": 163,
+  "cargo_target_count": 164,
   "feature_lane_units": [
     {
       "features": [],
@@ -18007,7 +18007,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 223,
+  "generated_label_count": 224,
   "packages": [
     {
       "declared_features": [
@@ -19701,6 +19701,12 @@
           "tags": []
         },
         {
+          "cargo": "suspended_turn",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:suspended_turn__test",
+          "tags": []
+        },
+        {
           "cargo": "turn_crash_replay",
           "kind": "test",
           "label": "//crates/lash-restate-test:turn_crash_replay__test",
@@ -19712,6 +19718,7 @@
         "members": [
           "//crates/lash-restate-test:lash-restate-test__unit_test",
           "//crates/lash-restate-test:server_semantics__test",
+          "//crates/lash-restate-test:suspended_turn__test",
           "//crates/lash-restate-test:turn_crash_replay__test"
         ]
       }
