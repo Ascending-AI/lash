@@ -328,6 +328,16 @@ impl lash_core_execution::RuntimeEffectController for ScopedControllerAdapter {
     fn effect_journaling(&self) -> lash_core_execution::EffectJournaling {
         self.0.controller().effect_journaling()
     }
+
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<lash_core_execution::IndependentEffectWork<'work>>,
+    ) {
+        self.0
+            .controller()
+            .drive_independent_effect_work(work)
+            .await;
+    }
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -488,6 +498,13 @@ impl lash_core_execution::AwaitEventResolver for CrossingController {
 impl lash_core_execution::RuntimeEffectController for CrossingController {
     fn effect_journaling(&self) -> lash_core_execution::EffectJournaling {
         self.inner.effect_journaling()
+    }
+
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<lash_core_execution::IndependentEffectWork<'work>>,
+    ) {
+        self.inner.drive_independent_effect_work(work).await;
     }
 
     async fn execute_effect(

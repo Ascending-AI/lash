@@ -225,6 +225,14 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         Some(Arc::clone(&self.groups) as Arc<dyn std::any::Any + Send + Sync>)
     }
 
+    /// Concurrent: this controller records no journal a replay could misread.
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<crate::IndependentEffectWork<'work>>,
+    ) {
+        futures_util::future::join_all(work).await;
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

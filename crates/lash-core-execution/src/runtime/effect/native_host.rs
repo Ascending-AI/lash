@@ -616,6 +616,13 @@ impl RuntimeEffectController for FencedNativeController {
         self.host.effect_journaling()
     }
 
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<crate::IndependentEffectWork<'work>>,
+    ) {
+        self.host.drive_independent_effect_work(work).await;
+    }
+
     async fn read_recorded_journal(
         &self,
         range: &crate::RecordedKeyRange,
@@ -722,6 +729,13 @@ impl RuntimeEffectController for NativeEffectHost {
 
     fn effect_journaling(&self) -> EffectJournaling {
         self.controller.effect_journaling()
+    }
+
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<crate::IndependentEffectWork<'work>>,
+    ) {
+        self.controller.drive_independent_effect_work(work).await;
     }
 
     async fn read_recorded_journal(

@@ -214,19 +214,25 @@ fn dispatch_outcome_reply(
 /// Runs an orchestrating body's nested calls through the dispatch the body
 /// was admitted under.
 ///
-/// Calls run concurrently and replies come back in source order. The body is
-/// replayable workflow code, and a redrive must meet the same journaled
-/// attempts it already committed, so the batch mints no batch envelope of its
-/// own: every call is prepared the way its authority demands — the Tool
-/// Catalog for an ordinary call, the grant for a granted one — and then
-/// coordinated exactly the way a live leaf call is, journaled `ToolAttempt`
-/// effects under the body's own admitted controller, parented to the lineage
-/// the dispatch carries. Replay identity is the call's own replay key, so the
-/// schedule is the only thing concurrency changes: a redrive re-derives the
-/// same keys and reads the recorded attempt rather than running it again,
-/// regardless of the order the calls happened to commit in. A call that
+/// Replies come back in source order. The body is replayable workflow code,
+/// and a redrive must meet the same journaled attempts it already committed,
+/// so the batch mints no batch envelope of its own: every call is prepared the
+/// way its authority demands — the Tool Catalog for an ordinary call, the
+/// grant for a granted one — and then coordinated exactly the way a live leaf
+/// call is, journaled `ToolAttempt` effects under the body's own admitted
+/// controller, parented to the lineage the dispatch carries. A call that
 /// defers is awaited through the same journaled await the child's driver
 /// parks on, under the call id the body named it with.
+///
+/// Whether the calls overlap is the body's controller's to decide, through
+/// [`drive_independent_effect_work`](crate::RuntimeEffectController::drive_independent_effect_work).
+/// A controller that finds each recorded attempt by its replay key runs them
+/// concurrently, because a redrive re-derives the same keys and reads the
+/// recorded attempts whatever order they committed in. One that replays its
+/// journal by position runs them one at a time in source order. Concurrent
+/// calls would commit in whatever order they reached that journal, the redrive
+/// would reissue them in another, and the replay would refuse the mismatch
+/// (FIG-3671).
 async fn coordinate_nested_tool_batch<'run>(
     body_context: &ToolContext<'run>,
     dispatch: &Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
@@ -493,7 +499,46 @@ async fn coordinate_nested_tool_batch<'run>(
             }
         }
     };
-    futures_util::future::join_all(calls.into_iter().map(run_call)).await
+    // The calls go to the body's controller as independent work, which runs
+    // them concurrently where the order they commit in cannot be misread and
+    // one at a time, in source order, where it can. Either way every call
+    // runs to completion, and each reply lands in its call's own slot.
+    let slots: Vec<std::sync::Mutex<Option<crate::ToolInvocationReply>>> =
+        calls.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    let work = calls
+        .into_iter()
+        .zip(&slots)
+        .map(|(call, slot)| {
+            let reply = run_call(call);
+            Box::pin(async move {
+                let reply = reply.await;
+                *slot
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(reply);
+            }) as crate::IndependentEffectWork<'_>
+        })
+        .collect();
+    dispatch
+        .effect_controller
+        .controller()
+        .drive_independent_effect_work(work)
+        .await;
+    slots
+        .into_iter()
+        .map(|slot| {
+            slot.into_inner()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .unwrap_or_else(|| {
+                    crate::ToolInvocationReply::from_output(crate::ToolCallOutput::failure(
+                        crate::ToolFailure::runtime(
+                            crate::ToolFailureClass::Internal,
+                            "nested_call_not_driven",
+                            "the controller returned before driving this nested call",
+                        ),
+                    ))
+                })
+        })
+        .collect()
 }
 
 /// Implementation contract carried by an [`OrchestratingToolDef`].

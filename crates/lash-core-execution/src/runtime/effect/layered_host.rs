@@ -541,6 +541,13 @@ impl RuntimeEffectController for LayeredController {
         self.inner.effect_journaling()
     }
 
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<crate::IndependentEffectWork<'work>>,
+    ) {
+        self.inner.drive_independent_effect_work(work).await;
+    }
+
     fn wants_segment_boundary(&self, progress: &SegmentProgress) -> Option<BoundaryReason> {
         self.inner.wants_segment_boundary(progress)
     }
