@@ -93,6 +93,10 @@ fn endpoint(
     registry: Arc<dyn lash_core::ProcessRegistry>,
     host: &lash_restate::RestateEffectHost,
     ingress: lash_restate::RestateIngressClient,
+    // The session catalog the deployment's turns run against: a session-scope
+    // group child checks its owning session's state generation there before
+    // it runs.
+    sessions: Arc<dyn lash_core::SessionStoreFactory>,
 ) -> restate_sdk::endpoint::Endpoint
 {
     let runner = Arc::new(RestateCoreProcessRunner::new(worker));
@@ -104,6 +108,7 @@ fn endpoint(
         host,
         ingress,
         RestateEffectGroupRetryPolicy::infinite(),
+        sessions,
     );
     Endpoint::builder()
         .bind(LashProcessWorkflowImpl::new(runner, registry).serve())

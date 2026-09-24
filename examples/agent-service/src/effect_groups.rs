@@ -133,11 +133,13 @@ impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
 pub(crate) fn effect_group_services(
     host: &lash_restate::RestateEffectHost,
     ingress_url: impl Into<String>,
+    sessions: std::sync::Arc<dyn lash::persistence::SessionStoreFactory>,
 ) -> RestateEffectGroupServices {
     RestateEffectGroupServices::new(
         host,
         RestateIngressClient::new(ingress_url.into()),
         RestateEffectGroupRetryPolicy::infinite(),
+        sessions,
     )
 }
 

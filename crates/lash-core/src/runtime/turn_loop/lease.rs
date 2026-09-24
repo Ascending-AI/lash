@@ -54,7 +54,7 @@ impl crate::QueuedLaneProbe for SessionExecutionLaneProbe {
             Arc::clone(&self.clock),
         )
         .await
-        .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
+        .map_err(super::runtime_error_from_store_commit)?
         {
             SessionExecutionLeaseGuardAcquisition::Acquired(guard) => Ok(
                 crate::QueuedLaneAttempt::Acquired(crate::QueuedLaneGuard::new(guard)),
@@ -95,7 +95,7 @@ impl LashRuntime {
             Arc::clone(&self.host.core.clock),
         )
         .await
-        .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
+        .map_err(super::runtime_error_from_store_commit)?
         {
             Some(guard) => {
                 if store

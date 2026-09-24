@@ -120,7 +120,10 @@ use expectations::{
 };
 pub use held_turn_input::held_turn_input_visibility_survives_claim_holder_crash;
 use invocation_effect_host::InvocationEffectHost;
-pub use pre_cutover_generation::pre_cutover_generation_turn_redrive_is_refused_before_any_effect;
+pub use pre_cutover_generation::{
+    pre_cutover_generation_turn_claim_is_refused_typed,
+    pre_cutover_generation_turn_redrive_is_refused_before_any_effect,
+};
 use pretty_assertions::assert_eq;
 pub(crate) use seam_controllers::{
     CrashAfterCheckpointExecutionController, SeamEffectController, StoreOwnedTurnControlController,

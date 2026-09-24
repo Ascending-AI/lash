@@ -100,6 +100,15 @@ latest deployment. Immutability of any single deployment does not make
 handover artifacts self-describing, which is why they carry their own format
 version rather than leaning on this obligation.
 
+Effect-group children cross invocations the same way, so a child can run on
+a newer build than the turn that opened it. A session-scope child therefore
+checks its owning session's state generation at invocation entry, before it
+admits, reads its journal or dispatches anything, and a generation that build
+refuses settles the child with the typed refusal (FIG-3619). A process-scope
+child needs no such check here: its tool driver routes only where its
+process's opener is live, and the process's own segment gates admitted it
+there.
+
 ## Consequences
 
 Hosts that mutate deployments will see replay hash mismatches that look like

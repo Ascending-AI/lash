@@ -658,3 +658,35 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         })
     }
 }
+
+/// The session-state generation gate for work that acts for a session from
+/// outside that session's execution lease (FIG-3619).
+///
+/// A turn meets the generation fence when it claims its lane
+/// ([`SessionCommitStore::admit_session_state`](crate::store::SessionCommitStore::admit_session_state)).
+/// Work a durable engine runs as a separate invocation on the session's
+/// behalf, such as a Restate effect-group child, may be routed to a newer
+/// deployment than the turn that opened it, and never claims that lane. It
+/// calls this at invocation entry, before it reads a journal or derives an
+/// effect key: the owning session's physical marker is classified by the
+/// same backend read the lease admission uses, so both paths refuse exactly
+/// the same generations and a generation bump moves them together.
+///
+/// Refusal is `Err(StoreError::SessionStateVersionUnsupported)` or
+/// `Err(StoreError::SessionStateVersionNewerThanRuntime)`, with the found
+/// generation. A session the catalog does not hold, or one that was deleted,
+/// passes: there is no generation to refuse, and the deletion fences own that
+/// work's fate. Any other error is the catalog's or the store's, and the
+/// caller decides whether to retry it.
+pub async fn admit_session_state_generation(
+    sessions: &dyn SessionStoreFactory,
+    session_id: &SessionId,
+) -> Result<(), crate::StoreError> {
+    let Some(store) = sessions.open_existing_store_by_id(session_id).await? else {
+        return Ok(());
+    };
+    match store.read_session_state_version().await {
+        Ok(_) | Err(crate::StoreError::SessionDeleted { .. }) => Ok(()),
+        Err(error) => Err(error),
+    }
+}

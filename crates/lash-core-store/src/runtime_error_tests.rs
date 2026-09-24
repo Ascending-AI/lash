@@ -86,7 +86,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        194,
+        196,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
@@ -446,5 +446,94 @@ fn lashlang_replay_refusals_park_the_turn() {
             ),
             "{code}: only the lashlang replay refusals park"
         );
+    }
+}
+
+/// FIG-3619 (lead ruling): the two session-state codes are additive. A stored
+/// refusal carries only its code and message — the typed generations travel
+/// in-process on the returned error and are never serialized — so a build
+/// from before these codes decodes the stored error without failing, reading
+/// the code as a foreign recorded outcome and re-encoding the same bytes.
+#[test]
+fn a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_existed() {
+    let added = [
+        RuntimeErrorCode::SessionStateVersionUnsupported,
+        RuntimeErrorCode::SessionStateVersionNewerThanRuntime,
+    ];
+    // The decoder before this change is this `from_wire_code` without the two
+    // arms: every other spelling keeps its arm, and an unknown one falls
+    // through to `other => Self::ForeignCode(other.to_string())`.
+    let pre_change_decode = |spelling: &str| {
+        if added.iter().any(|code| code.as_str() == spelling) {
+            RuntimeErrorCode::ForeignCode(spelling.to_string())
+        } else {
+            RuntimeErrorCode::from_wire_code(spelling)
+        }
+    };
+    for (error, code) in [
+        (
+            crate::StoreError::SessionStateVersionUnsupported {
+                found: 2,
+                current: 3,
+            },
+            RuntimeErrorCode::SessionStateVersionUnsupported,
+        ),
+        (
+            crate::StoreError::SessionStateVersionNewerThanRuntime {
+                found: 4,
+                current: 3,
+            },
+            RuntimeErrorCode::SessionStateVersionNewerThanRuntime,
+        ),
+    ] {
+        let (found, current) = match &error {
+            crate::StoreError::SessionStateVersionUnsupported { found, current }
+            | crate::StoreError::SessionStateVersionNewerThanRuntime { found, current } => {
+                (*found, *current)
+            }
+            _ => unreachable!("the cases are session-state refusals"),
+        };
+        let refused = crate::runtime_error::runtime_error_from_store_commit(error);
+        assert_eq!(refused.code, code);
+        assert_eq!(
+            refused.session_state_version_refusal(),
+            Some(crate::runtime_error::SessionStateVersionRefusal { found, current }),
+            "the refused call returns the generations typed"
+        );
+
+        let stored = serde_json::to_value(&refused).expect("serialize the refusal");
+        assert_eq!(
+            stored,
+            serde_json::json!({ "code": code.as_str(), "message": refused.message }),
+            "a stored refusal is its code and message; the generations are not persisted"
+        );
+        assert!(
+            refused.message.contains(&found.to_string())
+                && refused.message.contains(&current.to_string()),
+            "the stored message names both generations: {}",
+            refused.message
+        );
+
+        let spelling = stored["code"].as_str().expect("the code is a string");
+        let before = pre_change_decode(spelling);
+        assert_eq!(
+            before,
+            RuntimeErrorCode::ForeignCode(spelling.to_string()),
+            "a build without the code reads it as a foreign code"
+        );
+        assert!(
+            before.is_terminal(),
+            "a foreign code is a recorded outcome, not a retry"
+        );
+        assert_eq!(
+            serde_json::to_value(&before).expect("re-encode the foreign code"),
+            stored["code"],
+            "the foreign code re-encodes to the same bytes"
+        );
+
+        let decoded: RuntimeError =
+            serde_json::from_value(stored).expect("this build decodes the stored refusal");
+        assert_eq!(decoded.code, code);
+        assert_eq!(decoded.session_state_version_refusal(), None);
     }
 }

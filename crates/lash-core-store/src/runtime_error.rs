@@ -98,6 +98,19 @@ pub enum RuntimeErrorCode {
     /// transient miss: retrying the identical lookup cannot change the
     /// answer, so this is terminal.
     SessionCatalogLookupUnsupported,
+    /// The session's durable state is an older generation than this build
+    /// admits (FIG-3571, FIG-3619). Under the clean-cutover policy it is
+    /// refused before any turn, model, tool or provider effect. A redrive on
+    /// this build reads the same marker, so the refusal is terminal. The
+    /// message names both generations; the error a refused call returns also
+    /// carries them typed in
+    /// [`RuntimeError::session_state_version_refusal`].
+    SessionStateVersionUnsupported,
+    /// The session's durable state is a newer generation than this build
+    /// knows. Only a build that admits that generation can run it; the
+    /// generations are carried as for
+    /// [`Self::SessionStateVersionUnsupported`].
+    SessionStateVersionNewerThanRuntime,
     /// The final runtime commit writes more graph and attachment-adoption rows
     /// than the shared node budget permits. The same turn will fail identically
     /// until the host produces a smaller turn.
@@ -470,6 +483,21 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
             format!("failed to snapshot dirty execution state: {message}"),
         ),
         crate::store::StoreError::TurnOutcomeMaterializationRefused { error } => *error,
+        ref err @ crate::store::StoreError::SessionStateVersionUnsupported { found, current } => {
+            RuntimeError::new(
+                RuntimeErrorCode::SessionStateVersionUnsupported,
+                err.to_string(),
+            )
+            .with_session_state_version_refusal(SessionStateVersionRefusal { found, current })
+        }
+        ref err @ crate::store::StoreError::SessionStateVersionNewerThanRuntime {
+            found,
+            current,
+        } => RuntimeError::new(
+            RuntimeErrorCode::SessionStateVersionNewerThanRuntime,
+            err.to_string(),
+        )
+        .with_session_state_version_refusal(SessionStateVersionRefusal { found, current }),
         crate::store::StoreError::QueuedRunConfigurationChanged { session_id } => {
             RuntimeError::new(
                 RuntimeErrorCode::QueuedRunConfigurationChanged,
@@ -508,6 +536,8 @@ impl RuntimeErrorCode {
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
             Self::SessionCatalogLookupUnsupported => "session_catalog_lookup_unsupported",
+            Self::SessionStateVersionUnsupported => "session_state_version_unsupported",
+            Self::SessionStateVersionNewerThanRuntime => "session_state_version_newer_than_runtime",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
             Self::StoreCommitByteBudgetExceeded => "store_commit_byte_budget_exceeded",
             Self::CheckpointComponentEncodingVersionMismatch => {
@@ -790,6 +820,8 @@ impl RuntimeErrorCode {
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
         Self::SessionCatalogLookupUnsupported,
+        Self::SessionStateVersionUnsupported,
+        Self::SessionStateVersionNewerThanRuntime,
         Self::StoreCommitNodeBudgetExceeded,
         Self::StoreCommitByteBudgetExceeded,
         Self::CheckpointComponentEncodingVersionMismatch,
@@ -994,6 +1026,8 @@ impl RuntimeErrorCode {
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
             "session_catalog_lookup_unsupported" => Self::SessionCatalogLookupUnsupported,
+            "session_state_version_unsupported" => Self::SessionStateVersionUnsupported,
+            "session_state_version_newer_than_runtime" => Self::SessionStateVersionNewerThanRuntime,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
             "store_commit_byte_budget_exceeded" => Self::StoreCommitByteBudgetExceeded,
             "checkpoint_component_encoding_version_mismatch" => {
@@ -1271,6 +1305,21 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
 pub enum RuntimeErrorCause {
     SessionDeleted { session_id: SessionId },
 }
+
+/// The session-state generations an admission refused (FIG-3619): the one
+/// the session's marker holds and the one this build admits.
+///
+/// In-process only. A [`RuntimeError`] carries it to the host whose call was
+/// refused and never serializes it, so no reader of a stored error meets a
+/// shape an older build cannot decode. A stored error keeps the code
+/// ([`RuntimeErrorCode::SessionStateVersionUnsupported`] or
+/// [`RuntimeErrorCode::SessionStateVersionNewerThanRuntime`]) and a message
+/// naming both generations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionStateVersionRefusal {
+    pub found: u32,
+    pub current: u32,
+}
 /// Runtime error for unexpected failures.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
@@ -1298,6 +1347,10 @@ pub struct RuntimeError {
     /// outcome.
     #[serde(skip)]
     foreign_cause: Option<TurnFailureCause>,
+    /// The generations a session-state admission refused (FIG-3619). Never
+    /// persisted; see [`SessionStateVersionRefusal`].
+    #[serde(skip)]
+    session_state_version_refusal: Option<SessionStateVersionRefusal>,
 }
 impl RuntimeError {
     /// Constructs a `RuntimeError` for effect-host implementors while creating, observing, or
@@ -1310,7 +1363,21 @@ impl RuntimeError {
             cause: None,
             turn_input_acceptance: None,
             foreign_cause: None,
+            session_state_version_refusal: None,
         }
+    }
+
+    #[must_use]
+    fn with_session_state_version_refusal(mut self, refusal: SessionStateVersionRefusal) -> Self {
+        self.session_state_version_refusal = Some(refusal);
+        self
+    }
+
+    /// The generations a session-state admission refused, on the error the
+    /// refused call returned (FIG-3619). `None` on any other error, and on an
+    /// error read back from storage, which keeps only the code and message.
+    pub fn session_state_version_refusal(&self) -> Option<SessionStateVersionRefusal> {
+        self.session_state_version_refusal
     }
 
     /// Attaches the acceptance of the direct turn this error aborted.
@@ -1614,6 +1681,12 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
                 crate::RuntimeErrorCode::RuntimeStoreCorrupt
             }
             crate::StoreError::SessionDeleted { .. } => crate::RuntimeErrorCode::SessionDeleted,
+            crate::StoreError::SessionStateVersionUnsupported { .. } => {
+                crate::RuntimeErrorCode::SessionStateVersionUnsupported
+            }
+            crate::StoreError::SessionStateVersionNewerThanRuntime { .. } => {
+                crate::RuntimeErrorCode::SessionStateVersionNewerThanRuntime
+            }
             crate::StoreError::HeadRevisionConflict { .. } => {
                 crate::RuntimeErrorCode::StoreCommitSuperseded
             }
