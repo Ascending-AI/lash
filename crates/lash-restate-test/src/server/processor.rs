@@ -713,7 +713,9 @@ impl State {
             .iter()
             .filter(|entry| entry.frame.ty.is_command())
             .count();
-        let run_name = if frame.ty == MessageType::ProposeRunCompletion {
+        let run_name = if frame.ty == MessageType::RunCommand {
+            frame.decode::<RunCommandMessage>().ok().map(|run| run.name)
+        } else if frame.ty == MessageType::ProposeRunCompletion {
             frame
                 .decode::<ProposeRunCompletionMessage>()
                 .ok()

@@ -103,6 +103,7 @@ mod effect_group_session_gate;
 mod effect_group_shape;
 mod endpoint_protocol;
 mod endpoint_turn_runner;
+mod journal_cut_runner;
 mod live_turn_probe;
 mod process_effect_summary;
 mod process_tool_replay;

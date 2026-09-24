@@ -61,6 +61,28 @@ pub type ConformanceTurnAttempt = Arc<
         + Sync,
 >;
 
+/// Where a tier cuts an attempt down, named by the replay key of the effect
+/// it cuts at. Every tier journals lash's effects under their replay keys,
+/// whatever its journal is, so a law states the point once for all tiers and
+/// each tier's runner cuts there with its own crash mechanism: a store fault
+/// in process, a crashed handler on the Restate server double.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JournalCut {
+    pub replay_key: String,
+    pub at: JournalCutPoint,
+}
+
+/// Which side of the effect a [`JournalCut`] falls on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JournalCutPoint {
+    /// The effect ran; the attempt dies before its result is durable, and
+    /// the redrive runs it again.
+    BeforeResult,
+    /// The attempt dies before the effect is journaled at all, and the
+    /// redrive issues it anew.
+    BeforeEffect,
+}
+
 /// Runs a [`ConformanceTurnJob`] where the tier runs turns.
 #[async_trait::async_trait]
 pub trait ConformanceTurnRunner: Send + Sync {
@@ -77,6 +99,27 @@ pub trait ConformanceTurnRunner: Send + Sync {
         crashing: ConformanceTurnAttempt,
         redrive: ConformanceTurnAttempt,
     );
+
+    /// The replay keys of every effect the tier journaled for `scope`'s
+    /// turn, or `None` when this runner cannot read them. A law finds the
+    /// key of a [`JournalCut`] here, from a probe run of the same turn.
+    async fn recorded_replay_keys(&self, _scope: &crate::ExecutionScope) -> Option<Vec<String>> {
+        None
+    }
+
+    /// Runs one turn across a cut the tier injects: `attempt` runs until the
+    /// tier kills it at `cut`, and the tier then redelivers the same turn to
+    /// `redrive` the way it recovers a crashed turn. Panics when the cut did
+    /// not fire. A runner that cannot cut says so by panicking.
+    async fn run_cut_then_redriven_turn(
+        &self,
+        _admitted: crate::AdmittedScope,
+        cut: JournalCut,
+        _attempt: ConformanceTurnAttempt,
+        _redrive: ConformanceTurnAttempt,
+    ) {
+        panic!("this tier's turn runner cannot cut a turn at {cut:?}");
+    }
 
     /// The process-work wiring for a runtime whose process segments run on
     /// `worker`. In process the runtime's own port drives the worker; a tier
@@ -96,6 +139,10 @@ pub trait ConformanceTurnRunner: Send + Sync {
 /// runs on and driven in the calling task.
 pub struct HostTurnRunner {
     host: Arc<dyn crate::EffectHost>,
+    /// The host's journal fault injector, which cuts turns at a
+    /// [`JournalCut`]: a failed claim before the effect, a failed finalize
+    /// before its result.
+    journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
 }
 
 impl HostTurnRunner {
@@ -103,7 +150,22 @@ impl HostTurnRunner {
     /// is built on: group children route through the executors that host
     /// registered.
     pub fn shared(host: Arc<dyn crate::EffectHost>) -> Arc<dyn ConformanceTurnRunner> {
-        Arc::new(Self { host })
+        Arc::new(Self {
+            host,
+            journal_faults: None,
+        })
+    }
+
+    /// [`shared`](Self::shared), cutting turns with `faults`, the journal
+    /// fault injector of `host`.
+    pub fn with_journal_faults(
+        host: Arc<dyn crate::EffectHost>,
+        faults: lash_core::facade_support::effect_replay_driver::EffectJournalFaults,
+    ) -> Arc<dyn ConformanceTurnRunner> {
+        Arc::new(Self {
+            host,
+            journal_faults: Some(faults),
+        })
     }
 }
 
@@ -141,6 +203,70 @@ impl ConformanceTurnRunner for HostTurnRunner {
         assert!(
             crashed.is_err(),
             "the crashing attempt must panic before its turn commits"
+        );
+        let scoped = self
+            .host
+            .scoped(admitted)
+            .expect("scope the redriven conformance turn on its host");
+        redrive(scoped).await;
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: an unscoped host is a fixture defect"
+    )]
+    async fn recorded_replay_keys(&self, scope: &crate::ExecutionScope) -> Option<Vec<String>> {
+        let scoped = self
+            .host
+            .scoped(crate::admit(scope.clone()))
+            .expect("scope the recorded turn on its host");
+        match scoped
+            .controller()
+            .read_recorded_journal(&crate::RecordedKeyRange {
+                lower: String::new(),
+                upper: "\u{10FFFF}".to_string(),
+                group_key_prefix: String::new(),
+            })
+            .await
+            .expect("read the recorded turn's journal")
+        {
+            crate::RecordedJournal::Keys(keys) => Some(keys.replay_keys),
+            _ => None,
+        }
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: an unscoped host is a fixture defect"
+    )]
+    async fn run_cut_then_redriven_turn(
+        &self,
+        admitted: crate::AdmittedScope,
+        cut: JournalCut,
+        attempt: ConformanceTurnAttempt,
+        redrive: ConformanceTurnAttempt,
+    ) {
+        use lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint;
+        let faults = self
+            .journal_faults
+            .as_ref()
+            .unwrap_or_else(|| panic!("this host runner has no journal faults to cut {cut:?}"));
+        faults.fail_next(
+            match cut.at {
+                JournalCutPoint::BeforeEffect => EffectJournalFaultPoint::Claim,
+                JournalCutPoint::BeforeResult => EffectJournalFaultPoint::Finalize,
+            },
+            &cut.replay_key,
+        );
+        let scoped = self
+            .host
+            .scoped(admitted.clone())
+            .expect("scope the cut conformance turn on its host");
+        let end = attempt(scoped).await;
+        assert!(faults.fired(), "the journal cut at {cut:?} fired");
+        assert!(
+            matches!(end, ConformanceTurnEnd::Aborted(_)),
+            "the cut at {cut:?} aborts the attempt: {end:?}"
         );
         let scoped = self
             .host

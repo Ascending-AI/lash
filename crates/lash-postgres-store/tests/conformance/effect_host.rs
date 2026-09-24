@@ -62,8 +62,7 @@ lash_conformance::cell_binding_drift_tests!({
         database_lock,
         "postgres",
         Arc::clone(&host),
-        faults,
-        lash_conformance::HostTurnRunner::shared(host),
+        lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
         vec![rlm_factory(&artifacts, false)],
     )
 });

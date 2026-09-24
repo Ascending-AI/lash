@@ -87,9 +87,10 @@ macro_rules! model_call_drift_park_tests {
 /// against its journaled binding set, completing from the journal when the
 /// drifted tool's result was recorded and parking when it would reach the
 /// tool live. The fixture hands back a guard, a prefix, the tier's effect
-/// host, that host's journal fault injector, its
-/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) and the RLM
-/// protocol plugin factories from the crates above this one.
+/// host, its [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) — which
+/// must read its journal's replay keys and cut a turn at a
+/// [`JournalCut`](crate::JournalCut) — and the RLM protocol plugin factories
+/// from the crates above this one.
 #[macro_export]
 macro_rules! cell_binding_drift_tests {
     ($(#[$attr:meta])* $fixture:block) => {
@@ -100,8 +101,8 @@ macro_rules! cell_binding_drift_tests {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, prefix, host, faults, runner, rlm) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, faults, runner, rlm).await;
+            let (_guard, prefix, host, runner, rlm) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, runner, rlm).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };

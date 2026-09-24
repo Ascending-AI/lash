@@ -608,6 +608,14 @@ impl LiveConformanceHarness {
         )
     }
 
+    /// The in-process server double this harness runs on, if it runs on one.
+    pub(super) fn server_double(&self) -> Option<lash_restate_test::RestateTestServer> {
+        match &self.admin {
+            HarnessAdmin::InProcess { server } => Some(server.clone()),
+            HarnessAdmin::Live { .. } => None,
+        }
+    }
+
     /// The registry the endpoint's `LashProcessWorkflow` writes terminals
     /// into: a law whose processes run on the endpoint must register and
     /// observe them here.
