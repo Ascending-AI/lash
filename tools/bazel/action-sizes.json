@@ -601,6 +601,13 @@
     "peak_bytes": 578121728,
     "samples": 104
   },
+  "lash-internal-typescript/integration": {
+    "cpu_count": 2,
+    "memory_kb": 3670016,
+    "p95_cores": 1.49,
+    "peak_bytes": 2490662912,
+    "samples": 182
+  },
   "lash-internal-typescript/lash_typescript": {
     "cpu_count": 2,
     "memory_kb": 2097152,
