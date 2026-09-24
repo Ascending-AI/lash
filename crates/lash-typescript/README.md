@@ -275,6 +275,15 @@ no probe that fires it fails that test.
   reached through `globalThis`) opens it for the whole cell, and an open
   object reads a missing field as `undefined`. `console.log`, `Object.keys`
   and `Array.isArray` read their argument without opening it.
+- Two forms `tsc --strict` rejects are refused rather than implemented (ADR
+  0064, FIG-3651). A function declaration that shares its var scope's name
+  with another function, a `var` or a parameter refuses as
+  `TS_FUNCTION_REDECLARATION_UNSUPPORTED` (TS2393, TS2300), where Node lets
+  the last declaration win. `delete` of an operand that is not a property
+  reference, such as `delete 1` or `delete f()`, refuses as
+  `TS_DELETE_NON_REFERENCE_UNSUPPORTED` (TS2703), where Node evaluates the
+  operand and answers `true`. `delete` of a bare identifier stays the early
+  `SyntaxError` strict code makes it.
 - Await permission stops at every function boundary: an async IIFE or async
   `map` callback must await its own tool calls, `sleep`, `waitSignal`, and
   `triggers.register` operations.
@@ -773,10 +782,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 708 rows, of which 635 are distinct
+The Node differential table carries 724 rows, of which 651 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of those 635 unique expressions rather than of all 708 rows. Every count in
+that of those 651 unique expressions rather than of all 724 rows. Every count in
 this paragraph is pinned against the table by
 `committed_row_counts_match_the_register`, and the generator pins each lane's
 own row count, so neither this paragraph nor a lane can drift from the corpus in

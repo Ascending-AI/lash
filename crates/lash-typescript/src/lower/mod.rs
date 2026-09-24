@@ -173,6 +173,16 @@ impl Lowerer {
                 span,
             );
         }
+        if name == "await" {
+            // Outside an async function a Script reads `await` as a name, so
+            // `await (x)` there calls it; `tsc` answers the same (TS2311).
+            return Diagnostic::with_repair(
+                DiagnosticCode::UnknownBinding,
+                "unknown binding `await`: outside an async function, `await` is an identifier",
+                "declare the enclosing function `async` to await inside it",
+                span,
+            );
+        }
         Diagnostic::new(
             DiagnosticCode::UnknownBinding,
             format!("unknown binding `{name}`"),

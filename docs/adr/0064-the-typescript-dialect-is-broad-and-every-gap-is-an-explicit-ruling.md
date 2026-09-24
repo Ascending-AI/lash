@@ -36,6 +36,18 @@ ECMA-262 does, and the name-based snapshot-safety refusal is retired with ADR
 0062 register entry 16. Runtime semantics are exactly ECMA's; the only static
 refusal of an otherwise accepted program is the closed-shape field guard.
 
+Amended 2026-09-24 (FIG-3651): the dialect may refuse, rather than implement,
+a construct ECMA-262 accepts where `tsc --strict` rejects it, and only there.
+Such a refusal is sound: it refuses exactly the shape the pinned `tsc`
+(7.0.2) rejects and never a program `tsc` accepts. It names its own `TS_*`
+code, cites the `tsc` diagnostic, and carries a census row with a probe and a
+rejection test like any other ruling. Two join the closed-shape field guard:
+`TS_FUNCTION_REDECLARATION_UNSUPPORTED`, a function declaration that shares
+its var scope's name with another function, a `var` or a parameter (TS2393,
+TS2300); and `TS_DELETE_NON_REFERENCE_UNSUPPORTED`, `delete` of an operand
+that is not a property reference (TS2703). An ECMA-262 early error in the
+same cell still reports first.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves

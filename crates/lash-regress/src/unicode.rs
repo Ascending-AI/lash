@@ -357,7 +357,7 @@ pub fn add_icase_code_points(mut input: CodePointSet) -> CodePointSet {
 }
 
 pub(crate) enum PropertyEscapeKind {
-    CharacterClass(&'static [Interval]),
+    CharacterClass(CodePointSet),
     StringSet(&'static [&'static [u32]]),
 }
 
@@ -384,34 +384,64 @@ pub(crate) fn unicode_property_from_str(
     name: Option<UnicodePropertyName>,
     unicode_sets: bool,
 ) -> Option<PropertyEscapeKind> {
+    let class = |ranges: &[Interval]| {
+        PropertyEscapeKind::CharacterClass(CodePointSet::from_sorted_disjoint_intervals(
+            ranges.to_vec(),
+        ))
+    };
     match name {
-        Some(UnicodePropertyName::GeneralCategory) => Some(PropertyEscapeKind::CharacterClass(
-            general_category_property_value_ranges(
+        Some(UnicodePropertyName::GeneralCategory) => {
+            Some(class(general_category_property_value_ranges(
                 &unicode_property_value_general_category_from_str(s)?,
-            ),
-        )),
-        Some(UnicodePropertyName::Script) => Some(PropertyEscapeKind::CharacterClass(
-            script_value_ranges(&unicode_property_value_script_from_str(s)?),
-        )),
-        Some(UnicodePropertyName::ScriptExtensions) => Some(PropertyEscapeKind::CharacterClass(
-            script_extensions_value_ranges(&unicode_property_value_script_from_str(s)?),
-        )),
+            )))
+        }
+        Some(UnicodePropertyName::Script | UnicodePropertyName::ScriptExtensions)
+            if is_unknown_script(s) =>
+        {
+            Some(PropertyEscapeKind::CharacterClass(
+                unknown_script_code_points(),
+            ))
+        }
+        Some(UnicodePropertyName::Script) => Some(class(script_value_ranges(
+            &unicode_property_value_script_from_str(s)?,
+        ))),
+        Some(UnicodePropertyName::ScriptExtensions) => Some(class(script_extensions_value_ranges(
+            &unicode_property_value_script_from_str(s)?,
+        ))),
         None => {
             if let Some(value) = unicode_property_binary_from_str(s) {
-                return Some(PropertyEscapeKind::CharacterClass(binary_property_ranges(
-                    &value,
-                )));
+                return Some(class(binary_property_ranges(&value)));
             }
             if unicode_sets && let Some(value) = unicode_string_property_from_str(s) {
                 return Some(PropertyEscapeKind::StringSet(string_property_sets(&value)));
             }
-            Some(PropertyEscapeKind::CharacterClass(
-                general_category_property_value_ranges(
-                    &unicode_property_value_general_category_from_str(s)?,
-                ),
-            ))
+            Some(class(general_category_property_value_ranges(
+                &unicode_property_value_general_category_from_str(s)?,
+            )))
         }
     }
+}
+
+/// `Unknown` (`Zzzz`) is the Script value of every code point no script
+/// claims: the unassigned, private-use and surrogate code points (UAX #24).
+/// It is also their only Script_Extensions value. The generated tables list
+/// assigned scripts only, so the set is the union of those three General
+/// Categories.
+fn is_unknown_script(value: &str) -> bool {
+    matches!(value, "Unknown" | "Zzzz")
+}
+
+fn unknown_script_code_points() -> CodePointSet {
+    use crate::unicodetables::UnicodePropertyValueGeneralCategory::{
+        PrivateUse, Surrogate, Unassigned,
+    };
+    let mut code_points = CodePointSet::new();
+    for category in [Unassigned, PrivateUse, Surrogate] {
+        code_points.add_set(CodePointSet::from_sorted_disjoint_intervals(
+            general_category_property_value_ranges(&category).to_vec(),
+        ));
+    }
+    code_points
 }
 
 #[cfg(test)]

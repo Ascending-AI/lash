@@ -32,6 +32,8 @@ mod deviation_register;
 mod dialect;
 #[path = "differential_oracle.rs"]
 mod differential_oracle;
+#[path = "early_errors.rs"]
+mod early_errors;
 #[path = "ecma_regressions.rs"]
 mod ecma_regressions;
 #[path = "fluency_smoke.rs"]

@@ -64,6 +64,8 @@ pub enum DiagnosticCode {
     TriggerInputsLiteralRequired,
     MethodUnsupported,
     DateImmutable,
+    DeleteNonReferenceUnsupported,
+    FunctionRedeclarationUnsupported,
     ReturnOutsideFunction,
     LoopControlOutsideLoop,
     UnsupportedStatement,
@@ -142,6 +144,8 @@ impl DiagnosticCode {
         Self::TriggerInputsLiteralRequired,
         Self::MethodUnsupported,
         Self::DateImmutable,
+        Self::DeleteNonReferenceUnsupported,
+        Self::FunctionRedeclarationUnsupported,
         Self::ReturnOutsideFunction,
         Self::LoopControlOutsideLoop,
         Self::UnsupportedStatement,
@@ -261,6 +265,12 @@ impl DiagnosticCode {
                 "use a method the dialect's standard-library contract lists for this receiver"
             }
             Self::DateImmutable => "build a new date instead: `new Date(d.getTime() + n)`",
+            Self::DeleteNonReferenceUnsupported => {
+                "evaluate the operand as its own statement; `delete` removes a property, `delete object.member`"
+            }
+            Self::FunctionRedeclarationUnsupported => {
+                "give each declaration its own name; hold a value that changes in a `let`"
+            }
             Self::UnsupportedStatement | Self::UnsupportedExpression => {
                 "rewrite with the constructs the dialect prompt lists"
             }
@@ -344,6 +354,10 @@ impl DiagnosticCode {
             | Self::FunctionNotPersisted
             | Self::NonLiftableCapture
             | Self::DateImmutable
+            // Stricter than ECMA-262 exactly where `tsc --strict` rejects
+            // the program (ADR 0064, FIG-3651).
+            | Self::DeleteNonReferenceUnsupported
+            | Self::FunctionRedeclarationUnsupported
             // Rules about size, placement, and shape. No single construct to
             // name, but just as much a refusal: the runtime will not accept
             // this program however it is debugged.
@@ -445,6 +459,8 @@ impl DiagnosticCode {
             Self::TriggerInputsLiteralRequired => "TS_TRIGGER_INPUTS_LITERAL_REQUIRED",
             Self::MethodUnsupported => "TS_METHOD_UNSUPPORTED",
             Self::DateImmutable => "TS_DATE_IMMUTABLE",
+            Self::DeleteNonReferenceUnsupported => "TS_DELETE_NON_REFERENCE_UNSUPPORTED",
+            Self::FunctionRedeclarationUnsupported => "TS_FUNCTION_REDECLARATION_UNSUPPORTED",
             Self::ReturnOutsideFunction => "TS_RETURN_OUTSIDE_FUNCTION",
             Self::LoopControlOutsideLoop => "TS_LOOP_CONTROL_OUTSIDE_LOOP",
             Self::UnsupportedStatement => "TS_STATEMENT_UNSUPPORTED",
@@ -697,7 +713,16 @@ mod tests {
     pub(super) fn emitting_sources() -> Vec<(&'static str, &'static str)> {
         vec![
             ("adapter/mod.rs", include_str!("adapter/mod.rs")),
+            (
+                "adapter/declarations.rs",
+                include_str!("adapter/declarations.rs"),
+            ),
+            (
+                "adapter/early_errors.rs",
+                include_str!("adapter/early_errors.rs"),
+            ),
             ("adapter/enums.rs", include_str!("adapter/enums.rs")),
+            ("adapter/goal.rs", include_str!("adapter/goal.rs")),
             ("adapter/nesting.rs", include_str!("adapter/nesting.rs")),
             (
                 "adapter/prototype_chain.rs",

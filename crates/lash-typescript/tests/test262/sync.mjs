@@ -147,8 +147,12 @@ const typescriptNames = [
   "date-mutation",
   "date-string-coercion",
   "debugger",
+  // Forms `tsc --strict` rejects, refused rather than implemented (FIG-3651,
+  // ADR 0064).
+  "delete-non-reference",
   "direct-eval",
   "function-constructor",
+  "function-redeclaration",
   "instanceof-arbitrary",
   "labels",
   "lone-surrogate-values",

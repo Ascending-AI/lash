@@ -22,7 +22,7 @@ pub(super) fn parenthesized(expr: Expr) -> Expr {
     }
 }
 
-impl Adapter {
+impl Adapter<'_> {
     pub(super) fn append_optional_operation(
         &self,
         base: Expr,
@@ -70,7 +70,9 @@ impl Adapter {
             swc::OptChainBase::Member(member) => {
                 let object = self.convert_expr(&member.obj)?;
                 let property = match &member.prop {
-                    swc::MemberProp::Ident(name) => MemberProperty::Field(name.sym.to_string()),
+                    swc::MemberProp::Ident(name) => {
+                        MemberProperty::Field(self.identifier_name(name)?)
+                    }
                     swc::MemberProp::Computed(property) => {
                         MemberProperty::Index(Box::new(self.convert_expr(&property.expr)?))
                     }

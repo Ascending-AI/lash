@@ -61,3 +61,15 @@
 # value model cannot do — refused by name rather than silently coerced.
 "'AB'.match({ toString: function() { return 'AB'; } })"	runtime-reject	TS_OBJECT_STRING_COERCION
 "[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	runtime-reject	TS_OBJECT_STRING_COERCION
+# FIG-3650/FIG-3651: ECMA-262 early errors reject as TS_SYNTAX_ERROR; the two
+# forms tsc --strict rejects (TS2393/TS2300, TS2703) refuse by name.
+"(() => { { let f; var f; } })()"	reject	TS_SYNTAX_ERROR
+"(() => { switch (0) { case 1: let f; default: var f; } })()"	reject	TS_SYNTAX_ERROR
+"(() => { try {} catch (e) { let e; } })()"	reject	TS_SYNTAX_ERROR
+"(() => { for (let x of []) { var x; } })()"	reject	TS_SYNTAX_ERROR
+"(() => { var \\u0062reak = 1; })()"	reject	TS_SYNTAX_ERROR
+"(() => { 'use strict'; return '\\8'; })()"	reject	TS_SYNTAX_ERROR
+"(() => `\\8`)()"	reject	TS_SYNTAX_ERROR
+"(async () => { var \\u0061wait; })()"	reject	TS_SYNTAX_ERROR
+"(() => { function f() { return 1; } function f() { return 2; } return f(); })()"	reject	TS_FUNCTION_REDECLARATION_UNSUPPORTED
+"(() => delete 1)()"	reject	TS_DELETE_NON_REFERENCE_UNSUPPORTED

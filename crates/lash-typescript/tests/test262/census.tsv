@@ -231,9 +231,11 @@ typescript	date-mutation	rejected	TS_DATE_IMMUTABLE	const d = new Date(0); d.set
 typescript	date-string-coercion	rejected	TS_DATE_STRING_COERCION_PENDING	const s = '' + new Date(0);
 typescript	debugger	rejected	TS_DEBUGGER_UNSUPPORTED	debugger;
 typescript	decorators	rejected	TS_DECORATOR_UNSUPPORTED	@dec class A { }
+typescript	delete-non-reference	rejected	TS_DELETE_NON_REFERENCE_UNSUPPORTED	const b = delete 1;
 typescript	direct-eval	rejected	TS_EVAL_UNSUPPORTED	eval('1');
 typescript	enum	accepted	-	-
 typescript	function-constructor	rejected	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED	const f = Function('return 1');
+typescript	function-redeclaration	rejected	TS_FUNCTION_REDECLARATION_UNSUPPORTED	function f() { } function f() { }
 typescript	generics	accepted	-	-
 typescript	instanceof-arbitrary	rejected	TS_INSTANCEOF_UNSUPPORTED	const b = 'a' instanceof String;
 typescript	interfaces	accepted	-	-

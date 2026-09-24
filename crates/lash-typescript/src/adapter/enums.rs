@@ -20,7 +20,7 @@ impl ConstEnumValue {
     }
 }
 
-impl Adapter {
+impl Adapter<'_> {
     pub(super) fn with_enum_scope<T>(
         &self,
         convert: impl FnOnce() -> Result<T, Diagnostic>,
