@@ -992,19 +992,16 @@ class BazelTestContractTests(unittest.TestCase):
         # every unit that resolution compiles, and `//:feature_lane_clippy`
         # lints exactly those. The Cargo command stays for untrusted events,
         # which have no cache credentials and so no pool. The feature-lane
-        # variants and the OFF variant are merge-group breadth: a pull request
-        # builds only the workspace clippy and the schema checks.
-        self.assertIn("//:feature_lane_clippy", clippy_bazel["run"])
-        self.assertIn("//:runtime_off", clippy_bazel["run"])
-        # The Restate release witness is cheap enough for every event: the
-        # release worker build is dispatch-only (FIG-3610).
+        # lint is merge-group breadth: a pull request lints only the
+        # workspace and builds the schema checks. That every feature variant
+        # compiles is the `feature-lanes` job's proof on every trusted event
+        # (FIG-3572), so Lint names no single lane unit.
         self.assertIn(
-            "targets=(//:workspace_clippy //:schema_checks //:restate_release)",
-            clippy_bazel["run"],
+            "targets=(//:workspace_clippy //:schema_checks)", clippy_bazel["run"]
         )
         self.assertIn(
             'if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then\n'
-            "  targets+=(//:feature_lane_clippy //:runtime_off)",
+            "  targets+=(//:feature_lane_clippy)",
             clippy_bazel["run"],
         )
 
@@ -1100,7 +1097,6 @@ class BazelTestContractTests(unittest.TestCase):
             [
                 "pg-store",
                 "pg-pool-wait",
-                "pg-agent-scenario",
                 "pg-sim-backend-faults",
                 "pg-cross-backend",
                 "pg-catalog-compatibility",
@@ -1149,7 +1145,8 @@ class BazelTestContractTests(unittest.TestCase):
         }
         for job in ci_plan.DISPATCH_ONLY_JOBS:
             needs[job]["result"] = "skipped"
-        for job in ci_plan.BAZEL_TEST_JOBS:
+        # The feature lanes need the pool as much as the Bazel partition does.
+        for job in ci_plan.BAZEL_TEST_JOBS | {ci_plan.FEATURE_LANES_JOB}:
             needs[job]["result"] = "skipped"
         self.assertEqual(
             [], ci_plan.evaluate_conclusion(needs, "pull_request", bazel_is_trusted=False)

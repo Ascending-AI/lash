@@ -108,6 +108,9 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
             f"{_store_tests_stub_bin()}{os.pathsep}{environment['PATH']}"
         )
         environment["BAZEL_TRUSTED"] = trusted
+        # `scripts/ci/with-service.sh` exports the slot count to every suite
+        # it wraps; the sharded PostgreSQL suite refuses to run without it.
+        environment["LASH_POSTGRES_SLOT_COUNT"] = "4"
         result = subprocess.run(
             ["bash", str(STORE_TESTS), suite],
             cwd=ROOT,
@@ -592,11 +595,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "functional-e2e",
             "functional-e2e-process-operations",
             "fuzz-smoke",
-            # Feature lanes, deferred Unicode and the lashlang consumer left
-            # the PR/merge-group board entirely: the queue now runs the same
-            # minimal board as a pull request, and the release dispatch is
-            # their sole home.
-            "feature-lanes",
+            # Deferred Unicode and the lashlang consumer left the
+            # PR/merge-group board entirely: the queue runs the same minimal
+            # board as a pull request, and the release dispatch is their sole
+            # home. Feature lanes came back to every trusted event (FIG-3572).
             "unicode-tests",
             "lashlang-git-consumer",
         }
@@ -2218,7 +2220,6 @@ derive_mutation_jobs() {{
             "Test PostgreSQL catalog compatibility",
             "Test Postgres store (conformance and attempt atomicity)",
             "Test runtime pool-wait binding",
-            "Test runtime Postgres agent scenarios",
             "Test simulator backend faults on Postgres",
             "Test cross-backend store differential",
         ):
@@ -2243,7 +2244,6 @@ derive_mutation_jobs() {{
             "Test PostgreSQL catalog compatibility",
             "Test Postgres store (conformance and attempt atomicity)",
             "Test runtime pool-wait binding",
-            "Test runtime Postgres agent scenarios",
             "Test cross-backend store differential",
         ):
             with self.subTest(step=step_name):
@@ -2252,30 +2252,16 @@ derive_mutation_jobs() {{
                 self.assertTrue(bazel.strip())
                 self.assertIn("cargo ", cargo)
 
-        runtime_scenarios = workflow_step_block(
-            postgres_store_job, "Test runtime Postgres agent scenarios"
+        store_suites = workflow_step_block(
+            postgres_store_job, "Test Postgres store (conformance and attempt atomicity)"
         )
-        # The primary major's agent scenarios run on every event.
-        self.assertNotIn("if:", runtime_scenarios.split("run:", 1)[0])
-        scenario_bazel, scenario_cargo = store_suite_branches(
-            store_suite_for_step(runtime_scenarios)
-        )
+        # The whole store package runs on every event (FIG-3572): FIG-3595
+        # and FIG-3550 broke it while it was dispatch-only.
+        self.assertNotIn("if:", store_suites.split("run:", 1)[0])
+        self.assertIn("store-tests.sh pg-store", store_suites)
         self.assertIn(
-            "cargo nextest run --profile ci -p lash-internal-postgres-store",
-            scenario_cargo,
-        )
-        self.assertIn("--test integration", scenario_cargo)
-        # One named test, pinned on both branches. A libtest filter that
-        # matches nothing exits 0, so a rename that leaves this leg pointing
-        # at a deleted test turns the slot green without running anything.
-        oracle = (
-            "public_provider_parent_end_row_is_recovered_after_a_crash"
-            "_before_the_ledger_write_on_postgres"
-        )
-        self.assertIn(f"test({oracle})", scenario_cargo)
-        self.assertIn(f"--test_arg={oracle}", scenario_bazel)
-        self.assertIn(
-            "//crates/lash-postgres-store:integration__test", scenario_bazel
+            "//crates/lash-postgres-store:integration__test",
+            (ROOT / "tools/bazel/postgres_test_labels.txt").read_text(encoding="utf-8"),
         )
         self.assertIn("if: needs.plan.outputs.stores == 'true'", postgres_store_job)
 
@@ -2324,7 +2310,7 @@ derive_mutation_jobs() {{
         three arms and "both halves non-empty" for the rest.
 
         The counts the audit quoted -- nine suites, six uniform -- counted the
-        `case`'s own `*)` arm. The tree has eight suites: five uniform, and
+        `case`'s own `*)` arm. The tree has seven suites: four uniform, and
         three that keep explicit arms because their shape varies
         (`pg-catalog-compatibility` runs two invocations; `pg-store` and
         `s3-store` take a generated label file rather than one label).
@@ -2343,12 +2329,12 @@ derive_mutation_jobs() {{
             re.findall(r"bash scripts/ci/store-tests\.sh ([a-z0-9-]+)", workflow)
         )
 
-        self.assertEqual(5, len(uniform), sorted(uniform))
+        self.assertEqual(4, len(uniform), sorted(uniform))
         self.assertEqual(
             {"pg-catalog-compatibility", "pg-store", "s3-store"}, shaped
         )
         self.assertEqual(suites, dispatched)
-        self.assertEqual(8, len(suites), sorted(suites))
+        self.assertEqual(7, len(suites), sorted(suites))
         # A suite cannot be in both halves, or the table would be shadowed.
         self.assertEqual(set(), set(uniform) & shaped)
 

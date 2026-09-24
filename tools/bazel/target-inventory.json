@@ -18706,6 +18706,7 @@
           "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:integration__test",
+          "shard_count": 2,
           "tags": [
             "cargo-service-gate",
             "manual"
@@ -18716,6 +18717,7 @@
           "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:conformance__test",
+          "shard_count": 6,
           "tags": [
             "cargo-service-gate",
             "manual"

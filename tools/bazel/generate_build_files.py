@@ -2236,8 +2236,9 @@ def feature_lane_outputs(metadata: dict) -> tuple[dict[str, str], str, list[dict
         )
     # The runtime OFF witness, `cargo check -p lash-runtime --lib
     # --no-default-features`: the facade library at that request's first-party
-    # resolution. The `otel-feature-chain` lane runs the same command, so the
-    # label is one of the lane units and the check below proves it stays one.
+    # resolution (FIG-3427). The `otel-feature-chain` lane runs the same
+    # command, and the check below proves it stays a unit of `//:feature_lanes`,
+    # which CI builds on every trusted event.
     runtime_off_request = feature_variants.resolve_request(
         graph.workspace, "lash-runtime", default_features=False, requested=[], with_dev=False
     ).sorted_features()
@@ -2252,7 +2253,7 @@ def feature_lane_outputs(metadata: dict) -> tuple[dict[str, str], str, list[dict
     # --no-default-features --features restate`: lash-restate at the
     # resolution the release worker build compiles it at, with no
     # dev-dependency to unify `lash-core/testing` in (FIG-3610). The
-    # `runtime-features` lane runs the same command.
+    # `runtime-features` lane runs the same command; it too must stay a unit.
     restate_release_request = feature_variants.resolve_request(
         graph.workspace,
         "lash-runtime",
@@ -2269,8 +2270,6 @@ def feature_lane_outputs(metadata: dict) -> tuple[dict[str, str], str, list[dict
         )
     bzl = [
         GENERATED_HEADER,
-        "RUNTIME_OFF_TARGET = " + quote(runtime_off) + "\n\n",
-        "RESTATE_RELEASE_TARGET = " + quote(restate_release) + "\n\n",
         "FEATURE_LANE_COMPILE_TARGETS = " + string_list(compile_targets, indent=4) + "\n\n",
         "FEATURE_LANE_TEST_TARGETS = " + string_list(test_targets, indent=4) + "\n\n",
         "FEATURE_LANE_CLIPPY_TARGETS = " + string_list(clippy_targets, indent=4) + "\n\n",

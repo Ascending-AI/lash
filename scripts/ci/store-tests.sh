@@ -114,7 +114,6 @@ labels() {
 # `s3-store` take a generated label file rather than one label. Forcing a shape
 # variation into the table for those buys nothing.
 declare -A uniform_store_suites=(
-  [pg-agent-scenario]="//crates/lash-postgres-store:integration__test|public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres,automatic_queued_retry_reuses_recorded_completion_before_new_arrivals|lash-internal-postgres-store|--test integration|nextest-ci|"
   [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|pool_wait|lash-perf||nextest|"
   [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|"
   [pg-cross-backend]="//crates/lash-sim:cross_backend_store_differential__test||lash-sim|--test cross_backend_store_differential|nextest-ci|include-ignored,single-threaded,nocapture"
@@ -220,9 +219,15 @@ case "${suite}" in
 
   # Package-wide by design: tests/attempt_atomicity.rs is part of this gate, so
   # narrowing to the conformance binary would silently drop attempt atomicity.
-  # The suites self-serialize on a per-process guard and share one database, so
-  # the binaries must not overlap: Cargo runs them one at a time, and
-  # `--local_test_jobs=1` makes Bazel do the same.
+  # The suites self-serialize on a per-process guard, and two processes on one
+  # database would truncate each other's tables. Cargo runs the binaries one at
+  # a time against the one database. Bazel runs the sharded binaries' shards
+  # and the other binaries in parallel (FIG-3572), each under
+  # `//tools/bazel:postgres_slot_runner`, which gives every test action a
+  # database of its own out of the LASH_POSTGRES_SLOT_COUNT slots
+  # `with-service.sh` created; `--local_test_jobs` never runs more tests than
+  # there are slots. `check_test_shard_coverage.py` then proves every sharded
+  # label's shards ran the binary's whole `--list`, each case exactly once.
   #
   # The execution-receipt census (FIG-3429 item 8) rides both dialects: a law
   # registered for this tier must have run in this job. Under Bazel the
@@ -230,8 +235,19 @@ case "${suite}" in
   # one file the census diffs against the whole crate's registrations.
   pg-store)
     if [ "${trusted}" = true ]; then
+      slots="${LASH_POSTGRES_SLOT_COUNT:?with-service.sh sets LASH_POSTGRES_SLOT_COUNT}"
+      LASH_POSTGRES_SLOT_DIR="$(mktemp -d)"
+      export LASH_POSTGRES_SLOT_DIR
       # shellcheck disable=SC2046
-      bazel_test $(labels postgres)
+      bazel_test \
+        --run_under=//tools/bazel:postgres_slot_runner \
+        --local_test_jobs="${slots}" \
+        --test_env=LASH_POSTGRES_SLOT_DIR \
+        --test_env=LASH_POSTGRES_SLOT_COUNT \
+        $(labels postgres)
+      python3 scripts/ci/check_test_shard_coverage.py \
+        --labels tools/bazel/postgres_test_labels.txt \
+        --testlogs bazel-testlogs
       python3 scripts/check_law_execution_receipts.py \
         --labels tools/bazel/postgres_test_labels.txt \
         --crate-root crates/lash-postgres-store \
