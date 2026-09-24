@@ -48,9 +48,11 @@ async fn world(database_url: String, spec: DrainWorldSpec) -> DrainWorld {
             .expect("a freshly connected host has no resolver yet");
     }
     let drain = host.group_drain();
+    let journal_faults = host.effect_journal_faults();
     DrainWorld {
         host: Arc::new(host) as Arc<dyn EffectHost>,
         drain,
+        journal_faults,
     }
 }
 

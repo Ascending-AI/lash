@@ -13,9 +13,13 @@
 //!
 //! Nothing is enqueued. The drain's work list is
 //! [`EffectReplayRowStore::read_unsettled_group_children`](super::effect_replay_driver::EffectReplayRowStore::read_unsettled_group_children)
-//! — the children of one group that hold no settlement rank, which for a
-//! grouped child is the same set as "no terminal", because N1 writes the rank
-//! and the terminal in one transaction. No synthetic queued-work item, no
+//! — the children of one group that hold no settlement rank. That is wider
+//! than "no terminal": a child's terminal and its rank are two transactions
+//! (ADR 0099 §5 seats the rank at discharge, after the terminal's declared
+//! intents are durable), so a child whose terminal landed but whose discharge
+//! has not is still queued, and the drain finishes its discharge rather than
+//! re-running it. A child released unrecorded after a live fault holds
+//! neither, and is queued to run again (FIG-3644). No synthetic queued-work item, no
 //! `work_kind`, and no table exists for this: a second queue would be a second
 //! copy of a fact the effect journal already holds exactly, and the two would
 //! disagree the first time one of them was written without the other.

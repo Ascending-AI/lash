@@ -26,7 +26,13 @@ crate::tool_child_invocation_tests!({
         crate::ToolChildLawFixture {
             make_world: Arc::new(move |_spec| {
                 let host = Arc::clone(&host);
-                Box::pin(async move { crate::ToolChildWorld { host, drain: None } })
+                Box::pin(async move {
+                    crate::ToolChildWorld {
+                        host,
+                        drain: None,
+                        journal_faults: None,
+                    }
+                })
             }),
             make_processes: Arc::new(|| {
                 Box::pin(async {
@@ -57,7 +63,13 @@ crate::tool_batch_group_tests!({
         crate::ToolChildLawFixture {
             make_world: Arc::new(move |_spec| {
                 let host = Arc::clone(&host);
-                Box::pin(async move { crate::ToolChildWorld { host, drain: None } })
+                Box::pin(async move {
+                    crate::ToolChildWorld {
+                        host,
+                        drain: None,
+                        journal_faults: None,
+                    }
+                })
             }),
             make_processes: Arc::new(|| {
                 Box::pin(async {

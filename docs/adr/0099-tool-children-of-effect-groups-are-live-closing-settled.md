@@ -1338,3 +1338,35 @@ refuses before any child is claimed — re-typed by the run to
 two openers share a group row although the group table is keyed by the group
 key alone. The native tier
 (§14) does not yet run the content check: it fences a reopen by shape only.
+
+## Amendment (FIG-3644): a child's live fault is never its terminal
+
+Amended 2026-09-24. A child's recorded terminal is its outcome, and a redrive
+replays it. A child whose execution fails with a code that aborts its turn is
+different: a live fault (store I/O, a pool timeout, a `ControllerAborted`
+attempt) or a park (FIG-3586). That failure belongs to the attempt, so it is
+never sealed. If it were sealed as the child's `Failed` terminal, every
+redrive would replay the abort, and the turn could only abort again.
+
+- **Lash-owned journals.** On SQLite and PostgreSQL, the driver releases a
+  pending child's claim unrecorded (`release_uncommitted_claim`). The row
+  stays `pending` and keeps its canonical envelope. The open group hands the
+  fault to `await_next_settlement`, so the waiting turn aborts instead of
+  parking on a rank nothing will allocate. A reopen dispatches the child again
+  under the same replay key. So does the loser drain, and so does the opener's
+  end. Its recorded attempts replay, and only unrecorded work runs again, at
+  least once (ADR 0042).
+- **Committed children.** A committed child that fails keeps its claim until
+  the lease lapses, as before (§4).
+- **Restate.** A child whose run ends this way fails its invocation with a
+  retryable error and records no settlement. The engine re-runs the child and
+  replays its journaled steps.
+- **Consumers.** A settled child's `Failed` terminal is always its recorded
+  outcome. The group consumer no longer re-reads a sealed failure's code as a
+  live abort.
+- **Saved result without a rank (W19).** A child's terminal and its rank are
+  saved in two transactions, so a crash between them leaves a saved result
+  with no rank. The drain seats that rank. So does a reopen that replays the
+  saved terminal: it discharges the child before it serves the result. The
+  child is not run again and holds exactly one rank. No sibling is left
+  stranded behind it at the commit-order barrier.

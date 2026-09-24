@@ -189,7 +189,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     ///
     /// Everything runs inside one `BEGIN IMMEDIATE` write transaction, so the
     /// decision cannot interleave with a sibling's regardless.
-    async fn release_uncommitted_derivation(
+    async fn release_uncommitted_claim(
         &self,
         fence: &EffectLeaseFence,
     ) -> Result<bool, RuntimeEffectControllerError> {
@@ -203,7 +203,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 let changed = tx.execute(
                     effect_sql(Schema::Main)
                         .replay_sqlite
-                        .release_uncommitted_derivation
+                        .release_uncommitted_claim
                         .sql(),
                     params![
                         fence.scope_id,

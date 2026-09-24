@@ -160,25 +160,20 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     /// ADR 0065 accepts with a pre-identified, backend-local escape (a
     /// per-group sequence generator or a sharded counter) that needs no
     /// contract movement.
-    async fn release_uncommitted_derivation(
+    async fn release_uncommitted_claim(
         &self,
         fence: &EffectLeaseFence,
     ) -> Result<bool, RuntimeEffectControllerError> {
-        let changed = sqlx::query(
-            effect_sql()
-                .replay_postgres
-                .release_uncommitted_derivation
-                .sql(),
-        )
-        .bind(&fence.scope_id)
-        .bind(&fence.replay_key)
-        .bind(&fence.envelope_hash)
-        .bind(&fence.owner_id)
-        .bind(&fence.lease_token)
-        .execute(&self.pool)
-        .await
-        .map_err(effect_store_error)?
-        .rows_affected();
+        let changed = sqlx::query(effect_sql().replay_postgres.release_uncommitted_claim.sql())
+            .bind(&fence.scope_id)
+            .bind(&fence.replay_key)
+            .bind(&fence.envelope_hash)
+            .bind(&fence.owner_id)
+            .bind(&fence.lease_token)
+            .execute(&self.pool)
+            .await
+            .map_err(effect_store_error)?
+            .rows_affected();
         if changed == 1 {
             self.announce_row(&fence.scope_id, &fence.replay_key);
         }

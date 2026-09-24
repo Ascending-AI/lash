@@ -125,6 +125,11 @@ pub struct ToolChildWorld {
     /// the recovery law reads this to decide which half of the routing
     /// contract the tier can speak to.
     pub drain: Option<Arc<dyn crate::testing::conformance_support::StoreEffectGroupDrain>>,
+    /// The host journal's fault injector, where the tier keeps a Lash-owned
+    /// journal a law can make fail one call (FIG-3524). `None` on Restate,
+    /// whose journal is the engine's.
+    pub journal_faults:
+        Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
 }
 
 /// What a law needs the next world to be built with.
@@ -2048,6 +2053,7 @@ mod capture;
 mod commit_boundary;
 mod deferred_commit;
 mod driver;
+mod env_resolution;
 mod foreign_opener;
 mod incarnation;
 mod incorporation;
@@ -2064,6 +2070,7 @@ pub use capture::*;
 pub use commit_boundary::*;
 pub use deferred_commit::*;
 pub use driver::*;
+pub use env_resolution::*;
 pub use foreign_opener::*;
 pub use incarnation::*;
 pub use incorporation::*;

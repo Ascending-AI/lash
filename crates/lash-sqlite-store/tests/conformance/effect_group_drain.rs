@@ -55,9 +55,11 @@ async fn world(backend: TestBackend, spec: DrainWorldSpec) -> DrainWorld {
             .expect("a freshly opened host has no resolver yet");
     }
     let drain = host.group_drain();
+    let journal_faults = host.effect_journal_faults();
     DrainWorld {
         host: host as Arc<dyn EffectHost>,
         drain,
+        journal_faults,
     }
 }
 

@@ -125,8 +125,10 @@ lash_store_sql::statements! {
                AND lease_expires_at_ms > ?10
              RETURNING group_key";
 
-        /// Release an ungrouped, uncommitted derivation under the complete live lease fence.
-        release_uncommitted_derivation = "UPDATE runtime_effect_replay
+        /// Release an uncommitted claim unrecorded under the complete live
+        /// lease fence: an ungrouped derivation, or a pending group child whose
+        /// execution ended in a live fault.
+        release_uncommitted_claim = "UPDATE runtime_effect_replay
              SET lease_expires_at_ms = 0,
                  updated_at_ms = ?6
              WHERE scope_id = ?1
@@ -135,7 +137,6 @@ lash_store_sql::statements! {
                AND lease_owner_id = ?4
                AND lease_token = ?5
                AND status = 'in_progress'
-               AND group_key IS NULL
                AND commit_state = 'pending'
                AND lease_expires_at_ms > ?6";
 

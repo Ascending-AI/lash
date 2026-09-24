@@ -1638,6 +1638,18 @@ impl RuntimeEffectControllerError {
         }
     }
 
+    /// Whether this error aborts its turn without being any effect's
+    /// recorded outcome: a live error, not one replayed off a settled row,
+    /// whose cause is a live fault or a park (FIG-3575, FIG-3586).
+    ///
+    /// A group child whose execution fails with one is never sealed: its
+    /// claim is released unrecorded and the substrate re-drives it under the
+    /// same replay key (FIG-3644). Sealing it would replay the abort as the
+    /// child's terminal on every redrive.
+    pub fn is_unrecorded_abort(&self) -> bool {
+        self.turn_failure_cause().aborts_invocation()
+    }
+
     /// Sets the summary carried by a `RuntimeEffectControllerError` for effect-host implementors
     /// while executing or replaying a runtime effect.
     pub fn with_summary(mut self, summary: crate::RuntimeEffectReplayMismatchReport) -> Self {

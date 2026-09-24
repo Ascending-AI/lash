@@ -52,7 +52,7 @@ use pretty_assertions::assert_eq;
 use tokio_util::sync::CancellationToken;
 
 use super::effect_group_drain::{
-    CRASH_LEASE_MS, DrainWorld, DrainWorldFactory, RUN, RecordingExecutors, blocking,
+    AWAIT_BUDGET, CRASH_LEASE_MS, DrainWorld, DrainWorldFactory, RUN, RecordingExecutors, blocking,
     child_replay_key, close, crashed_process, doomed_process, drain_until_no_live_lease, group_key,
     impostor, impostor_group, never, next, open, open_with, orphan_two_losers, outcome_of, pass,
     scope, settles, spec, until, until_leases_lapse, unwired_spec,
@@ -83,12 +83,26 @@ enum GroupCrashWindow {
     /// Both children hold claims and are inside their executors; nothing is
     /// journaled beyond the open (ADR 0099 W3).
     ChildrenInFlightBeforeSettlement,
+    /// Position 0's body ran to its result, but the result was never
+    /// journaled: its finalize failed, the child was released unrecorded
+    /// (FIG-3644), and the process died with position 1 still in flight
+    /// (ADR 0099 W14). A redrive runs position 0 again under the same replay
+    /// key — at least once, per ADR 0042 — and it settles and ranks once.
+    ChildRanBeforeJournal,
     /// Position 0's terminal is journaled — replayable by any later opener —
     /// while position 1 is still in flight under a claim that dies with the
     /// process (ADR 0099 W4 and W5, which share this residue: *consumption* is
     /// a cursor on the caller's handle, not a journaled fact, so "settled" and
     /// "settled and consumed" are the same durable state).
     ChildSettledBeforeConsume,
+    /// Position 0's terminal is saved and its final committed, but its rank
+    /// is not: a child's result and its rank are two transactions — §5 seats
+    /// the rank at discharge — and the process dies between them (ADR 0099
+    /// W19). Position 1 is in flight under a claim that dies with the
+    /// process. Recovery must seat position 0's rank exactly once from the
+    /// saved result, never re-run it, and never leave position 1 queued
+    /// behind it at the commit-order barrier.
+    ChildSavedBeforeRank,
     /// The caller closed with `RunToCompletion` while its losers were still
     /// claimed and running: the group is closed, the losers are orphaned
     /// (ADR 0099 W9).
@@ -96,10 +110,12 @@ enum GroupCrashWindow {
 }
 
 impl GroupCrashWindow {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 6] = [
         Self::OpenJournaledBeforeDispatch,
         Self::ChildrenInFlightBeforeSettlement,
+        Self::ChildRanBeforeJournal,
         Self::ChildSettledBeforeConsume,
+        Self::ChildSavedBeforeRank,
         Self::ClosingRecordedLosersInFlight,
     ];
 
@@ -107,13 +123,25 @@ impl GroupCrashWindow {
         match self {
             Self::OpenJournaledBeforeDispatch => "open-journaled",
             Self::ChildrenInFlightBeforeSettlement => "children-in-flight",
+            Self::ChildRanBeforeJournal => "ran-unjournaled",
             Self::ChildSettledBeforeConsume => "child-settled",
+            Self::ChildSavedBeforeRank => "saved-unranked",
             Self::ClosingRecordedLosersInFlight => "closing-recorded",
         }
     }
 
-    /// Positions whose terminals are journaled when the process dies.
+    /// Positions whose terminals are saved when the process dies: never run
+    /// again, whatever comes back.
     fn settled(self) -> &'static [usize] {
+        match self {
+            Self::ChildSettledBeforeConsume | Self::ChildSavedBeforeRank => &[0],
+            _ => &[],
+        }
+    }
+
+    /// Positions whose ranks are journaled when the process dies: served to
+    /// any opener without anything having to seat them.
+    fn ranked(self) -> &'static [usize] {
         match self {
             Self::ChildSettledBeforeConsume => &[0],
             _ => &[],
@@ -123,7 +151,7 @@ impl GroupCrashWindow {
     /// Positions a redrive may still have to run.
     fn unsettled(self) -> &'static [usize] {
         match self {
-            Self::ChildSettledBeforeConsume => &[1],
+            Self::ChildSettledBeforeConsume | Self::ChildSavedBeforeRank => &[1],
             _ => &[0, 1],
         }
     }
@@ -274,11 +302,7 @@ const ADR_0099_ROWS: &[Adr0099Row] = &[
     Adr0099Row {
         row: "W14",
         summary: "child handler dies with the opener alive",
-        ruling: Adr0099Ruling::NoSeam(
-            "a child handler runs inside the driver's own task; the seam can \
-             kill the process, not one task, and an executor failure is a \
-             journaled terminal rather than a death",
-        ),
+        ruling: Adr0099Ruling::Covered(GroupCrashWindow::ChildRanBeforeJournal),
     },
     Adr0099Row {
         row: "W15",
@@ -311,9 +335,7 @@ const ADR_0099_ROWS: &[Adr0099Row] = &[
     Adr0099Row {
         row: "W19",
         summary: "final record committed and ordered, crash before drain",
-        ruling: Adr0099Ruling::NoSeam(
-            "commit-order drain positions do not exist on this substrate",
-        ),
+        ruling: Adr0099Ruling::Covered(GroupCrashWindow::ChildSavedBeforeRank),
     },
     Adr0099Row {
         row: "W20",
@@ -408,7 +430,15 @@ async fn run_cell(
     let key = group_key(prefix, &label);
     let crashed_scope = scope(prefix, &label);
     crash_at(make, window, &key, &crashed_scope).await;
-    until_leases_lapse(make, &key).await;
+    if window == GroupCrashWindow::ChildSavedBeforeRank {
+        // A probe pass would discharge the saved child itself — the drain
+        // seats a committed child's rank with no executor — and every
+        // redrive would then meet the settled-and-ranked residue instead.
+        // So the dead claim is left to lapse on the lease clock alone.
+        tokio::time::sleep(Duration::from_millis(3 * CRASH_LEASE_MS)).await;
+    } else {
+        until_leases_lapse(make, &key).await;
+    }
     match redrive {
         GroupRedrive::SameOpener => {
             redrive_same_opener(make, window, &key, &crashed_scope).await;
@@ -417,7 +447,7 @@ async fn run_cell(
             redrive_different_opener(make, window, &key, &crashed_scope).await;
         }
         GroupRedrive::NoOpener => {
-            redrive_no_opener(make, window, &key).await;
+            redrive_no_opener(make, window, &key, &crashed_scope).await;
         }
     }
 }
@@ -559,10 +589,132 @@ async fn crash_at(
             })
             .await;
         }
+        GroupCrashWindow::ChildRanBeforeJournal => {
+            crashed_process(make, {
+                let key = key.to_string();
+                let scope = crashed_scope.clone();
+                move |world| {
+                    Box::pin(async move {
+                        let scoped = world.host.scoped(crate::admit(scope)).expect("scope");
+                        world.journal_faults.fail_next(
+                            lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint::Finalize,
+                            &child_replay_key(&key, 0),
+                        );
+                        let ran: Arc<Mutex<Vec<usize>>> = Arc::default();
+                        let entered = Arc::new(AtomicUsize::new(0));
+                        let _opener = open(
+                            &scoped,
+                            &key,
+                            2,
+                            RUN,
+                            vec![counting(&ran, 0), blocking(&entered)],
+                        )
+                        .await;
+                        until(|| entered.load(Ordering::SeqCst) == 1).await;
+                        tokio::time::timeout(AWAIT_BUDGET, world.journal_faults.wait_fired())
+                            .await
+                            .expect("position 0 reaches its finalize");
+                        assert_eq!(
+                            ran.lock_recover().clone(),
+                            vec![0],
+                            "position 0's body ran to its result before the process died"
+                        );
+                        // Nothing was journaled for it: a second cursor is
+                        // handed the finalize's store fault, unrecorded, and
+                        // no rank (FIG-3644).
+                        let mut witness = EffectGroupHandle::restored(key.clone(), 2, 0)
+                            .expect("a fresh cursor over a two-child group");
+                        let error = next(&scoped, &mut witness)
+                            .await
+                            .expect_err("position 0's result is not journaled");
+                        assert_eq!(
+                            error.code,
+                            world.journal_faults.store_code(),
+                            "the waiter is handed the finalize's store fault: {error}"
+                        );
+                    })
+                }
+            })
+            .await;
+        }
+        GroupCrashWindow::ChildSavedBeforeRank => {
+            crashed_process(make, {
+                let key = key.to_string();
+                let scope = crashed_scope.clone();
+                move |world| {
+                    Box::pin(async move {
+                        let scoped = world.host.scoped(crate::admit(scope)).expect("scope");
+                        world.journal_faults.fail_next(
+                            lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint::Discharge,
+                            &child_replay_key(&key, 0),
+                        );
+                        let entered = Arc::new(AtomicUsize::new(0));
+                        let _opener =
+                            open(&scoped, &key, 2, RUN, vec![settles(0), blocking(&entered)]).await;
+                        until(|| entered.load(Ordering::SeqCst) == 1).await;
+                        tokio::time::timeout(AWAIT_BUDGET, world.journal_faults.wait_fired())
+                            .await
+                            .expect("position 0 reaches its discharge");
+                        // The residue, read without seating anything: a
+                        // second cursor's next rank is not position 0's saved
+                        // result — its rank was never journaled — but the
+                        // fault that stopped the discharge, handed over
+                        // unrecorded (FIG-3644).
+                        let mut witness = EffectGroupHandle::restored(key.clone(), 2, 0)
+                            .expect("a fresh cursor over a two-child group");
+                        let error = next(&scoped, &mut witness)
+                            .await
+                            .expect_err("position 0's rank is not journaled");
+                        assert_eq!(
+                            error.code,
+                            world.journal_faults.store_code(),
+                            "the waiter is handed the discharge's store fault: {error}"
+                        );
+                    })
+                }
+            })
+            .await;
+        }
         GroupCrashWindow::ClosingRecordedLosersInFlight => {
             orphan_two_losers(make, key, crashed_scope).await;
         }
     }
+}
+
+/// Every child of `key` holds exactly one rank: the journal serves ranks 1
+/// and 2, one per position, and nothing at rank 3. A recovery that seated a
+/// saved child's rank twice, or never, fails here.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn assert_each_child_ranked_once(
+    make: &DrainWorldFactory,
+    key: &str,
+    crashed_scope: &ExecutionScope,
+) {
+    let reader = make(spec(CRASH_LEASE_MS, &RecordingExecutors::refusing())).await;
+    let scoped = reader
+        .host
+        .scoped(crate::admit(crashed_scope.clone()))
+        .expect("the same scope binds");
+    let mut ranked = Vec::new();
+    for rank in 1..=3_u64 {
+        if let Some(settlement) = scoped
+            .controller()
+            .read_group_settlement(key, rank)
+            .await
+            .expect("the journal answers a rank read")
+        {
+            ranked.push(settlement.child_replay_key);
+        }
+    }
+    ranked.sort();
+    assert_eq!(
+        ranked,
+        vec![child_replay_key(key, 0), child_replay_key(key, 1)],
+        "each child holds exactly one rank"
+    );
 }
 
 /// The same durable scope reopens with the accepted children.
@@ -655,6 +807,7 @@ async fn redrive_same_opener(
         "a resumed group leaves the drain nothing to run: {:?}",
         verifier.executions()
     );
+    assert_each_child_ranked_once(make, key, crashed_scope).await;
 }
 
 /// A different process reopens with the retained replay keys under different
@@ -697,7 +850,7 @@ async fn redrive_different_opener(
     )
     .await;
 
-    for &position in window.settled() {
+    for &position in window.ranked() {
         let settlement = next(&scoped, &mut handle).await.expect(
             "a journaled rank replays to any opener — refusal governs \
                      execution, not the record",
@@ -753,6 +906,7 @@ async fn redrive_different_opener(
         expected_executions,
         "the honest host settles each unsettled child exactly once"
     );
+    assert_each_child_ranked_once(make, key, crashed_scope).await;
 }
 
 /// Nobody comes back for the group; the drain is the only redrive.
@@ -766,35 +920,49 @@ async fn redrive_different_opener(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn redrive_no_opener(make: &DrainWorldFactory, window: GroupCrashWindow, key: &str) {
+async fn redrive_no_opener(
+    make: &DrainWorldFactory,
+    window: GroupCrashWindow,
+    key: &str,
+    crashed_scope: &ExecutionScope,
+) {
     let unwired = make(unwired_spec(CRASH_LEASE_MS)).await;
     let report = pass(&unwired, key)
         .await
         .expect("an unwired host's drain reports the queue rather than refusing it");
-    // The queue is exactly the unsettled children: a journaled rank has left
-    // the drain's work list, so `settled` positions must be *absent* — their
-    // being reported again would mean a journaled rank re-entered the queue.
+    // The queue is exactly the children holding no rank: a journaled rank
+    // has left the drain's work list, so `ranked` positions must be *absent*
+    // — their being reported again would mean a journaled rank re-entered the
+    // queue. A saved child with no rank is queued, and the pass seats its
+    // rank itself — that needs no executor — so it reports it `Decided`.
     let mut reported: Vec<String> = report
         .children
         .iter()
         .map(|child| child.replay_key.clone())
         .collect();
     reported.sort();
-    let expected_queue: Vec<String> = window
-        .unsettled()
-        .iter()
-        .map(|position| child_replay_key(key, *position))
+    let expected_queue: Vec<String> = (0..2)
+        .filter(|position| !window.ranked().contains(position))
+        .map(|position| child_replay_key(key, position))
         .collect();
     assert_eq!(
         reported, expected_queue,
-        "the pass reports exactly the unsettled children: {report:?}"
+        "the pass reports exactly the children holding no rank: {report:?}"
     );
     for child in &report.children {
+        let position = (0..2)
+            .find(|position| child_replay_key(key, *position) == child.replay_key)
+            .expect("the pass reports only this group's children");
+        let expected = if window.settled().contains(&position) {
+            ChildDrainOutcome::Decided
+        } else {
+            ChildDrainOutcome::NoExecutor
+        };
         assert_eq!(
-            child.outcome,
-            ChildDrainOutcome::NoExecutor,
-            "a child no opener can run is reported waiting, not invented or \
-             hidden: {report:?}"
+            child.outcome, expected,
+            "a saved child's rank is seated from its record, and a child no \
+             opener can run is reported waiting, not invented or hidden: \
+             {report:?}"
         );
     }
     assert!(
@@ -821,6 +989,7 @@ async fn redrive_no_opener(make: &DrainWorldFactory, window: GroupCrashWindow, k
         expected_executions,
         "with no opener the drain still settles each unsettled child exactly once"
     );
+    assert_each_child_ranked_once(make, key, crashed_scope).await;
 }
 
 /// A staged executor that records which positions actually ran under this

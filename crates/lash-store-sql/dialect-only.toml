@@ -3634,7 +3634,7 @@ kind = "operation exists on one backend only"
 reason = "The read half of the same fork as turn_ingress.record_wake_fence_from_claim."
 
 [[dialect_only]]
-statement = "effect_replay.release_uncommitted_derivation"
+statement = "effect_replay.release_uncommitted_claim"
 kind = "server clock"
 backends = ["sqlite", "postgres"]
 reason = "SQLite samples its host clock after writer admission and binds the timestamp; PostgreSQL samples transaction_timestamp in the fenced update."

@@ -202,6 +202,18 @@ macro_rules! tool_child_invocation_tests {
                 timer_and_durable_wait_children_are_admitted_beside_a_tool_child,
                 "tool-child-timer-and-wait-siblings"
             ),
+            (
+                a_process_env_store_fault_is_a_live_fault_not_the_childs_outcome,
+                "tool-child-env-store-fault"
+            ),
+            (
+                a_divergent_child_parks_every_redrive_and_a_live_fault_re_drives,
+                "tool-child-divergent-park-and-live-redrive"
+            ),
+            (
+                a_re_driven_child_replays_its_recorded_attempts_under_its_replay_key,
+                "tool-child-live-fault-at-least-once"
+            ),
         ]);
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

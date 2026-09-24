@@ -872,11 +872,14 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         replay_key: &str,
     ) -> Result<(), RuntimeEffectControllerError>;
 
-    /// Expire an ungrouped pending derivation claim without sealing an error.
-    /// Match all five fence columns and the live lease at write time. Retain
-    /// the canonical envelope and pending row; a subsequent claim rotates its
-    /// owner and token. Refuse committed, cancelled, grouped or expired rows.
-    async fn release_uncommitted_derivation(
+    /// Expire a pending claim without sealing an error: an ungrouped
+    /// derivation the executor marked retryable, or a group child whose
+    /// execution ended in a live fault (FIG-3644). Match all five fence
+    /// columns and the live lease at write time. Retain the canonical
+    /// envelope and the `pending` row; a subsequent claim takes it over and
+    /// rotates its owner and token. Refuse committed, cancel-decided, settled
+    /// or expired rows.
+    async fn release_uncommitted_claim(
         &self,
         fence: &EffectLeaseFence,
     ) -> Result<bool, RuntimeEffectControllerError>;
@@ -1165,7 +1168,7 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     /// woken after each commit that can change the subject:
     ///
     /// - a [`EffectJournalSubject::Row`] by [`finalize`](Self::finalize),
-    ///   [`release_uncommitted_derivation`](Self::release_uncommitted_derivation),
+    ///   [`release_uncommitted_claim`](Self::release_uncommitted_claim),
     ///   [`decide_cancel`](Self::decide_cancel), a terminal-carrying
     ///   [`discharge_child`](Self::discharge_child),
     ///   [`discard_reexecuted_row`](Self::discard_reexecuted_row), and
@@ -1879,6 +1882,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                     ));
                 }
                 PreparedEffect::ReplayOutcome { outcome, due_at_ms } => {
+                    self.discharge_replayed_child(scope, &envelope).await?;
                     self.sleep_until_due(due_at_ms).await;
                     return Ok(EffectRun::Terminal(*outcome));
                 }
@@ -1887,7 +1891,10 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 // consumers keep it on the result surface (it replays
                 // identically on every redrive) while unrecorded claim,
                 // renew and finalize faults abort like a crash (FIG-3528).
-                PreparedEffect::ReplayError(err) => return Err(err.into_journaled()),
+                PreparedEffect::ReplayError(err) => {
+                    self.discharge_replayed_child(scope, &envelope).await?;
+                    return Err(err.into_journaled());
+                }
                 PreparedEffect::Claimed(claim) => {
                     let command_kind = envelope.command.kind();
                     let execution =
@@ -2171,7 +2178,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 EffectCommitState::Pending => {}
             }
         }
-        if derivation::release_derivation(self, claim, command_kind, outcome).await? {
+        if unrecorded::release_unrecorded(self, claim, command_kind, outcome).await? {
             return Ok(());
         }
         #[cfg(feature = "testing")]
@@ -2252,6 +2259,12 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         let mut watch = None;
         loop {
             let armed = watch.as_ref().map(journal_wait::JournalWatch::arm);
+            #[cfg(feature = "testing")]
+            if let Some(err) =
+                self.take_journal_fault(EffectJournalFaultPoint::Discharge, replay_key)
+            {
+                return Err(err);
+            }
             match self
                 .row_store
                 .discharge_child(&EffectDischargeRequest {
@@ -2408,7 +2421,6 @@ fn sleep_spec(envelope: &RuntimeEffectEnvelope) -> Option<SleepSpec> {
 }
 
 mod closing;
-mod derivation;
 mod drain;
 mod groups;
 #[cfg(feature = "testing")]
@@ -2417,6 +2429,8 @@ mod journal_wait;
 mod journal_wake;
 mod lease_renewal;
 mod reexecution;
+mod replayed_discharge;
+mod unrecorded;
 #[cfg(feature = "testing")]
 pub use journal_faults::{EffectJournalFaultPoint, EffectJournalFaults};
 pub use journal_wake::{

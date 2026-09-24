@@ -33,6 +33,9 @@ pub enum EffectJournalFaultPoint {
     Finalize,
     /// [`EffectReplayRowStore::renew`](super::EffectReplayRowStore::renew).
     Renew,
+    /// [`EffectReplayRowStore::discharge_child`](super::EffectReplayRowStore::discharge_child):
+    /// a group child's saved terminal left without its rank.
+    Discharge,
 }
 
 impl EffectJournalFaultPoint {
@@ -42,6 +45,7 @@ impl EffectJournalFaultPoint {
             Self::Claim => "claim",
             Self::Finalize => "finalize",
             Self::Renew => "renew",
+            Self::Discharge => "discharge",
         }
     }
 }

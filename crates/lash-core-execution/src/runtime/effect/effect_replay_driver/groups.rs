@@ -208,6 +208,15 @@ pub(super) struct OpenGroupState {
     /// budget is measured from this instant, per §7: the decision is the
     /// durable fact and what the budget bounds is waiting on the body.
     pub(super) decided_at: HashMap<String, Instant>,
+    /// Replay key → the live fault its last execution here ended in (FIG-3644).
+    ///
+    /// A child that faults is released unrecorded rather than sealed, so the
+    /// journal holds no rank for it and a caller parked on the next rank
+    /// would wait for a settlement nothing is producing. This is how the
+    /// caller learns instead: `await_next_group_settlement` hands the fault
+    /// over, the turn aborts on it, and the reopen that re-drives the turn
+    /// dispatches the child again and forgets the fault.
+    pub(super) faulted: HashMap<String, RuntimeEffectControllerError>,
 }
 
 /// One child's durable identity as this process holds it.
@@ -427,14 +436,14 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 // the new handle.
                 let still_open = {
                     let open = self.groups.open.write_recover();
-                    if let Some(existing) = open.get(group.group_key()) {
+                    open.get(group.group_key()).map(|existing| {
                         existing.state.lock_recover().closed = false;
-                        true
-                    } else {
-                        false
-                    }
+                        Arc::clone(existing)
+                    })
                 };
-                if still_open {
+                if let Some(existing) = still_open {
+                    self.redispatch_faulted(scope, &existing, &group, &persisted.lifecycle)
+                        .await?;
                     return Ok(handle);
                 }
                 // The entry raced a reap and lost: it existed at the earlier
@@ -445,12 +454,17 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 (children, self.resolve_group_children(&group).await?)
             }
         };
-        {
+        let still_open = {
             let open = self.groups.open.write_recover();
-            if let Some(existing) = open.get(group.group_key()) {
+            open.get(group.group_key()).map(|existing| {
                 existing.state.lock_recover().closed = false;
-                return Ok(handle);
-            }
+                Arc::clone(existing)
+            })
+        };
+        if let Some(existing) = still_open {
+            self.redispatch_faulted(scope, &existing, &group, &persisted.lifecycle)
+                .await?;
+            return Ok(handle);
         }
 
         // Dispatch from the *journal's* membership, never from `group`.
@@ -550,6 +564,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     closed: false,
                     running,
                     decided_at: HashMap::new(),
+                    faulted: HashMap::new(),
                 }),
                 settled: Notify::new(),
             });
@@ -700,11 +715,13 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             // reacquires the slot the worker granted this run.
             crate::task::spawn(
                 lash_core_ids::execution_permit::inherit_process_execution_permit(async move {
-                    // The result is discarded here on purpose: a child's outcome is
-                    // reported to its caller through the journal, by rank, and this
-                    // task's return value has no other reader. A failure is already
-                    // journaled as that child's terminal.
-                    let _ = Box::pin(driver.execute_effect_cancellable(
+                    // A child's outcome is reported to its caller through the
+                    // journal, by rank, so an `Ok` and a sealed failure are
+                    // dropped here: the journal already answers for both. A
+                    // live fault is not sealed (FIG-3644) and so has no rank;
+                    // it is kept for the caller instead, recorded before the
+                    // finish below wakes it.
+                    let result = Box::pin(driver.execute_effect_cancellable(
                         &scope,
                         child,
                         executor,
@@ -712,6 +729,15 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                         None,
                     ))
                     .await;
+                    if let Err(error) = result
+                        && error.is_unrecorded_abort()
+                    {
+                        state
+                            .state
+                            .lock_recover()
+                            .faulted
+                            .insert(replay_key.clone(), error);
+                    }
                     // Released here, after the execution returned, however far
                     // it got: a child the close cancelled while parked, and
                     // one it cancelled before it ever claimed — whose
@@ -853,6 +879,9 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 handle.advance()?;
                 return Ok(settlement);
             }
+            if let Some(fault) = self.unsettled_fault(handle.group_key(), &state).await? {
+                return Err(fault);
+            }
             tokio::select! {
                 () = cancel.cancelled() => {
                     return Err(await_cancelled_error(handle.group_key(), rank));
@@ -861,6 +890,117 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 () = &mut settled => {}
             }
         }
+    }
+
+    /// The live fault a child of `group_key` last ended in here, when the
+    /// journal still holds that child unsettled (FIG-3644).
+    ///
+    /// Children are asked in position order, so every caller parked on the
+    /// same group is handed the same fault. A fault whose child has since
+    /// settled — the loser drain or the opener's end re-drove it — is stale
+    /// and is forgotten: the rank it took is what the caller reads.
+    async fn unsettled_fault(
+        &self,
+        group_key: &str,
+        state: &Arc<OpenGroup>,
+    ) -> Result<Option<RuntimeEffectControllerError>, RuntimeEffectControllerError> {
+        let faulted: Vec<(String, RuntimeEffectControllerError)> = {
+            let inner = state.state.lock_recover();
+            if inner.faulted.is_empty() {
+                return Ok(None);
+            }
+            state
+                .children
+                .iter()
+                .filter_map(|child| {
+                    inner
+                        .faulted
+                        .get(&child.replay_key)
+                        .map(|fault| (child.replay_key.clone(), fault.clone()))
+                })
+                .collect()
+        };
+        let unsettled: HashSet<String> = self
+            .row_store
+            .read_unsettled_group_children(group_key)
+            .await?
+            .into_iter()
+            .map(|child| child.replay_key)
+            .collect();
+        let mut inner = state.state.lock_recover();
+        let mut handed = None;
+        for (replay_key, fault) in faulted {
+            if !unsettled.contains(&replay_key) {
+                inner.faulted.remove(&replay_key);
+            } else if handed.is_none() {
+                handed = Some(fault);
+            }
+        }
+        Ok(handed)
+    }
+
+    /// Dispatches again every child whose last execution here ended in a
+    /// live fault, for a reopen inside the process that ran it (FIG-3644).
+    ///
+    /// A reopen here normally dispatches nothing — the children are still
+    /// running on this host's tasks — but a faulted child's task has
+    /// returned and its claim was released unrecorded, so nothing would ever
+    /// settle it. It is dispatched from the journal's membership, as a first
+    /// open is, and runs under the same replay key: a completed attempt
+    /// replays, and only unrecorded work runs again (ADR 0042). A lifecycle
+    /// that dispatches nothing — `closing` under `Cancel`, `settled` — leaves
+    /// the faults for the finalizer that owns those children.
+    async fn redispatch_faulted(
+        self: &Arc<Self>,
+        scope: &ExecutionScope,
+        state: &Arc<OpenGroup>,
+        offered: &RuntimeEffectGroup,
+        lifecycle: &EffectGroupLifecycle,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        if state.state.lock_recover().faulted.is_empty()
+            || !matches!(
+                lifecycle,
+                EffectGroupLifecycle::Live
+                    | EffectGroupLifecycle::Closing {
+                        disposition: LoserPolicy::RunToCompletion,
+                        ..
+                    }
+            )
+        {
+            return Ok(());
+        }
+        let retained = self
+            .row_store
+            .read_group_membership(offered.group_key())
+            .await?;
+        let group = reconstruct_group(offered, retained, self.vocabulary())?;
+        let resolver = self.group_executors()?;
+        let executors = {
+            let mut inner = state.state.lock_recover();
+            let executors: Vec<Option<RuntimeEffectLocalExecutor<'static>>> = group
+                .children()
+                .iter()
+                .map(|child| {
+                    let replay_key = child.invocation.replay_key();
+                    if !inner.faulted.contains_key(replay_key) || inner.running.contains(replay_key)
+                    {
+                        return None;
+                    }
+                    let executor = resolver.executor_for(child)?;
+                    inner.faulted.remove(replay_key);
+                    inner.running.insert(replay_key.to_string());
+                    Some(executor)
+                })
+                .collect();
+            let dispatched = executors
+                .iter()
+                .filter(|executor| executor.is_some())
+                .count();
+            state.outstanding.fetch_add(dispatched, Ordering::AcqRel);
+            executors
+        };
+        self.dispatch_group_children(scope, state, group, executors);
+        Ok(())
     }
 
     /// Turns a journal row into the settlement the contract delivers.

@@ -1070,7 +1070,7 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
             match operation {
                 Write::Renew => !store.renew(&fence(&request), 300).await.expect("renew"),
                 Write::ReleaseDerivation => !store
-                    .release_uncommitted_derivation(&fence(&request))
+                    .release_uncommitted_claim(&fence(&request))
                     .await
                     .expect("release derivation"),
                 Write::Finalize => matches!(

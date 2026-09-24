@@ -40,9 +40,11 @@ async fn world(backend: TestBackend, spec: ToolChildWorldSpec) -> ToolChildWorld
         .await
         .effect_host();
     let drain = host.group_drain();
+    let journal_faults = Some(host.effect_journal_faults());
     ToolChildWorld {
         host: host as Arc<dyn EffectHost>,
         drain: Some(drain),
+        journal_faults,
     }
 }
 

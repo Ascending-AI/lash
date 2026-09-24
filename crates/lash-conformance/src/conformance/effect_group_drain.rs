@@ -85,6 +85,9 @@ pub struct DrainWorld {
     /// The drain over the same journal, resolving children through the same
     /// registered resolver the host does.
     pub drain: Arc<dyn StoreEffectGroupDrain>,
+    /// The host journal's fault injector (FIG-3524): a crash law arms one
+    /// journal call to fail so the process dies between two of its writes.
+    pub journal_faults: lash_core::facade_support::effect_replay_driver::EffectJournalFaults,
 }
 
 /// What a law needs the next host to be built with.

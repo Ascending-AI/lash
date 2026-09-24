@@ -39,9 +39,11 @@ async fn world(database_url: String, spec: ToolChildWorldSpec) -> ToolChildWorld
     };
     let host = PostgresEffectHost::with_options(&storage, options);
     let drain = host.group_drain();
+    let journal_faults = Some(host.effect_journal_faults());
     ToolChildWorld {
         host: Arc::new(host) as Arc<dyn EffectHost>,
         drain: Some(drain),
+        journal_faults,
     }
 }
 

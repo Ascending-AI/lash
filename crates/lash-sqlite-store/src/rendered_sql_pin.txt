@@ -246,7 +246,7 @@ UPDATE main.runtime_effect_replay
                AND status = 'in_progress'
                AND lease_expires_at_ms > ?10
              RETURNING group_key
-=== main | sqlite::ReplaySqliteStatements | effect_replay.release_uncommitted_derivation
+=== main | sqlite::ReplaySqliteStatements | effect_replay.release_uncommitted_claim
 UPDATE main.runtime_effect_replay
              SET lease_expires_at_ms = 0,
                  updated_at_ms = ?6
@@ -256,7 +256,6 @@ UPDATE main.runtime_effect_replay
                AND lease_owner_id = ?4
                AND lease_token = ?5
                AND status = 'in_progress'
-               AND group_key IS NULL
                AND commit_state = 'pending'
                AND lease_expires_at_ms > ?6
 === main | sqlite::ReplaySqliteStatements | effect_replay.renew_lease
@@ -584,7 +583,7 @@ UPDATE effect_journal.runtime_effect_replay
                AND status = 'in_progress'
                AND lease_expires_at_ms > ?10
              RETURNING group_key
-=== effect_journal | sqlite::ReplaySqliteStatements | effect_replay.release_uncommitted_derivation
+=== effect_journal | sqlite::ReplaySqliteStatements | effect_replay.release_uncommitted_claim
 UPDATE effect_journal.runtime_effect_replay
              SET lease_expires_at_ms = 0,
                  updated_at_ms = ?6
@@ -594,7 +593,6 @@ UPDATE effect_journal.runtime_effect_replay
                AND lease_owner_id = ?4
                AND lease_token = ?5
                AND status = 'in_progress'
-               AND group_key IS NULL
                AND commit_state = 'pending'
                AND lease_expires_at_ms > ?6
 === effect_journal | sqlite::ReplaySqliteStatements | effect_replay.renew_lease
@@ -922,7 +920,7 @@ UPDATE process_registry.runtime_effect_replay
                AND status = 'in_progress'
                AND lease_expires_at_ms > ?10
              RETURNING group_key
-=== process_registry | sqlite::ReplaySqliteStatements | effect_replay.release_uncommitted_derivation
+=== process_registry | sqlite::ReplaySqliteStatements | effect_replay.release_uncommitted_claim
 UPDATE process_registry.runtime_effect_replay
              SET lease_expires_at_ms = 0,
                  updated_at_ms = ?6
@@ -932,7 +930,6 @@ UPDATE process_registry.runtime_effect_replay
                AND lease_owner_id = ?4
                AND lease_token = ?5
                AND status = 'in_progress'
-               AND group_key IS NULL
                AND commit_state = 'pending'
                AND lease_expires_at_ms > ?6
 === process_registry | sqlite::ReplaySqliteStatements | effect_replay.renew_lease
