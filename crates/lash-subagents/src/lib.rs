@@ -89,8 +89,8 @@ impl SubagentsPluginFactory {
     /// Hides resident tools by exact manifest name in built-in child requests.
     ///
     /// Use the callable name, not a cell-facing display spelling. For
-    /// example, the shell input tool is named `write_stdin`; `shell.write` is
-    /// only the call path a cell reaches it by.
+    /// example, the process-listing tool is named `list_process_handles`;
+    /// `processes.list` is only the call path a cell reaches it by.
     pub fn with_hidden_tools<I, S>(
         mut self,
         tools: I,

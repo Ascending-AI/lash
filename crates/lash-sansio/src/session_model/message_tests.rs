@@ -455,9 +455,9 @@ fn render_transcript_prompt_preserves_tool_name_for_assistant_tool_calls() {
             role: MessageRole::Assistant,
             parts: vec![Part::tool_call(
                 "m1.p0".to_string(),
-                r#"{"cmd":"date"}"#.to_string(),
+                r#"{"timezone":"UTC"}"#.to_string(),
                 "tc1".to_string(),
-                "exec_command".to_string(),
+                "get_time".to_string(),
                 None,
             )]
             .into(),
@@ -468,7 +468,7 @@ fn render_transcript_prompt_preserves_tool_name_for_assistant_tool_calls() {
     let rendered = render_transcript_prompt(&msgs);
     let text = block_text(&rendered.messages[0], 0);
 
-    assert!(text.contains(r#"exec_command({"cmd":"date"})"#));
+    assert!(text.contains(r#"get_time({"timezone":"UTC"})"#));
 }
 
 #[test]

@@ -39,21 +39,6 @@ finish({ len: result.value });"#,
 
     if request.output_spec.is_some() || request.session_id().ends_with("-llm-query") {
         if request.output_spec.as_ref().is_some_and(|spec| {
-            matches!(spec, LlmOutputSpec::JsonSchema(schema) if schema.name == "tool_search_rerank")
-        }) {
-            return text_profile(
-                serde_json::json!({
-                    "tool_names": [
-                        "GMAIL_SEND_EMAIL",
-                        "GMAIL_CREATE_EMAIL_DRAFT",
-                        "GMAIL_LIST_MESSAGES",
-                        "exec_command"
-                    ]
-                })
-                .to_string(),
-            );
-        }
-        if request.output_spec.as_ref().is_some_and(|spec| {
             matches!(spec, LlmOutputSpec::JsonSchema(schema) if schema.name == "runtime_perf_oblique_judge")
         }) {
             return text_profile(
@@ -167,21 +152,6 @@ finish({ len: result.value });"#,
                     "benchmark_async",
                     serde_json::json!({
                         "value": "runtime perf benchmark ok"
-                    }),
-                )
-            }
-        }
-        RuntimePerfScenario::StandardShellOutput => {
-            if request_has_tool_result(request) {
-                text_profile("runtime perf benchmark ok")
-            } else {
-                tool_call_profile(
-                    "standard-shell-output-call",
-                    "exec_command",
-                    serde_json::json!({
-                        "cmd": "for i in $(seq 1 160); do printf 'runtime-perf-shell-line-%03d abcdefghijklmnopqrstuvwxyz0123456789\\n' \"$i\"; done",
-                        "timeout_ms": 5000,
-                        "max_output_tokens": 4096
                     }),
                 )
             }

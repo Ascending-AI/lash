@@ -90,7 +90,7 @@ fn bench_call(name: &str, args: &Record) -> Result<Value, ExecutionHostError> {
         "cancel_process_handle" => Ok(args.get("handle").cloned().unwrap_or(Value::Null)),
         "echo" => Ok(args.get("value").cloned().unwrap_or(Value::Null)),
         "boom" => Err(ExecutionHostError::new("explicit failure for benchmark")),
-        "exec_command" => {
+        "run_job" => {
             let mut record = Record::default();
             record.insert("status".to_string(), Value::String("completed".into()));
             record.insert("done".to_string(), Value::Bool(true));
@@ -101,7 +101,7 @@ fn bench_call(name: &str, args: &Record) -> Result<Value, ExecutionHostError> {
                 Value::String(
                     format!(
                         "ran: {}",
-                        args.get("cmd")
+                        args.get("target")
                             .and_then(|value| match value {
                                 Value::String(text) => Some(text.as_str()),
                                 _ => None,

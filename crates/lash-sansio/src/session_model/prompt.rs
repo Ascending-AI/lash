@@ -510,14 +510,14 @@ mod tests {
         let mut prompt = prompt();
         prompt.contributions = vec![
             PromptContribution::project_instructions("Repo rules"),
-            PromptContribution::guidance("Shell", "Use exec_command."),
+            PromptContribution::guidance("Search", "Use search_tools."),
         ]
         .into();
         let text = template.render(&prompt);
         assert!(text.contains("## Rules"));
         assert!(text.contains("Repo rules"));
         assert!(text.contains("## Guidance"));
-        assert!(text.contains("### Shell"));
+        assert!(text.contains("### Search"));
     }
 
     #[test]

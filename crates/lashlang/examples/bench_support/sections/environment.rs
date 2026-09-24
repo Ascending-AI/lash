@@ -69,10 +69,10 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
         .expect("valid button trigger source");
     resources
         .add_module_operation(
-            ["shell"],
-            "Shell",
-            "exec",
-            "exec_command",
+            ["jobs"],
+            "Jobs",
+            "run",
+            "run_job",
             TypeExpr::Any,
             TypeExpr::Any,
         )
