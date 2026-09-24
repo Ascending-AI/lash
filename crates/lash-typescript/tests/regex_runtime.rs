@@ -784,3 +784,27 @@ fn match_and_search_coerce_non_regexp_arguments() {
         "the refusal is the named one: {error}"
     );
 }
+
+#[test]
+fn match_and_search_evaluate_every_argument_in_order() {
+    // ECMA-262 evaluates every argument for its side effects even though only
+    // the first is used (FIG-3698).
+    assert_eq!(
+        finished("let i=0; 'a'.match(/a/, i++); finish(i);"),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        finished("let i=0; 'a'.search(/a/, i++); finish(i);"),
+        Value::Number(1.0)
+    );
+    // The extra argument's value is still ignored semantically: the match
+    // uses only the first.
+    assert_eq!(
+        finished("let i=0; finish('ab'.match(/b/, i++)[0]);"),
+        Value::String("b".into())
+    );
+    assert_eq!(
+        finished("let i=0; finish('ab'.search(/b/, i++));"),
+        Value::Number(1.0)
+    );
+}
