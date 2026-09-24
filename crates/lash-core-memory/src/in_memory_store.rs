@@ -41,8 +41,10 @@ pub use testing_access::RawSessionExecutionLeaseRow;
 mod claim_hold;
 mod turn_cancel_closure;
 mod turn_input;
+mod turn_park_feed;
 mod warnings;
 use claim_hold::ClaimHold;
+use turn_park_feed::SharedTurnParkFeed;
 
 use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
 
@@ -187,6 +189,10 @@ pub struct InMemorySessionStore {
     /// The session's parked turn (FIG-3586): cleared by any commit, by a
     /// cancel that releases the parked turn's claim, and by deletion.
     pub turn_park: Mutex<Option<crate::store::TurnPark>>,
+    /// The factory-global park transition ledger (FIG-3659): every mutation
+    /// of `turn_park` that opens or closes a park appends while holding the
+    /// park's lock, and a deleted session's events survive its store.
+    pub turn_park_feed: SharedTurnParkFeed,
     pub pending_turn_input_next_seq: Mutex<u64>,
     pub turn_cancel_requests: Mutex<HashMap<TurnId, InMemoryTurnCancelRequest>>,
     pub attachment_manifest: SharedAttachmentManifest,
@@ -290,6 +296,7 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashSet::new())),
             Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(turn_park_feed::TurnParkFeed::default())),
         )
     }
 
@@ -313,6 +320,7 @@ impl InMemorySessionStore {
         attachment_manifest: SharedAttachmentManifest,
         retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
         attachment_write_ids: SharedAttachmentWriteIds,
+        turn_park_feed: SharedTurnParkFeed,
     ) -> Self {
         warnings::process_owner_death_degraded("InMemorySessionStore::with_shared_history");
         Self {
@@ -348,6 +356,7 @@ impl InMemorySessionStore {
             wake_redelivery_fences: Mutex::new(HashMap::new()),
             pending_turn_inputs: Mutex::new(Vec::new()),
             turn_park: Mutex::new(None),
+            turn_park_feed,
             pending_turn_input_next_seq: Mutex::new(0),
             turn_cancel_requests: Mutex::new(HashMap::new()),
             attachment_manifest,

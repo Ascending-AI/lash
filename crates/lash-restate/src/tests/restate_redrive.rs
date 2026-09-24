@@ -646,12 +646,12 @@ pub(super) fn a_diverged_group_reopen_parks_under_the_group_head() {
             lash_core::TurnFailureCause::Parked
         );
         let error = refusal.into_runtime_error();
-        let reason = lash_core::store::TurnParkReason::of_error(&error)
+        let reason = lash_core::store::ParkReason::of_error(&error)
             .expect("a diverged group reopen parks its turn");
         assert!(
             matches!(
                 &reason,
-                lash_core::store::TurnParkReason::EffectReplayDivergence { effect_kind, .. }
+                lash_core::store::ParkReason::EffectReplayDivergence { effect_kind, .. }
                     if effect_kind == "effect_group"
             ),
             "the park names the group head: {reason:?}"

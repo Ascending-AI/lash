@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::context::EpochMs;
-use crate::store::{BlobRef, StoreError, TurnParkReason};
+use crate::store::{BlobRef, ParkReason, StoreError};
 use crate::{
     AttachmentId, BatchId, FrameNodeId, InputId, NodeId, PluginState, ProtocolTurnOptions,
     SessionId, SessionPolicy, TokenUsage, TurnCancellationEvidence, TurnId, TurnStop,
@@ -241,7 +241,7 @@ pub trait ParkRecoveryWriter: Send + Sync {
     async fn record_engine_park(
         &self,
         root: &ParkedWorkRef,
-        reason: TurnParkReason,
+        reason: ParkReason,
         engine: EngineParkRef,
     ) -> Result<ParkId, StoreError>;
 }

@@ -16,7 +16,8 @@ use lash_store_sql::turn_ingress::{
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
     retired_scopes::RetiredScopeStatements,
     session_execution_leases::SessionExecutionLeaseStatements,
-    tool_intent_submissions::ToolIntentSubmissionStatements, turn_parks::TurnParkStatements,
+    tool_intent_submissions::ToolIntentSubmissionStatements,
+    turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -32,6 +33,8 @@ mod pending_inputs;
 mod queued_work;
 #[path = "turn_ingress/turn_cancel.rs"]
 mod turn_cancel;
+#[path = "turn_ingress/turn_parks.rs"]
+mod turn_parks;
 
 pub(crate) use family::TurnIngressPostgresStatements;
 pub(crate) use leases::SessionExecutionLeasePostgresStatements;
@@ -42,6 +45,7 @@ pub(crate) use turn_cancel::{
     CancellationBindingPostgresStatements, ClosureAuthorizationPostgresStatements,
     RetiredScopePostgresStatements, ToolIntentSubmissionPostgresStatements,
 };
+pub(crate) use turn_parks::{TurnParkClockPostgresStatements, TurnParkPostgresStatements};
 
 /// The `pending_turn_inputs.state` partitions this family's statements name.
 ///
@@ -121,6 +125,12 @@ pub(crate) struct TurnIngressSql {
     /// `turn_cancel_retired_scopes`, shared.
     /// `turn_parks`, shared.
     pub(crate) turn_parks: TurnParkStatements,
+    /// `turn_parks`, PostgreSQL only.
+    pub(crate) turn_parks_postgres: TurnParkPostgresStatements,
+    /// `turn_park_clock`, PostgreSQL only.
+    pub(crate) turn_park_clock: TurnParkClockPostgresStatements,
+    /// `turn_park_events`, shared.
+    pub(crate) turn_park_events: TurnParkEventStatements,
     pub(crate) retired_scopes: RetiredScopeStatements,
     /// `turn_cancel_retired_scopes`, PostgreSQL only.
     pub(crate) retired_scopes_postgres: RetiredScopePostgresStatements,
@@ -153,6 +163,9 @@ static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
         closures_postgres: ClosureAuthorizationPostgresStatements::render(dialect),
         closure_participants: ClosureParticipantStatements::render(dialect),
         turn_parks: TurnParkStatements::render(dialect),
+        turn_parks_postgres: TurnParkPostgresStatements::render(dialect),
+        turn_park_clock: TurnParkClockPostgresStatements::render(dialect),
+        turn_park_events: TurnParkEventStatements::render(dialect),
         retired_scopes: RetiredScopeStatements::render(dialect),
         retired_scopes_postgres: RetiredScopePostgresStatements::render(dialect),
         tool_intents: ToolIntentSubmissionStatements::render(dialect),

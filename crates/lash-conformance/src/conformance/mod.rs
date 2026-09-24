@@ -101,6 +101,7 @@ mod trigger_store;
 mod turn_bound_input;
 mod turn_control;
 mod turn_crash_matrix;
+mod turn_park_feed;
 mod turn_runner;
 mod wake_delivery;
 
@@ -162,5 +163,6 @@ pub use tool_intent_runtime::*;
 pub use trigger_store::*;
 pub use turn_control::*;
 pub use turn_crash_matrix::*;
+pub use turn_park_feed::*;
 pub use turn_runner::*;
 pub use wake_delivery::*;

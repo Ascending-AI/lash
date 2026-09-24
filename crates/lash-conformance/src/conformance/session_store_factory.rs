@@ -118,6 +118,13 @@ pub async fn session_store_factory<F>(
     session_store_factory_unbound_vacuum_is_typed_error(backend, unbound_store).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
+    turn_park_feed::parked_turns_list_by_since_with_filters_and_keyset_pages(make()).await;
+    turn_park_feed::re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes(make())
+        .await;
+    turn_park_feed::every_park_transition_writes_exactly_one_feed_event(make()).await;
+    turn_park_feed::a_rolled_back_commit_leaves_park_and_feed_unchanged(make()).await;
+    turn_park_feed::a_compacted_feed_cursor_is_refused_typed(make()).await;
+    turn_park_feed::summary_agrees_with_list(make()).await;
 }
 
 /// Hold a backend to the read-only session-view contract.

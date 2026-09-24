@@ -1797,3 +1797,117 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         "head-commit round trips changed",
     );
 }
+
+/// The process-prune batch delete parks a `Cancelled{SessionDeleted}` event
+/// per deleted park through one clock bump: `first_seq + row_number - 1`
+/// must hand each event a distinct, contiguous sequence (FIG-3659).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping batch-delete park feed test: database URL is not set");
+        return;
+    };
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(isolated_database.url())
+        .await
+        .expect("connect batch-delete storage");
+    let factory = storage.session_store_factory();
+    let nonce = uuid::Uuid::new_v4();
+
+    let mut session_ids = Vec::new();
+    for label in ["batch-park-a", "batch-park-b"] {
+        let session_id = SessionId::from(format!("{label}:{nonce}"));
+        let request = SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
+        };
+        let store = factory
+            .create_store(&request)
+            .await
+            .expect("create the parked session's store");
+        store
+            .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
+                session_id.as_str(),
+            ))
+            .await
+            .expect("admit the parked session");
+        let state = lash_core_execution::RuntimeSessionState {
+            session_id: session_id.clone(),
+            ..lash_core_execution::RuntimeSessionState::new(request.policy.clone())
+        };
+        store
+            .commit_runtime_state(
+                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+            )
+            .await
+            .expect("seed the parked session");
+        store
+            .record_turn_park(&lash_core_execution::store::TurnParkWrite {
+                session_id: session_id.clone(),
+                turn_id: lash_core_execution::TurnId::from(format!("{label}-turn")),
+                reason: lash_core_execution::store::ParkReason::ReplayDivergence {
+                    message: format!("{label} diverged"),
+                },
+                at_ms: 1_700_000_000_000,
+            })
+            .await
+            .expect("park the session's turn");
+        session_ids.push(session_id);
+    }
+
+    let before = factory
+        .turn_park_feed(
+            lash_core_execution::store::TurnParkFeedCursor::initial(),
+            std::num::NonZeroUsize::new(100).expect("a nonzero page size"),
+        )
+        .await
+        .expect("read the feed before the batch delete");
+    let head = before
+        .events
+        .last()
+        .expect("the two parks precede the delete")
+        .seq;
+
+    let mut tx = storage
+        .pool()
+        .begin()
+        .await
+        .expect("begin the batch delete");
+    crate::session_factory::delete_process_sessions_tx(&mut tx, &session_ids)
+        .await
+        .expect("batch delete the parked sessions");
+    tx.commit().await.expect("commit the batch delete");
+
+    let after = factory
+        .turn_park_feed(
+            lash_core_execution::store::TurnParkFeedCursor::from_store_sequence(head),
+            std::num::NonZeroUsize::new(100).expect("a nonzero page size"),
+        )
+        .await
+        .expect("read the feed after the batch delete");
+    assert_eq!(
+        after.events.len(),
+        2,
+        "one Cancelled event per deleted park: {:?}",
+        after.events
+    );
+    assert_eq!(
+        after.events[0].seq + 1,
+        after.events[1].seq,
+        "the batch's event sequences are contiguous"
+    );
+    for (event, session_id) in after.events.iter().zip(session_ids.iter()) {
+        assert_eq!(
+            event.kind,
+            lash_core_execution::store::TurnParkEventKind::Cancelled {
+                cause: lash_core_execution::store::ParkCancelCause::SessionDeleted,
+            },
+            "each deleted park closes as session-deleted"
+        );
+        assert_eq!(&event.session_id, session_id);
+    }
+}

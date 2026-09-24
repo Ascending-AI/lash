@@ -525,22 +525,22 @@ fn surface_parked_turn_id(key: u8) -> lash_core::TurnId {
 
 /// One deterministic park record per key, cycling every reason shape the
 /// persisted `reason_json` carries so each variant round-trips.
-fn surface_turn_park(key: u8) -> lash_core::store::TurnPark {
+fn surface_turn_park(key: u8) -> lash_core::store::TurnParkWrite {
     let message = format!("surface park {key}: the journal refused replay");
     let reason = match key % 4 {
-        0 => lash_core::store::TurnParkReason::ReplayDivergence { message },
-        1 => lash_core::store::TurnParkReason::KeyFormatCutover { message },
-        2 => lash_core::store::TurnParkReason::BindingDrift { message },
-        _ => lash_core::store::TurnParkReason::EffectReplayDivergence {
+        0 => lash_core::store::ParkReason::ReplayDivergence { message },
+        1 => lash_core::store::ParkReason::KeyFormatCutover { message },
+        2 => lash_core::store::ParkReason::BindingDrift { message },
+        _ => lash_core::store::ParkReason::EffectReplayDivergence {
             effect_kind: "llm_call".to_string(),
             message,
         },
     };
-    lash_core::store::TurnPark {
+    lash_core::store::TurnParkWrite {
         session_id: SessionId::from(SURFACE_RUNTIME_SESSION.to_string()),
         turn_id: surface_parked_turn_id(key),
         reason,
-        parked_at_ms: 1_000 + u64::from(key),
+        at_ms: 1_000 + u64::from(key),
     }
 }
 
@@ -1250,6 +1250,7 @@ impl SurfaceRunner {
                 .runtime
                 .record_turn_park(&surface_turn_park(*key))
                 .await
+                .map(|_park| ())
                 .map_err(|error| error.to_string()),
             SurfaceOperation::TurnParkLoad => {
                 let loaded = self

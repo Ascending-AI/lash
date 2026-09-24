@@ -150,7 +150,21 @@ impl InMemorySessionStore {
             .values()
             .any(|run| run.scope.session_id() == Some(session_id) && run.terminal.is_none());
         if !holds_bound_rows && !holds_queued_run {
-            park.take();
+            // The withdrawal released the parked turn's last held work: the
+            // close is a cancellation, appended under the park's lock
+            // (FIG-3659).
+            let Some(closed) = park.take() else {
+                return;
+            };
+            self.turn_park_feed.lock_recover().log(
+                session_id.clone(),
+                closed.turn_id.clone(),
+                closed.park_id,
+                crate::store::TurnParkEventKind::Cancelled {
+                    cause: crate::store::ParkCancelCause::InputWithdrawn,
+                },
+                self.clock.timestamp_ms(),
+            );
         }
     }
 }

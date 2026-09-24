@@ -711,6 +711,16 @@ pub enum StoreError {
     /// the artifact, e.g. `artifact \`env-…\`` or `module artifact \`mod-…\``.
     #[error("{artifact} is not retained by the staging owner")]
     ArtifactStagingEdgeMissing { artifact: String },
+    /// A turn park feed cursor predates history `compact_turn_park_feed`
+    /// removed. The consumer must perform a full relist before resuming from
+    /// the reported horizon.
+    #[error(
+        "turn park feed cursor is below the compaction horizon {horizon:?}; a full relist is required"
+    )]
+    ParkFeedCursorCompacted {
+        /// The lowest feed position the store still serves.
+        horizon: crate::store::TurnParkFeedCursor,
+    },
     /// The storage substrate failed an operation before a trustworthy value
     /// could be returned.
     #[error("{backend} storage failure: {message}")]
@@ -854,6 +864,7 @@ impl StoreError {
             Self::ArtifactOwnerRetired => "ArtifactOwnerRetired",
             Self::ArtifactDestinationOwnerRetired => "ArtifactDestinationOwnerRetired",
             Self::ArtifactStagingEdgeMissing { .. } => "ArtifactStagingEdgeMissing",
+            Self::ParkFeedCursorCompacted { .. } => "ParkFeedCursorCompacted",
             Self::StorageFailure { .. } => "StorageFailure",
             Self::Backend(_) => "Backend",
         }

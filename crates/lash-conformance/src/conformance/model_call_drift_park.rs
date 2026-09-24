@@ -259,8 +259,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
         .expect("read the park")
         .expect("the drifted turn is parked");
     assert_eq!(park.turn_id, turn_id);
-    let crate::store::TurnParkReason::EffectReplayDivergence { effect_kind, .. } = &park.reason
-    else {
+    let crate::store::ParkReason::EffectReplayDivergence { effect_kind, .. } = &park.reason else {
         panic!("the park names an effect replay divergence: {park:?}");
     };
     assert_eq!(

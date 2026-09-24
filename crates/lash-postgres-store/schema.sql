@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 127.
+-- lash-postgres-store schema, component version 128.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -247,8 +247,33 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancel_retired_scopes (
 CREATE TABLE IF NOT EXISTS lash_turn_parks (
     session_id TEXT PRIMARY KEY,
     turn_id TEXT NOT NULL,
+    park_id BIGINT NOT NULL,
+    reason_code TEXT NOT NULL,
     reason_json TEXT NOT NULL,
-    parked_at_ms BIGINT NOT NULL
+    since_ms BIGINT NOT NULL,
+    last_refused_ms BIGINT NOT NULL,
+    attempts BIGINT NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_turn_parks_since
+    ON lash_turn_parks(since_ms, session_id);
+
+CREATE TABLE IF NOT EXISTS lash_turn_park_clock (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    current_seq BIGINT NOT NULL DEFAULT 0,
+    compaction_horizon BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT ck_turn_park_clock_singleton CHECK (singleton)
+);
+
+CREATE TABLE IF NOT EXISTS lash_turn_park_events (
+    seq BIGINT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    park_id BIGINT NOT NULL,
+    kind TEXT NOT NULL CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled')),
+    cause TEXT,
+    reason_json TEXT,
+    at_ms BIGINT NOT NULL,
+    CONSTRAINT ck_turn_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS lash_session_execution_leases (
@@ -906,11 +931,16 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 127)
+VALUES ('lash-postgres-store', 128)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (
     singleton, current_seq, tombstone_compaction_horizon
+) VALUES (TRUE, 0, 0)
+ON CONFLICT (singleton) DO NOTHING;
+
+INSERT INTO lash_turn_park_clock (
+    singleton, current_seq, compaction_horizon
 ) VALUES (TRUE, 0, 0)
 ON CONFLICT (singleton) DO NOTHING;
 

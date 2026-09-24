@@ -14,6 +14,7 @@ pub(super) async fn delete_session_from_catalog(
     catalog: &DatabaseLocation,
     session_id: &SessionId,
     policy: SqliteConnectionPolicy,
+    now_ms: u64,
 ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
     if !catalog.target().exists() {
         return Ok(lash_core_execution::SessionBlobReclaimReport::default());
@@ -187,6 +188,29 @@ pub(super) async fn delete_session_from_catalog(
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
+            // A deleted session's parked turn is cancelled, and its feed event
+            // outlives the session row: the ledger is the only place the park
+            // transition stays durable (FIG-3659).
+            let released: Option<(String, i64)> = tx
+                .query_row(
+                    turn_ingress.turn_parks.delete_by_session_returning.sql(),
+                    params![session_id.as_str()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+            if let Some((released_turn_id, released_park_id)) = released {
+                crate::persistence::turn_park_feed::log_turn_park_closed_conn(
+                    tx,
+                    &session_id,
+                    &released_turn_id,
+                    released_park_id,
+                    &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                        cause: lash_core_execution::store::ParkCancelCause::SessionDeleted,
+                    },
+                    crate::clamp_epoch_ms(now_ms),
+                )?;
+            }
             // Administration revokes the session's effect authority before
             // entering store deletion. Only then may the pinned closure
             // obligation and its selected-owner identity be retired.
@@ -194,7 +218,6 @@ pub(super) async fn delete_session_from_catalog(
                 queued_runs.delete_members.sql(),
                 queued_runs.delete_runs.sql(),
                 turn_ingress.pending_inputs.delete_by_session.sql(),
-                turn_ingress.turn_parks.delete_by_session.sql(),
                 crate::session_ingress::session_ingress_sql()
                     .shared
                     .delete_by_session

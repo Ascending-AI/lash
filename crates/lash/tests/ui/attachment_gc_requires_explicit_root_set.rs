@@ -3,8 +3,8 @@ use std::sync::Arc;
 use lash::SessionId;
 use lash::persistence::{
     AttachmentReclamationPolicy, EmptyRootSetPolicy, FileAttachmentStore, RuntimePersistence,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, UnsettledTurnCounts,
-    reclaim_unreferenced_attachments,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TurnPark, TurnParkFeedCursor,
+    TurnParkFeedPage, TurnParkQuery, UnsettledTurnCounts, reclaim_unreferenced_attachments,
 };
 
 struct DelegatingFactory {
@@ -48,6 +48,28 @@ impl SessionStoreFactory for DelegatingFactory {
     // A decorator forwards the deployment turn count to the catalog it wraps.
     async fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError> {
         self.inner.count_unsettled_turns().await
+    }
+
+    async fn list_turn_parks(
+        &self,
+        query: &TurnParkQuery,
+    ) -> Result<Vec<TurnPark>, StoreError> {
+        self.inner.list_turn_parks(query).await
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<TurnParkFeedPage, StoreError> {
+        self.inner.turn_park_feed(after, limit).await
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: TurnParkFeedCursor,
+    ) -> Result<(), StoreError> {
+        self.inner.compact_turn_park_feed(through).await
     }
 }
 

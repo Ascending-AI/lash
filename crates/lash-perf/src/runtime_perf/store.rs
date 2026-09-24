@@ -548,6 +548,28 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
     ) -> Result<lash_core::store::UnsettledTurnCounts, StoreError> {
         self.inner.count_unsettled_turns().await
     }
+
+    async fn list_turn_parks(
+        &self,
+        query: &lash_core::store::TurnParkQuery,
+    ) -> Result<Vec<lash_core::store::TurnPark>, StoreError> {
+        self.inner.list_turn_parks(query).await
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: lash_core::store::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash_core::store::TurnParkFeedPage, StoreError> {
+        self.inner.turn_park_feed(after, limit).await
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: lash_core::store::TurnParkFeedCursor,
+    ) -> Result<(), StoreError> {
+        self.inner.compact_turn_park_feed(through).await
+    }
 }
 
 #[cfg(test)]

@@ -1072,6 +1072,30 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
     ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
         lash::persistence::SessionStoreFactory::count_unsettled_turns(self.inner.as_ref()).await
     }
+
+    async fn list_turn_parks(
+        &self,
+        query: &lash::persistence::TurnParkQuery,
+    ) -> Result<Vec<lash::persistence::TurnPark>, lash::persistence::StoreError> {
+        lash::persistence::SessionStoreFactory::list_turn_parks(self.inner.as_ref(), query).await
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: lash::persistence::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash::persistence::TurnParkFeedPage, lash::persistence::StoreError> {
+        lash::persistence::SessionStoreFactory::turn_park_feed(self.inner.as_ref(), after, limit)
+            .await
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: lash::persistence::TurnParkFeedCursor,
+    ) -> Result<(), lash::persistence::StoreError> {
+        lash::persistence::SessionStoreFactory::compact_turn_park_feed(self.inner.as_ref(), through)
+            .await
+    }
 }
 
 impl MetaLossSessionStoreFactory {
@@ -1181,6 +1205,30 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         &self,
     ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
         lash::persistence::SessionStoreFactory::count_unsettled_turns(self.inner.as_ref()).await
+    }
+
+    async fn list_turn_parks(
+        &self,
+        query: &lash::persistence::TurnParkQuery,
+    ) -> Result<Vec<lash::persistence::TurnPark>, lash::persistence::StoreError> {
+        lash::persistence::SessionStoreFactory::list_turn_parks(self.inner.as_ref(), query).await
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: lash::persistence::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash::persistence::TurnParkFeedPage, lash::persistence::StoreError> {
+        lash::persistence::SessionStoreFactory::turn_park_feed(self.inner.as_ref(), after, limit)
+            .await
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: lash::persistence::TurnParkFeedCursor,
+    ) -> Result<(), lash::persistence::StoreError> {
+        lash::persistence::SessionStoreFactory::compact_turn_park_feed(self.inner.as_ref(), through)
+            .await
     }
 }
 

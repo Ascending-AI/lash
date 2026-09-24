@@ -132,6 +132,34 @@ mod tests {
                 operation: "SessionStoreFactory::count_unsettled_turns",
             })
         }
+
+        async fn list_turn_parks(
+            &self,
+            _query: &crate::store::TurnParkQuery,
+        ) -> Result<Vec<crate::store::TurnPark>, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "SessionStoreFactory::list_turn_parks",
+            })
+        }
+
+        async fn turn_park_feed(
+            &self,
+            _after: crate::store::TurnParkFeedCursor,
+            _limit: std::num::NonZeroUsize,
+        ) -> Result<crate::store::TurnParkFeedPage, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "SessionStoreFactory::turn_park_feed",
+            })
+        }
+
+        async fn compact_turn_park_feed(
+            &self,
+            _through: crate::store::TurnParkFeedCursor,
+        ) -> Result<(), crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "SessionStoreFactory::compact_turn_park_feed",
+            })
+        }
     }
 
     fn address(label: &str) -> TurnAddress {

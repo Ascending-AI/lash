@@ -140,11 +140,31 @@ impl LashCore {
         let remaining_invocations = self.process_registry.count_non_terminal_processes().await?;
         let turns = self.store_factory.count_unsettled_turns().await?;
         let checked_at = self.env.core.clock.timestamp_ms();
+        for reason in lash_core::store::ParkReasonCode::ALL {
+            let count = turns
+                .parked_by_reason
+                .get(reason)
+                .copied()
+                .unwrap_or_default();
+            lash_core::operational_metrics::record_parked_work_count(
+                "turn",
+                reason.as_str(),
+                u64::try_from(count).unwrap_or(u64::MAX),
+            );
+        }
+        lash_core::operational_metrics::record_parked_work_oldest_age(
+            "turn",
+            turns
+                .oldest_parked_since_ms
+                .map(|since| checked_at.saturating_sub(since))
+                .unwrap_or_default(),
+        );
         Ok(DeploymentDrainStatus {
             accepting_new_work,
             remaining_invocations,
             in_flight_turns: turns.in_flight_turns,
             parked_turns: turns.parked_turns,
+            oldest_parked_since_ms: turns.oldest_parked_since_ms,
             checked_at,
         })
     }

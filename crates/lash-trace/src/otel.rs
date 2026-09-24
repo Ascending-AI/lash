@@ -22,7 +22,9 @@ use crate::{
 mod language_execution;
 mod metrics;
 use language_execution::language_execution_attributes;
-pub use metrics::{RuntimeTuningMetrics, ToolIntentMetrics, WorkerCapacityMetrics};
+pub use metrics::{
+    ParkedWorkMetrics, RuntimeTuningMetrics, ToolIntentMetrics, WorkerCapacityMetrics,
+};
 
 const INSTRUMENTATION_NAME: &str = "lash-trace";
 

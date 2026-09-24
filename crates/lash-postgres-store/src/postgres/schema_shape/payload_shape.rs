@@ -229,11 +229,24 @@ fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
         PayloadRegistration::of::<lash_core_execution::store::RuntimeCommitReceipt>(),
     );
     // FIG-3586: a parked turn's reason is one serialized type on both SQL
-    // backends, registered like the receipt above.
-    let mut park = PayloadRegistration::of::<lash_core_execution::store::TurnParkReason>();
+    // backends, registered like the receipt above. FIG-3659: the feed's
+    // `parked` rows carry the same payload on `turn_park_events.reason_json`.
+    let mut park = PayloadRegistration::of::<lash_core_execution::store::ParkReason>();
     park.include_persisted_projection(
         PayloadCarrier::new(PayloadBackend::Sqlite, "turn_parks", "reason_json"),
-        PayloadShape::of::<lash_core_execution::store::TurnParkReason>(),
+        PayloadShape::of::<lash_core_execution::store::ParkReason>(),
+    );
+    park.include_persisted_projection(
+        PayloadCarrier::new(PayloadBackend::Sqlite, "turn_park_events", "reason_json"),
+        PayloadShape::of::<lash_core_execution::store::ParkReason>(),
+    );
+    park.include_persisted_projection(
+        PayloadCarrier::new(
+            PayloadBackend::Postgres,
+            "lash_turn_park_events",
+            "reason_json",
+        ),
+        PayloadShape::of::<lash_core_execution::store::ParkReason>(),
     );
     payloads.insert(
         PayloadCarrier::new(PayloadBackend::Postgres, "lash_turn_parks", "reason_json"),
@@ -241,7 +254,19 @@ fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
     );
     payloads.insert(
         PayloadCarrier::new(PayloadBackend::Sqlite, "turn_parks", "reason_json"),
-        PayloadRegistration::of::<lash_core_execution::store::TurnParkReason>(),
+        PayloadRegistration::of::<lash_core_execution::store::ParkReason>(),
+    );
+    payloads.insert(
+        PayloadCarrier::new(
+            PayloadBackend::Postgres,
+            "lash_turn_park_events",
+            "reason_json",
+        ),
+        PayloadRegistration::of::<lash_core_execution::store::ParkReason>(),
+    );
+    payloads.insert(
+        PayloadCarrier::new(PayloadBackend::Sqlite, "turn_park_events", "reason_json"),
+        PayloadRegistration::of::<lash_core_execution::store::ParkReason>(),
     );
     payloads
 }
@@ -789,8 +814,10 @@ mod tests {
                 String::from("postgres lash_runtime_turn_commits.result_json"),
                 String::from("postgres lash_turn_cancel_closure_participants.scope_json"),
                 String::from("postgres lash_turn_cancellation_bindings.admitted_scope_json"),
+                String::from("postgres lash_turn_park_events.reason_json"),
                 String::from("postgres lash_turn_parks.reason_json"),
                 String::from("sqlite runtime_turn_commits.result_json"),
+                String::from("sqlite turn_park_events.reason_json"),
                 String::from("sqlite turn_parks.reason_json"),
             ])
         );

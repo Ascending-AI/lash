@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// These declarations retain the component-126 endpoint: the five
+/// These declarations retain the component-127 endpoint: the five
 /// effect-replay constraints component 115 installed, the durable queued-run
 /// admission component 116 adds, the runtime-commit receipt version component
 /// 117 stamps, the NOT NULL `submitted_ingress_json` and
@@ -22,8 +22,10 @@ use super::*;
 /// (`worker_replacement_abort` by `effect_replay_divergence`) and moves no
 /// relation either. Component 126 is reserved by FIG-3585, and component 127
 /// (FIG-3540) adds the `lash_session_ingress` table and the `drive_epoch` /
-/// `drive_admission_id` columns of `lash_session_meta`. No arm targets 127: the
-/// current build refuses every predecessor.
+/// `drive_admission_id` columns of `lash_session_meta`. Component 128
+/// (FIG-3659) reshapes `lash_turn_parks` into the enriched parked record and
+/// adds `lash_turn_park_clock` and `lash_turn_park_events`. No arm targets
+/// 128: the current build refuses every predecessor.
 /// Source-shape
 /// declarations remain keyed to this build's catalog for precise older-store
 /// fixture construction.
@@ -82,13 +84,15 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         // The lists are keyed to the floor, not to one generation: a relation,
         // column, or constraint introduced after 105 belongs here too, so the
         // fixture rebuilds the published component-101 catalog by removing them.
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
             "lash_session_ingress",
             "lash_turn_cancel_affected_inputs",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -127,12 +131,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -163,12 +169,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -198,12 +206,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // models, so a component-104 catalog lacks exactly those columns.
     SchemaMigration {
         from: 104,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -234,12 +244,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // parent payload, and the arbitration state alone.
     SchemaMigration {
         from: 105,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -270,12 +282,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // to its siblings.
     SchemaMigration {
         from: 106,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -308,11 +322,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // 108 added no relational DDL of its own.
     SchemaMigration {
         from: 107,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -342,11 +358,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // guards a component-107 catalog does against this build.
     SchemaMigration {
         from: 108,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -386,11 +404,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // columns and guards plus the five effect-replay constraints.
     SchemaMigration {
         from: 109,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -424,11 +444,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // All are refused at the queued-run cutover.
     SchemaMigration {
         from: 110,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -447,11 +469,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 111,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -470,11 +494,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 112,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -493,11 +519,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 113,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -519,11 +547,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // current component-117 cutover offers no executable migration.
     SchemaMigration {
         from: 114,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -546,11 +576,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // foreign key ride the table drops, so only the relations are enumerated.
     SchemaMigration {
         from: 115,
-        to: 126,
+        to: 127,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -578,8 +610,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 116,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
@@ -600,8 +636,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // could be claiming.
     SchemaMigration {
         from: 117,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
@@ -623,8 +663,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // claiming.
     SchemaMigration {
         from: 118,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
@@ -643,8 +687,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // rewound stamp could be claiming.
     SchemaMigration {
         from: 119,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
@@ -663,8 +711,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // a rewound stamp could be claiming.
     SchemaMigration {
         from: 120,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress", "lash_turn_parks"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+            "lash_turn_parks",
+        ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
             ("lash_session_meta", "drive_epoch"),
@@ -683,12 +736,21 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 121,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_turn_parks", "park_id"),
+            ("lash_turn_parks", "reason_code"),
+            ("lash_turn_parks", "since_ms"),
+            ("lash_turn_parks", "last_refused_ms"),
+            ("lash_turn_parks", "attempts"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -701,12 +763,21 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 122,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_turn_parks", "park_id"),
+            ("lash_turn_parks", "reason_code"),
+            ("lash_turn_parks", "since_ms"),
+            ("lash_turn_parks", "last_refused_ms"),
+            ("lash_turn_parks", "attempts"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -714,18 +785,26 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_constraints: &[],
         statements: &[],
     },
-    // The immediate predecessor of the retained endpoint 124. Component 124
-    // (FIG-3587) changed persisted vocabularies and moved no relation, so a
-    // component-123 catalog lacks nothing the endpoint models; component 125
-    // replaces a runtime-error code, so the row is a refusal boundary that
-    // introduces nothing a rewound stamp could be claiming.
+    // Components 124 (FIG-3587) and 125 changed persisted vocabularies and
+    // moved no relation, so a component-123 catalog lacks nothing they moved;
+    // the row is a refusal boundary that introduces nothing a rewound stamp
+    // could be claiming.
     SchemaMigration {
         from: 123,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
         source_missing_columns: &[
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_turn_parks", "park_id"),
+            ("lash_turn_parks", "reason_code"),
+            ("lash_turn_parks", "since_ms"),
+            ("lash_turn_parks", "last_refused_ms"),
+            ("lash_turn_parks", "attempts"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -734,18 +813,28 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         statements: &[],
     },
     // Components 124 and 125 changed persisted vocabularies and moved no
-    // relation. A component-124 or component-125 catalog lacks the
+    // relation. A component-124, -125, or -126 catalog lacks the
     // `lash_session_ingress` table and the `lash_session_meta` drive-epoch
-    // columns component 127 (FIG-3540) adds; component
-    // 127 is destructive, so each row is a refusal boundary that introduces
-    // nothing a rewound stamp could be claiming.
+    // columns component 127 (FIG-3540) adds and the feed catalog component
+    // 128 (FIG-3659) adds; component 128 is destructive, so each row is a
+    // refusal boundary that introduces nothing a rewound stamp could be
+    // claiming.
     SchemaMigration {
         from: 124,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
         source_missing_columns: &[
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_turn_parks", "park_id"),
+            ("lash_turn_parks", "reason_code"),
+            ("lash_turn_parks", "since_ms"),
+            ("lash_turn_parks", "last_refused_ms"),
+            ("lash_turn_parks", "attempts"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -755,11 +844,49 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 125,
-        to: 126,
-        source_missing_tables: &["lash_session_ingress"],
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
         source_missing_columns: &[
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_turn_parks", "park_id"),
+            ("lash_turn_parks", "reason_code"),
+            ("lash_turn_parks", "since_ms"),
+            ("lash_turn_parks", "last_refused_ms"),
+            ("lash_turn_parks", "attempts"),
+        ],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
+        introduced_relations: &[],
+        introduced_constraints: &[],
+        statements: &[],
+    },
+    // The immediate predecessor of the retained endpoint 127. Component 126
+    // is reserved by FIG-3585 and shipped no catalog of its own, so a
+    // component-126 stamp carries the published component-125 shape and lacks
+    // the session-ingress and feed catalogs; component 128 is destructive, so
+    // the row is a refusal boundary that introduces nothing a rewound stamp
+    // could be claiming.
+    SchemaMigration {
+        from: 126,
+        to: 127,
+        source_missing_tables: &[
+            "lash_session_ingress",
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+        ],
+        source_missing_columns: &[
+            ("lash_session_meta", "drive_epoch"),
+            ("lash_session_meta", "drive_admission_id"),
+            ("lash_turn_parks", "park_id"),
+            ("lash_turn_parks", "reason_code"),
+            ("lash_turn_parks", "since_ms"),
+            ("lash_turn_parks", "last_refused_ms"),
+            ("lash_turn_parks", "attempts"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],

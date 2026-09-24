@@ -19,12 +19,12 @@ fn a_group_shape_mismatch_names_the_group_head_as_its_effect_kind() {
             .and_then(|summary| summary.effect_kind.as_deref()),
         Some("effect_group")
     );
-    let park = crate::store::TurnParkReason::of_error(&refused.into_runtime_error())
+    let park = crate::store::ParkReason::of_error(&refused.into_runtime_error())
         .expect("a replay hash conflict parks");
     assert!(
         matches!(
             park,
-            crate::store::TurnParkReason::EffectReplayDivergence { ref effect_kind, .. }
+            crate::store::ParkReason::EffectReplayDivergence { ref effect_kind, .. }
                 if effect_kind == "effect_group"
         ),
         "{park:?}"

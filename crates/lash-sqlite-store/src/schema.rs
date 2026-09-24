@@ -346,8 +346,36 @@ CREATE TABLE IF NOT EXISTS turn_cancel_retired_scopes (
 CREATE TABLE IF NOT EXISTS turn_parks (
     session_id TEXT PRIMARY KEY,
     turn_id TEXT NOT NULL,
+    park_id INTEGER NOT NULL,
+    reason_code TEXT NOT NULL,
     reason_json TEXT NOT NULL,
-    parked_at_ms INTEGER NOT NULL
+    since_ms INTEGER NOT NULL,
+    last_refused_ms INTEGER NOT NULL,
+    attempts INTEGER NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1)
+);
+CREATE INDEX IF NOT EXISTS idx_turn_parks_since
+    ON turn_parks(since_ms, session_id);
+
+CREATE TABLE IF NOT EXISTS turn_park_clock (
+    singleton           INTEGER PRIMARY KEY CONSTRAINT ck_turn_park_clock_singleton CHECK (singleton = 1),
+    current_seq         INTEGER NOT NULL DEFAULT 0,
+    compaction_horizon  INTEGER NOT NULL DEFAULT 0
+);
+
+INSERT OR IGNORE INTO turn_park_clock (
+    singleton, current_seq, compaction_horizon
+) VALUES (1, 0, 0);
+
+CREATE TABLE IF NOT EXISTS turn_park_events (
+    seq         INTEGER PRIMARY KEY,
+    session_id  TEXT NOT NULL,
+    turn_id     TEXT NOT NULL,
+    park_id     INTEGER NOT NULL,
+    kind        TEXT NOT NULL CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled')),
+    cause       TEXT,
+    reason_json TEXT,
+    at_ms       INTEGER NOT NULL,
+    CONSTRAINT ck_turn_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS session_execution_leases (
@@ -861,7 +889,12 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// database has no such table and is rejected at open and recreated. The
 /// number is provisional: the ingress store merges with the FIG-3540
 /// cutover, which takes the next free version at its merge.
-pub(crate) const SCHEMA_VERSION: i32 = 86;
+/// Bumped to 87 for FIG-3659: `turn_parks` reshapes into the enriched parked
+/// record — `park_id`, `reason_code`, `since_ms`, `last_refused_ms` and
+/// `attempts` — and the catalog gains `turn_park_clock`, the feed's sequence
+/// row, and `turn_park_events`, the durable ledger of park transitions. A
+/// pre-87 database is rejected at open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 87;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

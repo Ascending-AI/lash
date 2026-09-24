@@ -153,6 +153,9 @@ const DIVERGENCE_PARK_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const SESSION_INGRESS_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-119-5b8e9512f/postgres-expected.json",
 ];
+const PARK_FEED_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-120-e242928e4/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -297,7 +300,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 127);
+    assert_eq!(PostgresStorage::schema_version(), 128);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -691,6 +694,22 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("add the drive epoch to the session metadata");
+    // Component 128 (FIG-3659) reshapes the parked-turn row and adds the feed
+    // clock and event tables. The refusal fixture's park row predates them,
+    // so the park catalog is discarded and recreated from the authoritative
+    // DDL; the clock's seed row lands with the opening provision below.
+    sqlx::raw_sql(
+        "DROP TABLE IF EXISTS lash_turn_parks;
+         DROP TABLE IF EXISTS lash_turn_park_clock;
+         DROP TABLE IF EXISTS lash_turn_park_events;",
+    )
+    .execute(&pool)
+    .await
+    .expect("discard the pre-feed turn-park catalog");
+    sqlx::raw_sql(schema_turn_park_ddl())
+        .execute(&pool)
+        .await
+        .expect("recreate the turn-park catalog from the authoritative DDL");
     // The enclosing catalog uses the current session-metadata constraints;
     // only the deliberately obsolete checkpoint component remains historical.
     for constraint in
@@ -988,6 +1007,18 @@ fn schema_process_registry_ddl() -> &'static str {
         .find("CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (")
         .map(|offset| start + offset)
         .expect("process registry DDL must precede tool-intent submissions");
+    &ddl[start..end]
+}
+
+fn schema_turn_park_ddl() -> &'static str {
+    let ddl = PostgresStorage::schema_ddl();
+    let start = ddl
+        .find("CREATE TABLE IF NOT EXISTS lash_turn_parks (")
+        .expect("schema DDL must declare the turn-park catalog");
+    let end = ddl[start..]
+        .find("CREATE TABLE IF NOT EXISTS lash_session_execution_leases (")
+        .map(|offset| start + offset)
+        .expect("turn-park DDL must precede session execution leases");
     &ddl[start..end]
 }
 

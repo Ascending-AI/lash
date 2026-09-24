@@ -286,16 +286,32 @@ impl PostgresSessionStore {
         }
         settle_run_members_tx(&mut tx, fence, &settlement.scope).await?;
         // Settling the run settles the turn it had parked (FIG-3586).
-        sqlx::query(
+        let released = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .turn_parks
-                .delete_by_session
+                .delete_by_session_returning
                 .sql(),
         )
         .bind(fence.session_id.as_str())
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
+        if let Some(released) = released {
+            let released_turn_id: String = released.get(0);
+            let released_park_id: i64 = released.get(1);
+            let at_ms = postgres_transaction_epoch_ms(&mut tx).await?;
+            crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
+                &mut tx,
+                &fence.session_id,
+                &released_turn_id,
+                released_park_id,
+                &lash_core_execution::store::TurnParkEventKind::Unparked {
+                    cause: lash_core_execution::store::UnparkCause::RunSettled,
+                },
+                at_ms,
+            )
+            .await?;
+        }
         if matches!(settlement.progress, QueuedRunProgress::ForgetUnworked) {
             sqlx::query(run_sql().clear_members.sql())
                 .bind(fence.session_id.as_str())

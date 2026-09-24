@@ -494,21 +494,227 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn count_unsettled_turns(
         &self,
     ) -> Result<lash_core_execution::store::UnsettledTurnCounts, StoreError> {
+        // The headline counts and the per-reason split must come from one
+        // snapshot — a park landing between two pool reads would appear in
+        // the total but not in the split. `REPEATABLE READ` pins both
+        // statements to the transaction's first-snapshot.
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read_read_only
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         let row = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .count_unsettled_turns
                 .sql(),
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
         let parked: i64 = row.get(0);
-        let in_flight: i64 = row.get(1);
+        let oldest_since_ms: Option<i64> = row.get(1);
+        let in_flight: i64 = row.get(2);
+        let reason_rows = sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .count_parks_by_reason
+                .sql(),
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        let mut parked_by_reason = std::collections::BTreeMap::new();
+        for row in reason_rows {
+            let code: String = row.get(0);
+            let count: i64 = row.get(1);
+            let Some(code) = lash_core_execution::store::ParkReasonCode::from_code(&code) else {
+                return Err(StoreError::StoredDataCorrupt {
+                    record_kind: "TurnPark",
+                    message: format!("stored park reason code `{code}` is unknown"),
+                });
+            };
+            parked_by_reason.insert(code, usize::try_from(count).unwrap_or_default());
+        }
         Ok(lash_core_execution::store::UnsettledTurnCounts {
             parked_turns: usize::try_from(parked).unwrap_or_default(),
             in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
+            oldest_parked_since_ms: oldest_since_ms.map(|ms| u64::try_from(ms).unwrap_or_default()),
+            parked_by_reason,
         })
+    }
+
+    async fn list_turn_parks(
+        &self,
+        query: &lash_core_execution::store::TurnParkQuery,
+    ) -> Result<Vec<lash_core_execution::store::TurnPark>, StoreError> {
+        let limit = i64::try_from(query.limit.get()).unwrap_or(i64::MAX);
+        let session = query.session.as_ref().map(|id| id.as_str().to_string());
+        let at_or_before = query
+            .parked_at_or_before_ms
+            .map(|ms| i64::try_from(ms).unwrap_or(i64::MAX));
+        let (after_since, after_session) = match query.after.as_ref() {
+            Some((since_ms, session_id)) => (
+                Some(i64::try_from(*since_ms).unwrap_or(i64::MAX)),
+                Some(session_id.as_str().to_string()),
+            ),
+            None => (None, None),
+        };
+        let reasons: Option<Vec<&str>> = query
+            .reasons
+            .as_ref()
+            .filter(|reasons| !reasons.is_empty())
+            .map(|reasons| reasons.iter().map(|code| code.as_str()).collect());
+        let rows = sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .turn_parks_postgres
+                .list
+                .sql(),
+        )
+        .bind(limit)
+        .bind(session)
+        .bind(at_or_before)
+        .bind(after_since)
+        .bind(after_session)
+        .bind(reasons)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        rows.iter()
+            .map(|row| {
+                let session_id: String = row.get(0);
+                let turn_id: String = row.get(1);
+                let park_id: i64 = row.get(2);
+                let reason_code: String = row.get(3);
+                let reason_json: String = row.get(4);
+                let since_ms: i64 = row.get(5);
+                let last_refused_ms: i64 = row.get(6);
+                let attempts: i64 = row.get(7);
+                lash_core_execution::store::TurnPark::decode(
+                    SessionId::from(session_id),
+                    lash_sansio::TurnId::from(turn_id),
+                    lash_core_execution::store::ParkId::from_feed_sequence(
+                        u64::try_from(park_id).unwrap_or_default(),
+                    ),
+                    &reason_code,
+                    &reason_json,
+                    u64::try_from(since_ms).unwrap_or_default(),
+                    u64::try_from(last_refused_ms).unwrap_or_default(),
+                    u32::try_from(attempts).unwrap_or(u32::MAX),
+                )
+            })
+            .collect()
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: lash_core_execution::store::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash_core_execution::store::TurnParkFeedPage, StoreError> {
+        let mut page = lash_core_execution::store::TurnParkFeedPage {
+            events: Vec::new(),
+            next: after,
+        };
+        let after_seq = i64::try_from(after.store_sequence()).unwrap_or(i64::MAX);
+        let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        // The horizon is read under `FOR SHARE`: a compaction still
+        // committing must not let a stale-cursor read pass unrefused while
+        // its events are already gone.
+        let horizon: i64 = sqlx::query_scalar(
+            crate::turn_ingress::turn_ingress_sql()
+                .turn_park_clock
+                .select_compaction_horizon_for_share
+                .sql(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if after_seq < horizon {
+            return Err(StoreError::ParkFeedCursorCompacted {
+                horizon: lash_core_execution::store::TurnParkFeedCursor::from_store_sequence(
+                    u64::try_from(horizon).unwrap_or_default(),
+                ),
+            });
+        }
+        let rows = sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .turn_park_events
+                .select_events_after
+                .sql(),
+        )
+        .bind(after_seq)
+        .bind(limit)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        for row in rows {
+            let seq: i64 = row.get(0);
+            let session_id: String = row.get(1);
+            let turn_id: String = row.get(2);
+            let park_id: i64 = row.get(3);
+            let kind: String = row.get(4);
+            let cause: Option<String> = row.get(5);
+            let reason_json: Option<String> = row.get(6);
+            let at_ms: i64 = row.get(7);
+            let kind = lash_core_execution::store::TurnParkEventKind::decode_columns(
+                &kind,
+                cause.as_deref(),
+                reason_json.as_deref(),
+            )?;
+            page.events
+                .push(lash_core_execution::store::TurnParkFeedEvent {
+                    seq: u64::try_from(seq).unwrap_or_default(),
+                    at_ms: u64::try_from(at_ms).unwrap_or_default(),
+                    session_id: SessionId::from(session_id),
+                    turn_id: lash_sansio::TurnId::from(turn_id),
+                    park_id: lash_core_execution::store::ParkId::from_feed_sequence(
+                        u64::try_from(park_id).unwrap_or_default(),
+                    ),
+                    kind,
+                });
+            page.next = lash_core_execution::store::TurnParkFeedCursor::from_store_sequence(
+                u64::try_from(seq).unwrap_or_default(),
+            );
+        }
+        Ok(page)
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: lash_core_execution::store::TurnParkFeedCursor,
+    ) -> Result<(), StoreError> {
+        let through_seq = i64::try_from(through.store_sequence()).unwrap_or(i64::MAX);
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let sql = crate::turn_ingress::turn_ingress_sql();
+        // Lock the clock row before the delete: a concurrent bump either
+        // commits ahead of the lock — its events are then visible to the
+        // delete and to the clamp — or waits until this horizon update is
+        // durable. `through` is clamped to the allocated sequence so the
+        // horizon never rises past events the feed has not yet committed.
+        let current_seq: i64 =
+            sqlx::query_scalar(sql.turn_park_clock.select_current_for_update.sql())
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        let through_seq = through_seq.min(current_seq);
+        sqlx::query(sql.turn_park_events.delete_events_through.sql())
+            .bind(through_seq)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        sqlx::query(sql.turn_park_clock.raise_compaction_horizon.sql())
+            .bind(through_seq)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)
     }
 
     async fn read_session(
@@ -824,6 +1030,30 @@ pub(crate) async fn delete_session_tx(
     .map_err(store_sqlx_error)?;
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
     let queued_runs = &turn_ingress.queued_runs;
+    // A deleted session's parked turn is cancelled, and its feed event
+    // outlives the session row: the ledger is the only place the park
+    // transition stays durable (FIG-3659).
+    let released = sqlx::query(turn_ingress.turn_parks.delete_by_session_returning.sql())
+        .bind(session_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    if let Some(released) = released {
+        let released_turn_id: String = released.get(0);
+        let released_park_id: i64 = released.get(1);
+        let at_ms = postgres_transaction_epoch_ms(tx).await?;
+        crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
+            tx,
+            session_id,
+            &released_turn_id,
+            released_park_id,
+            &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                cause: lash_core_execution::store::ParkCancelCause::SessionDeleted,
+            },
+            at_ms,
+        )
+        .await?;
+    }
     for statement in [
         turn_ingress.queued_items_postgres.delete_by_session.sql(),
         turn_ingress.queued_batches.delete_by_session.sql(),
@@ -838,7 +1068,6 @@ pub(crate) async fn delete_session_tx(
         queued_runs.delete_members.sql(),
         queued_runs.delete_runs.sql(),
         turn_ingress.pending_inputs.delete_by_session.sql(),
-        turn_ingress.turn_parks.delete_by_session.sql(),
         crate::session_ingress::session_ingress_sql()
             .shared
             .delete_by_session

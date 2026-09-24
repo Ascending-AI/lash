@@ -248,7 +248,7 @@ impl LashRuntime {
     /// exactly as the abort left it — its held claims still keep the
     /// deployment from reporting drained.
     pub(super) async fn record_turn_park_after_abort(&self, err: &RuntimeError, turn_id: &TurnId) {
-        let Some(reason) = crate::store::TurnParkReason::of_error(err) else {
+        let Some(reason) = crate::store::ParkReason::of_error(err) else {
             return;
         };
         let Some(store) = self
@@ -258,21 +258,30 @@ impl LashRuntime {
         else {
             return;
         };
-        let park = crate::store::TurnPark {
+        let write = crate::store::TurnParkWrite {
             session_id: self.state.session_id.clone(),
             turn_id: turn_id.clone(),
             reason,
-            parked_at_ms: self.host.core.clock.timestamp_ms(),
+            at_ms: self.host.core.clock.timestamp_ms(),
         };
-        match store.record_turn_park(&park).await {
-            Ok(()) => tracing::warn!(
-                session_id = %self.state.session_id,
-                turn_id = %turn_id,
-                code = %err.code,
-                event = "turn.parked",
-                "turn parked on a replay refusal; redrive it under the build that wrote its \
-                 journal, cancel it, or fork from before it"
-            ),
+        let reason_code = write.reason.code().as_str();
+        let effect_kind = write.reason.effect_kind();
+        match store.record_turn_park(&write).await {
+            Ok(park) => {
+                crate::operational_metrics::record_work_parked("turn", reason_code);
+                tracing::warn!(
+                    session_id = %self.state.session_id,
+                    turn_id = %turn_id,
+                    code = %err.code,
+                    reason_code,
+                    effect_kind,
+                    park_id = %park.park_id,
+                    attempts = park.attempts,
+                    event = "turn.parked",
+                    "turn parked on a replay refusal; redrive it under the build that wrote its \
+                     journal, cancel it, or fork from before it"
+                );
+            }
             Err(error) => tracing::warn!(
                 session_id = %self.state.session_id,
                 turn_id = %turn_id,

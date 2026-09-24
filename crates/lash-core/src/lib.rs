@@ -27,7 +27,7 @@ pub use lash_core_execution::runtime::{
     TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_CHILD_REQUEST_VERSION, TOOL_PRESENTATION_VERSION,
     TOOL_SETTLEMENT_VERSION,
 };
-pub(crate) use lash_core_ids::operational_metrics;
+pub use lash_core_ids::operational_metrics;
 pub use lash_core_llm::llm;
 pub(crate) use lash_core_llm::model;
 pub use lash_core_store::attachments;

@@ -43,6 +43,10 @@ pub struct InMemorySessionStoreFactory {
     pub(super) attachment_manifest: super::SharedAttachmentManifest,
     pub(super) retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
     pub(super) attachment_write_ids: super::SharedAttachmentWriteIds,
+    /// The factory-global turn park transition ledger (FIG-3659): feed events
+    /// are appended under the parking store's `turn_park` lock and survive the
+    /// session's deletion.
+    pub(super) turn_park_feed: super::turn_park_feed::SharedTurnParkFeed,
     #[cfg(any(test, feature = "testing"))]
     fail_next_session_blob_delete: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -75,6 +79,7 @@ impl InMemorySessionStoreFactory {
             attachment_manifest: Arc::new(Mutex::new(HashMap::new())),
             retired_turn_cancel_scopes: Arc::new(Mutex::new(HashSet::new())),
             attachment_write_ids: Arc::new(Mutex::new(HashMap::new())),
+            turn_park_feed: Arc::new(Mutex::new(super::turn_park_feed::TurnParkFeed::default())),
             #[cfg(any(test, feature = "testing"))]
             fail_next_session_blob_delete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
@@ -173,6 +178,7 @@ impl InMemorySessionStoreFactory {
                     Arc::clone(&self.attachment_manifest),
                     Arc::clone(&self.retired_turn_cancel_scopes),
                     Arc::clone(&self.attachment_write_ids),
+                    Arc::clone(&self.turn_park_feed),
                 ));
                 *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
                 *store.session_meta.lock_recover() = Some(crate::SessionMeta {
@@ -377,6 +383,7 @@ impl InMemorySessionStoreFactory {
     /// Count parked turns and turns in flight across every live session
     /// (FIG-3586): a session holds a turn in flight while it has a pending
     /// queued run, a claimed turn input that is not settled, or a parked turn.
+    /// FIG-3659 adds the oldest park's `since_ms` and the per-reason counts.
     pub async fn count_unsettled_turns(
         &self,
     ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
@@ -387,7 +394,7 @@ impl InMemorySessionStoreFactory {
             if deleted.contains(&session_id) {
                 continue;
             }
-            let parked = store.turn_park.lock_recover().is_some();
+            let parked = store.turn_park.lock_recover().clone();
             let queued =
                 store.queued_runs.lock_recover().values().any(|run| {
                     run.scope.session_id() == Some(&session_id) && run.terminal.is_none()
@@ -401,10 +408,90 @@ impl InMemorySessionStoreFactory {
                         && entry.claim.id().is_some()
                         && !entry.input.state.kind().is_terminal()
                 });
-            counts.parked_turns += usize::from(parked);
-            counts.in_flight_turns += usize::from(parked || queued || claimed);
+            if let Some(ref park) = parked {
+                counts.parked_turns += 1;
+                *counts
+                    .parked_by_reason
+                    .entry(park.reason.code())
+                    .or_default() += 1;
+                counts.oldest_parked_since_ms = Some(
+                    counts
+                        .oldest_parked_since_ms
+                        .map_or(park.since_ms, |oldest| oldest.min(park.since_ms)),
+                );
+            }
+            counts.in_flight_turns += usize::from(parked.is_some() || queued || claimed);
         }
         Ok(counts)
+    }
+
+    /// List live parks across sessions, ordered `(since_ms, session_id)` with
+    /// the query's keyset, session, reason and age filters applied in Rust
+    /// (FIG-3659).
+    pub async fn list_turn_parks(
+        &self,
+        query: &crate::store::TurnParkQuery,
+    ) -> Result<Vec<crate::store::TurnPark>, crate::StoreError> {
+        let deleted = self.deleted_session_ids.lock_recover().clone();
+        let stores = self.stores.lock_recover().clone();
+        let mut parks = stores
+            .into_iter()
+            .filter(|(session_id, _)| !deleted.contains(session_id))
+            .filter_map(|(_, store)| store.turn_park.lock_recover().clone())
+            .filter(|park| {
+                query
+                    .session
+                    .as_ref()
+                    .is_none_or(|session| *session == park.session_id)
+            })
+            .filter(|park| {
+                query.reasons.as_ref().is_none_or(|reasons| {
+                    reasons.is_empty() || reasons.contains(&park.reason.code())
+                })
+            })
+            .filter(|park| {
+                query
+                    .parked_at_or_before_ms
+                    .is_none_or(|cutoff| park.since_ms <= cutoff)
+            })
+            .filter(|park| {
+                query.after.as_ref().is_none_or(|(since_ms, session_id)| {
+                    (park.since_ms, &park.session_id) > (*since_ms, session_id)
+                })
+            })
+            .collect::<Vec<_>>();
+        parks.sort_by(|left, right| {
+            left.since_ms
+                .cmp(&right.since_ms)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+        });
+        parks.truncate(query.limit.get());
+        Ok(parks)
+    }
+
+    /// Read the shared feed strictly after `after` (FIG-3659).
+    ///
+    /// # Errors
+    /// `StoreError::ParkFeedCursorCompacted` when the cursor is below the
+    /// compaction horizon.
+    pub async fn turn_park_feed(
+        &self,
+        after: crate::store::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<crate::store::TurnParkFeedPage, crate::StoreError> {
+        self.turn_park_feed
+            .lock_recover()
+            .events_after(after, limit)
+    }
+
+    /// Host-gated feed compaction: drop events at or below `through` and raise
+    /// the horizon (FIG-3659).
+    pub async fn compact_turn_park_feed(
+        &self,
+        through: crate::store::TurnParkFeedCursor,
+    ) -> Result<(), crate::StoreError> {
+        self.turn_park_feed.lock_recover().compact_through(through);
+        Ok(())
     }
 
     pub async fn delete_session(
@@ -479,6 +566,21 @@ impl InMemorySessionStoreFactory {
                     partial.deleted_blob_count = 0;
                     crate::store::MaintenanceFailure::failed(error, partial)
                 })?;
+            // The deleted session's park closes as Cancelled{SessionDeleted}:
+            // the feed is factory-global, so the ledger row survives the
+            // session's own teardown (FIG-3659).
+            let cancelled = store.turn_park.lock_recover().take();
+            if let Some(park) = cancelled {
+                self.turn_park_feed.lock_recover().log(
+                    session_id.clone(),
+                    park.turn_id.clone(),
+                    park.park_id,
+                    crate::store::TurnParkEventKind::Cancelled {
+                        cause: crate::store::ParkCancelCause::SessionDeleted,
+                    },
+                    self.clock.timestamp_ms(),
+                );
+            }
             self.deleted_session_ids
                 .lock_recover()
                 .insert(SessionId::from(session_id.to_string()));
@@ -783,6 +885,7 @@ impl InMemorySessionStoreFactory {
             Arc::clone(&self.attachment_manifest),
             Arc::clone(&self.retired_turn_cancel_scopes),
             Arc::clone(&self.attachment_write_ids),
+            Arc::clone(&self.turn_park_feed),
         ));
         *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
         *store.session_graph.lock_recover() = resident_graph.clone();

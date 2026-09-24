@@ -61,13 +61,16 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// The tables component 101 lacks: the cancellation affected-input child table
 /// component 102 installed (FIG-3263), the queued-run tables, the effect-group
-/// child table, and the session ingress component 127 installs (FIG-3540).
-const POST_FLOOR_TABLES: [&str; 5] = [
+/// child table, the session ingress component 127 installs (FIG-3540), and
+/// the park-feed clock and event tables component 128 installs (FIG-3659).
+const POST_FLOOR_TABLES: [&str; 7] = [
     "lash_queued_run_members",
     "lash_queued_runs",
-    "lash_turn_cancel_affected_inputs",
     "lash_runtime_effect_group_child",
     "lash_session_ingress",
+    "lash_turn_cancel_affected_inputs",
+    "lash_turn_park_clock",
+    "lash_turn_park_events",
 ];
 /// The post-floor indexes the fixture must drop by name: the child table's own
 /// guards drop with it, and component 102 added no index over a table the floor
@@ -135,9 +138,9 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// the *current* catalog, so these are exactly the artifacts its refusal must
 /// enumerate.
 ///
-/// The retained 125 -> 126 generation introduced no relation or constraint
-/// the refusal would name. Component 127 (FIG-3540) is destructive: no
-/// 126 → 127 arm exists, so the component-126 stamp over the current catalog
+/// The retained 126 -> 127 generation introduced no relation or constraint
+/// the refusal would name. Component 128 (FIG-3659) is destructive: no
+/// 127 → 128 arm exists, so the component-127 stamp over the current catalog
 /// is refused for having no applicable migration and names no artifacts.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A destructive generation has no migration arm, so a predecessor stamp over

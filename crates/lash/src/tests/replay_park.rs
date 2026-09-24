@@ -259,7 +259,7 @@ async fn assert_parked(
         lash_core::RuntimeErrorCode::LashlangCellReplayDivergence == code,
         matches!(
             park.reason,
-            lash_core::store::TurnParkReason::ReplayDivergence { .. }
+            lash_core::store::ParkReason::ReplayDivergence { .. }
         ),
         "the park names the refusal: {park:?}"
     );
@@ -267,7 +267,7 @@ async fn assert_parked(
         lash_core::RuntimeErrorCode::LashlangCellBindingDrift == code,
         matches!(
             park.reason,
-            lash_core::store::TurnParkReason::BindingDrift { .. }
+            lash_core::store::ParkReason::BindingDrift { .. }
         ),
         "the park names the refusal: {park:?}"
     );
@@ -301,7 +301,49 @@ async fn assert_parked(
     );
     let status = core.drain_status(false).await.expect("read drain status");
     assert_eq!(status.parked_turns, 1);
+    assert_eq!(status.oldest_parked_since_ms, Some(park.since_ms));
     assert!(!status.drained());
+}
+
+/// FIG-3659 parked-work metrics end to end: a durable park write counts once
+/// on `lash.parked_work.parks`, and `drain_status` reports the live count and
+/// oldest age. The test-metrics recorder is thread-local, so this law runs on
+/// a single-threaded runtime where every spawned task shares its slot.
+#[tokio::test]
+async fn a_parked_turn_records_the_parked_work_metrics() -> Result<()> {
+    #[cfg(feature = "otel-trace")]
+    let metrics = lash_core::operational_metrics::TestMetrics::install();
+    const SESSION: &str = "metric-park";
+    let backend = Backend::open().await;
+    let attempt_key = backend.first_attempt_key("metric-prob", SESSION).await;
+    backend.abort_after_dispatch(SESSION, &attempt_key).await;
+
+    let drifted = backend.core_for(Probe::Removed);
+    let code = redrive(&drifted, SESSION).await;
+    assert_eq!(code, lash_core::RuntimeErrorCode::LashlangCellBindingDrift);
+    #[cfg(feature = "otel-trace")]
+    assert_eq!(
+        metrics.counter_value("lash.parked_work.parks"),
+        1,
+        "the durable park write counts once"
+    );
+
+    let status = drifted
+        .drain_status(false)
+        .await
+        .expect("read drain status");
+    assert_eq!(status.parked_turns, 1);
+    #[cfg(feature = "otel-trace")]
+    assert!(
+        metrics.counter_value("lash.parked_work.count") >= 1,
+        "drain status reports the live parked count"
+    );
+    #[cfg(feature = "otel-trace")]
+    assert!(
+        metrics.counter_value("lash.parked_work.oldest_age") >= 1,
+        "drain status reports the oldest park's age"
+    );
+    Ok(())
 }
 
 /// The tool the cell called was dispatched but its result never recorded,
@@ -778,7 +820,7 @@ async fn a_native_call_on_a_drifted_tool_needed_live_parks() -> Result<()> {
             assert!(
                 matches!(
                     park.reason,
-                    lash_core::store::TurnParkReason::BindingDrift { .. }
+                    lash_core::store::ParkReason::BindingDrift { .. }
                 ),
                 "{drift:?}: {park:?}"
             );

@@ -359,6 +359,28 @@ impl lash::persistence::SessionStoreFactory for GatedSessionStoreFactory {
     ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
         self.inner.count_unsettled_turns().await
     }
+
+    async fn list_turn_parks(
+        &self,
+        query: &lash::persistence::TurnParkQuery,
+    ) -> Result<Vec<lash::persistence::TurnPark>, lash::persistence::StoreError> {
+        self.inner.list_turn_parks(query).await
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: lash::persistence::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash::persistence::TurnParkFeedPage, lash::persistence::StoreError> {
+        self.inner.turn_park_feed(after, limit).await
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: lash::persistence::TurnParkFeedCursor,
+    ) -> Result<(), lash::persistence::StoreError> {
+        self.inner.compact_turn_park_feed(through).await
+    }
 }
 
 #[async_trait::async_trait]

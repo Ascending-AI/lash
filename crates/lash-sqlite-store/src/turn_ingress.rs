@@ -28,7 +28,8 @@ use lash_store_sql::turn_ingress::{
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
     retired_scopes::RetiredScopeStatements,
     session_execution_leases::SessionExecutionLeaseStatements,
-    tool_intent_submissions::ToolIntentSubmissionStatements, turn_parks::TurnParkStatements,
+    tool_intent_submissions::ToolIntentSubmissionStatements,
+    turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -38,6 +39,7 @@ mod family;
 mod pending_inputs;
 mod queued_work;
 mod turn_cancel;
+mod turn_parks;
 
 pub(crate) use family::TurnIngressSqliteStatements;
 pub(crate) use pending_inputs::PendingInputSqliteStatements;
@@ -47,6 +49,7 @@ pub(crate) use turn_cancel::{
     ClosureAuthorizationSqliteStatements, RetiredScopeSqliteStatements,
     ToolIntentSubmissionSqliteStatements,
 };
+pub(crate) use turn_parks::{TurnParkClockSqliteStatements, TurnParkSqliteStatements};
 
 /// The `pending_turn_inputs.state` partitions this family's statements name.
 ///
@@ -121,6 +124,12 @@ pub(crate) struct TurnIngressSql {
     /// `turn_cancel_retired_scopes`, shared.
     /// `turn_parks`, shared.
     pub(crate) turn_parks: TurnParkStatements,
+    /// `turn_parks`, SQLite only.
+    pub(crate) turn_parks_sqlite: TurnParkSqliteStatements,
+    /// `turn_park_clock`, SQLite only.
+    pub(crate) turn_park_clock: TurnParkClockSqliteStatements,
+    /// `turn_park_events`, shared.
+    pub(crate) turn_park_events: TurnParkEventStatements,
     pub(crate) retired_scopes: RetiredScopeStatements,
     /// `turn_cancel_retired_scopes`, SQLite only.
     pub(crate) retired_scopes_sqlite: RetiredScopeSqliteStatements,
@@ -147,6 +156,9 @@ impl TurnIngressSql {
             closures: ClosureAuthorizationStatements::render(dialect),
             closures_sqlite: ClosureAuthorizationSqliteStatements::render(dialect),
             turn_parks: TurnParkStatements::render(dialect),
+            turn_parks_sqlite: TurnParkSqliteStatements::render(dialect),
+            turn_park_clock: TurnParkClockSqliteStatements::render(dialect),
+            turn_park_events: TurnParkEventStatements::render(dialect),
             retired_scopes: RetiredScopeStatements::render(dialect),
             retired_scopes_sqlite: RetiredScopeSqliteStatements::render(dialect),
         }

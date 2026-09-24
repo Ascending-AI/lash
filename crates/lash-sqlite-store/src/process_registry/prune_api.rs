@@ -69,9 +69,14 @@ pub(super) async fn prune_terminal_processes(
     // row.
     for process_id in prunable {
         for session_id in facade_support::process_runtime_session_ids(&process_id) {
-            delete_session_from_catalog(catalog, &session_id, SqliteConnectionPolicy::default())
-                .await
-                .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))?;
+            delete_session_from_catalog(
+                catalog,
+                &session_id,
+                SqliteConnectionPolicy::default(),
+                pruned_at_ms as u64,
+            )
+            .await
+            .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))?;
         }
     }
     registry

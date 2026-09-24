@@ -753,14 +753,29 @@ impl TurnInputStore for Store {
                             outcome,
                         });
                     }
-                    tx.execute(
-                        crate::turn_ingress::turn_ingress_sql()
-                            .family
-                            .delete_released_turn_park
-                            .sql(),
-                        params![session_id.as_str()],
-                    )
-                    .map_err(sqlite_error)?;
+                    let released: Option<(String, i64)> = tx
+                        .query_row(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .family
+                                .delete_released_turn_park_returning
+                                .sql(),
+                            params![session_id.as_str()],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
+                    if let Some((released_turn_id, released_park_id)) = released {
+                        crate::persistence::turn_park_feed::log_turn_park_closed_conn(
+                            tx,
+                            &session_id,
+                            &released_turn_id,
+                            released_park_id,
+                            &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                                cause: lash_core_execution::store::ParkCancelCause::InputWithdrawn,
+                            },
+                            crate::clamp_epoch_ms(now),
+                        )?;
+                    }
                     Ok(results)
                 })();
                 match outcome {
@@ -820,14 +835,30 @@ impl TurnInputStore for Store {
                                 tx, row, now, &covered,
                             )?);
                         }
-                        tx.execute(
-                            crate::turn_ingress::turn_ingress_sql()
-                                .family
-                                .delete_released_turn_park
-                                .sql(),
-                            params![session_id.as_str()],
-                        )
-                        .map_err(sqlite_error)?;
+                        let released: Option<(String, i64)> = tx
+                            .query_row(
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .family
+                                    .delete_released_turn_park_returning
+                                    .sql(),
+                                params![session_id.as_str()],
+                                |row| Ok((row.get(0)?, row.get(1)?)),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?;
+                        if let Some((released_turn_id, released_park_id)) = released {
+                            crate::persistence::turn_park_feed::log_turn_park_closed_conn(
+                                tx,
+                                &session_id,
+                                &released_turn_id,
+                                released_park_id,
+                                &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                                    cause:
+                                        lash_core_execution::store::ParkCancelCause::InputWithdrawn,
+                                },
+                                crate::clamp_epoch_ms(now),
+                            )?;
+                        }
                         Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes {
                             anchor,
                             outcomes,

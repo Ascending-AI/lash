@@ -13,7 +13,7 @@ use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
     AttachmentRootSet, RuntimePersistence, SessionStoreCreateRequest, SessionStoreFactory,
-    StoreError, UnsettledTurnCounts,
+    StoreError, TurnPark, TurnParkFeedCursor, TurnParkFeedPage, TurnParkQuery, UnsettledTurnCounts,
 };
 
 struct SilentFactory {
@@ -61,6 +61,28 @@ impl SessionStoreFactory for SilentFactory {
     // A decorator forwards the deployment turn count to the catalog it wraps.
     async fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError> {
         self.inner.count_unsettled_turns().await
+    }
+
+    async fn list_turn_parks(
+        &self,
+        query: &TurnParkQuery,
+    ) -> Result<Vec<TurnPark>, StoreError> {
+        self.inner.list_turn_parks(query).await
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<TurnParkFeedPage, StoreError> {
+        self.inner.turn_park_feed(after, limit).await
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: TurnParkFeedCursor,
+    ) -> Result<(), StoreError> {
+        self.inner.compact_turn_park_feed(through).await
     }
 }
 

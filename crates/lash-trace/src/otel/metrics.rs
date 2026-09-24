@@ -12,6 +12,8 @@ const SESSION_LANE_WAIT_OUTCOME_ATTRIBUTE: &str = "lash.session_execution_lane.w
 const SESSION_LANE_GIVE_UP_ATTRIBUTE: &str = "lash.session_execution_lane.give_up";
 const POSTGRES_POOL_ACQUIRE_OUTCOME_ATTRIBUTE: &str = "lash.postgres.pool.acquire.outcome";
 const RUNTIME_COMMIT_BUDGET_OUTCOME_ATTRIBUTE: &str = "lash.runtime_commit.budget.outcome";
+const PARKED_WORK_KIND_ATTRIBUTE: &str = "lash.parked_work.kind";
+const PARKED_WORK_REASON_ATTRIBUTE: &str = "lash.parked_work.reason";
 
 /// Runtime-facing OpenTelemetry instruments for host-tunable operational limits.
 #[derive(Clone)]
@@ -131,6 +133,73 @@ impl RuntimeTuningMetrics {
 
 fn duration_millis(duration: std::time::Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Runtime-facing OpenTelemetry instruments for parked work (FIG-3659).
+///
+/// `kind` names the parked lane (`turn` today; `process` lands with NOW-B),
+/// `reason` the park's reason code.
+#[derive(Clone)]
+pub struct ParkedWorkMetrics {
+    parks: Counter<u64>,
+    count: Gauge<u64>,
+    oldest_age: Gauge<u64>,
+}
+
+impl ParkedWorkMetrics {
+    pub fn from_global_provider() -> Self {
+        Self::new(global::meter_provider().meter(INSTRUMENTATION_NAME))
+    }
+
+    pub fn new(meter: Meter) -> Self {
+        Self {
+            parks: meter
+                .u64_counter("lash.parked_work.parks")
+                .with_description(
+                    "Park records written; counts first parks and same-turn re-parks alike",
+                )
+                .build(),
+            count: meter
+                .u64_gauge("lash.parked_work.count")
+                .with_description("Live parked records by kind and reason")
+                .build(),
+            oldest_age: meter
+                .u64_gauge("lash.parked_work.oldest_age")
+                .with_description("Age of the oldest live park; zero when nothing is parked")
+                .with_unit("ms")
+                .build(),
+        }
+    }
+
+    /// Count one park write — a first park or a same-turn re-park alike.
+    pub fn record_park(&self, kind: &'static str, reason: &'static str) {
+        self.parks.add(
+            1,
+            &[
+                KeyValue::new(PARKED_WORK_KIND_ATTRIBUTE, kind),
+                KeyValue::new(PARKED_WORK_REASON_ATTRIBUTE, reason),
+            ],
+        );
+    }
+
+    /// Report the live parked count for one (kind, reason) cell; zero-valued
+    /// cells are recorded too so a cleared reason drops to 0.
+    pub fn record_count(&self, kind: &'static str, reason: &'static str, count: u64) {
+        self.count.record(
+            count,
+            &[
+                KeyValue::new(PARKED_WORK_KIND_ATTRIBUTE, kind),
+                KeyValue::new(PARKED_WORK_REASON_ATTRIBUTE, reason),
+            ],
+        );
+    }
+
+    /// Report the oldest live park's age in milliseconds; zero when nothing
+    /// is parked.
+    pub fn record_oldest_age(&self, kind: &'static str, age_ms: u64) {
+        self.oldest_age
+            .record(age_ms, &[KeyValue::new(PARKED_WORK_KIND_ATTRIBUTE, kind)]);
+    }
 }
 
 /// Runtime-facing OpenTelemetry counters for tool-intent realization.

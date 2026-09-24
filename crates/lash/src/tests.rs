@@ -898,6 +898,34 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
             operation: "SessionStoreFactory::count_unsettled_turns",
         })
     }
+
+    async fn list_turn_parks(
+        &self,
+        _query: &lash_core::store::TurnParkQuery,
+    ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::list_turn_parks",
+        })
+    }
+
+    async fn turn_park_feed(
+        &self,
+        _after: lash_core::store::TurnParkFeedCursor,
+        _limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::turn_park_feed",
+        })
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        _through: lash_core::store::TurnParkFeedCursor,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::compact_turn_park_feed",
+        })
+    }
 }
 
 struct BoundSessionStore {
@@ -1308,6 +1336,34 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
             operation: "SessionStoreFactory::count_unsettled_turns",
         })
     }
+
+    async fn list_turn_parks(
+        &self,
+        _query: &lash_core::store::TurnParkQuery,
+    ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::list_turn_parks",
+        })
+    }
+
+    async fn turn_park_feed(
+        &self,
+        _after: lash_core::store::TurnParkFeedCursor,
+        _limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::turn_park_feed",
+        })
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        _through: lash_core::store::TurnParkFeedCursor,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::compact_turn_park_feed",
+        })
+    }
 }
 
 #[derive(Default)]
@@ -1429,6 +1485,34 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
     ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "SessionStoreFactory::count_unsettled_turns",
+        })
+    }
+
+    async fn list_turn_parks(
+        &self,
+        _query: &lash_core::store::TurnParkQuery,
+    ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::list_turn_parks",
+        })
+    }
+
+    async fn turn_park_feed(
+        &self,
+        _after: lash_core::store::TurnParkFeedCursor,
+        _limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::turn_park_feed",
+        })
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        _through: lash_core::store::TurnParkFeedCursor,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::compact_turn_park_feed",
         })
     }
 }

@@ -502,7 +502,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Component-126 catalogs lack the table and are rejected and recreated. The
 // number is provisional: the ingress store merges with the FIG-3540 cutover,
 // which takes the next free component at its merge.
-const SCHEMA_VERSION: i32 = 127;
+// Version 128 (FIG-3659) reshapes `lash_turn_parks` into the enriched parked
+// record — `park_id`, `reason_code`, `since_ms`, `last_refused_ms` and
+// `attempts` — and adds `lash_turn_park_clock`, the feed's sequence row, and
+// `lash_turn_park_events`, the durable ledger of park transitions.
+// Component-127 and older catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 128;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -103,25 +103,32 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
             })
             .await
             .expect("create the session store");
-        store
-            .record_turn_park(&lash_core::store::TurnPark {
+        let stored = store
+            .record_turn_park(&lash_core::store::TurnParkWrite {
                 session_id: session_id.clone(),
                 turn_id: lash_core::TurnId::from("parked-turn"),
-                reason: lash_core::store::TurnParkReason::ReplayDivergence {
+                reason: lash_core::store::ParkReason::ReplayDivergence {
                     message: "diverged".to_string(),
                 },
-                parked_at_ms: 1,
+                at_ms: 1,
             })
             .await
             .expect("park the turn");
+        assert_eq!(stored.since_ms, 1);
         let parked = core
             .drain_status(false)
             .await
             .expect("read parked drain status");
         assert_eq!((parked.parked_turns, parked.in_flight_turns), (1, 1));
+        assert_eq!(
+            parked.oldest_parked_since_ms,
+            Some(1),
+            "the drain status exposes the oldest park"
+        );
         assert!(!parked.drained(), "a parked turn is not drained");
         let wire = serde_json::to_value(&parked).expect("serialize drain status");
         assert_eq!(wire["parked_turns"], 1);
+        assert_eq!(wire["oldest_parked_since_ms"], 1);
         assert_eq!(wire["drained"], false);
 
         let state = lash_core::RuntimeSessionState {
@@ -151,6 +158,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
             .await
             .expect("read settled drain status");
         assert_eq!((settled.parked_turns, settled.in_flight_turns), (0, 0));
+        assert_eq!(settled.oldest_parked_since_ms, None);
         assert!(settled.drained());
     }
 }

@@ -49,6 +49,25 @@ impl crate::SessionStoreFactory for InMemorySessionStoreFactory {
     ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
         InMemorySessionStoreFactory::count_unsettled_turns(self).await
     }
+    async fn list_turn_parks(
+        &self,
+        query: &crate::store::TurnParkQuery,
+    ) -> Result<Vec<crate::store::TurnPark>, crate::StoreError> {
+        InMemorySessionStoreFactory::list_turn_parks(self, query).await
+    }
+    async fn turn_park_feed(
+        &self,
+        after: crate::store::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<crate::store::TurnParkFeedPage, crate::StoreError> {
+        InMemorySessionStoreFactory::turn_park_feed(self, after, limit).await
+    }
+    async fn compact_turn_park_feed(
+        &self,
+        through: crate::store::TurnParkFeedCursor,
+    ) -> Result<(), crate::StoreError> {
+        InMemorySessionStoreFactory::compact_turn_park_feed(self, through).await
+    }
     async fn pending_turn_cancel_closure_pins(
         &self,
         session_id: &crate::SessionId,

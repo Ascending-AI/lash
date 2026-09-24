@@ -57,6 +57,14 @@ pub async fn reset(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("reset postgres process change clock");
+    sqlx::query(
+        "INSERT INTO lash_turn_park_clock (singleton, current_seq)
+         VALUES (TRUE, 0)
+         ON CONFLICT (singleton) DO UPDATE SET current_seq = EXCLUDED.current_seq",
+    )
+    .execute(pool)
+    .await
+    .expect("reset postgres turn park clock");
 }
 
 pub fn database_url() -> Option<String> {

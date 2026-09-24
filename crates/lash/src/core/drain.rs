@@ -19,6 +19,10 @@ pub struct DeploymentDrainStatus {
     /// its claims until a redrive under the build that wrote its journal, a
     /// cancel, or a fork resolves it.
     pub parked_turns: usize,
+    /// Host-clock epoch milliseconds of the oldest live park's first refusal:
+    /// the minimum `since_ms` over parked turns (NOW-B folds in parked
+    /// processes). `None` when nothing is parked.
+    pub oldest_parked_since_ms: Option<u64>,
     /// Host-clock epoch milliseconds at which this read completed.
     pub checked_at: u64,
 }
@@ -44,6 +48,7 @@ impl serde::Serialize for DeploymentDrainStatus {
             remaining_invocations: usize,
             in_flight_turns: usize,
             parked_turns: usize,
+            oldest_parked_since_ms: Option<u64>,
             checked_at: u64,
             drained: bool,
         }
@@ -52,6 +57,7 @@ impl serde::Serialize for DeploymentDrainStatus {
             remaining_invocations: self.remaining_invocations,
             in_flight_turns: self.in_flight_turns,
             parked_turns: self.parked_turns,
+            oldest_parked_since_ms: self.oldest_parked_since_ms,
             checked_at: self.checked_at,
             drained: self.drained(),
         }

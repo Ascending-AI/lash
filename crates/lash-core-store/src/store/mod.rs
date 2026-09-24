@@ -26,6 +26,7 @@ mod graph_commit;
 mod lease_timings;
 mod load;
 mod maintenance;
+mod park;
 mod preflight;
 mod queued_run;
 pub mod queued_work;
@@ -45,7 +46,6 @@ pub mod session_ingress_plan;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
-mod turn_park;
 mod usage;
 pub mod work_claim;
 
@@ -109,6 +109,11 @@ pub use maintenance::{
     GcReport, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,
     MaintenanceStop, MaintenanceSweep, SessionBlobReclaimReport, VacuumReport,
 };
+pub use park::{
+    ParkCancelCause, ParkId, ParkReason, ParkReasonCode, TurnPark, TurnParkEventKind,
+    TurnParkFeedCursor, TurnParkFeedEvent, TurnParkFeedPage, TurnParkQuery, TurnParkWrite,
+    UnparkCause, UnsettledTurnCounts,
+};
 pub use preflight::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
     StoreBackend, StoreComponentVersion, StorePreflight, StoreReleaseStamp, StoreReleaseState,
@@ -160,7 +165,6 @@ pub use state_version::{
 pub use testing::{
     ConformancePersistence, StoreTestSupport, append_request_commit_with_clock_for_testing,
 };
-pub use turn_park::{TurnPark, TurnParkReason, UnsettledTurnCounts};
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
 pub use work_claim::{WorkClaim, WorkCompletion};
 
@@ -1221,14 +1225,24 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;
 
-    /// Record that the session's turn parked (FIG-3586, FIG-3600), replacing
-    /// any park the session already holds.
+    /// Record that the session's turn parked (FIG-3586, FIG-3600, FIG-3659).
     ///
     /// Written on the abort path of a turn whose refusal parks it, before its
-    /// lease is released. Any commit of the session clears it in the commit's
-    /// transaction, as does a cancel that releases the parked turn's claim and
-    /// the session's deletion: a park is live exactly while its turn is.
-    async fn record_turn_park(&self, _park: &crate::store::TurnPark) -> Result<(), StoreError> {
+    /// lease is released. A first park allocates the feed sequence the record's
+    /// `park_id` names and appends a `Parked` event; a re-park of the same
+    /// turn keeps `park_id` and `since_ms`, bumps `attempts` and
+    /// `last_refused_ms`, and writes no event; a different turn's park
+    /// supersedes the stored one (`Unparked{Superseded}` then `Parked`).
+    /// Any commit of the session clears the park in the commit's transaction,
+    /// as does a cancel that releases the parked turn's claim and the
+    /// session's deletion: a park is live exactly while its turn is.
+    ///
+    /// Returns the record as stored, so the caller can report the allocated
+    /// `park_id` and attempt count.
+    async fn record_turn_park(
+        &self,
+        _park: &crate::store::TurnParkWrite,
+    ) -> Result<crate::store::TurnPark, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "record_turn_park",
         })
