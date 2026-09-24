@@ -229,7 +229,7 @@ impl RuntimeTurnDriver<'_> {
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         checkpoint: CheckpointKind,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
     ) -> RuntimeEffectOutcome {
         let result = self
             .run_checkpoint(messages, protocol_iteration, checkpoint, event_tx)
@@ -264,7 +264,7 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         checkpoint: CheckpointKind,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<crate::CheckpointDelivery, RuntimeEffectControllerError> {
         let invocation = self.turn_effect_invocation(machine, id, RuntimeEffectKind::Checkpoint)?;
@@ -365,7 +365,7 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         response: LlmResponse,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<LlmResponse, RuntimeEffectControllerError> {
         // Rebuilt rather than threaded through: phase 1's invocation is a pure
@@ -398,7 +398,7 @@ impl RuntimeTurnDriver<'_> {
             for event in
                 crate::plugin::plugin_runtime_session_events(&emitted.plugin_id, emitted.events)
             {
-                send_session_event(event_tx, event).await;
+                event_tx.session(event);
             }
         }
         Ok(response)
@@ -408,7 +408,7 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<
         (
@@ -435,7 +435,7 @@ impl RuntimeTurnDriver<'_> {
         invocation: crate::RuntimeEffectInvocation,
         language: String,
         code: String,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<Result<crate::ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError>
     {
@@ -457,7 +457,7 @@ impl RuntimeTurnDriver<'_> {
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         checkpoint: CheckpointKind,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
     ) -> Result<crate::CheckpointDelivery, RuntimeError> {
         let mut committed = self.checkpoint_messages.drain();
         let mut transient_messages = Vec::new();
@@ -533,14 +533,10 @@ impl RuntimeTurnDriver<'_> {
                 let accepted_turn_inputs = claim.accepted_turn_inputs();
                 self.withheld_terminal_work.turn_inputs.push(claim);
                 if !accepted_turn_inputs.is_empty() {
-                    send_session_event(
-                        event_tx,
-                        SessionStreamEvent::InjectedTurnInputAccepted {
-                            inputs: accepted_turn_inputs,
-                            checkpoint,
-                        },
-                    )
-                    .await;
+                    event_tx.session(SessionStreamEvent::InjectedTurnInputAccepted {
+                        inputs: accepted_turn_inputs,
+                        checkpoint,
+                    });
                 }
             } else {
                 let mut delivery_claim = claim.clone();
@@ -567,8 +563,7 @@ impl RuntimeTurnDriver<'_> {
                 crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
                 &claim,
                 materialized.turn_causes.clone(),
-            )
-            .await;
+            );
             self.emit_trace(
                 protocol_iteration,
                 lash_trace::TraceEvent::Custom {
@@ -609,7 +604,7 @@ impl RuntimeTurnDriver<'_> {
             .await
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint))?;
         committed.extend(applied.messages);
-        emit_session_events(event_tx, applied.events).await;
+        emit_session_events(event_tx, applied.events);
         if let Some(abort) = applied.abort {
             // A plugin's abort code is plugin-authored vocabulary: it lands
             // in `ForeignCode` verbatim (namespace included) and is never
@@ -635,14 +630,10 @@ impl RuntimeTurnDriver<'_> {
         .await?;
 
         if !committed.is_empty() {
-            send_session_event(
-                event_tx,
-                SessionStreamEvent::InjectedMessagesCommitted {
-                    messages: committed.clone(),
-                    checkpoint,
-                },
-            )
-            .await;
+            event_tx.session(SessionStreamEvent::InjectedMessagesCommitted {
+                messages: committed.clone(),
+                checkpoint,
+            });
         }
 
         Ok(crate::CheckpointDelivery {
@@ -665,7 +656,7 @@ impl RuntimeTurnDriver<'_> {
         protocol_iteration: usize,
         cell_replay_grammar: Option<u32>,
         invocation: crate::RuntimeInvocation,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancellation: &CancellationToken,
     ) -> Result<
         Result<crate::ExecResponse, crate::ExecCodeFailure>,
@@ -693,14 +684,14 @@ impl RuntimeTurnDriver<'_> {
                             session_closed = true;
                             continue;
                         };
-                        send_session_event(&relay_tx, event).await;
+                        relay_tx.session(event);
                     }
                     maybe_turn_event = turn_event_rx.recv(), if !turn_closed => {
                         let Some(event) = maybe_turn_event else {
                             turn_closed = true;
                             continue;
                         };
-                        let _ = relay_tx.send(RuntimeStreamEvent::Turn(event)).await;
+                        relay_tx.publish(RuntimeStreamEvent::Turn(event));
                     }
                 }
             }

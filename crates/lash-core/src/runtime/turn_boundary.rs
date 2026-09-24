@@ -24,6 +24,8 @@ mod execution_state;
 use execution_state::*;
 mod final_commit_input;
 use final_commit_input::FinalCommitInput;
+mod recorded_assembly;
+pub use recorded_assembly::{RecordedTurnAssembly, classify_output_state};
 type FinalCommitResult = Result<
     (
         Vec<crate::QueuedWorkBatch>,

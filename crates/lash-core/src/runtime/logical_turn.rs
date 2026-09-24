@@ -430,12 +430,47 @@ impl LashRuntime {
         }
     }
 
+    /// Drive one logical turn while everything it publishes reaches the host
+    /// sinks outside the drive.
+    ///
+    /// Every physical turn of the run publishes through one [`TurnObserver`],
+    /// so the host receives one ordered stream; the drive never waits on a
+    /// host sink, and nothing it commits is read back from what it published.
+    /// The call returns only once the host has received the whole stream (the
+    /// observer's host contract).
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn drive_logical_turn(
         &mut self,
-        mut start: LogicalTurnStart,
+        start: LogicalTurnStart,
         events: &dyn EventSink,
         turn_events: &dyn TurnActivitySink,
+        scoped_effect_controller: ScopedEffectController<'_>,
+        cancel: CancellationToken,
+        claims: LogicalTurnClaims,
+        session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
+        stopwatch: TurnStopwatch,
+    ) -> Result<AgentFrameRun, RuntimeError> {
+        let (observer, mut observations) = TurnObserver::open(events, turn_events);
+        let drive = std::pin::pin!(self.drive_observed_logical_turn(
+            start,
+            &observer,
+            scoped_effect_controller,
+            cancel,
+            claims,
+            session_execution_lease,
+            stopwatch,
+        ));
+        drive_with_observations(drive, &mut observations, |observation| {
+            super::turn_loop::publish_observation(events, turn_events, observation)
+        })
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn drive_observed_logical_turn(
+        &mut self,
+        mut start: LogicalTurnStart,
+        observer: &TurnObserver,
         scoped_effect_controller: ScopedEffectController<'_>,
         cancel: CancellationToken,
         mut claims: LogicalTurnClaims,
@@ -493,7 +528,7 @@ impl LashRuntime {
                 TurnStopwatch::start(self.host.core.clock.as_ref())
             };
             Self::emit_physical_turn_start(
-                turn_events,
+                observer,
                 &turn_trace_turn_id,
                 &claims,
                 announce_queued_work,
@@ -516,7 +551,7 @@ impl LashRuntime {
                 let terminal = Box::pin(self.finish_logical_turn_error(LogicalTurnErrorContext {
                     message: format!("logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"),
                     trace_turn_id: turn_trace_turn_id,
-                    sinks: TurnSinks { events, turn_events },
+                    sinks: TurnSinks { observer },
                     scoped_effect_controller: turn_effect_controller,
                     cancel: cancel.clone(),
                     claims,
@@ -558,10 +593,7 @@ impl LashRuntime {
                     Box::pin(self.stream_turn_with_scoped_effect_controller_inner(
                         TurnPrepareContext {
                             input,
-                            sinks: TurnSinks {
-                                events,
-                                turn_events,
-                            },
+                            sinks: TurnSinks { observer },
                             scoped_effect_controller: turn_effect_controller,
                             cancel: cancel.clone(),
                             queued_claims: claims.queued,
@@ -590,10 +622,7 @@ impl LashRuntime {
                         .bind_turn_scoped(prepared.trace_turn_id.clone());
                     Box::pin(self.stream_prepared_turn_inner(PreparedTurnExecuteContext {
                         turn: prepared,
-                        sinks: TurnSinks {
-                            events,
-                            turn_events,
-                        },
+                        sinks: TurnSinks { observer },
                         scoped_effect_controller: turn_effect_controller,
                         cancel: cancel.clone(),
                         initial_queue_claims: claims.queued,
@@ -947,7 +976,7 @@ impl LashRuntime {
                 let terminal_effect_controller = scoped_effect_controller.clone();
                 let terminal_stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
                 Self::emit_physical_turn_start(
-                    turn_events,
+                    observer,
                     &terminal_trace_turn_id,
                     &next_claims,
                     true,
@@ -959,10 +988,7 @@ impl LashRuntime {
                                 "logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"
                             ),
                             trace_turn_id: terminal_trace_turn_id,
-                            sinks: TurnSinks {
-                                events,
-                                turn_events,
-                            },
+                            sinks: TurnSinks { observer },
                             scoped_effect_controller: terminal_effect_controller,
                             cancel: cancel.clone(),
                             claims: next_claims,

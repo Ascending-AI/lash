@@ -2,12 +2,12 @@ use super::*;
 
 #[test]
 fn assembler_ignores_streamed_text_without_durable_output() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::TextDelta {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::TextDelta {
         content: "streamed but not committed".to_string(),
         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
 
     let out = assembler.finish(
         default_state().to_snapshot(),
@@ -29,8 +29,8 @@ fn assembler_ignores_streamed_text_without_durable_output() {
 
 #[test]
 fn cancelled_assembler_with_only_streamed_text_has_empty_assistant_output() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::TextDelta {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::TextDelta {
         content: "partial answer".to_string(),
         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
     });
@@ -53,13 +53,13 @@ fn cancelled_assembler_with_only_streamed_text_has_empty_assistant_output() {
 
 #[test]
 fn assembler_preserves_explicit_assistant_message_outcome() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::TurnOutcome {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::TurnOutcome {
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: "first\n\nsecond".to_string(),
         }),
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
 
     let out = assembler.finish(
         default_state().to_snapshot(),
@@ -79,13 +79,13 @@ fn assembler_preserves_explicit_assistant_message_outcome() {
 
 #[test]
 fn assembler_uses_assistant_message_outcome_without_recovery_issue_when_no_streamed_prose() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::TurnOutcome {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::TurnOutcome {
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: "settled answer".to_string(),
         }),
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
 
     let out = assembler.finish(
         default_state().to_snapshot(),
@@ -110,13 +110,13 @@ fn assembler_uses_assistant_message_outcome_without_recovery_issue_when_no_strea
 
 #[test]
 fn assembler_uses_final_value_for_assistant_output() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::TurnOutcome {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::TurnOutcome {
         outcome: TurnOutcome::Finished(TurnFinish::FinalValue {
             value: serde_json::json!({ "ok": true }),
         }),
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
 
     let out = assembler.finish(
         default_state().to_snapshot(),
@@ -136,14 +136,14 @@ fn assembler_uses_final_value_for_assistant_output() {
 
 #[test]
 fn assembler_uses_tool_value_for_assistant_output() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::TurnOutcome {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::TurnOutcome {
         outcome: TurnOutcome::Finished(TurnFinish::ToolValue {
             tool_name: "finish".to_string(),
             value: serde_json::json!("done"),
         }),
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
 
     let out = assembler.finish(
         default_state().to_snapshot(),
@@ -174,8 +174,8 @@ fn assembler_falls_back_to_last_assistant_message_when_stream_output_is_empty() 
             origin: None,
         },
     );
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::Done);
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
         None,
@@ -227,7 +227,7 @@ fn interrupted_assembler_does_not_reuse_assistant_before_latest_user_message() {
         },
     );
 
-    let out = TurnAssembler::default().finish(
+    let out = RecordedTurnAssembly::default().finish(
         state.to_snapshot(),
         Some(lash_core::facade_support::TurnCancellationEvidence::internal("assembler-test")),
         None,
@@ -259,12 +259,12 @@ fn assembler_prefers_state_output_when_streamed_text_is_a_truncated_prefix() {
             origin: None,
         },
     );
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::TextDelta {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::TextDelta {
         content: "You graduated with a degree in Business".to_string(),
         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
         None,
@@ -316,7 +316,7 @@ fn assembler_state_output_excludes_tool_call_payload() {
             origin: None,
         },
     );
-    let assembler = TurnAssembler::default();
+    let assembler = RecordedTurnAssembly::default();
     let out = assembler.finish(
         state.to_snapshot(),
         Some(lash_core::facade_support::TurnCancellationEvidence::internal("assembler-test")),
@@ -336,8 +336,8 @@ fn assembler_state_output_excludes_tool_call_payload() {
 
 #[test]
 fn assembler_derives_tool_failure_from_assembled_records() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::ToolCall {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::ToolCall {
         call_id: Some("tc1".to_string()),
         name: "x".to_string(),
         args: serde_json::json!({}),
@@ -348,11 +348,11 @@ fn assembler_derives_tool_failure_from_assembled_records() {
         )),
         duration_ms: 1,
     });
-    assembler.push(&SessionStreamEvent::Error {
+    assembler.record(&SessionStreamEvent::Error {
         message: "tool failed".to_string(),
         envelope: None,
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
     let out = assembler.finish(
         default_state().to_snapshot(),
         None,
@@ -368,9 +368,9 @@ fn assembler_derives_tool_failure_from_assembled_records() {
 }
 
 #[test]
-fn assembler_records_code_execution_from_the_code_block_stream() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::Done);
+fn assembler_records_code_execution_the_driver_notes() {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::Done);
     let without = assembler.finish(
         default_state().to_snapshot(),
         None,
@@ -379,9 +379,9 @@ fn assembler_records_code_execution_from_the_code_block_stream() {
     );
     assert!(!without.execution.had_code_execution);
 
-    let mut assembler = TurnAssembler::default();
+    let mut assembler = RecordedTurnAssembly::default();
     assembler.note_code_execution();
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
     let with = assembler.finish(
         default_state().to_snapshot(),
         None,
@@ -393,8 +393,8 @@ fn assembler_records_code_execution_from_the_code_block_stream() {
 
 #[test]
 fn assembler_treats_any_non_success_record_as_tool_failure() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::ToolCall {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::ToolCall {
         call_id: Some("tc-cancelled".to_string()),
         name: "x".to_string(),
         args: serde_json::json!({}),
@@ -403,11 +403,11 @@ fn assembler_treats_any_non_success_record_as_tool_failure() {
         )),
         duration_ms: 1,
     });
-    assembler.push(&SessionStreamEvent::Error {
+    assembler.record(&SessionStreamEvent::Error {
         message: "runtime also reported a blocking issue".to_string(),
         envelope: None,
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
 
     let out = assembler.finish(
         default_state().to_snapshot(),
@@ -421,9 +421,9 @@ fn assembler_treats_any_non_success_record_as_tool_failure() {
 
 #[test]
 fn assembler_classifies_failure_omitted_beyond_128_call_horizon() {
-    let mut assembler = TurnAssembler::default();
+    let mut assembler = RecordedTurnAssembly::default();
     for index in 0..128 {
-        assembler.push(&SessionStreamEvent::ToolCall {
+        assembler.record(&SessionStreamEvent::ToolCall {
             call_id: Some(format!("call-{index}")),
             name: "successful_tool".to_string(),
             args: serde_json::json!({ "index": index }),
@@ -431,18 +431,18 @@ fn assembler_classifies_failure_omitted_beyond_128_call_horizon() {
             duration_ms: 1,
         });
     }
-    assembler.push(&SessionStreamEvent::ToolCallsOmitted {
+    assembler.record(&SessionStreamEvent::ToolCallsOmitted {
         summary: lash_core::OmittedToolCalls {
             count: 1,
             failures: 1,
             attachments: Vec::new(),
         },
     });
-    assembler.push(&SessionStreamEvent::Error {
+    assembler.record(&SessionStreamEvent::Error {
         message: "runtime also reported a blocking issue".to_string(),
         envelope: None,
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
 
     let out = assembler.finish(
         default_state().to_snapshot(),
@@ -458,8 +458,8 @@ fn assembler_classifies_failure_omitted_beyond_128_call_horizon() {
 
 #[test]
 fn assembler_marks_missing_done_as_failure() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::TextDelta {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::TextDelta {
         content: "partial".to_string(),
         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
     });
@@ -493,8 +493,8 @@ fn assembler_ignores_stale_max_turn_message() {
             origin: None,
         },
     );
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::Done);
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
         None,
@@ -525,11 +525,11 @@ fn assembler_uses_typed_max_turn_fact_despite_reworded_message() {
             origin: None,
         },
     );
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::TurnOutcome {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::TurnOutcome {
         outcome: TurnOutcome::Stopped(TurnStop::MaxTurns),
     });
-    assembler.push(&SessionStreamEvent::Done);
+    assembler.record(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
         None,
@@ -646,8 +646,8 @@ async fn attachment_source_policy_can_deny_borrowed_turn_ingress() {
 fn producer_severity_controls_completion_independently_of_issue_code() {
     use lash_core::runtime::TurnIssueSeverity;
     for severity in [TurnIssueSeverity::Advisory, TurnIssueSeverity::Blocking] {
-        let mut assembler = TurnAssembler::default();
-        assembler.push(&SessionStreamEvent::Done);
+        let mut assembler = RecordedTurnAssembly::default();
+        assembler.record(&SessionStreamEvent::Done);
         let issue = TurnIssue {
             severity,
             kind: lash_core::TurnFailureKind::Runtime,
@@ -674,8 +674,8 @@ fn producer_severity_controls_completion_independently_of_issue_code() {
 
 #[test]
 fn runtime_error_and_missing_done_producers_are_blocking() {
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::Error {
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::Error {
         message: "failed".into(),
         envelope: None,
     });
@@ -710,8 +710,8 @@ fn recovered_output_producer_emits_advisory_severity() {
             origin: None,
         },
     );
-    let mut assembler = TurnAssembler::default();
-    assembler.push(&SessionStreamEvent::Done);
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
         None,

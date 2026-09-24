@@ -916,14 +916,9 @@ pub(super) async fn emit_session_event_to_sink(events: &dyn EventSink, event: Se
     }
 }
 
-pub(super) async fn emit_session_events(
-    event_tx: &mpsc::Sender<RuntimeStreamEvent>,
-    plugin_events: Vec<SessionStreamEvent>,
-) {
+pub(super) fn emit_session_events(event_tx: &TurnObserver, plugin_events: Vec<SessionStreamEvent>) {
     for event in plugin_events {
-        if !event_tx.is_closed() {
-            let _ = event_tx.send(RuntimeStreamEvent::Session(event)).await;
-        }
+        event_tx.publish(RuntimeStreamEvent::Session(event));
     }
 }
 

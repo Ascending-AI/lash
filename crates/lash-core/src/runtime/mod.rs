@@ -33,7 +33,7 @@ mod claim_settlement;
 pub mod coalescing_scheduler;
 mod environment;
 mod error;
-mod event_pump;
+mod observation_publisher;
 use lash_core_execution::runtime::host;
 #[cfg(feature = "testing")]
 pub use lash_core_execution::runtime::in_memory_store;
@@ -112,7 +112,9 @@ pub use lash_core_execution::runtime::turn_control;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_execution::runtime::turn_control;
 mod turn_driver;
+mod turn_observer;
 use lash_core_store::turn_failure_evidence;
+use turn_observer::{Observation, TurnObserver};
 mod turn_graph_editor;
 pub use turn_failure_evidence::{
     ChargeSafetyRefusalEvidence, TurnFailureEvidence, TurnFailurePartialOutput,
@@ -169,8 +171,7 @@ use turn_driver::*;
 pub use crate::store::QueuedWorkClass;
 use assembly::{
     LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
-    LlmStreamState, LlmStreamSummary, ReasoningPublicationState, TurnAssembler,
-    fold_llm_stream_event,
+    LlmStreamState, LlmStreamSummary, ReasoningPublicationState, fold_llm_stream_event,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -193,9 +194,6 @@ pub(crate) fn response_synthesized_from_aborted_stream(
     accumulator.apply_to_response(&mut response);
     response
 }
-#[cfg(test)]
-#[allow(unused_imports)]
-use assembly::{classify_output_state, sanitize_assistant_output};
 pub use builder::EmbeddedRuntimeBuilder;
 pub use causal::process_event_invocation;
 pub use causal::{CommandReplayKey, command_invocation};
@@ -242,7 +240,6 @@ use error::session_commit_error;
 pub use error::{
     RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal, TurnFailureCause,
 };
-pub use event_pump::drive_with_event_pump;
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
     DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS, EmbeddedRuntimeHost, ProcessRuntimeHost,
@@ -279,6 +276,7 @@ pub use observation::{
     SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
     SessionQueueEventKind, SessionResume, SessionRevision,
 };
+pub use observation_publisher::{ObservationSource, drive_with_observations};
 #[cfg(any(test, feature = "testing"))]
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
@@ -362,6 +360,8 @@ pub use queued_drain_policy::{
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_with_clock};
+#[cfg(feature = "testing")]
+pub use turn_boundary::{RecordedTurnAssembly, classify_output_state};
 pub use turn_control::{
     TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
     TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,

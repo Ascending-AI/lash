@@ -63,12 +63,12 @@ impl RuntimeTurnDriver<'_> {
     pub(super) async fn prepare_turn_machine(
         &mut self,
         messages: crate::MessageSequence,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         run_offset: usize,
     ) -> Result<TurnMachine, (crate::MessageSequence, usize)> {
         macro_rules! emit {
             ($event:expr) => {
-                send_session_event(event_tx, $event).await
+                self.emit_recorded(event_tx, $event)
             };
         }
 

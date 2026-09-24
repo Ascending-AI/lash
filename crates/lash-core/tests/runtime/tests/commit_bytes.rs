@@ -501,3 +501,208 @@ impl lash_core::ToolProvider for CancelOnStart {
         self.inner.execute(call).await
     }
 }
+
+/// A host sink that blocks until released holds neither the commit nor the
+/// turn's decisions, and the turn announces itself finished only after the
+/// host has received its whole stream (the `TurnObserver` host contract).
+#[tokio::test]
+async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
+    const TURN_ID: &str = "commit-pin-parallel-tool-turn";
+    let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::testing::TestClock::new(1_000));
+    let backend = memory_backend_with_clock(Arc::clone(&clock)).await;
+    let store = unbound_recording_store_with_clock(&backend, clock).await;
+    let parallel = MockCall {
+        stream_events: vec![usage(9, 4)],
+        response: Ok(LlmResponse {
+            parts: ["beta", "gamma", "delta"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, value)| LlmOutputPart::ToolCall {
+                    call_id: format!("pin-parallel-{index}"),
+                    tool_name: "echo_tool".to_string(),
+                    input_json: serde_json::json!({ "value": value }).to_string(),
+                    replay: None,
+                })
+                .collect(),
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    };
+    // The same session and turn as the parallel tool pin, so the commit
+    // digests match it.
+    let session_id = format!("pin:{TURN_ID}");
+    let mut runtime = crate::runtime_support::commit_pins::pinned_runtime(
+        &session_id,
+        Vec::new(),
+        Arc::new(EchoTool),
+        mock_provider(vec![parallel, text_call("all three echoed", 13)]),
+        test_host_config(&backend),
+        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+    )
+    .await;
+    let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
+        Arc::clone(&runtime.host.core.control.effect_host),
+        session_id.as_str(),
+        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+    );
+    let address =
+        lash_core::facade_support::TurnAddress::new(SessionId::from(session_id.as_str()), TURN_ID);
+    let scope = host_turn_scope(
+        &runtime.host.core,
+        &SessionId::from(session_id.as_str()),
+        &TurnId::from(TURN_ID),
+    );
+    let host = GatedHost::default();
+    let turn = lash_core::task::spawn({
+        let host = host.clone();
+        async move {
+            runtime
+                .stream_turn(
+                    TurnInput::text("use the tool, then answer"),
+                    TurnOptions::new(CancellationToken::new(), scope)
+                        .with_events(&host)
+                        .with_turn_events(&host),
+                )
+                .await
+        }
+    });
+
+    // The commit lands while the host takes nothing, and commits the pinned
+    // bytes.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while store.runtime_commits().is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the turn commits while its host sink is blocked");
+    crate::runtime_support::commit_pins::assert_commit_pins(
+        "blocked host",
+        &store.runtime_commits(),
+        &["e222d98c9e88f0ab7c98d3c8e761c27ffdf343ec6e4adb89d81d85825e619f7a"],
+    );
+    assert!(host.received().is_empty(), "the host has taken nothing yet");
+
+    // "Finished" waits for the host: no terminal, and the turn call has not
+    // returned.
+    assert!(
+        turn_driver
+            .await_terminal_with_timeout(&address, std::time::Duration::from_millis(200))
+            .await
+            .is_err(),
+        "the terminal is not published before the host has the stream"
+    );
+    assert!(!turn.is_finished(), "the turn call waits for the host");
+
+    host.release();
+    let assembled = turn
+        .await
+        .expect("the turn task completes")
+        .expect("the turn assembles");
+    assert!(matches!(assembled.outcome, TurnOutcome::Finished(_)));
+    let terminal = turn_driver
+        .await_terminal_with_timeout(&address, std::time::Duration::from_secs(5))
+        .await
+        .expect("the terminal is published once the host has the stream");
+    assert!(matches!(
+        terminal,
+        lash_core::facade_support::TurnTerminal::Committed { .. }
+    ));
+
+    // The host received the whole stream, in order.
+    let sessions = host
+        .received()
+        .into_iter()
+        .filter_map(|received| match received {
+            Received::Session(event) => Some(event),
+            Received::Activity(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let tool_calls = sessions
+        .iter()
+        .filter_map(|event| match event {
+            SessionStreamEvent::ToolCall { call_id, .. } => call_id.clone(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tool_calls,
+        ["pin-parallel-0", "pin-parallel-1", "pin-parallel-2"]
+    );
+    let tail = &sessions[sessions.len().saturating_sub(2)..];
+    assert!(
+        matches!(
+            tail,
+            [
+                SessionStreamEvent::TurnOutcome {
+                    outcome: TurnOutcome::Finished(_)
+                },
+                SessionStreamEvent::Done
+            ]
+        ),
+        "the stream ends with the outcome, then `Done`: {tail:?}"
+    );
+}
+
+#[derive(Debug)]
+enum Received {
+    Session(SessionStreamEvent),
+    Activity(TurnActivity),
+}
+
+/// Host sinks that take nothing until released, then record everything in
+/// the order it arrives.
+#[derive(Clone)]
+struct GatedHost {
+    released: Arc<tokio::sync::watch::Sender<bool>>,
+    received: Arc<Mutex<Vec<Received>>>,
+}
+
+impl Default for GatedHost {
+    fn default() -> Self {
+        Self {
+            released: Arc::new(tokio::sync::watch::channel(false).0),
+            received: Arc::default(),
+        }
+    }
+}
+
+impl GatedHost {
+    fn release(&self) {
+        self.released.send_replace(true);
+    }
+
+    fn received(&self) -> Vec<Received> {
+        self.received
+            .lock_recover()
+            .iter()
+            .map(|received| match received {
+                Received::Session(event) => Received::Session(event.clone()),
+                Received::Activity(activity) => Received::Activity(activity.clone()),
+            })
+            .collect()
+    }
+
+    async fn gate(&self) {
+        let mut released = self.released.subscribe();
+        let _ = released.wait_for(|released| *released).await;
+    }
+}
+
+#[async_trait::async_trait]
+impl EventSink for GatedHost {
+    async fn emit(&self, event: SessionStreamEvent) {
+        self.gate().await;
+        self.received.lock_recover().push(Received::Session(event));
+    }
+}
+
+#[async_trait::async_trait]
+impl TurnActivitySink for GatedHost {
+    async fn emit(&self, activity: TurnActivity) {
+        self.gate().await;
+        self.received
+            .lock_recover()
+            .push(Received::Activity(activity));
+    }
+}

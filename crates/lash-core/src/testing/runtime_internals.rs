@@ -17,8 +17,7 @@ pub use crate::plugin::{
     SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent,
 };
 pub use crate::runtime::NormalizedItem;
-pub use crate::runtime::assembly::classify_output_state;
-pub use crate::runtime::assembly::{LlmStreamAccumulator, TurnAssembler};
+pub use crate::runtime::assembly::LlmStreamAccumulator;
 pub use crate::runtime::effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use crate::runtime::io::normalize_input_items;
 pub use crate::runtime::turn_input_ingress::ingress_message_id;
@@ -28,6 +27,7 @@ pub use crate::runtime::turn_queue::{
     SessionCommandSettlement, process_wake_batch_draft,
 };
 pub use crate::runtime::usage::{merge_ledger_entry_saturating, nonzero_usage};
+pub use crate::runtime::{RecordedTurnAssembly, classify_output_state};
 pub use crate::session::Session;
 /// `session_model::transport_stream_events` is crate-private; the relocated
 /// runtime suites call it through this wrapper so the crate's non-testing
