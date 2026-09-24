@@ -17,7 +17,7 @@ use lash_core::{
     MediaType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessOriginator,
     Resolution, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    SessionScope, StoreEffectGroupDrain, TriggerCommand, TriggerInputBinding,
+    RuntimePersistence, SessionScope, StoreEffectGroupDrain, TriggerCommand, TriggerInputBinding,
     TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
     facade_support::LeaseTimings,
     facade_support::SystemClock,
@@ -35,6 +35,10 @@ const DEFAULT_SEED: u64 = 852;
 const OPS_PER_CASE: usize = 55;
 const SURFACE_SESSION: &str = "surface-session";
 const SURFACE_TURN: &str = "surface-turn";
+/// The session the scenario's runtime store is bound to: the runtime ops the
+/// generated contract history drives all commit against it, so a turn park
+/// lands in a session the history already has.
+const SURFACE_RUNTIME_SESSION: &str = "prop-runtime-session";
 #[path = "generated_surface/groups.rs"]
 mod groups;
 use groups::*;
@@ -80,6 +84,9 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "effect_group_drain_blocked",
     "effect_group_crash",
     "effect_group_drain",
+    "turn_park_record",
+    "turn_park_load",
+    "turn_park_settle",
 ];
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -190,6 +197,22 @@ enum SurfaceOperation {
     EffectGroupDrain {
         group: u8,
     },
+    /// Park turn `key` of the runtime session with generated but valid
+    /// fields (FIG-3586). One record per session: a second record replaces
+    /// the first.
+    TurnParkRecord {
+        key: u8,
+    },
+    /// Read the runtime session's park back through `load_turn_park` and
+    /// record the answer for the cross-backend comparison.
+    TurnParkLoad,
+    /// Commit turn `key` on the runtime session. A turn's commit settles its
+    /// own park inside the commit's transaction and leaves another turn's
+    /// (FIG-3586), so which park a settle clears is decided by the turn it
+    /// names.
+    TurnParkSettle {
+        key: u8,
+    },
 }
 
 impl SurfaceOperation {
@@ -239,6 +262,9 @@ impl SurfaceOperation {
             Self::EffectGroupDrainBlocked { .. } => "effect_group_drain_blocked",
             Self::EffectGroupCrash { .. } => "effect_group_crash",
             Self::EffectGroupDrain { .. } => "effect_group_drain",
+            Self::TurnParkRecord { .. } => "turn_park_record",
+            Self::TurnParkLoad => "turn_park_load",
+            Self::TurnParkSettle { .. } => "turn_park_settle",
         }
     }
 }
@@ -261,6 +287,13 @@ struct SurfaceRunner {
     groups: Option<GroupSurface>,
     book: BTreeMap<u8, GroupBook>,
     group_outcomes: Vec<serde_json::Value>,
+    /// The session-bound runtime store the scenario drives; the turn-park
+    /// ops apply to it directly.
+    runtime: Arc<dyn RuntimePersistence>,
+    /// The `load_turn_park` answers this runner observed, in operation
+    /// order. Compared across every backend: each lane's runtime store is a
+    /// real durable one.
+    turn_park_loads: Vec<serde_json::Value>,
     reader: SurfaceReader,
 }
 
@@ -476,6 +509,31 @@ fn surface_operation_id(key: u8) -> String {
     format!("surface-op-{key}")
 }
 
+fn surface_parked_turn_id(key: u8) -> lash_core::TurnId {
+    lash_core::TurnId::from(format!("surface-parked-turn-{key}"))
+}
+
+/// One deterministic park record per key, cycling every reason shape the
+/// persisted `reason_json` carries so each variant round-trips.
+fn surface_turn_park(key: u8) -> lash_core::store::TurnPark {
+    let message = format!("surface park {key}: the journal refused replay");
+    let reason = match key % 4 {
+        0 => lash_core::store::TurnParkReason::ReplayDivergence { message },
+        1 => lash_core::store::TurnParkReason::KeyFormatCutover { message },
+        2 => lash_core::store::TurnParkReason::BindingDrift { message },
+        _ => lash_core::store::TurnParkReason::EffectReplayDivergence {
+            effect_kind: "llm_call".to_string(),
+            message,
+        },
+    };
+    lash_core::store::TurnPark {
+        session_id: SessionId::from(SURFACE_RUNTIME_SESSION.to_string()),
+        turn_id: surface_parked_turn_id(key),
+        reason,
+        parked_at_ms: 1_000 + u64::from(key),
+    }
+}
+
 fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
     let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 33);
     let mut operations = vec![
@@ -497,6 +555,23 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
 
         if index == 5 {
             operations.push(SurfaceOperation::TriggerDisable { key: 0 });
+        }
+        // Park turn 0, read it back, then replace it with turn 1's park —
+        // one record per session. Turn 0's settle leaves turn 1's park (a
+        // commit clears only the park naming its own turn), and turn 1's
+        // settle clears it.
+        if index == 6 {
+            operations.extend([
+                SurfaceOperation::TurnParkLoad,
+                SurfaceOperation::TurnParkRecord { key: 0 },
+                SurfaceOperation::TurnParkLoad,
+                SurfaceOperation::TurnParkRecord { key: 1 },
+                SurfaceOperation::TurnParkLoad,
+                SurfaceOperation::TurnParkSettle { key: 0 },
+                SurfaceOperation::TurnParkLoad,
+                SurfaceOperation::TurnParkSettle { key: 1 },
+                SurfaceOperation::TurnParkLoad,
+            ]);
         }
         // Final lands before the cancel: child 0 commits and discharges at
         // rank 1, then closing the group decides child 1's cancel at rank 2.
@@ -1161,6 +1236,50 @@ impl SurfaceRunner {
             }
             SurfaceOperation::EffectGroupCrash { group } => self.group_crash(*group).await,
             SurfaceOperation::EffectGroupDrain { group } => self.group_drain(*group).await,
+            SurfaceOperation::TurnParkRecord { key } => self
+                .runtime
+                .record_turn_park(&surface_turn_park(*key))
+                .await
+                .map_err(|error| error.to_string()),
+            SurfaceOperation::TurnParkLoad => {
+                let loaded = self
+                    .runtime
+                    .load_turn_park(&SessionId::from(SURFACE_RUNTIME_SESSION.to_string()))
+                    .await
+                    .map_err(|error| error.to_string())?;
+                self.turn_park_loads
+                    .push(serde_json::to_value(&loaded).map_err(|error| error.to_string())?);
+                Ok(())
+            }
+            SurfaceOperation::TurnParkSettle { key } => {
+                let session = SessionId::from(SURFACE_RUNTIME_SESSION.to_string());
+                let state = lash_core::store::load_persisted_session_state(self.runtime.as_ref())
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .unwrap_or_else(|| RuntimeSessionState {
+                        session_id: session.clone(),
+                        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                            lash_core::TurnBudget::Unbounded,
+                        ))
+                    });
+                let commit = RuntimeCommit::persisted_state_with_operation_for_testing(
+                    &state,
+                    &[],
+                    lash_core::store::OperationId::turn(
+                        session,
+                        surface_parked_turn_id(*key),
+                        format!("surface-park-settle-{key}"),
+                    ),
+                );
+                lash_core::testing::store_fixtures::commit_runtime_state_for_test(
+                    &self.runtime,
+                    commit,
+                    "surface-park-settler",
+                )
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+            }
         }
     }
 
@@ -1563,6 +1682,7 @@ impl SurfaceRunner {
     async fn observe(&self) -> SurfaceState {
         let mut state = self.reader.observe().await;
         state.group_outcomes = self.group_outcomes.clone();
+        state.turn_park_loads = self.turn_park_loads.clone();
         state
     }
 }
@@ -1612,7 +1732,7 @@ async fn surface_runners(
     let memory = lash_sqlite_store::SqliteBackend::memory_with_clock(Arc::clone(&clock))
         .await
         .unwrap();
-    let memory_runtime = Arc::new(memory.open_store().await.unwrap());
+    let memory_runtime: Arc<dyn RuntimePersistence> = Arc::new(memory.open_store().await.unwrap());
     let memory_registry = memory.process_registry();
     let memory_triggers = memory.trigger_store();
     let memory_effect: Arc<dyn EffectHost> =
@@ -1625,7 +1745,8 @@ async fn surface_runners(
     // Grouped children journal into their own database: opener and successor
     // are distinct hosts (distinct lease identities) over the same journal.
     let sqlite_group_path = root.join("groups.db");
-    let sqlite_runtime = Arc::new(SqliteStore::open(&sqlite_runtime_path).await.unwrap());
+    let sqlite_runtime: Arc<dyn RuntimePersistence> =
+        Arc::new(SqliteStore::open(&sqlite_runtime_path).await.unwrap());
     let sqlite_registry = Arc::new(
         SqliteProcessRegistry::open_with_clock(
             &sqlite_process_path,
@@ -1669,7 +1790,7 @@ async fn surface_runners(
         }
     };
 
-    let postgres_runtime = Arc::new(
+    let postgres_runtime: Arc<dyn RuntimePersistence> = Arc::new(
         storage
             .session_store("prop-runtime-session")
             .with_clock(Arc::clone(&clock)),
@@ -1702,7 +1823,7 @@ async fn surface_runners(
             name: "sqlite-memory",
             scenario: StoreContractScenario::new(StoreContractHandles {
                 registry: memory_registry.clone(),
-                runtime: memory_runtime,
+                runtime: Arc::clone(&memory_runtime),
             }),
             process_registry: memory_registry,
             process_env_store: memory.process_env_store(),
@@ -1711,6 +1832,8 @@ async fn surface_runners(
             groups: None,
             book: BTreeMap::new(),
             group_outcomes: Vec::new(),
+            runtime: memory_runtime,
+            turn_park_loads: Vec::new(),
             reader: SurfaceReader::Sqlite {
                 runtime_path: PathBuf::from(
                     memory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
@@ -1733,7 +1856,7 @@ async fn surface_runners(
             name: "sqlite",
             scenario: StoreContractScenario::new(StoreContractHandles {
                 registry: sqlite_registry.clone(),
-                runtime: sqlite_runtime,
+                runtime: Arc::clone(&sqlite_runtime),
             }),
             process_registry: sqlite_registry,
             process_env_store: memory_backend_env_store().await,
@@ -1742,6 +1865,8 @@ async fn surface_runners(
             groups: Some(sqlite_groups),
             book: BTreeMap::new(),
             group_outcomes: Vec::new(),
+            runtime: sqlite_runtime,
+            turn_park_loads: Vec::new(),
             reader: SurfaceReader::Sqlite {
                 runtime_path: sqlite_runtime_path,
                 process_path: sqlite_process_path,
@@ -1754,7 +1879,7 @@ async fn surface_runners(
             name: "postgres",
             scenario: StoreContractScenario::new(StoreContractHandles {
                 registry: postgres_registry.clone(),
-                runtime: postgres_runtime,
+                runtime: Arc::clone(&postgres_runtime),
             }),
             process_registry: postgres_registry,
             process_env_store: Arc::new(storage.process_env_store()),
@@ -1763,6 +1888,8 @@ async fn surface_runners(
             groups: Some(postgres_groups),
             book: BTreeMap::new(),
             group_outcomes: Vec::new(),
+            runtime: postgres_runtime,
+            turn_park_loads: Vec::new(),
             reader: SurfaceReader::Postgres {
                 pool: storage.pool().clone(),
             },

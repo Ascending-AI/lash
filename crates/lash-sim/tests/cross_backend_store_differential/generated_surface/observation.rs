@@ -48,6 +48,11 @@ pub(super) struct SurfaceState {
     /// The outcome every grouped op recorded, in operation order. Compared
     /// SQLite vs PostgreSQL only: the memory runner exercises no groups.
     pub(super) group_outcomes: Vec<serde_json::Value>,
+    /// `turn_parks`, normalized: the session's parked-turn record (FIG-3586).
+    pub(super) turn_parks: Vec<serde_json::Value>,
+    /// The `load_turn_park` answers the record ops produced, in operation
+    /// order. Recorded by the runner, not read off the tables.
+    pub(super) turn_park_loads: Vec<serde_json::Value>,
     pub(super) await_journal: Vec<serde_json::Value>,
 }
 
@@ -690,6 +695,21 @@ pub(super) fn read_sqlite_surface(
         effect_groups: read_sqlite_effect_groups(&groups),
         effect_group_children: read_sqlite_effect_group_children(&groups),
         group_outcomes: Vec::new(),
+        turn_parks: sqlite_simple_json_rows(
+            &runtime,
+            "SELECT session_id, turn_id, reason_json, parked_at_ms FROM turn_parks \
+             ORDER BY session_id",
+            |row| {
+                let reason: String = row.get(2)?;
+                Ok(normalized_json(serde_json::json!({
+                    "session_id": row.get::<_, String>(0)?,
+                    "turn_id": row.get::<_, String>(1)?,
+                    "reason": serde_json::from_str::<serde_json::Value>(&reason).unwrap(),
+                    "parked_at_ms": row.get::<_, i64>(3)?,
+                })))
+            },
+        ),
+        turn_park_loads: Vec::new(),
         await_journal: read_sqlite_await(&effect, &process),
     }
 }
@@ -962,8 +982,34 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         effect_groups: read_postgres_effect_groups(pool).await,
         effect_group_children: read_postgres_effect_group_children(pool).await,
         group_outcomes: Vec::new(),
+        turn_parks: read_postgres_turn_parks(pool).await,
+        turn_park_loads: Vec::new(),
         await_journal: read_postgres_await(pool).await,
     }
+}
+
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
+pub(super) async fn read_postgres_turn_parks(pool: &PgPool) -> Vec<serde_json::Value> {
+    sqlx::query_as::<_, (String, String, String, i64)>(
+        "SELECT session_id, turn_id, reason_json, parked_at_ms FROM lash_turn_parks \
+         ORDER BY session_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|(session_id, turn_id, reason, parked_at_ms)| {
+        normalized_json(serde_json::json!({
+            "session_id": session_id,
+            "turn_id": turn_id,
+            "reason": serde_json::from_str::<serde_json::Value>(&reason).unwrap(),
+            "parked_at_ms": parked_at_ms,
+        }))
+    })
+    .collect()
 }
 
 #[expect(
@@ -1160,6 +1206,8 @@ pub(super) fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
         pair[0].1.processes == pair[1].1.processes
             && pair[0].1.wake_redelivery_fences == pair[1].1.wake_redelivery_fences
             && pair[0].1.triggers == pair[1].1.triggers
+            && pair[0].1.turn_parks == pair[1].1.turn_parks
+            && pair[0].1.turn_park_loads == pair[1].1.turn_park_loads
     });
     let sqlite = observations
         .iter()

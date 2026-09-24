@@ -97,16 +97,6 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
         "turn-cancellation surface; owned by the turn_control conformance suite",
     ),
     (
-        "record_turn_park",
-        "turn-park surface: a park is written only by a turn whose journal refuses replay, which \
-         no driven operation produces; owned by the runtime_persistence turn_parks conformance \
-         suite, which runs on every backend. The residue digest still reads `turn_parks`",
-    ),
-    (
-        "load_turn_park",
-        "turn-park surface; owned by the runtime_persistence turn_parks conformance suite",
-    ),
-    (
         "gc_unreachable",
         "store-wide blob reclamation across every session the factory owns. This differential \
          runs all of its cases against one shared PostgreSQL database, so a sweep launched \
