@@ -95,6 +95,56 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .map_err(effect_sqlite_error)
     }
 
+    async fn recorded_keys_in_range(
+        &self,
+        scope_id: &str,
+        range: &RecordedKeyRange,
+    ) -> Result<RecordedKeys, RuntimeEffectControllerError> {
+        let scope_id = scope_id.to_string();
+        let RecordedKeyRange {
+            lower,
+            upper,
+            group_key_prefix,
+        } = range.clone();
+        self.conn
+            .call(move |connection| {
+                let read = |sql: &str, lower: &str, upper: &str| -> rusqlite::Result<Vec<String>> {
+                    let mut statement = connection.prepare_cached(sql)?;
+                    let rows = statement.query_map(params![scope_id, lower, upper], |row| {
+                        row.get::<_, String>(0)
+                    })?;
+                    rows.collect()
+                };
+                let sql = effect_sql(Schema::Main);
+                let replay_keys = read(sql.replay.select_keys_in_range.sql(), &lower, &upper)?;
+                let group_keys = read(
+                    sql.group.select_keys_in_range.sql(),
+                    &format!("{group_key_prefix}{lower}"),
+                    &format!("{group_key_prefix}{upper}"),
+                )?
+                .into_iter()
+                .map(|key| {
+                    key.strip_prefix(group_key_prefix.as_str())
+                        .map_or_else(|| key.clone(), str::to_string)
+                })
+                .collect();
+                let closing_outcome = connection
+                    .query_row(
+                        sql.replay.select_completed_outcome_by_key.sql(),
+                        params![scope_id, upper],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                Ok(RecordedKeys {
+                    replay_keys,
+                    group_keys,
+                    closing_outcome,
+                })
+            })
+            .await
+            .map_err(effect_sqlite_error)
+    }
+
     async fn discard_reexecuted_row(
         &self,
         scope_id: &str,

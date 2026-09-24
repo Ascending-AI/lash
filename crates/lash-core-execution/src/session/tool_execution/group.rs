@@ -164,10 +164,8 @@ impl RuntimeExecutionContext<'_> {
     /// `{scope_id}:group:{parent_effect_id}:{batch_id}` for a nested one,
     /// mirroring how [`Self::tool_batch_invocation`] prefixes a nested batch.
     ///
-    /// The occurrence ordinal is carried exactly once: `batch_id` is minted by
-    /// `tool_invocation_batch_preimage` under `TOOL_BATCH_FAMILY_VERSION` 2,
-    /// which already folds `ToolGroupOccurrence` into the hash (FIG-3394), so
-    /// the key has no separate occurrence segment.
+    /// Host-code batches only: a language runtime's aggregate is keyed by its
+    /// command key instead (FIG-3586).
     pub(crate) fn tool_child_group_key(&self, batch_id: &str) -> String {
         match self
             .parent_invocation
@@ -218,11 +216,16 @@ impl RuntimeExecutionContext<'_> {
     pub(crate) async fn open_tool_child_group(
         &self,
         group_invocation: crate::RuntimeEffectInvocation,
+        group_key: String,
         batch_id: &str,
         children: &[PreparedGroupChild],
         wake: GroupWakePolicy,
+        reopen: crate::GroupReopen,
     ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
         let scoped = self.dispatch.effect_controller.scoped();
+        // Opening a group writes the journal; a replayed language command's
+        // guard admits it or refuses it before any row exists (FIG-3586).
+        scoped.admit_journal_write()?;
         let scope = scoped.execution_scope().clone();
         let admitted = scoped.admitted_scope().clone();
         let controller = self.dispatch.effect_controller.controller();
@@ -293,7 +296,6 @@ impl RuntimeExecutionContext<'_> {
             .await;
         }
 
-        let group_key = self.tool_child_group_key(batch_id);
         // The group's unique children are reserved against the opener's bound
         // before anything is journaled or dispatched (ADR 0099 §9).
         self.reserve_group_work(&group_key, children.len()).await?;
@@ -381,6 +383,7 @@ impl RuntimeExecutionContext<'_> {
             wake,
             LoserPolicy::RunToCompletion,
         )
+        .map(|group| group.with_reopen(reopen))
         .inspect_err(|_| self.release_group_work(&group_key))?;
         controller
             .open_effect_group(group)
@@ -601,7 +604,7 @@ impl RuntimeExecutionContext<'_> {
                 // turn as the live fault it is (FIG-3528, FIG-3575); only a
                 // child's recorded outcome stays on the result surface.
                 (_, Err(mut error)) => {
-                    if error.code.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+                    if error.code.turn_failure_cause().aborts_invocation() {
                         error.journaled = false;
                     }
                     self.retain_outstanding_group(handle);
@@ -771,7 +774,14 @@ impl RuntimeExecutionContext<'_> {
         }
         let consumer = ToolAggregateConsumer::AllSettled;
         let handle = self
-            .open_tool_child_group(group_invocation, batch_id, &leaves, consumer.wake())
+            .open_tool_child_group(
+                group_invocation,
+                self.tool_child_group_key(batch_id),
+                batch_id,
+                &leaves,
+                consumer.wake(),
+                crate::GroupReopen::RetainedShape,
+            )
             .await?;
         let mut settled = self
             .consume_tool_child_group(handle, &leaves, consumer)
@@ -819,31 +829,20 @@ fn cancelled_group_leaf(leaf: &PreparedToolChildLeaf) -> CompletedProtocolToolCa
 mod tests {
     use super::*;
 
-    /// The occurrence ordinal rides inside `batch_id` (FIG-3394), so the group
-    /// key needs no occurrence segment of its own: two batches that differ
-    /// only in occurrence mint different batch ids, one batch mints one key,
-    /// and the key contains that id exactly once.
+    /// A host-code batch's group key carries its batch id exactly once, and
+    /// two different call lists mint two keys.
     #[test]
-    fn the_group_key_carries_the_occurrence_once_through_the_batch_id() {
-        let calls = || {
+    fn the_group_key_carries_the_batch_id_once() {
+        let calls = |id: &str| {
             vec![ToolInvocation::new(
-                "call-1",
+                id,
                 crate::ToolId::from("tool:one"),
                 serde_json::json!({}),
             )]
         };
-        let first_id = deterministic_tool_invocation_batch_id(
-            &calls(),
-            crate::session::ToolGroupOccurrence::Opener(1),
-        );
-        let second_id = deterministic_tool_invocation_batch_id(
-            &calls(),
-            crate::session::ToolGroupOccurrence::Opener(2),
-        );
-        assert_ne!(
-            first_id, second_id,
-            "identical call lists under different occurrences mint different batch ids"
-        );
+        let first_id = deterministic_tool_invocation_batch_id(&calls("call-1"));
+        let second_id = deterministic_tool_invocation_batch_id(&calls("call-2"));
+        assert_ne!(first_id, second_id);
 
         let context = crate::testing::TestExecutionContextBuilder::over_controller(
             std::sync::Arc::new(crate::testing::UnavailableEffectController)

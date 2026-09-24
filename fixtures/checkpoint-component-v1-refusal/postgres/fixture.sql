@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 16.15
+-- Dumped from database version 16.15 (Debian 16.15-1.pgdg13+2)
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -549,7 +549,7 @@ CREATE TABLE lash_durable_read_fixture.lash_release_stamp (
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group (
-    group_key text NOT NULL,
+    group_key text NOT NULL COLLATE pg_catalog."C",
     scope_id text NOT NULL,
     session_id text,
     wake text NOT NULL,
@@ -568,9 +568,9 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group (
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group_child (
-    group_key text NOT NULL,
+    group_key text NOT NULL COLLATE pg_catalog."C",
     "position" bigint NOT NULL,
-    replay_key text NOT NULL,
+    replay_key text NOT NULL COLLATE pg_catalog."C",
     envelope_json text NOT NULL,
     command_version bigint NOT NULL,
     created_at_ms bigint NOT NULL
@@ -584,7 +584,7 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group_child (
 CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_replay (
     scope_id text NOT NULL,
     session_id text,
-    replay_key text NOT NULL,
+    replay_key text NOT NULL COLLATE pg_catalog."C",
     envelope_hash text NOT NULL,
     envelope_json text NOT NULL,
     status text NOT NULL,
@@ -594,7 +594,7 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_replay (
     lease_token text,
     lease_expires_at_ms bigint DEFAULT 0 NOT NULL,
     due_at_ms bigint,
-    group_key text,
+    group_key text COLLATE pg_catalog."C",
     settlement_seq bigint,
     created_at_ms bigint NOT NULL,
     updated_at_ms bigint NOT NULL,
@@ -870,6 +870,18 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancellation_bindings (
     binding_id text NOT NULL,
     admitted_scope_json text,
     CONSTRAINT ck_turn_cancellation_bindings_binding_id CHECK ((length(binding_id) > 0))
+);
+
+
+--
+-- Name: lash_turn_parks; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_parks (
+    session_id text NOT NULL,
+    turn_id text NOT NULL,
+    reason_json text NOT NULL,
+    parked_at_ms bigint NOT NULL
 );
 
 
@@ -1211,7 +1223,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 120);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 121);
 
 
 --
@@ -1306,6 +1318,12 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_occurrences VALUES ('trigger:
 
 --
 -- Data for Name: lash_turn_cancellation_bindings; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_turn_parks; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1860,6 +1878,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_retired_scopes
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancellation_bindings
     ADD CONSTRAINT lash_turn_cancellation_bindings_pkey PRIMARY KEY (session_id);
+
+
+--
+-- Name: lash_turn_parks lash_turn_parks_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_parks
+    ADD CONSTRAINT lash_turn_parks_pkey PRIMARY KEY (session_id);
 
 
 --

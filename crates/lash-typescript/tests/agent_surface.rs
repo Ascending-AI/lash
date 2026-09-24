@@ -1817,7 +1817,7 @@ fn the_consumer_mode_moves_the_vm_abi_and_not_the_snapshot() {
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v11",
+        "lashlang-vm-abi-v12",
         "the aggregate consumer mode moved the VM ABI"
     );
 }

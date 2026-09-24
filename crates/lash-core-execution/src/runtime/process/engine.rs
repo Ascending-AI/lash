@@ -543,6 +543,14 @@ pub async fn settle_started_process_engine_artifacts(
 pub trait ProcessEngine: Send + Sync {
     fn kind(&self) -> &'static str;
 
+    /// The replay-key grammar this engine journals its bodies' nested effects
+    /// under (FIG-3586). The worker stamps it onto an incarnation's start
+    /// record once, and the engine refuses an incarnation whose record names
+    /// another grammar. `None` for an engine that keys nothing by grammar.
+    fn replay_key_grammar(&self) -> Option<u32> {
+        None
+    }
+
     async fn run(
         &self,
         context: ProcessEngineRunContext<'_>,

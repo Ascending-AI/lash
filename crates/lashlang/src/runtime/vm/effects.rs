@@ -162,8 +162,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .await?;
             }
             VmEffect::ResourceOperationListBatch(batch) => {
-                self.resolve_resource_operation_list_batch(batch, instruction_ip)
-                    .await?;
+                self.resolve_resource_operation_list_batch(batch).await?;
             }
             VmEffect::AwaitHandle => {
                 let handle = self.pop_stack()?;
@@ -314,8 +313,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let leaf_values = if batch.leaves.is_empty() {
                     Vec::new()
                 } else {
-                    self.settle_tool_leaves(batch, &values, instruction_ip)
-                        .await?
+                    self.settle_tool_leaves(batch, &values).await?
                 };
                 build_aggregate_await_shape(&batch.shape, &values, &leaf_values, self)?
             }
@@ -386,19 +384,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
         values: &[Value],
-        instruction_ip: usize,
     ) -> Result<Vec<Value>, RuntimeError> {
         let (operations, active_nodes) = self.batch_leaf_operations(batch, values)?;
-        let occurrence = self.next_aggregate_occurrence(instruction_ip);
         let reply = self
-            .perform_resource_operation_batch(
-                operations,
-                instruction_ip,
-                occurrence,
-                &active_nodes,
-                batch.consumer,
-                None,
-            )
+            .perform_resource_operation_batch(operations, &active_nodes, batch.consumer, None)
             .await?;
         match reply {
             ResourceOperationBatchResult::AllResults(results) => self
@@ -495,12 +484,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         }
         let (operations, active_nodes) = self.batch_leaf_operations(batch, values)?;
-        let occurrence = self.next_aggregate_occurrence(instruction_ip);
         let reply = self
             .perform_resource_operation_batch(
                 operations,
-                instruction_ip,
-                occurrence,
                 &active_nodes,
                 batch.consumer,
                 settled_value_after,
@@ -591,7 +577,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     async fn resolve_resource_operation_list_batch(
         &mut self,
         batch: usize,
-        instruction_ip: usize,
     ) -> Result<(), RuntimeError> {
         let batch = &self.chunk.resource_operation_list_batches[batch];
         let Value::List(calls) = self.pop_stack()? else {
@@ -630,12 +615,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let leaf_values = if operations.is_empty() {
             Vec::new()
         } else {
-            let occurrence = self.next_aggregate_occurrence(instruction_ip);
             let reply = self
                 .perform_resource_operation_batch(
                     operations,
-                    instruction_ip,
-                    occurrence,
                     &active_nodes,
                     AggregateConsumer::AllSettled,
                     None,
@@ -674,8 +656,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     async fn perform_resource_operation_batch(
         &mut self,
         leaves: Vec<ResourceOperationBatchLeaf>,
-        instruction_ip: usize,
-        occurrence: u64,
         active_nodes: &[Option<ActiveLashlangExecutionNode>],
         consumer: AggregateConsumer,
         settled_value_after: Option<usize>,
@@ -687,8 +667,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 leaves,
                 consumer,
                 settled_value_after,
-                site: instruction_ip as u64,
-                occurrence,
             }))
             .await;
         let reply = match result {

@@ -48,12 +48,13 @@ pub struct ToolAggregateRequest {
     /// operand in source order. That operand decides the aggregate unless an
     /// earlier prefix leaf does.
     pub settled_value_after: Option<usize>,
-    /// The site that formed the aggregate — a language runtime passes the
-    /// aggregate's instruction; host code with no program passes `0`. With
-    /// the occurrence it names an aggregate whose leaves carry no identity of
-    /// their own: timers (§11 clause 4).
-    pub site: u64,
-    pub occurrence: crate::session::ToolGroupOccurrence,
+    /// The aggregate's replay address (FIG-3586): the command key the
+    /// issuing language runtime minted from the aggregate's issue ordinal. It
+    /// is the group key and the group invocation's replay key, so every row
+    /// the aggregate writes — the group, its children, its tool children's
+    /// attempts, the timers' admission sample — lives under it. The leaves'
+    /// content is never key material; it is checked at the group head.
+    pub command: crate::CommandReplayKey,
 }
 
 /// One leaf's settled reply.
@@ -106,8 +107,7 @@ impl RuntimeExecutionContext<'_> {
             leaves,
             consumer,
             settled_value_after,
-            site,
-            occurrence,
+            command,
         } = request;
         let leaf_count = leaves.len();
         let calls = leaves
@@ -125,7 +125,7 @@ impl RuntimeExecutionContext<'_> {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        let batch_id = aggregate_batch_id(&calls, occurrence, site, &timer_identities);
+        let batch_id = aggregate_content_digest(&calls, &timer_identities);
 
         // Prepare in leaf order. A call settled during preparation joins the
         // immediate prefix with the caller's own settled leaves.
@@ -157,10 +157,7 @@ impl RuntimeExecutionContext<'_> {
             // sample fixes every timer's deadline, so a replay forms the same
             // group and a recovery never starts a fresh duration (§11 clause 4).
             let sample = match self
-                .journaled_language_runtime_value(
-                    format!("{}:timers-admitted", self.tool_child_group_key(&batch_id)),
-                    "now".to_string(),
-                )
+                .journaled_language_runtime_value(command.timers_admitted(), "now".to_string())
                 .await
             {
                 Ok(sample) => sample,
@@ -184,7 +181,14 @@ impl RuntimeExecutionContext<'_> {
         children.extend(
             self.tool_child_leaves(&batch_id, entries)
                 .into_iter()
-                .map(|leaf| (leaf.input_index, PreparedGroupChild::Tool(Box::new(leaf)))),
+                .map(|mut leaf| {
+                    // A leaf is keyed by its first-appearance index under the
+                    // aggregate's command, never by its call id or its position
+                    // among the prepared tool calls.
+                    leaf.call.replay_suffix =
+                        crate::CommandReplayKey::child_suffix(leaf.input_index);
+                    (leaf.input_index, PreparedGroupChild::Tool(Box::new(leaf)))
+                }),
         );
         // Group positions follow leaf order, so a replay admits every child at
         // the position it had.
@@ -195,9 +199,21 @@ impl RuntimeExecutionContext<'_> {
         let settled = if children.is_empty() {
             None
         } else {
-            let group_invocation = self.tool_batch_invocation(&batch_id);
+            let group_invocation = crate::runtime::command_invocation(
+                self.dispatch.effect_controller.scoped().execution_scope(),
+                self.effect_attribution(),
+                self.parent_invocation.as_ref(),
+                &command,
+            );
             let handle = match self
-                .open_tool_child_group(group_invocation, &batch_id, &children, consumer.wake())
+                .open_tool_child_group(
+                    group_invocation,
+                    self.command_group_key(&command),
+                    &batch_id,
+                    &children,
+                    consumer.wake(),
+                    crate::GroupReopen::RetainedContent,
+                )
                 .await
             {
                 Ok(handle) => handle,
@@ -290,29 +306,17 @@ impl RuntimeExecutionContext<'_> {
     }
 }
 
-/// One aggregate's group identity.
+/// One aggregate's content digest: its tool calls and its timers' positions
+/// and durations.
 ///
-/// A tool call carries its own identity — the bridge mints it from the call's
-/// site — so a tool-only aggregate keeps the batch identity the tool path has
-/// always had. A timer has none: two timer aggregates reached once at two
-/// sites would otherwise share one group, and the second await would reopen
-/// the first — answering from its recorded settlement, or failing the reopen
-/// fence when the durations differ (§11 clause 4). So an aggregate that holds
-/// timers folds every timer's position and duration, and the site that formed
-/// it, into its identity.
-fn aggregate_batch_id(
-    calls: &[ToolInvocation],
-    occurrence: crate::session::ToolGroupOccurrence,
-    site: u64,
-    timers: &[(usize, u64)],
-) -> String {
-    if timers.is_empty() {
-        return deterministic_tool_invocation_batch_id(calls, occurrence);
-    }
-    let mut identity =
-        crate::stable_identity::IdentityEncoder::new("lash.aggregate-with-timers", 1);
-    identity.bytes(&tool_invocation_batch_preimage(calls, occurrence));
-    identity.u64(site);
+/// Not identity. The aggregate is addressed by its command key; this digest
+/// only names the group in descriptive effect ids and traces. What the
+/// aggregate's content must match on a redrive is checked at the group head
+/// against the journal's retained children
+/// ([`GroupReopen::RetainedContent`](crate::GroupReopen::RetainedContent)).
+fn aggregate_content_digest(calls: &[ToolInvocation], timers: &[(usize, u64)]) -> String {
+    let mut identity = crate::stable_identity::IdentityEncoder::new("lash.aggregate-content", 1);
+    identity.bytes(&tool_invocation_batch_preimage(calls));
     identity.sequence(timers, |identity, (position, duration_ms)| {
         identity.u64(*position as u64);
         identity.u64(*duration_ms);

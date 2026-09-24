@@ -3,6 +3,7 @@ mod await_events {
     pub use lash_core_effect::core_internal::AwaitEventRegistry;
 }
 pub mod effect_replay_driver;
+pub use effect_replay_driver::{RecordedKeyRange, RecordedKeys};
 mod envelope;
 #[doc(hidden)]
 pub mod executor;
@@ -51,23 +52,23 @@ pub use envelope::{
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
     AdmittedScope, AdmittedScopeError, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
-    BoundaryReason, CompletionKeyPreparation, EffectHost, EffectJournalIdentity,
-    EffectJournalRetirement, EffectJournaling, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, NativeRuntimeEffectController, ProcessLocalExecution,
-    ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
-    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
-    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopeBoundController, ScopedEffectController,
-    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
-    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, concrete_turn_cancellation_authority,
-    turn_control_binding_id_for_scope,
+    BoundaryReason, CommandJournalGuard, CompletionKeyPreparation, EffectHost,
+    EffectJournalIdentity, EffectJournalRetirement, EffectJournaling, EffectOpener,
+    EffectRetirementGate, ExecutionScope, ExternalCompletionError, NativeRuntimeEffectController,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
+    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RecordedJournal,
+    RecordedKeyFence, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
+    RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
+    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
+    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
+    concrete_turn_cancellation_authority, turn_control_binding_id_for_scope,
 };
 pub use group::{
     EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, GroupChildBinding,
-    GroupSettlement, GroupWakePolicy, IncorporatedGroupRank, LoserPolicy, RankedGroupSettlement,
-    RuntimeEffectGroup, refuse_unhonored_group_membership,
+    GroupReopen, GroupSettlement, GroupWakePolicy, IncorporatedGroupRank, LoserPolicy,
+    RankedGroupSettlement, RuntimeEffectGroup, refuse_unhonored_group_membership,
 };
 pub use group_closing::{
     GroupFinalizationReport, GroupOnlyFinalization, OpenerFinalizationSteps,
@@ -91,7 +92,7 @@ pub use validation::{
 
 pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner};
 pub use executor::{EffectTaskController, drive_effect_controller_task, effect_groups_unsupported};
-pub use executor::{RuntimeEffectControllerHandle, TurnCancelWait};
+pub use executor::{RUN_SEAL_OPERATION, RuntimeEffectControllerHandle, TurnCancelWait};
 pub use outcome::{
     LlmTraceFailure, direct_trace_context, emit_llm_trace_completed, emit_llm_trace_failed,
     emit_llm_trace_started, emit_provider_replay_drops, llm_call_error_from_transport,

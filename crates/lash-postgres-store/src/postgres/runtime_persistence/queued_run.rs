@@ -285,6 +285,17 @@ impl PostgresSessionStore {
             return Ok(next);
         }
         settle_run_members_tx(&mut tx, fence, &settlement.scope).await?;
+        // Settling the run settles the turn it had parked (FIG-3586).
+        sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .turn_parks
+                .delete_by_session
+                .sql(),
+        )
+        .bind(fence.session_id.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         if matches!(settlement.progress, QueuedRunProgress::ForgetUnworked) {
             sqlx::query(run_sql().clear_members.sql())
                 .bind(fence.session_id.as_str())

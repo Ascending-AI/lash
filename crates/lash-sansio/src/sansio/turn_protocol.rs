@@ -311,6 +311,10 @@ pub enum Response {
     ExecutionEnvironmentSynced {
         id: EffectId,
         result: Result<Option<ExecutionEnvironmentSync>, String>,
+        /// The replay-key grammar the sync's journaled record names for the
+        /// code executor's cells (FIG-3586): `None` when the record names
+        /// none, which leaves the iteration's cells unrunnable on replay.
+        cell_replay_grammar: Option<u32>,
     },
     /// Full LLM response.
     LlmComplete {

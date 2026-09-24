@@ -281,6 +281,74 @@ impl SessionCommitStore for Store {
         .transpose()
     }
 
+    async fn record_turn_park(
+        &self,
+        park: &lash_core_execution::store::TurnPark,
+    ) -> Result<(), StoreError> {
+        self.bind_session(&park.session_id)?;
+        let session_id = park.session_id.clone();
+        let turn_id = park.turn_id.as_str().to_string();
+        let reason_json = park.encode_reason()?;
+        let parked_at_ms = i64::try_from(park.parked_at_ms).map_err(|_| {
+            StoreError::Backend(format!(
+                "turn park instant {} exceeds the stored range",
+                park.parked_at_ms
+            ))
+        })?;
+        self.conn
+            .write_flow(move |tx| {
+                let outcome: Result<(), StoreError> = (|| {
+                    ensure_session_not_deleted_conn(tx, &session_id)?;
+                    tx.execute(
+                        crate::turn_ingress::turn_ingress_sql()
+                            .turn_parks
+                            .upsert
+                            .sql(),
+                        params![session_id.as_str(), turn_id, reason_json, parked_at_ms],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(())
+                })();
+                Ok(match outcome {
+                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn load_turn_park(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<lash_core_execution::store::TurnPark>, StoreError> {
+        let session = session_id.as_str().to_string();
+        let row: Option<(String, String, i64)> = self
+            .conn
+            .call(move |conn| {
+                conn.query_row(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .turn_parks
+                        .select_by_session
+                        .sql(),
+                    params![session],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        row.map(|(turn_id, reason_json, parked_at_ms)| {
+            lash_core_execution::store::TurnPark::decode(
+                session_id.clone(),
+                turn_id.into(),
+                &reason_json,
+                u64::try_from(parked_at_ms).unwrap_or_default(),
+            )
+        })
+        .transpose()
+    }
+
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
@@ -322,6 +390,18 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         now,
                     )?;
                     planner.validate_node_derivation()?;
+                    // A turn's commit settles its park (FIG-3586), in the
+                    // commit's transaction; another turn's commit leaves it.
+                    if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
+                        tx.execute(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .turn_parks
+                                .delete_for_turn
+                                .sql(),
+                            params![commit.session_id.as_str(), turn_id.as_str()],
+                        )
+                        .map_err(sqlite_error)?;
+                    }
                     {
                         let prior: Option<(
                             String,

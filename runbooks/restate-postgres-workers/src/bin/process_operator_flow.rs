@@ -141,6 +141,7 @@ async fn register_started(
             fencing_token: 0,
             attempt: 1,
             started_at_ms: now_epoch_ms(),
+            replay_grammar: None,
         },
     )
     .await
@@ -1066,6 +1067,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
             fencing_token: 0,
             attempt: 1,
             started_at_ms: now_epoch_ms(),
+            replay_grammar: None,
         },
     )
     .await?;

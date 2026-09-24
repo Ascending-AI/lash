@@ -819,6 +819,7 @@ impl LashRuntime {
                     .await;
                 self.abandon_turn_input_claims_after_local_abort(&err, &pending_turn_input_claims)
                     .await;
+                Box::pin(self.record_turn_park_after_abort(&err, &trace_turn_id)).await;
                 return Err(err);
             }
         };

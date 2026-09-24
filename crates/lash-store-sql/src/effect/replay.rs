@@ -112,6 +112,26 @@ crate::statements! {
                  WHERE scope_id = ?1 AND replay_key = ?2
              )";
 
+        /// Every replay key recorded under `?1` (scope) in the closed range
+        /// `[?2, ?3]`, in ascending byte order.
+        ///
+        /// The recorded-frontier read (FIG-3586): a lashlang run reads its
+        /// own key namespace once, so a redrive knows which ordinals the
+        /// journal already holds before it lets any command leave live. The
+        /// range and the order are bytewise on both backends — SQLite's
+        /// default `BINARY` collation, and the `COLLATE "C"` PostgreSQL's
+        /// `replay_key` column carries — so a namespace's closing sentinel
+        /// sorts after every ordinal on either.
+        select_keys_in_range = "SELECT replay_key FROM runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
+             ORDER BY replay_key";
+
+        /// The recorded outcome of the completed replay row at `?1` (scope)
+        /// / `?2` (replay key), if there is one: the attribution a
+        /// recorded-frontier read serves from a namespace's closing seal.
+        select_completed_outcome_by_key = "SELECT outcome_json FROM runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2 AND status = 'completed'";
+
         /// Take an expired lease over: `?1` scope, `?2` replay key, `?3`
         /// owner, `?4` lease token, `?5` expiry, `?6` due-at, `?7` now.
         ///

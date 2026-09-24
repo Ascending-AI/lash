@@ -876,7 +876,10 @@ impl RuntimeEffectController for RecordingEffectController {
                 claims: Box::default(),
             }),
             RuntimeEffectCommand::SyncExecutionEnvironment { .. } => {
-                Ok(RuntimeEffectOutcome::SyncExecutionEnvironment { result: Ok(None) })
+                Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
+                    result: Ok(None),
+                    cell_replay_grammar: None,
+                })
             }
             command @ (RuntimeEffectCommand::AcceptTurnInput { .. }
             | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }) => {

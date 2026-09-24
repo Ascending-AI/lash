@@ -671,6 +671,13 @@ impl RuntimeEffectController for FencedRestateController {
             .group_child_drain_blocked(group_key, commit_seq)
             .await
     }
+
+    async fn read_recorded_journal(
+        &self,
+        range: &lash_core::RecordedKeyRange,
+    ) -> Result<lash_core::RecordedJournal, lash_core::RuntimeEffectControllerError> {
+        self.controller.read_recorded_journal(range).await
+    }
 }
 
 mod ingress;
@@ -1107,6 +1114,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "effect group {group_key} child {position} ({replay_key}) has no registered executor; refusing before group state is created"
             )));
         }
+        let content_checked = group.reopen() == lash_core::GroupReopen::RetainedContent;
         let opened = ingress
             .call_object_json::<_, EffectGroupOpenResponse>(
                 "EffectGroupIndex",
@@ -1114,6 +1122,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "open",
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
+                    content_checked,
                 },
             )
             .await
@@ -1171,9 +1180,24 @@ impl RuntimeEffectController for RestateEffectHostController {
             EffectGroupOpenResponse::Retired => Err(group_shape_error(format!(
                 "effect group {group_key} is retired"
             ))),
+            EffectGroupOpenResponse::ShapeMismatch if content_checked => Err(
+                crate::effect_group::content_checked_shape_mismatch(&group_key),
+            ),
             EffectGroupOpenResponse::ShapeMismatch => Err(group_shape_error(format!(
                 "effect group {group_key} was reopened with a different durable shape"
             ))),
+            // The engine tier's replay-mismatch code, exactly as a recorded
+            // run whose envelope drifted reports it.
+            EffectGroupOpenResponse::ContentMismatch { position } => {
+                Err(RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                    format!(
+                        "effect group {group_key} was reopened with a child at position \
+                         {position} that is not the retained one; the group head refuses a \
+                         redrive whose aggregate differs from the recorded one"
+                    ),
+                ))
+            }
         }
     }
 
@@ -1525,6 +1549,15 @@ impl RuntimeEffectController for RestateEffectHostController {
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blocked", error))
+    }
+
+    /// Positional, as the in-handler controller answers: this controller's
+    /// effects are journaled entries of a Restate invocation (FIG-3586).
+    async fn read_recorded_journal(
+        &self,
+        _range: &lash_core::RecordedKeyRange,
+    ) -> Result<lash_core::RecordedJournal, RuntimeEffectControllerError> {
+        Ok(lash_core::RecordedJournal::Positional)
     }
 
     fn effect_journaling(&self) -> EffectJournaling {

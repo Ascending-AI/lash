@@ -17,6 +17,7 @@ fn statements() -> Vec<Statement> {
         super::session_execution_leases::SessionExecutionLeaseStatements::NEUTRAL,
     );
     all.extend_from_slice(super::tool_intent_submissions::ToolIntentSubmissionStatements::NEUTRAL);
+    all.extend_from_slice(super::turn_parks::TurnParkStatements::NEUTRAL);
     all
 }
 

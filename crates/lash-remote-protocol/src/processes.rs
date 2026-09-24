@@ -441,6 +441,9 @@ pub enum RemoteProcessWaitKind {
         key: String,
         ordinal: u64,
     },
+    /// The body refused to replay its journal and waits for an operator
+    /// (FIG-3586).
+    Parked { code: String, message: String },
 }
 
 impl RemoteProcessWaitState {
@@ -462,6 +465,9 @@ impl RemoteProcessWaitState {
                     });
                 }
                 Ok(())
+            }
+            RemoteProcessWaitKind::Parked { code, .. } => {
+                require_non_empty(type_name, "wait.code", code)
             }
         }
     }
@@ -1029,6 +1035,9 @@ pub struct RemoteProcessStarted {
     #[serde(default = "remote_first_process_attempt")]
     pub attempt: u32,
     pub started_at_ms: u64,
+    /// The replay-key grammar the incarnation was started under (FIG-3586).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_grammar: Option<u32>,
 }
 
 const fn remote_first_process_attempt() -> u32 {

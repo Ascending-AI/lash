@@ -44,11 +44,11 @@ tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-execution = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }
+rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }

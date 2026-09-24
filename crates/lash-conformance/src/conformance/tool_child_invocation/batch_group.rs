@@ -95,9 +95,7 @@ async fn run_batch(
     .route_tool_children()
     .build()
     .into_runtime();
-    let replies = context
-        .call_tool_batch(calls, crate::session::ToolGroupOccurrence::Opener(1))
-        .await;
+    let replies = context.call_tool_batch(calls).await;
     (session_id, replies)
 }
 

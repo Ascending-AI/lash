@@ -380,27 +380,27 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
     let context = probe_context(&backend, provider, controller);
 
     let scalar = context
-        .call_tool_with_execution_grant(
-            "scalar".to_string(),
-            grant.clone(),
-            serde_json::json!({}),
-            0,
+        .call_command_tool(
+            &crate::CommandReplayKey::new("scalar"),
+            crate::session::ToolInvocation::new(
+                "scalar",
+                crate::ToolId::from("tool:granted_retry_probe"),
+                serde_json::json!({}),
+            )
+            .with_execution_grant(grant.clone()),
         )
         .await;
     let scalar_attempts = attempts.load(Ordering::SeqCst);
 
     let batch = context
-        .call_tool_batch(
-            vec![
-                ToolInvocation::new(
-                    "batch",
-                    crate::ToolId::from("tool:granted_retry_probe"),
-                    serde_json::json!({}),
-                )
-                .with_execution_grant(grant),
-            ],
-            crate::session::ToolGroupOccurrence::Opener(1),
-        )
+        .call_tool_batch(vec![
+            ToolInvocation::new(
+                "batch",
+                crate::ToolId::from("tool:granted_retry_probe"),
+                serde_json::json!({}),
+            )
+            .with_execution_grant(grant),
+        ])
         .await;
     let batch_attempts = attempts.load(Ordering::SeqCst) - scalar_attempts;
 
@@ -423,21 +423,18 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
 async fn deferred_leaves_settle_in_completion_order_not_launch_order() {
     let context = latency_probe_context().await;
     let replies = context
-        .call_tool_batch(
-            vec![
-                ToolInvocation::new(
-                    "slow",
-                    crate::ToolId::from("tool:slow_fail"),
-                    serde_json::json!({}),
-                ),
-                ToolInvocation::new(
-                    "fast",
-                    crate::ToolId::from("tool:fast_fail"),
-                    serde_json::json!({}),
-                ),
-            ],
-            crate::session::ToolGroupOccurrence::Opener(1),
-        )
+        .call_tool_batch(vec![
+            ToolInvocation::new(
+                "slow",
+                crate::ToolId::from("tool:slow_fail"),
+                serde_json::json!({}),
+            ),
+            ToolInvocation::new(
+                "fast",
+                crate::ToolId::from("tool:fast_fail"),
+                serde_json::json!({}),
+            ),
+        ])
         .await;
 
     assert_eq!(replies.replies.len(), 2, "one reply per call");
@@ -529,21 +526,18 @@ async fn a_later_leaf_that_settles_first_leads_the_settlement_order() {
 async fn drain_slot_handshake_batch() -> crate::session::ToolBatchReplies {
     let context = handshake_probe_context(LeafSettledSignal::new("fast")).await;
     let replies = context
-        .call_tool_batch(
-            vec![
-                ToolInvocation::new(
-                    "slow-sync",
-                    crate::ToolId::from(format!("tool:{SLOW_SYNCHRONOUS_PROBE}")),
-                    serde_json::json!({}),
-                ),
-                ToolInvocation::new(
-                    "fast",
-                    crate::ToolId::from("tool:fast_fail"),
-                    serde_json::json!({}),
-                ),
-            ],
-            crate::session::ToolGroupOccurrence::Opener(1),
-        )
+        .call_tool_batch(vec![
+            ToolInvocation::new(
+                "slow-sync",
+                crate::ToolId::from(format!("tool:{SLOW_SYNCHRONOUS_PROBE}")),
+                serde_json::json!({}),
+            ),
+            ToolInvocation::new(
+                "fast",
+                crate::ToolId::from("tool:fast_fail"),
+                serde_json::json!({}),
+            ),
+        ])
         .await;
 
     assert_eq!(replies.replies.len(), 2, "one reply per call");
@@ -563,21 +557,18 @@ async fn drain_slot_handshake_batch() -> crate::session::ToolBatchReplies {
 async fn completion_order_follows_the_delays_in_both_directions() {
     let context = latency_probe_context().await;
     let replies = context
-        .call_tool_batch(
-            vec![
-                ToolInvocation::new(
-                    "fast",
-                    crate::ToolId::from("tool:fast_fail"),
-                    serde_json::json!({}),
-                ),
-                ToolInvocation::new(
-                    "slow",
-                    crate::ToolId::from("tool:slow_fail"),
-                    serde_json::json!({}),
-                ),
-            ],
-            crate::session::ToolGroupOccurrence::Opener(1),
-        )
+        .call_tool_batch(vec![
+            ToolInvocation::new(
+                "fast",
+                crate::ToolId::from("tool:fast_fail"),
+                serde_json::json!({}),
+            ),
+            ToolInvocation::new(
+                "slow",
+                crate::ToolId::from("tool:slow_fail"),
+                serde_json::json!({}),
+            ),
+        ])
         .await;
 
     assert_eq!(
@@ -781,9 +772,7 @@ async fn mixed_batch(
     } else {
         vec![process_call, tool_call]
     };
-    let replies = context
-        .call_tool_batch(calls, crate::session::ToolGroupOccurrence::Opener(1))
-        .await;
+    let replies = context.call_tool_batch(calls).await;
     terminal.abort();
     replies
 }

@@ -412,7 +412,10 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
     ) -> Result<
-        Result<Option<crate::sansio::ExecutionEnvironmentSync>, String>,
+        (
+            Result<Option<crate::sansio::ExecutionEnvironmentSync>, String>,
+            Option<u32>,
+        ),
         RuntimeEffectControllerError,
     > {
         let invocation =
@@ -666,6 +669,7 @@ impl RuntimeTurnDriver<'_> {
         code: &str,
         messages: crate::MessageSequence,
         protocol_iteration: usize,
+        cell_replay_grammar: Option<u32>,
         invocation: crate::RuntimeInvocation,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancellation: &CancellationToken,
@@ -673,6 +677,14 @@ impl RuntimeTurnDriver<'_> {
         Result<crate::ExecResponse, crate::ExecCodeFailure>,
         crate::RuntimeEffectControllerError,
     > {
+        let code_executor = self.session.plugins().code_executor();
+        // A code executor that keys its cells' nested effects by a versioned
+        // replay-key grammar runs a cell only under the grammar its
+        // iteration's journaled sync names (FIG-3586): the refusal is the
+        // executor's, before the cell runs.
+        if let Some(executor) = &code_executor {
+            executor.admit_replay_key_grammar(cell_replay_grammar)?;
+        }
         let (session_event_tx, mut session_event_rx) = mpsc::channel::<SessionStreamEvent>(100);
         let (turn_event_tx, mut turn_event_rx) = mpsc::channel::<TurnActivity>(100);
         let relay_tx = event_tx.clone();
@@ -699,7 +711,6 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
         });
-        let code_executor = self.session.plugins().code_executor();
         let read_view = self
             .checkpoint_state_view(messages, protocol_iteration)
             .map_err(|error| {

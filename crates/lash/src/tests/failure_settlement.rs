@@ -232,6 +232,127 @@ async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_atte
     Ok(())
 }
 
+/// A protocol whose `before_llm_call` meets a replay refusal every time, as a
+/// code cell does when its re-execution diverges from its journal (FIG-3586).
+#[derive(Default)]
+struct DivergingBeforeLlmCall {
+    calls: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::ProtocolSessionPlugin for DivergingBeforeLlmCall {
+    async fn before_llm_call(
+        &self,
+        _ctx: lash_core::plugin::ProtocolBeforeLlmCallContext,
+        _request: &LlmRequest,
+    ) -> std::result::Result<Option<lash_core::ProtocolLlmCallAction>, lash_core::PluginError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(lash_core::PluginError::RuntimeEffectController(
+            lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::LashlangCellReplayDivergence,
+                "lashlang run diverged from its journal at issue ordinal 0",
+            ),
+        ))
+    }
+}
+
+/// FIG-3586, FIG-3600: a replay refusal parks a direct turn. The turn aborts
+/// with `Err` and is never recorded failed; it keeps its input bound, records
+/// a typed park that `drain_status` counts, and every redrive refuses again
+/// with nothing sent to the model. Withdrawing its input settles the park.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -> Result<()> {
+    const SESSION: &str = "direct-replay-refusal";
+    let backend = SqliteBackend::open().await;
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let protocol = Arc::new(DivergingBeforeLlmCall::default());
+    let core = backend.core(
+        counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
+        Some(protocol.clone()),
+    );
+    let session = core.session(SESSION).open().await?;
+
+    for attempt in 1..=2 {
+        let error = session
+            .turn(TurnInput::text(STRANDED_WORDS))
+            .turn_id("parked-turn")
+            .run()
+            .await
+            .expect_err("a replay refusal aborts the turn instead of recording it");
+        let EmbedError::Runtime(runtime_error) = &error else {
+            panic!("the abort is the typed runtime error: {error:?}");
+        };
+        assert_eq!(
+            runtime_error.code,
+            lash_core::RuntimeErrorCode::LashlangCellReplayDivergence
+        );
+        assert_eq!(protocol.calls.load(Ordering::SeqCst), attempt);
+        let status = core.drain_status(false).await?;
+        assert_eq!(
+            (status.parked_turns, status.in_flight_turns),
+            (1, 1),
+            "attempt {attempt}: the parked turn is counted"
+        );
+        assert!(!status.drained());
+    }
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        0,
+        "a parked turn never reaches the model"
+    );
+    let pending = session.durable().pending_turn_inputs().await?;
+    assert_eq!(pending.len(), 1);
+    assert!(
+        matches!(
+            &pending[0].status,
+            lash_core::PendingTurnInputReadStatus::TurnBound { turn_id, .. }
+                if turn_id.as_str() == "parked-turn"
+        ),
+        "the parked turn holds its input: {:?}",
+        pending[0].status
+    );
+    let cancelled = session
+        .durable()
+        .cancel_pending_turn_input(&pending[0].input.input_id)
+        .await?;
+    assert!(cancelled.is_cancelled(), "{cancelled:?}");
+    let status = core.drain_status(false).await?;
+    assert_eq!((status.parked_turns, status.in_flight_turns), (0, 0));
+    assert!(status.drained(), "withdrawing the input settles the park");
+    Ok(())
+}
+
+/// FIG-3586: a replay refusal on a queued run keeps the run pending, never
+/// settling it failed, however often it is retried; its park is counted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replay_refusal_keeps_a_queued_run_pending_and_parked() -> Result<()> {
+    let backend = SqliteBackend::open().await;
+    let protocol = Arc::new(DivergingBeforeLlmCall::default());
+    let core = backend.core(
+        counting_text_provider(Arc::default(), Arc::default()),
+        Some(protocol.clone()),
+    );
+    let session = core.session("queued-replay-refusal").open().await?;
+    session
+        .durable()
+        .enqueue(TurnInput::text("queued and diverging"))
+        .id("queued-diverging")
+        .send()
+        .await?;
+
+    for attempt in 1..=3 {
+        assert_queued_run_pending(session.queued_turn().run().await);
+        assert_eq!(protocol.calls.load(Ordering::SeqCst), attempt);
+        assert!(
+            session.durable().pending_queued_run().await?.is_some(),
+            "attempt {attempt}: the refused run stays pending"
+        );
+        let status = core.drain_status(false).await?;
+        assert_eq!((status.parked_turns, status.in_flight_turns), (1, 1));
+    }
+    Ok(())
+}
+
 /// Aborts `turn_id`'s first model call with a live journal fault, and returns
 /// the error with the id of the one input the aborted turn accepted.
 async fn abort_direct_turn_with_live_fault(

@@ -28,7 +28,7 @@ use lash_store_sql::turn_ingress::{
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
     retired_scopes::RetiredScopeStatements,
     session_execution_leases::SessionExecutionLeaseStatements,
-    tool_intent_submissions::ToolIntentSubmissionStatements,
+    tool_intent_submissions::ToolIntentSubmissionStatements, turn_parks::TurnParkStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -119,6 +119,8 @@ pub(crate) struct TurnIngressSql {
     /// `turn_cancel_closure_authorizations`, SQLite only.
     pub(crate) closures_sqlite: ClosureAuthorizationSqliteStatements,
     /// `turn_cancel_retired_scopes`, shared.
+    /// `turn_parks`, shared.
+    pub(crate) turn_parks: TurnParkStatements,
     pub(crate) retired_scopes: RetiredScopeStatements,
     /// `turn_cancel_retired_scopes`, SQLite only.
     pub(crate) retired_scopes_sqlite: RetiredScopeSqliteStatements,
@@ -144,6 +146,7 @@ impl TurnIngressSql {
             bindings_sqlite: CancellationBindingSqliteStatements::render(dialect),
             closures: ClosureAuthorizationStatements::render(dialect),
             closures_sqlite: ClosureAuthorizationSqliteStatements::render(dialect),
+            turn_parks: TurnParkStatements::render(dialect),
             retired_scopes: RetiredScopeStatements::render(dialect),
             retired_scopes_sqlite: RetiredScopeSqliteStatements::render(dialect),
         }

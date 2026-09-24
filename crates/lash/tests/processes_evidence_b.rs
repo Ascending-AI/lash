@@ -706,8 +706,8 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::RuntimeExecutionContext::process_handle_json;
     // W0537: lash::plugins::RuntimeExecutionContext::signal_process_by_id [function]
     let _ = lash::plugins::RuntimeExecutionContext::signal_process_by_id;
-    // W0538: lash::plugins::RuntimeExecutionContext::sleep_process [function]
-    let _ = lash::plugins::RuntimeExecutionContext::sleep_process;
+    // W0538: lash::plugins::RuntimeExecutionContext::sleep_command [function]
+    let _ = lash::plugins::RuntimeExecutionContext::sleep_command;
     // W0539: lash::plugins::RuntimeExecutionContext::start_child_process [function]
     let _ = lash::plugins::RuntimeExecutionContext::start_child_process(
         todo!(),

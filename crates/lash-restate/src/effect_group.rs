@@ -52,8 +52,10 @@ static ADMISSION_WITNESSES: std::sync::OnceLock<Mutex<HashMap<String, Arc<tokio:
     std::sync::OnceLock::new();
 
 mod group_waits;
+mod reopen;
 mod wire;
 use group_waits::{fence_cancel_decided_completions, resolve_group_wait, wait_resolution};
+pub(crate) use reopen::content_checked_shape_mismatch;
 pub(crate) use wire::btree_map_as_pairs;
 pub use wire::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupPhase,
@@ -176,6 +178,11 @@ pub enum EffectGroupOpenResponse {
     },
     Retired,
     ShapeMismatch,
+    /// A content-checked reopen offered a child that is not the retained one
+    /// at `position`.
+    ContentMismatch {
+        position: usize,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -367,6 +374,11 @@ pub enum EffectGroupRetirementCancelResponse {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupOpenRequest {
     pub shape: EffectGroupShape,
+    /// The opener asked for a content-checked reopen (FIG-3586,
+    /// `GroupReopen::RetainedContent`): a reopen whose offered membership
+    /// differs from the retained one is refused rather than served.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub content_checked: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -625,6 +637,20 @@ impl EffectGroupIndex {
         // recorded membership wins (ADR 0099 §3).
         if !record.live()?.shape.fences_equivalent(&request.shape) {
             return Ok(Json(EffectGroupOpenResponse::ShapeMismatch));
+        }
+        // A content-checked reopen (FIG-3586) is refused when any offered
+        // child is not the retained one: the aggregate is addressed by its
+        // issue ordinal, so a redrive with different leaves reaches this key.
+        if request.content_checked
+            && let Some(position) = record
+                .live()?
+                .shape
+                .membership
+                .iter()
+                .zip(&request.shape.membership)
+                .position(|(retained, offered)| retained != offered)
+        {
+            return Ok(Json(EffectGroupOpenResponse::ContentMismatch { position }));
         }
         // A reopen is a new caller interest (FIG-3481): a non-refused Closed
         // entry keeps its cumulative disposition but its reopened marker

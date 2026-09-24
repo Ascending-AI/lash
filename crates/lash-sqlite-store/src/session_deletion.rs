@@ -194,6 +194,7 @@ pub(super) async fn delete_session_from_catalog(
                 queued_runs.delete_members.sql(),
                 queued_runs.delete_runs.sql(),
                 turn_ingress.pending_inputs.delete_by_session.sql(),
+                turn_ingress.turn_parks.delete_by_session.sql(),
                 turn_ingress.cancel_requests.delete_by_session.sql(),
                 turn_ingress.closures.delete_by_session.sql(),
                 turn_ingress.bindings.delete_by_session.sql(),

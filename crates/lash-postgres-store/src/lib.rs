@@ -470,7 +470,18 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // only at an abort, so a pre-120 build would reclaim a bound row under a new
 // lease generation and fold it into a later turn; component-119 catalogs are
 // rejected and recreated rather than served to such a build.
-const SCHEMA_VERSION: i32 = 120;
+// Version 121 (FIG-3586) gives the effect journal's key columns —
+// `lash_runtime_effect_replay.replay_key` and `.group_key`,
+// `lash_runtime_effect_group.group_key`, and
+// `lash_runtime_effect_group_child.group_key` and `.replay_key` — `COLLATE
+// "C"`. A lashlang run's recorded-frontier read is one key range bounded by a
+// sentinel that must sort after every ordinal, and a locale collation that
+// ignores punctuation moves it. The same version adds `lash_turn_parks`, the
+// typed parked state of a driver-run turn that `drain_status` counts, and the
+// durable error-code vocabulary gains the lashlang replay refusals. A
+// collation change is not creation-only, so component-120 catalogs are
+// rejected and recreated.
+const SCHEMA_VERSION: i32 = 121;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

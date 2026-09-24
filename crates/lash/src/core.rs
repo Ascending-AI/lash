@@ -102,18 +102,30 @@ impl LashCore {
     }
 
     /// The host owns admission and must pass its current admission state. Lash
-    /// reads the process registry on demand; it does not maintain a counter or
-    /// orchestrate routing, deadlines, worker shutdown, or retirement. A core
-    /// without a process registry reports zero remaining invocations.
+    /// reads the process registry and the session store on demand; it does
+    /// not maintain a counter or orchestrate routing, deadlines, worker
+    /// shutdown, or retirement. A core without a process registry reports zero
+    /// remaining invocations, and one without a session store zero turns.
+    ///
+    /// Turns are counted as well as processes (FIG-3586): a parked turn, or a
+    /// turn whose claims a crashed driver still holds, is unfinished work, so
+    /// the deployment is not drained until none remains. A store that cannot
+    /// count its turns refuses rather than report zero.
     pub async fn drain_status(&self, accepting_new_work: bool) -> Result<DeploymentDrainStatus> {
         let remaining_invocations = match self.process_registry() {
             Some(registry) => registry.count_non_terminal_processes().await?,
             None => 0,
         };
+        let turns = match self.store_factory.as_ref() {
+            Some(factory) => factory.count_unsettled_turns().await?,
+            None => lash_core::store::UnsettledTurnCounts::default(),
+        };
         let checked_at = self.env.core.clock.timestamp_ms();
         Ok(DeploymentDrainStatus {
             accepting_new_work,
             remaining_invocations,
+            in_flight_turns: turns.in_flight_turns,
+            parked_turns: turns.parked_turns,
             checked_at,
         })
     }

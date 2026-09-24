@@ -507,7 +507,10 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: continuation,
         ordinals: ReplayOrdinalsState {
-            sleep_sequence: 0,
+            commands: crate::LashlangRunOrdinals {
+                next: 0,
+                dispatched: crate::DispatchedOrdinalsDigest::empty(),
+            },
             event_sequence: 0,
             signal_wait_ordinals: Default::default(),
         },
@@ -558,7 +561,10 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: vm.suspend().expect("capture fixture VM continuation"),
         ordinals: ReplayOrdinalsState {
-            sleep_sequence: 3,
+            commands: crate::LashlangRunOrdinals {
+                next: 3,
+                dispatched: crate::DispatchedOrdinalsDigest::empty(),
+            },
             event_sequence: 5,
             signal_wait_ordinals: [("ready".to_string(), 11)].into(),
         },
@@ -714,6 +720,10 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     // The predecessor held no effect group across its boundary; the current
     // envelope states that explicitly (ADR 0099 §9).
     fixture["segment_state"]["outstanding_groups"] = serde_json::json!([]);
+    // The predecessor counted sleeps per kind; the current envelope carries the
+    // run's issue-ordinal state instead (FIG-3586).
+    fixture["segment_state"]["commands"] =
+        serde_json::to_value(crate::LashlangRunOrdinals::start()).expect("run ordinals encode");
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
         .expect("the fixture carries a structurally valid current-envelope continuation");
     assert_eq!(
@@ -739,7 +749,10 @@ fn the_current_envelope_carries_no_dead_send_ordinal() {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: vm.suspend().expect("capture pinning VM continuation"),
         ordinals: ReplayOrdinalsState {
-            sleep_sequence: 1,
+            commands: crate::LashlangRunOrdinals {
+                next: 1,
+                dispatched: crate::DispatchedOrdinalsDigest::empty(),
+            },
             event_sequence: 2,
             signal_wait_ordinals: Default::default(),
         },
@@ -873,7 +886,10 @@ fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_chan
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: vm.suspend().expect("capture pinning VM continuation"),
         ordinals: ReplayOrdinalsState {
-            sleep_sequence: 0,
+            commands: crate::LashlangRunOrdinals {
+                next: 0,
+                dispatched: crate::DispatchedOrdinalsDigest::empty(),
+            },
             event_sequence: 0,
             signal_wait_ordinals: Default::default(),
         },

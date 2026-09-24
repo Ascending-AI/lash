@@ -76,6 +76,52 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .map_err(effect_store_error)
     }
 
+    async fn recorded_keys_in_range(
+        &self,
+        scope_id: &str,
+        range: &RecordedKeyRange,
+    ) -> Result<RecordedKeys, RuntimeEffectControllerError> {
+        let read = |sql: &'static str, lower: String, upper: String| {
+            sqlx::query_scalar::<_, String>(sql)
+                .bind(scope_id)
+                .bind(lower)
+                .bind(upper)
+                .fetch_all(&self.pool)
+        };
+        let sql = effect_sql();
+        let prefix = range.group_key_prefix.as_str();
+        Ok(RecordedKeys {
+            replay_keys: read(
+                sql.replay.select_keys_in_range.sql(),
+                range.lower.clone(),
+                range.upper.clone(),
+            )
+            .await
+            .map_err(effect_store_error)?,
+            group_keys: read(
+                sql.group.select_keys_in_range.sql(),
+                format!("{prefix}{}", range.lower),
+                format!("{prefix}{}", range.upper),
+            )
+            .await
+            .map_err(effect_store_error)?
+            .into_iter()
+            .map(|key| {
+                key.strip_prefix(prefix)
+                    .map_or_else(|| key.clone(), str::to_string)
+            })
+            .collect(),
+            closing_outcome: sqlx::query_scalar::<_, String>(
+                sql.replay.select_completed_outcome_by_key.sql(),
+            )
+            .bind(scope_id)
+            .bind(&range.upper)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(effect_store_error)?,
+        })
+    }
+
     async fn discard_reexecuted_row(
         &self,
         scope_id: &str,

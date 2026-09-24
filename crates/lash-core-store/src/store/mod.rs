@@ -42,6 +42,7 @@ pub mod session_execution_lease;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
+mod turn_park;
 mod usage;
 pub mod work_claim;
 
@@ -139,6 +140,7 @@ pub use state_version::{
 pub use testing::{
     ConformancePersistence, StoreTestSupport, append_request_commit_with_clock_for_testing,
 };
+pub use turn_park::{TurnPark, TurnParkReason, UnsettledTurnCounts};
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
 pub use work_claim::{WorkClaim, WorkCompletion};
 
@@ -1198,6 +1200,29 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// so all backends answer identically.
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;
+
+    /// Record that the session's turn parked (FIG-3586, FIG-3600), replacing
+    /// any park the session already holds.
+    ///
+    /// Written on the abort path of a turn whose refusal parks it, before its
+    /// lease is released. Any commit of the session clears it in the commit's
+    /// transaction, as does a cancel that releases the parked turn's claim and
+    /// the session's deletion: a park is live exactly while its turn is.
+    async fn record_turn_park(&self, _park: &crate::store::TurnPark) -> Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "record_turn_park",
+        })
+    }
+
+    /// The session's parked turn, if its turn is parked.
+    async fn load_turn_park(
+        &self,
+        _session_id: &crate::SessionId,
+    ) -> Result<Option<crate::store::TurnPark>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "load_turn_park",
+        })
+    }
 }
 
 /// Pending turn-input lifecycle capability: durable ingress for model-visible

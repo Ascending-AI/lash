@@ -85,7 +85,7 @@ impl RuntimeTurnDriver<'_> {
             // (FIG-3575). Only a live fault the hook ran into aborts.
             Err(err) => {
                 let failure = err.into_turn_failure(RuntimeErrorCode::ProtocolBeforeLlmCall);
-                if failure.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+                if failure.turn_failure_cause().aborts_invocation() {
                     return Err(failure);
                 }
                 machine.fail_turn(make_error_event(
@@ -386,7 +386,7 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
-        let result = match self
+        let (result, cell_replay_grammar) = match self
             .invoke_turn_execution_environment_sync_effect(
                 machine,
                 id,
@@ -402,7 +402,14 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
-        self.handle_machine_response(machine, Response::ExecutionEnvironmentSynced { id, result })?;
+        self.handle_machine_response(
+            machine,
+            Response::ExecutionEnvironmentSynced {
+                id,
+                result,
+                cell_replay_grammar,
+            },
+        )?;
         Ok(())
     }
 
@@ -580,7 +587,7 @@ impl RuntimeTurnDriver<'_> {
                 // effect loop settles a pending cancel as `Stopped { Cancelled }`
                 // after the abort. Any other failure under a cancel is the
                 // cancel's own consequence (FIG-3575).
-                if err.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+                if err.turn_failure_cause().aborts_invocation() {
                     return Err(err.into_runtime_error());
                 }
                 if let Some(evidence) = cancellation_evidence {

@@ -491,6 +491,26 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         crate::session_catalog::list_sessions(&self.pool, filter).await
     }
 
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<lash_core_execution::store::UnsettledTurnCounts, StoreError> {
+        let row = sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .count_unsettled_turns
+                .sql(),
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        let parked: i64 = row.get(0);
+        let in_flight: i64 = row.get(1);
+        Ok(lash_core_execution::store::UnsettledTurnCounts {
+            parked_turns: usize::try_from(parked).unwrap_or_default(),
+            in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
+        })
+    }
+
     async fn read_session(
         &self,
         session_id: &SessionId,
@@ -818,6 +838,7 @@ pub(crate) async fn delete_session_tx(
         queued_runs.delete_members.sql(),
         queued_runs.delete_runs.sql(),
         turn_ingress.pending_inputs.delete_by_session.sql(),
+        turn_ingress.turn_parks.delete_by_session.sql(),
         turn_ingress.cancel_requests.delete_by_session.sql(),
         // Administration revokes the session's effect authority before store
         // deletion, after which the pinned closure obligation may be retired.

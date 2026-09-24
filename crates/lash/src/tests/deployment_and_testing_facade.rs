@@ -69,6 +69,96 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     assert!(!status.drained());
 }
 
+/// FIG-3586: a parked turn keeps the deployment from reporting drained, on
+/// every store that counts turns, and its commit releases it.
+#[tokio::test]
+async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
+    let sqlite = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open in-memory SQLite backend")
+        .session_store_factory();
+    let factories: Vec<Arc<dyn lash_core::SessionStoreFactory>> = vec![
+        Arc::new(crate::persistence::InMemorySessionStoreFactory::new()),
+        sqlite,
+    ];
+    for factory in factories {
+        let core = explicit_ephemeral_facets(
+            LashCore::standard_builder(crate::TurnBudget::Unbounded).model(mock_model_spec()),
+        )
+        .store_factory(Arc::clone(&factory))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("build core");
+        let idle = core
+            .drain_status(false)
+            .await
+            .expect("read idle drain status");
+        assert_eq!((idle.parked_turns, idle.in_flight_turns), (0, 0));
+        assert!(idle.drained());
+
+        let session_id = lash_core::SessionId::from("drain-parked-turn");
+        let mut policy = lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded);
+        policy.session_id = Some(session_id.clone());
+        let store = factory
+            .create_store(&lash_core::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: session_id.clone(),
+                relation: lash_core::SessionRelation::default(),
+                policy,
+            })
+            .await
+            .expect("create the session store");
+        store
+            .record_turn_park(&lash_core::store::TurnPark {
+                session_id: session_id.clone(),
+                turn_id: lash_core::TurnId::from("parked-turn"),
+                reason: lash_core::store::TurnParkReason::ReplayDivergence {
+                    message: "diverged".to_string(),
+                },
+                parked_at_ms: 1,
+            })
+            .await
+            .expect("park the turn");
+        let parked = core
+            .drain_status(false)
+            .await
+            .expect("read parked drain status");
+        assert_eq!((parked.parked_turns, parked.in_flight_turns), (1, 1));
+        assert!(!parked.drained(), "a parked turn is not drained");
+        let wire = serde_json::to_value(&parked).expect("serialize drain status");
+        assert_eq!(wire["parked_turns"], 1);
+        assert_eq!(wire["drained"], false);
+
+        let state = lash_core::RuntimeSessionState {
+            session_id: session_id.clone(),
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        let commit = lash_core::store::RuntimeCommit::persisted_state_with_operation_for_testing(
+            &state,
+            &[],
+            lash_core::store::OperationId::turn(
+                session_id.clone(),
+                lash_core::TurnId::from("parked-turn"),
+                "final",
+            ),
+        );
+        lash_core::testing::store_fixtures::commit_runtime_state_for_test(
+            &store,
+            commit,
+            "drain-settler",
+        )
+        .await
+        .expect("commit settles the parked turn");
+        let settled = core
+            .drain_status(false)
+            .await
+            .expect("read settled drain status");
+        assert_eq!((settled.parked_turns, settled.in_flight_turns), (0, 0));
+        assert!(settled.drained());
+    }
+}
+
 #[tokio::test]
 async fn testing_facade_run_tool_executes_provider() {
     let outcome = crate::testing::run_tool(

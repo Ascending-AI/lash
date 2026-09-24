@@ -32,11 +32,42 @@ pub mod queued_runs;
 pub mod retired_scopes;
 pub mod session_execution_leases;
 pub mod tool_intent_submissions;
+pub mod turn_parks;
 
 crate::statements! {
     /// Statements over more than one of the family's tables, which both
     /// backends issue verbatim.
     pub struct TurnIngressStatements @ "turn_ingress" {
+        /// Clear session `?1`'s park once its turn holds no work: no input
+        /// row bound to the parked turn and no pending queued run.
+        delete_released_turn_park = "DELETE FROM turn_parks
+             WHERE session_id = ?1
+               AND NOT EXISTS(
+                  SELECT 1 FROM pending_turn_inputs pti
+                  WHERE pti.session_id = ?1
+                    AND pti.claim_bound_turn_id = turn_parks.turn_id
+                    AND {{nonterminal_turn_input_state(pti.state)}}
+               )
+               AND NOT EXISTS(
+                  SELECT 1 FROM queued_runs qr
+                  WHERE qr.session_id = ?1 AND qr.status = 'pending'
+               )";
+
+        /// The deployment's parked turns, and its turns in flight: a session
+        /// with a pending queued run, a claimed turn input that is not
+        /// settled, or a parked turn.
+        count_unsettled_turns = "SELECT
+                (SELECT COUNT(*) FROM turn_parks) AS parked_turns,
+                (SELECT COUNT(*) FROM (
+                    SELECT session_id FROM turn_parks
+                    UNION
+                    SELECT session_id FROM queued_runs WHERE status = 'pending'
+                    UNION
+                    SELECT session_id FROM pending_turn_inputs
+                    WHERE claim_id IS NOT NULL
+                      AND {{nonterminal_turn_input_state(state)}}
+                ) AS unsettled) AS in_flight_turns";
+
         /// Whether session `?1` has work a runner could pick up at `?2`:
         /// an unfinished queued run, an available queued batch, or an input
         /// already deferred to the next turn that no aborted turn is bound to

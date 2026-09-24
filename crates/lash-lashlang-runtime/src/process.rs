@@ -50,7 +50,7 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// v11 drops `signal_send_sequence`: its only producer was deleted with the
 /// signal special forms (FIG-2999), and the ordinal had been round-tripping
 /// dead since, so the envelope was version-gating a field that carried no
-/// meaning. The remaining ordinals move into one [`ReplayOrdinalsState`]
+/// meaning. The remaining ordinals move into one `ReplayOrdinalsState`
 /// group, so the envelope, the restore path and the boundary snapshot spell
 /// them once.
 /// v10 drops the parent-end action list: child lifecycle is settled from the
@@ -88,9 +88,14 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// v18 (FIG-3571) embeds VM continuation v19 over the carrier IR's node ids. A
 /// v17 segment parked before the cutover is refused before continuation
 /// restore; it is never re-driven under the new node ids.
+/// v19 (FIG-3586) carries the run's issue-ordinal state — the ordinal the
+/// next command takes and the running digest of the commands it wrote — in
+/// place of the per-kind sleep sequence, and embeds VM continuation state
+/// whose aggregates no longer count occurrences. A segment parked by v18
+/// resumes commands under keys a v19 run never mints, so it is refused.
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 18;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 19;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -121,15 +126,20 @@ struct LashlangSegmentStateVersionProbe {
 /// round-tripping for a day after FIG-2999 deleted its only producer.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ReplayOrdinalsState {
-    sleep_sequence: u64,
+    /// The run's issue-ordinal state (FIG-3586): every command's journal key.
+    commands: crate::LashlangRunOrdinals,
+    /// Process-event sequence: the idempotency key of each event append,
+    /// which observers address.
     event_sequence: u64,
+    /// Per-name signal-wait ordinals: the wait keys outside signallers
+    /// address, so they stay named.
     signal_wait_ordinals: BTreeMap<String, u64>,
 }
 
 /// The live counterpart of [`ReplayOrdinalsState`]: the ordinals the running
-/// segment is consuming, held as the counters the host mutates in place.
+/// segment is consuming, held as the counters the host mutates in place. The
+/// command ordinals live in the run itself.
 struct ReplayOrdinals {
-    sleep_sequence: AtomicU64,
     event_sequence: AtomicU64,
     signal_wait_ordinals: tokio::sync::Mutex<BTreeMap<String, u64>>,
 }
@@ -138,7 +148,6 @@ impl ReplayOrdinals {
     fn restore(state: Option<&LashlangSegmentState>) -> Self {
         let ordinals = state.map(|state| &state.ordinals);
         Self {
-            sleep_sequence: AtomicU64::new(ordinals.map_or(0, |o| o.sleep_sequence)),
             event_sequence: AtomicU64::new(ordinals.map_or(0, |o| o.event_sequence)),
             signal_wait_ordinals: tokio::sync::Mutex::new(
                 ordinals.map_or_else(BTreeMap::new, |o| o.signal_wait_ordinals.clone()),
@@ -146,9 +155,17 @@ impl ReplayOrdinals {
         }
     }
 
-    async fn snapshot(&self) -> ReplayOrdinalsState {
+    /// The command ordinals a resumed segment continues from, or a fresh
+    /// run's.
+    fn restore_commands(state: Option<&LashlangSegmentState>) -> crate::LashlangRunOrdinals {
+        state.map_or_else(crate::LashlangRunOrdinals::start, |state| {
+            state.ordinals.commands.clone()
+        })
+    }
+
+    async fn snapshot(&self, run: &crate::LashlangReplayRun) -> ReplayOrdinalsState {
         ReplayOrdinalsState {
-            sleep_sequence: self.sleep_sequence.load(Ordering::Relaxed),
+            commands: run.ordinals(),
             event_sequence: self.event_sequence.load(Ordering::Relaxed),
             signal_wait_ordinals: self.signal_wait_ordinals.lock().await.clone(),
         }
@@ -191,6 +208,13 @@ fn resolve_child_max_attempts(
     host_default: std::num::NonZeroU32,
 ) -> std::num::NonZeroU32 {
     segment_state.map_or(host_default, |state| state.child_max_attempts)
+}
+
+#[cfg(test)]
+pub(crate) fn decode_lashlang_segment_state_for_tests(data: &[u8]) -> Result<(), String> {
+    decode_lashlang_segment_state(data)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn decode_lashlang_segment_state(
@@ -415,6 +439,34 @@ pub async fn run_lashlang_process(
         },
         None => None,
     };
+    // The start record names the grammar this incarnation's journal was
+    // written under (FIG-3586); one begun under another grammar — or before
+    // the stamp existed — is refused before its body runs, since its keys are
+    // ones this build cannot reach.
+    match context.processes().record().await {
+        Ok(record) => {
+            let started_under = record
+                .as_ref()
+                .and_then(|record| record.first_started.as_deref())
+                .and_then(|started| started.replay_grammar);
+            if started_under != Some(crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION) {
+                return Ok(process_lashlang_failure(
+                    LashlangProcessFailureCode::ReplayKeyFormatCutover,
+                    format!(
+                        "lashlang process refused at the replay-key grammar cutover: its start \
+                         record names grammar {} and this build mints grammar {}, so its \
+                         journal cannot be replayed by this build and nothing ran",
+                        started_under
+                            .map_or_else(|| "none".to_string(), |grammar| grammar.to_string()),
+                        crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
+                    ),
+                    None,
+                )
+                .into());
+            }
+        }
+        Err(error) => return Err(lash_core::ProcessInfraError::new(error)),
+    }
     let process_id = context.registration().id.clone();
     // The opener, not the name: a process re-registered under the same name is
     // a different opener and must never mint identities the predecessor used
@@ -493,6 +545,10 @@ pub async fn run_lashlang_process(
         );
     }
     let ordinals = ReplayOrdinals::restore(segment_state.as_ref());
+    let run = crate::LashlangReplayRun::new(
+        identities.namespace(),
+        ReplayOrdinals::restore_commands(segment_state.as_ref()),
+    );
     let child_max_attempts =
         resolve_child_max_attempts(segment_state.as_ref(), ctx.engine_child_max_attempts());
     let host = LashlangProcessHost {
@@ -502,6 +558,12 @@ pub async fn run_lashlang_process(
         processes,
         process_id: process_id.clone(),
         identities,
+        run,
+        producer: serde_json::json!({
+            "compiler": lashlang::LASHLANG_COMPILER_VERSION,
+            "vm_abi": lashlang::LASHLANG_VM_ABI_VERSION,
+            "module_ref": input.module_ref.to_string(),
+        }),
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         ordinals,
         child_max_attempts,
@@ -532,7 +594,17 @@ pub async fn run_lashlang_process(
     // The omission record precedes the terminal event the runner appends
     // next; a run that failed an incorporation writes nothing more.
     let mut incorporation_fault = host.effect_summary.take_incorporation_fault();
-    if incorporation_fault.is_none() && output.is_terminal() {
+    // A body refused at its journal (FIG-3586) stopped where it diverged: it
+    // writes nothing more — no omission record, no group finalization — and
+    // its refusal surfaces from the run guard below as infrastructure, so the
+    // process stays non-terminal and every redrive refuses again with nothing
+    // dispatched until an operator acts.
+    let refused = host.ctx.nested_replay_mismatch().is_some();
+    if !refused && incorporation_fault.is_none() && output.is_terminal() {
+        // A body that ends must end where the run that wrote its journal
+        // ended (FIG-3586). Its terminal is the registry's to record, so it
+        // journals no seal of its own.
+        host.commands().close_unsealed().await;
         host.record_effect_omissions().await;
         incorporation_fault = host.effect_summary.take_incorporation_fault();
     }
@@ -544,7 +616,7 @@ pub async fn run_lashlang_process(
     // the cursors the handover carried. A failed close leaves `closing`
     // recorded and surfaces as infrastructure, so the run is retried rather
     // than committing a terminal whose accounting was never incorporated.
-    if output.is_terminal() {
+    if output.is_terminal() && !refused {
         let _phase = host.ctx.named_phase("rlm_process.close_groups");
         host.ctx.close_opener_groups().await.map_err(|error| {
             lash_core::ProcessInfraError::new(lash_core::PluginError::RuntimeEffectController(
@@ -662,7 +734,7 @@ async fn execute_lashlang(
                         let segment_state = LashlangSegmentState {
                             version: LASHLANG_SEGMENT_STATE_VERSION,
                             vm: continuation,
-                            ordinals: host.ordinals.snapshot().await,
+                            ordinals: host.ordinals.snapshot(&host.run).await,
                             started_process_ids: host.ctx.started_process_ids(),
                             child_max_attempts: host.child_max_attempts,
                             incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
@@ -705,11 +777,17 @@ struct LashlangProcessHost<'run> {
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
     processes: lash_core::facade_support::ProcessEngineProcessContext,
     process_id: ProcessId,
-    /// The one derivation of leaf, child and group identities this tier mints,
+    /// The one derivation of the ids and key namespace this tier mints,
     /// shared with the RLM cell bridge. The authority is this process
     /// incarnation, never a segment: a body that hands over keeps minting from
     /// the scope its first segment used.
     identities: crate::LashlangHostIdentities,
+    /// The run's issue-ordinal mint and recorded frontier (FIG-3586), resumed
+    /// from the segment state a handover carried.
+    run: crate::LashlangReplayRun,
+    /// Who is running this body, for the attribution a refusal and the seal
+    /// carry.
+    producer: serde_json::Value,
     lashlang_execution_trace: LashlangProcessExecutionTrace,
     /// The replay ordinals this segment is consuming: restored from the
     /// handover that resumed the run (or zeroed for a first segment) and
@@ -896,23 +974,14 @@ impl LashlangProcessHost<'_> {
         Ok(payload)
     }
 
-    /// This tier refuses a leaf with no call site (see
-    /// [`prepare_resource_invocation`]), so the position is always a site here.
-    fn resource_tool_call_id(
-        &self,
-        host_operation: &str,
-        call_site: &lashlang::LashlangExecutionCallSite,
-        batch_index: Option<usize>,
-    ) -> String {
-        let call_id = match batch_index {
-            Some(batch_index) => self
-                .identities
-                .child(host_operation, call_site, batch_index),
-            None => self.identities.leaf(host_operation, call_site),
-        };
-        self.lashlang_execution_trace
-            .record_resource_call(call_site, &call_id);
-        call_id
+    /// The run's command protocol over this body's execution (FIG-3586).
+    fn commands(&self) -> crate::ReplayCommands<'_, '_> {
+        crate::ReplayCommands {
+            run: &self.run,
+            ctx: &self.ctx,
+            cancellation: &self.cancellation,
+            producer: self.producer.to_string(),
+        }
     }
 
     async fn resource_operation(
@@ -922,17 +991,40 @@ impl LashlangProcessHost<'_> {
         args: Vec<lashlang::Value>,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
     ) -> Result<lashlang::Value, ExecutionHostError> {
-        if crate::is_typescript_runtime_receiver(&receiver) {
-            let call_site = call_site.as_ref().ok_or_else(|| {
-                ExecutionHostError::new("TypeScript runtime operation is missing its call site")
-            })?;
-            return self
-                .typescript_runtime_value(&receiver, &operation, &args, call_site, None)
+        let commands = self.commands();
+        let command = commands.issue()?;
+        if let Some(checked) = crate::typescript_runtime_operation(&receiver, &operation, &args) {
+            let runtime_operation = match checked {
+                Ok(runtime_operation) => runtime_operation,
+                Err(error) => {
+                    commands.skipped(&command)?;
+                    return Err(error);
+                }
+            };
+            let in_flight = commands.enter(command, crate::CommandShape::Value).await?;
+            let key = in_flight.command.key.as_str().to_string();
+            let result = self
+                .typescript_runtime_value(&in_flight, runtime_operation, call_site.as_ref(), key)
                 .await;
+            commands.finish(&in_flight)?;
+            return result;
         }
-        let invocation =
-            self.prepare_resource_invocation(operation, receiver, args, call_site, None)?;
-        let invocation = match invocation {
+        let call_id = self.identities.call_id(command.ordinal);
+        let prepared = match self.prepare_resource_invocation(
+            operation,
+            receiver,
+            args,
+            call_site,
+            call_id,
+            command.key.as_str().to_string(),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                commands.skipped(&command)?;
+                return Err(error);
+            }
+        };
+        match prepared {
             PreparedResourceInvocation::Trigger {
                 operation,
                 payload,
@@ -940,53 +1032,74 @@ impl LashlangProcessHost<'_> {
                 host_operation,
                 call_site,
             } => {
-                return self
-                    .trigger_operation(operation, payload, effect_id, &host_operation, &call_site)
+                let in_flight = commands.enter(command, crate::CommandShape::Value).await?;
+                let result = self
+                    .trigger_operation(
+                        &in_flight.ctx,
+                        operation,
+                        payload,
+                        effect_id,
+                        &host_operation,
+                        call_site.as_ref(),
+                    )
                     .await;
+                commands.finish(&in_flight)?;
+                result
             }
             PreparedResourceInvocation::Tool {
                 invocation,
                 host_operation,
                 call_site,
-            } => (invocation, host_operation, call_site),
-        };
-        let (invocation, host_operation, call_site) = invocation;
-        let lash_core::facade_support::ToolInvocation {
-            id,
-            tool_id,
-            args,
-            execution_grant: _,
-            child_execution_trace_hook,
-            issuing_language_node_id,
-        } = invocation;
-        let tool_ctx = issuing_language_node_id
-            .map(|node_id| self.ctx.clone().with_issuing_language_node_id(node_id))
-            .unwrap_or_else(|| self.ctx.clone());
-        let replay_key = id.clone();
-        let reply = if let Some(call_site) = child_execution_trace_hook {
-            tool_ctx
-                .call_tool_by_id_with_child_execution_trace_hook(id, tool_id, args, 0, call_site)
-                .await
-        } else {
-            Box::pin(tool_ctx.call_tool_by_id(id, tool_id, args, 0)).await
-        };
-        self.record_tool_reply(&call_site, &host_operation, &replay_key, &reply)
-            .await;
-        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
+            } => {
+                // The call's journal rows live under its command key; that is
+                // the replay key its summary and its failures name.
+                let replay_key = command.key.as_str().to_string();
+                let in_flight = commands
+                    .enter(command, crate::CommandShape::ToolCall)
+                    .await?;
+                let reply = Box::pin(
+                    in_flight
+                        .ctx
+                        .call_command_tool(&in_flight.command.key, invocation),
+                )
+                .await;
+                commands.finish(&in_flight)?;
+                if let Some(call_site) = &call_site {
+                    self.record_tool_reply(call_site, &host_operation, &replay_key, &reply)
+                        .await;
+                }
+                protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
+            }
+        }
     }
 
     async fn await_handle(
         &self,
         handle: lashlang::Value,
     ) -> Result<lashlang::Value, ExecutionHostError> {
-        let replay_key = uuid::Uuid::new_v4().to_string();
+        let commands = self.commands();
+        let command = commands.issue()?;
+        let handle = match lashlang_value_to_json(&handle) {
+            Ok(handle) => handle,
+            Err(error) => {
+                commands.skipped(&command)?;
+                return Err(error);
+            }
+        };
+        let call_id = self.identities.call_id(command.ordinal);
+        let in_flight = commands
+            .enter(command, crate::CommandShape::AwaitHandle)
+            .await?;
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
-            self.ctx
-                .await_tool_handle(replay_key.clone(), lashlang_value_to_json(&handle)?)
+            in_flight
+                .ctx
+                .under_command(&in_flight.command.key)
+                .await_tool_handle(call_id.clone(), handle)
                 .await
         };
-        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
+        commands.finish(&in_flight)?;
+        protocol_tool_reply_to_lashlang_value(reply, &call_id, &self.cancellation)
     }
 
     async fn process_event(&self, event: lashlang::ProcessEvent) -> Result<(), ExecutionHostError> {
@@ -994,8 +1107,15 @@ impl LashlangProcessHost<'_> {
             lashlang::ProcessEventKind::Yield => "process.yield",
             lashlang::ProcessEventKind::Wake => "process.wake",
         };
+        // An event holds an issue ordinal like every command, but it is an
+        // append to the process's event log, addressed by its own sequence,
+        // and writes nothing to the effect journal.
+        let commands = self.commands();
+        let command = commands.issue()?;
+        let in_flight = commands.enter(command, crate::CommandShape::Silent).await?;
         let ordinal = self.ordinals.event_sequence.fetch_add(1, Ordering::Relaxed);
-        self.ctx
+        let appended = self
+            .ctx
             .append_process_event(
                 lash_core::ProcessEventAppendRequest::new(
                     event_type,
@@ -1003,16 +1123,26 @@ impl LashlangProcessHost<'_> {
                 )
                 .with_replay_key(format!("process:{}:event:{ordinal}", self.process_id)),
             )
-            .await
-            .map_err(|error| LashlangHostError::AppendProcessEvent {
-                message: error.to_string(),
-            })?;
+            .await;
+        commands.finish(&in_flight)?;
+        appended.map_err(|error| LashlangHostError::AppendProcessEvent {
+            message: error.to_string(),
+        })?;
         Ok(())
     }
 
     async fn sleep(&self, sleep: lashlang::Sleep) -> Result<lashlang::Value, ExecutionHostError> {
+        let commands = self.commands();
+        let command = commands.issue()?;
         let call_site = sleep.call_site;
-        let sleep = process_sleep(sleep.kind, &sleep.value)?;
+        let sleep = match process_sleep(sleep.kind, &sleep.value) {
+            Ok(sleep) => sleep,
+            Err(error) => {
+                commands.skipped(&command)?;
+                return Err(error);
+            }
+        };
+        let in_flight = commands.enter(command, crate::CommandShape::Sleep).await?;
         if let Some(call_site) = &call_site {
             self.lashlang_execution_trace.emit_waiting(
                 call_site,
@@ -1024,9 +1154,11 @@ impl LashlangProcessHost<'_> {
                 },
             );
         }
-        let sequence = self.ordinals.sleep_sequence.fetch_add(1, Ordering::Relaxed);
-        let scope = format!("process:{}", self.process_id);
-        let slept = self.ctx.sleep_process(&scope, sequence, sleep).await;
+        let slept = in_flight
+            .ctx
+            .sleep_command(&in_flight.command.key, sleep)
+            .await;
+        commands.finish(&in_flight)?;
         // The effect host journals the wake verdict, so a success or a
         // recorded cancellation is replay-stable; any other error has no
         // recorded outcome to summarise.
@@ -1045,12 +1177,17 @@ impl LashlangProcessHost<'_> {
                 lash_core::runtime::PROCESS_SLEEP_OPERATION,
                 outcome_class,
                 None,
-                &self.ctx.process_sleep_replay_key(&scope, sequence),
+                &in_flight.command.key.sleep(),
             )
             .await;
         }
-        slept.map_err(|error| LashlangHostError::SleepProcess {
-            message: error.to_string(),
+        slept.map_err(|error| {
+            commands.journal_error(&in_flight, error, |error| {
+                LashlangHostError::SleepProcess {
+                    message: error.to_string(),
+                }
+                .into()
+            })
         })?;
         if let Some(call_site) = &call_site
             && !self.cancellation.is_cancelled()
@@ -1066,12 +1203,21 @@ impl LashlangProcessHost<'_> {
         name: String,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
     ) -> Result<lashlang::Value, ExecutionHostError> {
-        let event_type =
-            lash_core::facade_support::process_signal_event_type(&name).map_err(|error| {
-                LashlangHostError::ValidateSignalName {
+        let commands = self.commands();
+        let command = commands.issue()?;
+        let event_type = match lash_core::facade_support::process_signal_event_type(&name) {
+            Ok(event_type) => event_type,
+            Err(error) => {
+                commands.skipped(&command)?;
+                return Err(LashlangHostError::ValidateSignalName {
                     message: error.to_string(),
                 }
-            })?;
+                .into());
+            }
+        };
+        let in_flight = commands
+            .enter(command, crate::CommandShape::SignalWait)
+            .await?;
         let event_ordinal = {
             let mut wait_ordinals = self.ordinals.signal_wait_ordinals.lock().await;
             let ordinal = wait_ordinals.entry(name.clone()).or_insert(0);
@@ -1109,13 +1255,24 @@ impl LashlangProcessHost<'_> {
                 },
             );
         }
-        let payload = self
+        let payload = in_flight
             .ctx
-            .await_process_signal_event(&self.process_id, &name, event_ordinal)
-            .await
-            .map_err(|error| LashlangHostError::AwaitSignal {
-                message: error.to_string(),
-            })?;
+            .await_process_signal_event(
+                &in_flight.command.key,
+                &self.process_id,
+                &name,
+                event_ordinal,
+            )
+            .await;
+        commands.finish(&in_flight)?;
+        let payload = payload.map_err(|error| {
+            commands.journal_error(&in_flight, error, |error| {
+                LashlangHostError::AwaitSignal {
+                    message: error.to_string(),
+                }
+                .into()
+            })
+        })?;
         self.processes
             .clear_wait()
             .await

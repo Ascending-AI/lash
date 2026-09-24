@@ -374,6 +374,39 @@ impl InMemorySessionStoreFactory {
         Ok(self.deleted_session_ids.lock_recover().contains(session_id))
     }
 
+    /// Count parked turns and turns in flight across every live session
+    /// (FIG-3586): a session holds a turn in flight while it has a pending
+    /// queued run, a claimed turn input that is not settled, or a parked turn.
+    pub async fn count_unsettled_turns(
+        &self,
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+        let deleted = self.deleted_session_ids.lock_recover().clone();
+        let stores = self.stores.lock_recover().clone();
+        let mut counts = crate::store::UnsettledTurnCounts::default();
+        for (session_id, store) in stores {
+            if deleted.contains(&session_id) {
+                continue;
+            }
+            let parked = store.turn_park.lock_recover().is_some();
+            let queued =
+                store.queued_runs.lock_recover().values().any(|run| {
+                    run.scope.session_id() == Some(&session_id) && run.terminal.is_none()
+                });
+            let claimed = store
+                .pending_turn_inputs
+                .lock_recover()
+                .iter()
+                .any(|entry| {
+                    entry.input.session_id == session_id
+                        && entry.claim.id().is_some()
+                        && !entry.input.state.kind().is_terminal()
+                });
+            counts.parked_turns += usize::from(parked);
+            counts.in_flight_turns += usize::from(parked || queued || claimed);
+        }
+        Ok(counts)
+    }
+
     pub async fn delete_session(
         &self,
         session_id: &SessionId,

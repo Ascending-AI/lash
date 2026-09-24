@@ -937,6 +937,7 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
             "open",
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
+                content_checked: false,
             },
         )
         .await
@@ -986,6 +987,7 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
             "open",
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
+                content_checked: false,
             },
         )
         .await
@@ -1076,6 +1078,7 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
             "open",
             &EffectGroupOpenRequest {
                 shape: admission_shape.clone(),
+                content_checked: false,
             },
         )
         .await
@@ -1183,6 +1186,7 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
             "open",
             &EffectGroupOpenRequest {
                 shape: gap_shape.clone(),
+                content_checked: false,
             },
         )
         .await

@@ -25,8 +25,8 @@ use lash_core_execution::facade_support::effect_replay_driver::{
     EffectGroupLifecyclePhase, EffectGroupRecord, EffectJournalNotifiers, EffectJournalSubject,
     EffectJournalWake, EffectJournalWriters, EffectLeaseFence, EffectLeaseStamp,
     EffectReplayRowStore, EffectReplayVocabulary, EffectRowStatus, EffectTerminal,
-    StoreEffectReplayDriver, StoredChildArbitration, StoredEffectRow, StoredGroupSettlement,
-    UnsettledGroupChild, decide_effect_claim,
+    RecordedKeyRange, RecordedKeys, StoreEffectReplayDriver, StoredChildArbitration,
+    StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild, decide_effect_claim,
 };
 use lash_core_execution::{
     EffectJournalRetirement, EffectRetirementGate, ExecutionScope, GroupExecutors,

@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::process_grammar_tests::run_sleep_process_started_under;
 use lashlang::testing::ast_builders as b;
 
 thread_local! {
@@ -70,19 +71,35 @@ async fn durable_process_events(
     registration: &lash_core::ProcessRegistration,
     authority: &lash_core::ProcessExecutionWriteAuthority,
 ) -> lash_core_execution::session::RuntimeExecutionProcessEventContext {
+    durable_process_events_started_under(
+        registry,
+        registration,
+        authority,
+        Some(crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION),
+    )
+    .await
+}
+
+/// [`durable_process_events`] whose start record names `replay_grammar`.
+pub(crate) async fn durable_process_events_started_under(
+    registry: &Arc<dyn lash_core::ProcessRegistry>,
+    registration: &lash_core::ProcessRegistration,
+    authority: &lash_core::ProcessExecutionWriteAuthority,
+    replay_grammar: Option<u32>,
+) -> lash_core_execution::session::RuntimeExecutionProcessEventContext {
     let env_ref = lash_core::testing::process_execution_env_fixture_ref();
     registry
         .register_process(registration.clone().with_execution_env_ref(Some(env_ref)))
         .await
         .expect("register the harness process");
+    // The start record a worker writes names the engine's replay-key grammar
+    // (FIG-3586); the harness writes the same one.
+    let mut started = authority
+        .invocation_started()
+        .expect("the harness invocation names its execution");
+    started.replay_grammar = replay_grammar;
     registry
-        .record_first_started_with_authority(
-            &registration.id,
-            authority
-                .invocation_started()
-                .expect("the harness invocation names its execution"),
-            authority,
-        )
+        .record_first_started_with_authority(&registration.id, started, authority)
         .await
         .expect("record the harness execution start");
     lash_core_execution::session::RuntimeExecutionProcessEventContext {
@@ -98,128 +115,8 @@ async fn durable_process_events(
 
 #[tokio::test(flavor = "current_thread")]
 async fn real_process_sleep_until_emits_deadline_and_completion() {
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
-    let environment = LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default().with_sleep(),
-    );
-    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "process pause() -> null { finish await sleep_until(0) }",
-        program: process_module(
-            "pause",
-            Vec::new(),
-            lashlang::TypeExpr::Null,
-            b::sleep_until(b::num(0.0)),
-        ),
-        environment: &environment,
-    })
-    .expect("sleep process compiles");
-    store
-        .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("sleep-fixture"),
-            &output.artifact,
-        )
-        .await
-        .expect("sleep process artifact publishes");
-    let input = LashlangProcessInput {
-        module_ref: output.module_ref.clone(),
-        process_ref: output
-            .artifact
-            .process_ref("pause")
-            .expect("pause export")
-            .clone(),
-        host_requirements_ref: output.host_requirements_ref.clone(),
-        process_name: "pause".to_string(),
-        args: serde_json::Map::new(),
-    };
-    let process_id = lash_core::ProcessId::from("sleep-process");
-    let registration = lash_core::ProcessRegistration::new(
-        process_id.clone(),
-        input.to_process_input().expect("valid process input"),
-        lash_core::RecoveryContract::Rerunnable,
-        lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
-    )
-    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-        input.process_identity(),
-    ));
-    let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
-    let effect_host = lash_core::facade_support::NativeEffectHost::default();
-    let scoped = lash_core::EffectHost::scoped_static(
-        &effect_host,
-        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
-            process_id.clone(),
-            incarnation,
-        )),
-    )
-    .expect("valid process scope")
-    .expect("native controller");
-    let parent = lash_core::RuntimeInvocation::effect(
-        lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::process(process_id.clone()),
-            "process-body",
-        )
-        .expect("valid process effect address"),
-        lash_core::RuntimeAttribution::none(),
-        "process-body",
-    );
-    let built = lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone())
-        .runtime_parent_invocation(parent)
-        .build();
-    let plugins = Arc::clone(&built.dispatch.plugins);
-    let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let expected_catalog = Arc::clone(&catalog);
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "sleep-run")
-        .bind_attempt(1);
-    let process_events = durable_process_events(&registry, &registration, &authority).await;
-    let execution_registration = registration.clone();
-    let context = lash_core::ProcessEngineRunContext::new(
-        registration,
-        incarnation,
-        lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
-        lash_core::testing::process_work_wiring_for_registry(registry),
-        lash_core::SessionId::from("sleep-session"),
-        plugins,
-        catalog,
-        None,
-        None,
-        Arc::new(lash_core::NoQueuedWork::new()),
-        lash_core::DeliveryPolicy::EarliestSafeBoundary,
-        Arc::new(lash_core::facade_support::SystemClock),
-        true,
-        lash_core::CancellationToken::new(),
-        None,
-        scoped,
-        None,
-        Box::new(move |catalog| {
-            assert!(Arc::ptr_eq(&catalog, &expected_catalog));
-            Ok(
-                lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
-                    built
-                        .into_runtime()
-                        .with_process_execution(&execution_registration, process_events),
-                    lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
-                        Box::pin(async { Ok(()) })
-                    }),
-                ),
-            )
-        }),
-    );
-    let graph_store = Arc::new(TraceLashlangGraphStore::default());
-    let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
-    let result = Box::pin(crate::process::run_lashlang_process(
-        LashlangProcessEngine::new(store, LashlangSurface::default())
-            .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
-        context,
-        serde_json::to_value(input).expect("process input serializes"),
-    ))
-    .await
-    .expect("process run succeeds");
+    let (result, graph_store) =
+        run_sleep_process_started_under(Some(crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION)).await;
     assert!(result.is_terminal());
     let graph = graph_store
         .graphs()
@@ -353,6 +250,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
                 fencing_token: lease.fencing_token,
                 attempt: 1,
                 started_at_ms: 1,
+                replay_grammar: Some(crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION),
             },
             &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
@@ -646,39 +544,12 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     assert_eq!(waits[0].3, 0);
     assert_eq!(waits[1].3, 1);
     assert_eq!(waits[0].2, waits[1].2);
-    let calls = waits
-        .iter()
-        .map(|(node_id, occurrence, _, position)| {
-            let call_id = graph
-                .history
-                .iter()
-                .find_map(|event| match &event.event.payload {
-                    TraceLanguageExecutionPayload::NodeStarted {
-                        node_id: started_node,
-                        occurrence: started_occurrence,
-                        call_id: Some(call_id),
-                        ..
-                    } if started_node == *node_id && started_occurrence == occurrence => {
-                        Some(call_id.clone())
-                    }
-                    _ => None,
-                })
-                .expect("resource leaf call id");
-            lash_core::facade_support::ToolInvocation::new(
-                call_id,
-                lash_core::ToolId::from("tool:fixture_echo"),
-                serde_json::json!({ "value": if *position == 0 { "a" } else { "b" } }),
-            )
-        })
-        .collect::<Vec<_>>();
-    let expected = lash_core::session::deterministic_tool_invocation_batch_id(
-        &calls,
-        lash_core::session::ToolGroupOccurrence::Opener(1),
-    );
-    assert_eq!(
-        waits[0].2.as_str(),
-        expected,
-        "reconstructed tool calls: {calls:?}; waits: {waits:?}"
+    // The batch both leaves await is the aggregate's command (FIG-3586): its
+    // issue ordinal under the process body's namespace, never a digest of
+    // the leaves.
+    assert!(
+        waits[0].2.starts_with("lashlang:v2:") && waits[0].2.contains(":lk2:"),
+        "the awaited batch is the aggregate's command key: {waits:?}"
     );
 }
 
@@ -691,7 +562,7 @@ mod second_front_end;
 /// module. ADR 0096 retired the Lashlang front-end, so the fixtures that used
 /// to be written as source state their AST instead; the source each one stood
 /// for is kept as a comment at the call site.
-fn process_module(
+pub(crate) fn process_module(
     name: &str,
     params: Vec<lashlang::ProcessParam>,
     return_ty: lashlang::TypeExpr,

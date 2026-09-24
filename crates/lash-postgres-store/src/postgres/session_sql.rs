@@ -810,6 +810,11 @@ lash_store_sql::statements! {
              WHERE session_id = ANY(?1)
              RETURNING session_id
          ),
+         deleted_turn_parks AS (
+             DELETE FROM turn_parks
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
          deleted_turn_cancel_requests AS (
              DELETE FROM turn_cancel_requests
              WHERE session_id = ANY(?1)
@@ -847,6 +852,7 @@ lash_store_sql::statements! {
               + (SELECT count(*) FROM deleted_wake_redelivery_fences)
               + (SELECT count(*) FROM deleted_wake_allocation_floors)
               + (SELECT count(*) FROM deleted_pending_turn_inputs)
+              + (SELECT count(*) FROM deleted_turn_parks)
               + (SELECT count(*) FROM deleted_turn_cancel_closures)
               + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
               + (SELECT count(*) FROM deleted_session_execution_leases)

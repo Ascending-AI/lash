@@ -19,6 +19,7 @@ pub(crate) const GLOBAL_SALT: u8 = 2;
 /// Reserved durable identity family domains. Entries are append-only: retired
 /// families remain reserved so a later projection cannot silently reuse them.
 pub(crate) const FAMILY_DOMAINS: &[&str] = &[
+    "lash.aggregate-content",
     "lash.aggregate-with-timers",
     "lash.append-request",
     "lash.await-event",

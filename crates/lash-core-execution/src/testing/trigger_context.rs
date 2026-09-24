@@ -29,7 +29,8 @@ pub fn code_execution_context_with_trigger_store_and_invocation(
         .into_runtime()
 }
 
-fn test_trigger_router(
+/// A trigger router over `trigger_store`, for fixtures building their own context.
+pub fn test_trigger_router(
     trigger_store: Arc<dyn crate::TriggerStore>,
     process_registry: Arc<dyn crate::ProcessRegistry>,
 ) -> crate::TriggerRouter {

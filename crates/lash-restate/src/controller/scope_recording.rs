@@ -359,4 +359,11 @@ where
             .group_child_drain_blocked(group_key, commit_seq)
             .await
     }
+
+    async fn read_recorded_journal(
+        &self,
+        range: &lash_core::RecordedKeyRange,
+    ) -> Result<lash_core::RecordedJournal, lash_core::RuntimeEffectControllerError> {
+        self.inner.read_recorded_journal(range).await
+    }
 }

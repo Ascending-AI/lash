@@ -127,6 +127,34 @@ fn release_bound_claim(
     }
 }
 
+impl InMemorySessionStore {
+    /// Clear the session's park once its turn holds no work any more: no row
+    /// bound to the parked turn and no pending queued run (FIG-3586). A cancel
+    /// that withdraws the parked turn's input settles the park with it.
+    pub(super) fn clear_released_turn_park(
+        &self,
+        session_id: &SessionId,
+        pending: &[InMemoryPendingTurnInput],
+        runs: &std::collections::HashMap<crate::ExecutionScope, crate::store::QueuedRunAdmission>,
+    ) {
+        let mut park = self.turn_park.lock_recover();
+        let Some(parked) = park.as_ref() else {
+            return;
+        };
+        let holds_bound_rows = pending.iter().any(|entry| {
+            entry.input.session_id == session_id
+                && entry.claim.bound_turn() == Some(&parked.turn_id)
+                && !entry.input.state.is_terminal()
+        });
+        let holds_queued_run = runs
+            .values()
+            .any(|run| run.scope.session_id() == Some(session_id) && run.terminal.is_none());
+        if !holds_bound_rows && !holds_queued_run {
+            park.take();
+        }
+    }
+}
+
 fn find_pending_turn_input_index(
     pending: &[InMemoryPendingTurnInput],
     session_id: &SessionId,
@@ -602,6 +630,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 outcome,
             });
         }
+        self.clear_released_turn_park(session_id, &pending, &runs);
         Ok(results)
     }
 
@@ -654,6 +683,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 &covered,
             ));
         }
+        self.clear_released_turn_park(session_id, &pending, &runs);
         Ok(crate::PendingTurnInputSuffixCancelOutcome::Outcomes {
             anchor: anchor.clone(),
             outcomes,

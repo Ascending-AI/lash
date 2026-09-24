@@ -552,6 +552,24 @@ impl DurableProcessWorker {
             }
         });
         let execution_write_authority = execution_write_authority.bind_attempt(attempt);
+        // The start record's replay-key grammar (FIG-3586): the grammar the
+        // incarnation's first attempt ran under, stamped from its engine once
+        // and inherited by every later attempt, so an incarnation a
+        // pre-cutover build started stays unstamped and is refused by an
+        // engine that keys its journal by grammar.
+        let replay_grammar = match current.first_started.as_deref() {
+            Some(started) => started.replay_grammar,
+            None => match registration.input.as_ref() {
+                crate::ProcessInput::Engine { kind, .. } => self
+                    .config
+                    .runtime_host
+                    .process_engines
+                    .require(kind)
+                    .ok()
+                    .and_then(|engine| engine.replay_key_grammar()),
+                _ => None,
+            },
+        };
         let admitted = self
             .config
             .process_registry()
@@ -562,6 +580,7 @@ impl DurableProcessWorker {
                     fencing_token,
                     attempt,
                     started_at_ms: self.now_ms(),
+                    replay_grammar,
                 },
                 &execution_write_authority,
             )
@@ -597,6 +616,21 @@ impl DurableProcessWorker {
                 ),
             )));
         }
+        // A parked process (FIG-3586) is re-run to find out whether this build
+        // can replay its journal: its park is lifted for the run and recorded
+        // again if the run refuses again. A run that goes on to fail for any
+        // other reason spends its attempt budget as usual.
+        if current
+            .wait
+            .as_ref()
+            .is_some_and(crate::WaitState::is_parked)
+        {
+            self.config
+                .process_registry()
+                .clear_process_wait_with_authority(&registration.id, &execution_write_authority)
+                .await?;
+        }
+        let park_authority = execution_write_authority.clone();
         let execution_context =
             execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime = Box::pin(self.runtime_for_registration(&registration)).await?;
@@ -635,7 +669,8 @@ impl DurableProcessWorker {
                 registration.id
             ))
         })?;
-        manager
+        let process_id = registration.id.clone();
+        let result = manager
             .run_process(
                 // The opener is the name bound to the incarnation this run was
                 // admitted under, read off the record the authority CAS
@@ -651,7 +686,27 @@ impl DurableProcessWorker {
                 handover,
             )
             .await
-            .map_err(crate::ProcessInfraError::into_plugin_error)
+            .map_err(crate::ProcessInfraError::into_plugin_error);
+        if let Err(error) = &result
+            && let Some(refusal) = parking_refusal(error)
+        {
+            // The body refused to replay its journal with nothing dispatched
+            // (FIG-3586): the process parks — non-terminal, with no terminal
+            // evidence — until an operator acts. The park is what exempts its
+            // later sweeps from the attempt budget.
+            let wait = crate::WaitState {
+                kind: crate::WaitKind::Parked {
+                    code: refusal.code.as_str().to_string(),
+                    message: refusal.message.clone(),
+                },
+                since_ms: self.now_ms(),
+            };
+            self.config
+                .process_registry()
+                .set_process_wait_with_authority(&process_id, wait, &park_authority)
+                .await?;
+        }
+        result
     }
 
     /// Admit claimable non-terminal processes to this worker's execution
@@ -1018,6 +1073,10 @@ impl DurableProcessWorker {
             Err(disposition) => return ProcessRecoveryOutcome::Deferred(disposition),
         };
         if record.disposition == RecoveryContract::Rerunnable
+            && !record
+                .wait
+                .as_ref()
+                .is_some_and(crate::WaitState::is_parked)
             && let (Some(max_attempts), Some(started)) =
                 (record.max_attempts, record.first_started.as_deref())
             && started.attempt >= max_attempts
@@ -1588,3 +1647,12 @@ impl super::native_substrate::NativeProcessAdmissionDriver for DurableProcessWor
 mod permit_tests;
 #[cfg(test)]
 mod recovery_tests;
+
+/// The replay refusal a process run ended on, when it is one that parks
+/// (FIG-3586): the body could not replay its journal and dispatched nothing.
+fn parking_refusal(error: &PluginError) -> Option<&crate::RuntimeEffectControllerError> {
+    match error {
+        PluginError::RuntimeEffectController(refusal) if refusal.code.parks_turn() => Some(refusal),
+        _ => None,
+    }
+}

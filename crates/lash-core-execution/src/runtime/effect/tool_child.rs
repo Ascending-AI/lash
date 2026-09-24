@@ -155,7 +155,12 @@ use super::executor::RuntimeEffectControllerError;
 /// unchanged. The version moves because a child journaled by an older build
 /// would replay against a different step order, so it is refused, typed and
 /// before any effect, at [`ToolChildRequest::validate`].
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 6;
+///
+/// Version 7 (FIG-3586) adds the `command` attempt identity: a lashlang
+/// command's tool attempts key under the command's issue-ordinal key
+/// (`{command}:attempt:{a}`), never the call id, and a v6 reader has no such
+/// identity to rebuild a child's attempts under.
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 7;
 
 /// The authority a tool child was admitted under, pinned at formation.
 ///

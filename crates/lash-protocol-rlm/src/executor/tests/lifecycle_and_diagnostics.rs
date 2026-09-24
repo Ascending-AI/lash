@@ -1176,20 +1176,20 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // artifact carries the linked program verbatim as `ir`, so the module
         // ref hashes binder names again. The call id below names no module
         // ref, so it does not move.
+        // Re-pinned by FIG-3586: a call's id is its issue ordinal under the
+        // cell's scope, so neither the call site's node id nor the tool's
+        // operation appears in it — which also moves the frame key derived
+        // from it.
         // What the pair asserts is unchanged: the two sides are still equal,
         // which is the trace-sink independence this test exists for; only the
         // derivation both sides share moved.
         assert_eq!(
             without_trace.call_id.as_deref(),
-            Some(
-                "lashlang:turn:12:test-session:6:turn-7:11:exec-code:3:resource:16:tool:continue_as:29:node:1de6eca7fbb5c02fa3b32d47:1"
-            )
+            Some("lashlang:v2:turn:12:test-session:6:turn-7:11:exec-code:3:0000000000")
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
-            Some(
-                "lashlang:turn:12:test-session:6:turn-7:11:exec-code:3:resource:16:tool:continue_as:29:node:1de6eca7fbb5c02fa3b32d47:1"
-            )
+            Some("lashlang:v2:turn:12:test-session:6:turn-7:11:exec-code:3:0000000000")
         );
 
         let without_trace_key = match without_trace.output.control {
@@ -1202,11 +1202,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/24682960bee1ace2b8718fc0d09ae16a618d89a8686b9128311c5fa8ef9c65c3"
+            "frame-key/v2/05a11b1c96c2a1640f723be1e954ccbfae4fc629742d2feaeda2378b011c4007"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/24682960bee1ace2b8718fc0d09ae16a618d89a8686b9128311c5fa8ef9c65c3"
+            "frame-key/v2/05a11b1c96c2a1640f723be1e954ccbfae4fc629742d2feaeda2378b011c4007"
         );
     });
 }

@@ -357,6 +357,17 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
         self.state.execution_state_dirty()
     }
 
+    fn replay_key_grammar(&self) -> Option<u32> {
+        Some(lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION)
+    }
+
+    fn admit_replay_key_grammar(
+        &self,
+        served: Option<u32>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        crate::executor::admit_replay_key_grammar(served)
+    }
+
     async fn snapshot_execution_state(
         &self,
         _ctx: ProtocolSessionContext<'_>,

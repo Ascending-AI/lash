@@ -137,7 +137,7 @@ impl<'run> OrchestrationContext<'run> {
             return Box::pin(
                 runtime
                     .with_batch_parent_call_id(self.context.tool_call_id.clone())
-                    .call_tool_batch(calls, crate::session::ToolGroupOccurrence::Uncounted),
+                    .call_tool_batch(calls),
             )
             .await
             .replies;

@@ -303,6 +303,21 @@ impl SessionCommitStore for PostgresSessionStore {
             pending_observer_intents: Vec::new(),
         };
         planner.validate_node_derivation()?;
+        // A turn's commit settles its park (FIG-3586), in the commit's
+        // transaction; another turn's commit leaves it.
+        if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
+            sqlx::query(
+                crate::turn_ingress::turn_ingress_sql()
+                    .turn_parks
+                    .delete_for_turn
+                    .sql(),
+            )
+            .bind(commit.session_id.as_str())
+            .bind(turn_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        }
         {
             let prior = sqlx::query(session_sql().turn_commits.select_receipt.sql())
                 .bind(commit.session_id.as_str())
@@ -1099,6 +1114,66 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
         crate::session_meta::load_session_meta(&self.pool, Some(&self.session_id)).await
+    }
+
+    async fn record_turn_park(
+        &self,
+        park: &lash_core_execution::store::TurnPark,
+    ) -> Result<(), StoreError> {
+        self.bind_session_id(&park.session_id)?;
+        let reason_json = park.encode_reason()?;
+        let parked_at_ms = i64::try_from(park.parked_at_ms).map_err(|_| {
+            StoreError::Backend(format!(
+                "turn park instant {} exceeds the stored range",
+                park.parked_at_ms
+            ))
+        })?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, &park.session_id).await?;
+        sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .turn_parks
+                .upsert
+                .sql(),
+        )
+        .bind(park.session_id.as_str())
+        .bind(park.turn_id.as_str())
+        .bind(reason_json)
+        .bind(parked_at_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn load_turn_park(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<lash_core_execution::store::TurnPark>, StoreError> {
+        let row = sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .turn_parks
+                .select_by_session
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        row.map(|row| {
+            let turn_id: String = row.get(0);
+            let reason_json: String = row.get(1);
+            let parked_at_ms: i64 = row.get(2);
+            lash_core_execution::store::TurnPark::decode(
+                session_id.clone(),
+                turn_id.into(),
+                &reason_json,
+                u64::try_from(parked_at_ms).unwrap_or_default(),
+            )
+        })
+        .transpose()
     }
 }
 

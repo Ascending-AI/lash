@@ -221,6 +221,97 @@ pub fn child_effect_invocation_from_effect(
     }
 }
 
+/// The replay address of one command a replayed language program issued
+/// (FIG-3586).
+///
+/// A language runtime that re-executes its program on replay (a lashlang cell,
+/// a lashlang process body) mints one of these per command, from the dense
+/// issue ordinal of that command within the run, and every journal row the
+/// command writes lives under it. Core derives the command's sub-keys from it
+/// — tool attempts, retry sleeps, a deferred completion's await, an
+/// aggregate's group and children, a sleep — and never reads its structure:
+/// the grammar that spells the prefix is the language runtime's, versioned
+/// there (`LASHLANG_REPLAY_KEY_GRAMMAR_VERSION`).
+///
+/// Nothing a compiler produces may appear in it. That is the property the
+/// type exists for: a redrive on a build whose lowering differs reaches the
+/// same command at the same address as long as it issues the same commands in
+/// the same order.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CommandReplayKey(String);
+
+impl CommandReplayKey {
+    /// Wraps a key a language runtime minted.
+    pub fn new(key: impl Into<String>) -> Self {
+        Self(key.into())
+    }
+
+    /// The command's own replay key: a runtime value's or a trigger
+    /// operation's row, and an aggregate's group key.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The row a foreground or process sleep journals its intent under.
+    pub fn sleep(&self) -> String {
+        format!("{}:sleep", self.0)
+    }
+
+    /// The row an aggregate's timers record their shared admission instant
+    /// under (ADR 0099 §11 clause 4).
+    pub fn timers_admitted(&self) -> String {
+        format!("{}:timers-admitted", self.0)
+    }
+
+    /// The replay suffix of an aggregate's tool leaf at `leaf` — its index in
+    /// first-appearance order — under the group's invocation.
+    pub fn child_suffix(leaf: usize) -> String {
+        format!("child:{leaf}")
+    }
+
+    /// The row a process-signal wait journals its await under.
+    pub fn signal(&self) -> String {
+        format!("{}:signal", self.0)
+    }
+
+    /// Unwraps the key.
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for CommandReplayKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The invocation a command's nested effects descend from: an effect subject
+/// at the command's replay key, caused by the execution that issued it.
+///
+/// It is never itself journaled — like the code cell that issues it (ADR
+/// 0103) — so it is lineage and key material only: every sub-effect a
+/// command writes is a [`child_effect_invocation`] of it, which puts the
+/// sub-effect's row under the command's key.
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
+pub fn command_invocation(
+    execution_scope: &ExecutionScope,
+    attribution: RuntimeAttribution,
+    issuer: Option<&RuntimeInvocation>,
+    command: &CommandReplayKey,
+) -> RuntimeEffectInvocation {
+    RuntimeEffectInvocation::new(
+        EffectAddress::new(execution_scope.clone(), command.as_str())
+            .expect("a command uses the already admitted controller scope"),
+        attribution,
+        command.as_str(),
+    )
+    .with_caused_by(issuer.and_then(RuntimeInvocation::causal_ref))
+}
+
 pub fn tool_retry_sleep_invocation(
     execution_scope: &ExecutionScope,
     parent: &RuntimeInvocation,
@@ -236,68 +327,8 @@ pub fn tool_retry_sleep_invocation(
     )
 }
 
-/// The operation a process sleep's replay key names, and the one its durable
-/// effect-summary record carries.
+/// The operation a process sleep's durable effect-summary record carries.
 pub const PROCESS_SLEEP_OPERATION: &str = "sleep";
-
-#[expect(
-    clippy::expect_used,
-    reason = "the caller's live effect controller admitted this scope"
-)]
-pub(crate) fn process_sleep_invocation(
-    execution_scope: &ExecutionScope,
-    attribution: RuntimeAttribution,
-    parent: Option<&RuntimeInvocation>,
-    scope: &str,
-    sequence: u64,
-) -> RuntimeEffectInvocation {
-    let suffix = format!("process:{scope}:{PROCESS_SLEEP_OPERATION}:{sequence}");
-    if let Some(parent) = parent {
-        let parent_effect_id = parent.effect_id().unwrap_or("effect");
-        return child_effect_invocation(
-            execution_scope,
-            parent,
-            format!("{parent_effect_id}:{suffix}"),
-            suffix,
-        );
-    }
-    RuntimeEffectInvocation::new(
-        EffectAddress::new(execution_scope.clone(), suffix.clone())
-            .expect("process sleep uses the already admitted controller scope"),
-        attribution,
-        suffix.clone(),
-    )
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the caller's live effect controller admitted this scope"
-)]
-pub(crate) fn process_await_event_invocation(
-    execution_scope: &ExecutionScope,
-    attribution: RuntimeAttribution,
-    parent: Option<&RuntimeInvocation>,
-    process_id: &ProcessId,
-    signal_name: &str,
-    ordinal: u64,
-) -> RuntimeEffectInvocation {
-    let suffix = crate::process_signal_await_key(process_id, signal_name, ordinal);
-    if let Some(parent) = parent {
-        let parent_effect_id = parent.effect_id().unwrap_or("effect");
-        return child_effect_invocation(
-            execution_scope,
-            parent,
-            format!("{parent_effect_id}:{suffix}"),
-            suffix,
-        );
-    }
-    RuntimeEffectInvocation::new(
-        EffectAddress::new(execution_scope.clone(), suffix.clone())
-            .expect("process await uses the already admitted controller scope"),
-        attribution,
-        suffix.clone(),
-    )
-}
 
 #[expect(
     clippy::expect_used,

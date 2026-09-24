@@ -44,6 +44,11 @@ impl crate::SessionStoreFactory for InMemorySessionStoreFactory {
     ) -> Result<Option<std::sync::Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
         InMemorySessionStoreFactory::open_existing_store_by_id(self, session_id).await
     }
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+        InMemorySessionStoreFactory::count_unsettled_turns(self).await
+    }
     async fn pending_turn_cancel_closure_pins(
         &self,
         session_id: &crate::SessionId,

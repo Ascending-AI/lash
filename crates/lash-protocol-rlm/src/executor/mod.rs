@@ -1,3 +1,5 @@
+mod cell_run;
+pub(crate) use cell_run::admit_replay_key_grammar;
 mod host_bridge;
 mod snapshot;
 mod state;
@@ -61,7 +63,7 @@ async fn execute_code_unbounded_for_tests(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
 ) -> ExecResponse {
-    execute_code_with_bounds(
+    Box::pin(execute_code_with_bounds(
         state,
         ctx,
         request,
@@ -72,7 +74,7 @@ async fn execute_code_unbounded_for_tests(
         projection_resolver,
         lashlang_execution_trace_config,
         lashlang::ExecutionBounds::unbounded(),
-    )
+    ))
     .await
 }
 
@@ -93,7 +95,7 @@ pub(crate) async fn execute_code_with_bounds(
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
 ) -> ExecResponse {
-    execute_code_with_channel_and_bounds(
+    Box::pin(execute_code_with_channel_and_bounds(
         state,
         ctx,
         request,
@@ -105,7 +107,7 @@ pub(crate) async fn execute_code_with_bounds(
         lashlang_execution_trace_config,
         execution_bounds,
         crate::plugin::RlmChannel::Cell,
-    )
+    ))
     .await
 }
 
@@ -123,7 +125,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
 ) -> ExecResponse {
-    execute_code_with_channel_and_bounds_with_trigger_resolver(
+    Box::pin(execute_code_with_channel_and_bounds_with_trigger_resolver(
         state,
         ctx,
         request,
@@ -136,7 +138,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
         lashlang_execution_trace_config,
         execution_bounds,
         channel,
-    )
+    ))
     .await
 }
 
@@ -157,9 +159,17 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
 ) -> ExecResponse {
     let start = std::time::Instant::now();
     let clean_code = clean_model_code(&request.code);
-    Box::pin(execute_code_inner(
+    // The cell's replay run (FIG-3586): every command it issues is keyed by
+    // its issue ordinal under the cell's own replay key, and the cell seals
+    // its run as its last nested effect once it has an answer.
+    let cell = Arc::new(cell_run::CellRun::open(&ctx));
+    // Boxed: the seal runs under the same context after the cell, and an
+    // unboxed context held across the cell would size every caller's future.
+    let seal_ctx = Box::new(ctx.clone());
+    let response = Box::pin(execute_code_inner(
         state,
         ctx,
+        Arc::clone(&cell),
         &clean_code,
         start,
         artifact_store,
@@ -172,7 +182,17 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
         execution_bounds,
         channel,
     ))
-    .await
+    .await;
+    if let Ok(cell) = cell.as_ref()
+        && !seal_ctx.is_cancelled()
+    {
+        Box::pin(cell.seal(
+            &seal_ctx,
+            &lash_lashlang_runtime::ExecutionCancellation::new(),
+        ))
+        .await;
+    }
+    response
 }
 
 /// Feature-gated fixture that lets the repository's performance harness drive
@@ -288,6 +308,7 @@ fn clean_model_code(code: &str) -> String {
 async fn execute_code_inner(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
+    cell: Arc<Result<cell_run::CellRun, cell_run::LashlangCellOpener>>,
     code: &str,
     start: std::time::Instant,
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
@@ -334,7 +355,10 @@ async fn execute_code_inner(
                 state.deferred_trigger_resolutions = record;
             }
             Err(error) => {
-                ctx.record_nested_runtime_effect_error(error.runtime_effect_error());
+                ctx.record_nested_runtime_effect_error(cell_run::setup_effect_error(
+                    &cell,
+                    error.runtime_effect_error(),
+                ));
                 return exec_setup_failure_or_stop(
                     state,
                     &ctx,
@@ -364,7 +388,10 @@ async fn execute_code_inner(
         {
             Ok(environment) => environment,
             Err(error) => {
-                ctx.record_nested_runtime_effect_error(error.runtime_effect_error());
+                ctx.record_nested_runtime_effect_error(cell_run::setup_effect_error(
+                    &cell,
+                    error.runtime_effect_error(),
+                ));
                 return exec_setup_failure_or_stop(
                     state,
                     &ctx,
@@ -472,6 +499,9 @@ async fn execute_code_inner(
         }
     };
     let linked_module = cached_program.linked_module();
+    if let Ok(cell) = cell.as_ref() {
+        cell.ran_module(linked_module.artifact.module_ref().to_string());
+    }
     if !linked_module.artifact.exports().processes.is_empty()
         && !state
             .stored_lashlang_modules
@@ -548,6 +578,7 @@ async fn execute_code_inner(
     let print_projector = Arc::new(crate::rlm_support::print_history_projector());
     let host = HostBridge::new(HostBridgeConfig {
         ctx: ctx.clone(),
+        cell,
         print_projector,
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         host_environment,

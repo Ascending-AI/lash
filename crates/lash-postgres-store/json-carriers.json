@@ -126,5 +126,9 @@
   "lash_process_definitions.record_json": {
     "verdict": "deliberately-excluded",
     "reason": "ProcessDefinitionRecord is modelled on TriggerSubscriptionRecord: coupled to indexed projection columns (owner scope, revision, fingerprint, lifecycle) and belongs to the same registry-store schema cutover."
+  },
+  "lash_turn_parks.reason_json": {
+    "verdict": "enroll-now",
+    "reason": "TurnParkReason is the typed reason a parked turn is recorded under (FIG-3586); both SQL backends persist its serde form, so its schemars shape participates in the component shape gate."
   }
 }

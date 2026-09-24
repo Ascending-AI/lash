@@ -688,6 +688,50 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         let _ = (group_key, commit_seq);
         Err(super::effect_groups_unsupported("durable drain barrier"))
     }
+
+    /// The recorded-frontier read (FIG-3586): every journal row this
+    /// controller's scope holds inside `range`, compared bytewise.
+    ///
+    /// A replayed language runtime issues it once per run, over its own key
+    /// namespace, before any command leaves: it is how the run knows which
+    /// commands the journal already holds, so that nothing is dispatched live
+    /// while a recorded entry at or beyond the current command still exists.
+    ///
+    /// The default answers from [`effect_journaling`](Self::effect_journaling):
+    /// a controller that journals nothing durably has recorded nothing, so it
+    /// answers an empty set; a durable controller that does not override this
+    /// refuses, because an empty answer from a journal that does hold rows is
+    /// exactly the hole the fence exists to close. Forwarding wrappers forward.
+    async fn read_recorded_journal(
+        &self,
+        range: &super::super::effect_replay_driver::RecordedKeyRange,
+    ) -> Result<RecordedJournal, RuntimeEffectControllerError> {
+        let _ = range;
+        match self.effect_journaling() {
+            EffectJournaling::Local => Ok(RecordedJournal::Keys(
+                super::super::effect_replay_driver::RecordedKeys::default(),
+            )),
+            EffectJournaling::Journaled => Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RecordedJournalReadUnsupported,
+                "this durable effect controller does not answer the recorded-frontier read; a \
+                 replayed language runtime cannot know which of its commands the journal holds",
+            )),
+        }
+    }
+}
+
+/// A controller's answer to
+/// [`read_recorded_journal`](RuntimeEffectController::read_recorded_journal).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RecordedJournal {
+    /// The journal rows the scope holds in the range, readable by key.
+    Keys(super::super::effect_replay_driver::RecordedKeys),
+    /// The host replays its journal by position and checks each entry's name
+    /// as it goes (Restate's journal-mismatch check): a range read has nothing
+    /// to add, because that positional check is already the fence — a command
+    /// issued out of recorded order meets a recorded entry of another name
+    /// before anything is dispatched.
+    Positional,
 }
 
 #[cfg(test)]

@@ -175,8 +175,16 @@ pub fn prepare_process_start(
             record.id, expected_attempt, started.attempt
         )));
     }
+    // A parked process (FIG-3586) re-runs to find out whether the build now
+    // serving it can replay its journal; those runs refuse with nothing
+    // dispatched, so they do not spend its attempt budget.
+    let parked = record
+        .wait
+        .as_ref()
+        .is_some_and(super::model::WaitState::is_parked);
     if let Some(max_attempts) = record.max_attempts
         && started.attempt > max_attempts
+        && !parked
     {
         return Ok(ProcessStartPlan::AttemptsExhausted {
             attempts: started.attempt.saturating_sub(1),

@@ -20,7 +20,11 @@ use super::*;
 /// Version 8 (FIG-3515) answers each tool call with one tool-result part
 /// carrying ordered text and attachment `blocks`; v7 checkpoints holding
 /// text-only results or call-bound attachment parts are refused.
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 8;
+/// Version 9 (FIG-3586) records the replay-key grammar the iteration's
+/// execution-environment sync served (`synced_cell_replay_grammar`); a v8
+/// checkpoint has no stamp, and a cell resumed from it would run under no
+/// grammar.
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 9;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1
@@ -112,6 +116,12 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: TokenUsage,
     pub(super) synced_protocol_iteration: Option<usize>,
+    /// The cell replay-key grammar the synced iteration's execution
+    /// environment named (FIG-3586). Absent in a checkpoint a build without
+    /// the field wrote, which leaves that iteration's cells unrunnable on
+    /// replay — the fail-closed answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) synced_cell_replay_grammar: Option<u32>,
 }
 
 impl<M: TurnProtocol> TurnCheckpoint<M> {
@@ -315,6 +325,10 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: TokenUsage,
     pub(super) synced_protocol_iteration: Option<usize>,
+    /// The cell replay-key grammar the synced iteration's execution
+    /// environment named (FIG-3586); `None` until that sync lands and again
+    /// from the next iteration on.
+    pub(super) synced_cell_replay_grammar: Option<u32>,
     /// Cancellation evidence the host has observed for this turn, recorded
     /// before the machine is told the provider call was cancelled. Lets the
     /// machine name the request that stopped it instead of minting internal

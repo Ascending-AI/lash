@@ -280,6 +280,7 @@ async fn claim_cannot_interleave_between_authority_validation_and_append() {
                 fencing_token: lease.fencing_token,
                 attempt: 1,
                 started_at_ms: 1,
+                replay_grammar: None,
             },
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )

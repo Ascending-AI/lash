@@ -16,6 +16,7 @@ mod native_controller;
 mod process_local;
 
 mod language_runtime;
+pub use language_runtime::RUN_SEAL_OPERATION;
 mod scoped;
 mod task_panic;
 mod trigger;
@@ -25,13 +26,13 @@ pub use await_event_support::await_event_scope_not_retirable;
 pub use control::EffectControllerTaskRequest;
 pub use control::RuntimeEffectControllerHandle;
 pub use control::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, QueuedLaneAcquisition,
-    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
-    ResolveOutcome, RuntimeEffectController, ScopeBoundController, ScopedEffectController,
-    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-    TurnCancelClosureOwnerBinding,
+    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RecordedJournal,
+    RecordedKeyFence, Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
+    ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;

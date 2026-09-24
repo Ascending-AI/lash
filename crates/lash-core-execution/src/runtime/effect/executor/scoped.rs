@@ -52,6 +52,7 @@ impl<'run> ScopedEffectController<'run> {
             ScopedEffectControllerInner::Shared(controller) => Ok(ScopedEffectController {
                 controller: ScopedEffectControllerInner::Shared(controller),
                 admitted: self.admitted,
+                journal_guard: self.journal_guard,
             }),
         }
     }

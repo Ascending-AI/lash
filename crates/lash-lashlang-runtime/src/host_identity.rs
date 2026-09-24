@@ -1,19 +1,18 @@
 //! One derivation of the identities a Lashlang host mints for the work a
-//! program asks it to start: a leaf call, a child of an aggregate, and the
-//! aggregate's own group.
+//! program asks it to start: a call's id, the id of one leaf of an aggregate,
+//! and the key namespace every journal row of the run lives under.
 //!
 //! There are two Lashlang hosts — the RLM cell bridge and the process body
-//! bridge — and they had a `resource_tool_call_id` each. The two spellings had
-//! already drifted: the process host scoped every identity on its process id,
-//! while the cell host scoped on the effect address it ran under *only when a
-//! leaf carried a call site* and fell back to the bare session id otherwise, so
-//! two cells of one session minted the same identity for their first unsited
-//! call. Keeping the rendering in one place is what makes the opener an
-//! argument instead of a property of whichever host happened to build the
-//! string.
+//! bridge — and both mint from here, so the opener is an argument instead of
+//! a property of whichever host happened to build the string.
+//!
+//! Every identity is positional (FIG-3586): a command is named by the issue
+//! ordinal it took when it left the VM, never by the call site that issued
+//! it. The call site's node id and occurrence are trace metadata only.
 
 use lash_core::{EffectOpener, ProcessRef};
-use lashlang::LashlangExecutionCallSite;
+
+use crate::replay_run::LashlangReplayNamespace;
 
 /// The identities one Lashlang host mints.
 ///
@@ -21,11 +20,10 @@ use lashlang::LashlangExecutionCallSite;
 /// lifecycle owner (ADR 0099 §1) — a turn, or one process incarnation — and it
 /// is the shared type, never a second spelling of it. `execution` is the part
 /// of the identity the opener is deliberately too coarse to supply: a turn runs
-/// many cells, and two cells of one turn running the same program would
-/// otherwise mint the same leaf ids, because a leaf id is a node id plus an
-/// occurrence counted per VM execution. A process body has no such
-/// subdivision — it is one execution for its whole life, across every segment —
-/// so it carries none, and a segment must never appear here.
+/// many cells, and two cells of one turn each count their ordinals from zero,
+/// so without the cell's own key they would mint the same ids. A process body
+/// has no such subdivision — it is one run for its whole life, across every
+/// segment — so it carries none, and a segment must never appear here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LashlangHostIdentities {
     opener: EffectOpener,
@@ -77,52 +75,38 @@ impl LashlangHostIdentities {
         }
     }
 
-    /// The identity of one call the program made on its own.
+    /// The key namespace every journal row of this run lives under.
     ///
-    /// The call site is required, not preferred. Every production compile
-    /// entrypoint for both bridges enables execution-site tracking, and
-    /// `lashlang_execution_paths` walks `program.main` through the total
-    /// `Expr::children()` walk, so a tool leaf without a site does not exist:
-    /// a caller that cannot supply one has a defect upstream, and both bridges
-    /// refuse it with `LashlangHostError::OperationCallSiteMissing` rather than
-    /// inventing a position. A fallback here would be a second identity
-    /// grammar for a case that cannot arise, and the one that existed — the
-    /// leaf's position inside its batch — could not tell two identical
-    /// aggregates apart.
-    pub fn leaf(&self, host_operation: &str, call_site: &LashlangExecutionCallSite) -> String {
-        let node_id = &call_site.site.node_id;
-        format!(
-            "lashlang:{}:resource:{}:{}:{}:{}:{}",
-            self.scope(),
-            host_operation.len(),
-            host_operation,
-            node_id.len(),
-            node_id,
-            call_site.occurrence,
-        )
+    /// A cell's rows sit under its own replay key, beside the rest of its
+    /// turn's journal; a process body's under its opener scope.
+    pub fn namespace(&self) -> LashlangReplayNamespace {
+        match &self.execution {
+            Some(execution) => LashlangReplayNamespace::cell(execution),
+            None => LashlangReplayNamespace::process(&self.scope()),
+        }
+    }
+
+    /// The id of the call the program issued at `ordinal`: the tool call's
+    /// id, and the reply id of an awaited handle.
+    ///
+    /// The subagent spawn tool builds a child `ProcessId` out of this id
+    /// verbatim (`process:subagent:{call_id}`), so it is what keeps a redriven
+    /// spawn from starting a second child: it moves only when the command's
+    /// position in the run moves.
+    pub fn call_id(&self, ordinal: u64) -> String {
+        format!("lashlang:v2:{}:{ordinal:010}", self.scope())
+    }
+
+    /// The id of the leaf at `leaf_index` — its first-appearance index in the
+    /// aggregate as written, not the order it settled in — of the aggregate
+    /// the program issued at `ordinal`.
+    pub fn child_call_id(&self, ordinal: u64, leaf_index: usize) -> String {
+        format!("{}:child:{leaf_index}", self.call_id(ordinal))
     }
 
     /// The replay key of the run's one durable effect-omission record.
     pub fn effect_omissions(&self) -> String {
         format!("lashlang:{}:effect_omissions", self.scope())
-    }
-
-    /// The identity of one leaf of an aggregate, at `leaf_index` of the batch
-    /// the program wrote.
-    ///
-    /// The index is the leaf's position in the aggregate as written, not the
-    /// order it settled in: it has to be the same on a replay that settles the
-    /// leaves in another order.
-    pub fn child(
-        &self,
-        host_operation: &str,
-        call_site: &LashlangExecutionCallSite,
-        leaf_index: usize,
-    ) -> String {
-        format!(
-            "{}:child:{leaf_index}",
-            self.leaf(host_operation, call_site)
-        )
     }
 }
 
@@ -132,25 +116,6 @@ mod tests {
     use lash_core::{
         AdmittedScope, AdmittedScopeError, ExecutionScope, ProcessId, ProcessIncarnation, SessionId,
     };
-    use lashlang::{LashlangExecutionSite, WorkflowExecutionSite};
-
-    fn call_site(node_id: &str, occurrence: u64) -> LashlangExecutionCallSite {
-        LashlangExecutionCallSite {
-            site: LashlangExecutionSite {
-                node_id: node_id.to_string(),
-                node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
-                label: "call".to_string(),
-                branch: None,
-                workflow_site: WorkflowExecutionSite::new(
-                    "main",
-                    [0u32],
-                    lash_sansio::ExecutionNodeKind::ResourceOperation,
-                    "call",
-                ),
-            },
-            occurrence,
-        }
-    }
 
     fn process_opener(name: &str, incarnation: u64) -> LashlangHostIdentities {
         LashlangHostIdentities::process_body(ProcessRef::new(
@@ -194,7 +159,6 @@ mod tests {
     /// a worker retry of the same incarnation mints the same ones.
     #[test]
     fn two_incarnations_of_one_process_backed_cell_mint_distinct_identities() {
-        let site = call_site("resource_operation:aaaa", 1);
         let identities = |incarnation| {
             LashlangHostIdentities::cell(
                 EffectOpener::for_scope(&AdmittedScope::process(process_ref(
@@ -207,13 +171,13 @@ mod tests {
         };
 
         assert_ne!(
-            identities(1).leaf("tool:task.fail", &site),
-            identities(2).leaf("tool:task.fail", &site),
+            identities(1).call_id(0),
+            identities(2).call_id(0),
             "a re-registered process is a different opener (ADR 0099 §1)"
         );
         assert_eq!(
-            identities(1).leaf("tool:task.fail", &site),
-            identities(1).leaf("tool:task.fail", &site),
+            identities(1).call_id(0),
+            identities(1).call_id(0),
             "a worker retry keeps the incarnation, so it re-derives the same identity"
         );
     }
@@ -267,24 +231,21 @@ mod tests {
     /// same name.
     #[test]
     fn a_re_registered_process_name_is_a_different_opener() {
-        let site = call_site("resource_operation:aaaa", 1);
         let first = process_opener("worker", 1);
         let second = process_opener("worker", 2);
 
         assert_ne!(
-            first.leaf("tool:send", &site),
-            second.leaf("tool:send", &site),
+            first.call_id(0),
+            second.call_id(0),
             "two incarnations of one process name must not share a leaf identity"
         );
         assert_ne!(
-            first.child("tool:send", &site, 0),
-            second.child("tool:send", &site, 0),
+            first.child_call_id(0, 0),
+            second.child_call_id(0, 0),
             "two incarnations of one process name must not share a child identity"
         );
         assert!(
-            first
-                .leaf("tool:send", &site)
-                .contains("process:6:worker:incarnation:1"),
+            first.call_id(0).contains("process:6:worker:incarnation:1"),
             "the incarnation is bound, not merely mixed in"
         );
     }
@@ -297,7 +258,7 @@ mod tests {
     /// makes the child unregistrable rather than merely ugly.
     #[test]
     fn a_minted_identity_carries_no_reserved_separator() {
-        let minted = process_opener("worker", 1).leaf("tool:send", &call_site("node:aaaa", 1));
+        let minted = process_opener("worker", 1).call_id(0);
         assert!(!minted.contains('#'), "{minted}");
         assert!(!minted.contains('/'), "{minted}");
     }
@@ -306,15 +267,14 @@ mod tests {
     /// openers, so no identity is reachable from both.
     #[test]
     fn a_turn_and_a_process_never_share_an_identity() {
-        let site = call_site("resource_operation:aaaa", 1);
         let turn = LashlangHostIdentities::cell(
             EffectOpener::turn("process:worker:incarnation:1", "t"),
             "exec-code:1",
         );
 
         assert_ne!(
-            turn.leaf("tool:send", &site),
-            process_opener("worker", 1).leaf("tool:send", &site),
+            turn.call_id(0),
+            process_opener("worker", 1).call_id(0),
             "a turn whose ids spell a process opener must still not collide with it"
         );
     }
@@ -329,7 +289,6 @@ mod tests {
     /// execution key the two mint one identity.
     #[test]
     fn two_cells_of_one_turn_running_one_program_mint_distinct_identities() {
-        let site = call_site("resource_operation:aaaa", 1);
         let opener = EffectOpener::turn("session-1", "turn-7");
         let first = LashlangHostIdentities::cell(opener.clone(), "exec-code:1");
         let second = LashlangHostIdentities::cell(opener.clone(), "exec-code:2");
@@ -340,13 +299,13 @@ mod tests {
             "both cells belong to one opener; that is the point"
         );
         assert_ne!(
-            first.leaf("tool:send", &site),
-            second.leaf("tool:send", &site),
+            first.call_id(0),
+            second.call_id(0),
             "two cells of one turn must not mint one leaf identity"
         );
         assert_ne!(
-            first.child("tool:send", &site, 0),
-            second.child("tool:send", &site, 0),
+            first.child_call_id(0, 0),
+            second.child_call_id(0, 0),
             "two cells of one turn must not mint one child identity"
         );
     }
@@ -371,8 +330,6 @@ mod tests {
         )
         .expect("a queued-work drain is an opener");
         assert_eq!(opener, EffectOpener::queue_drain("session-1", "drain-3"));
-
-        let site = call_site("resource_operation:aaaa", 1);
         let first = LashlangHostIdentities::cell(opener.clone(), "exec-code:1");
         let second = LashlangHostIdentities::cell(opener.clone(), "exec-code:2");
 
@@ -382,13 +339,13 @@ mod tests {
             "both cells belong to one drain; that is the point"
         );
         assert_ne!(
-            first.leaf("tool:send", &site),
-            second.leaf("tool:send", &site),
+            first.call_id(0),
+            second.call_id(0),
             "two cells of one drain must not mint one leaf identity"
         );
         assert_ne!(
-            first.child("tool:send", &site, 0),
-            second.child("tool:send", &site, 0),
+            first.child_call_id(0, 0),
+            second.child_call_id(0, 0),
             "two cells of one drain must not mint one child identity"
         );
         assert_ne!(
@@ -414,7 +371,6 @@ mod tests {
     /// length-prefixed encoding.
     #[test]
     fn delimiter_bearing_turn_components_mint_distinct_identities() {
-        let site = call_site("resource_operation:aaaa", 1);
         let split_early =
             LashlangHostIdentities::cell(EffectOpener::turn("a:b", "c"), "exec-code:1");
         let split_late =
@@ -426,13 +382,13 @@ mod tests {
             "the diagnostic rendering may stay ambiguous; the identity must not"
         );
         assert_ne!(
-            split_early.leaf("tool:send", &site),
-            split_late.leaf("tool:send", &site),
+            split_early.call_id(0),
+            split_late.call_id(0),
             "two splits of `a:b:c` are different openers and must mint different leaves"
         );
         assert_ne!(
-            split_early.child("tool:send", &site, 0),
-            split_late.child("tool:send", &site, 0),
+            split_early.child_call_id(0, 0),
+            split_late.child_call_id(0, 0),
             "two splits of `a:b:c` are different openers and must mint different children"
         );
     }
@@ -441,20 +397,19 @@ mod tests {
     /// `QueueDrain("a", "b:c")` both rendered `drain:a:b:c`.
     #[test]
     fn delimiter_bearing_drain_components_mint_distinct_identities() {
-        let site = call_site("resource_operation:aaaa", 1);
         let split_early =
             LashlangHostIdentities::cell(EffectOpener::queue_drain("a:b", "c"), "exec-code:1");
         let split_late =
             LashlangHostIdentities::cell(EffectOpener::queue_drain("a", "b:c"), "exec-code:1");
 
         assert_ne!(
-            split_early.leaf("tool:send", &site),
-            split_late.leaf("tool:send", &site),
+            split_early.call_id(0),
+            split_late.call_id(0),
             "two splits of `a:b:c` are different drains and must mint different leaves"
         );
         assert_ne!(
-            split_early.child("tool:send", &site, 0),
-            split_late.child("tool:send", &site, 0),
+            split_early.child_call_id(0, 0),
+            split_late.child_call_id(0, 0),
             "two splits of `a:b:c` are different drains and must mint different children"
         );
     }
@@ -478,9 +433,7 @@ mod tests {
             Some(spawned_session),
             "the session id round-trips through the typed opener untouched"
         );
-
-        let site = call_site("resource_operation:aaaa", 1);
-        let leaf = LashlangHostIdentities::cell(opener, "exec-code:1").leaf("tool:send", &site);
+        let leaf = LashlangHostIdentities::cell(opener, "exec-code:1").call_id(0);
         assert!(
             leaf.contains("38:session:subagent:lashlang:turn:1:x:1:y"),
             "the canonical encoding length-prefixes the session id, keeping its `:` bytes inside one component: {leaf}"
@@ -491,7 +444,7 @@ mod tests {
                 EffectOpener::turn("session:subagent:lashlang:turn:1:x:1", "y:turn-1"),
                 "exec-code:1",
             )
-            .leaf("tool:send", &site),
+            .call_id(0),
             "the same bytes split across the session/turn boundary are a different opener"
         );
     }
@@ -506,10 +459,9 @@ mod tests {
     /// never `#`, which is refused inside a process id.
     #[test]
     fn a_call_id_nested_two_process_ids_deep_is_admitted() {
-        let site = call_site("resource_operation:aaaa", 1);
         let parent_leaf =
             LashlangHostIdentities::cell(EffectOpener::turn("session-1", "turn-7"), "exec-code:1")
-                .leaf("tool:spawn_agent", &site);
+                .call_id(0);
 
         let child_process_id = ProcessId::from(format!("process:subagent:{parent_leaf}"));
         assert_eq!(
@@ -523,8 +475,7 @@ mod tests {
             4,
         )))
         .expect("the spawned child process is an opener");
-        let grandchild_leaf = LashlangHostIdentities::cell(child_opener, "exec-code:1")
-            .leaf("tool:spawn_agent", &site);
+        let grandchild_leaf = LashlangHostIdentities::cell(child_opener, "exec-code:1").call_id(0);
         let grandchild_process_id = ProcessId::from(format!("process:subagent:{grandchild_leaf}"));
 
         assert_eq!(
@@ -537,29 +488,46 @@ mod tests {
         );
     }
 
-    /// Two reaches of one aggregate are separated by the site occurrence the
-    /// VM counted, and the leaves of one reach by their position in it.
+    /// Two aggregates are separated by the ordinals they were issued at, and
+    /// the leaves of one aggregate by their first-appearance index in it.
     #[test]
-    fn one_aggregate_reached_twice_mints_four_child_identities() {
+    fn two_aggregates_mint_four_child_identities() {
         let identities = process_opener("worker", 1);
-        let minted = [1u64, 2]
+        let minted = [3u64, 4]
             .into_iter()
-            .flat_map(|occurrence| {
+            .flat_map(|ordinal| {
                 let identities = &identities;
-                [0usize, 1].into_iter().map(move |leaf_index| {
-                    identities.child(
-                        "tool:send",
-                        &call_site("resource_operation:aaaa", occurrence),
-                        leaf_index,
-                    )
-                })
+                [0usize, 1]
+                    .into_iter()
+                    .map(move |leaf_index| identities.child_call_id(ordinal, leaf_index))
             })
             .collect::<std::collections::BTreeSet<_>>();
 
         assert_eq!(
             minted.len(),
             4,
-            "two leaves of two aggregate occurrences are four identities"
+            "two leaves of two aggregates are four identities"
         );
+    }
+
+    /// No compiler output reaches an identity: the id of a command is a
+    /// function of the opener, the cell, and the command's issue ordinal
+    /// alone, and the namespace of a run is a function of its cell key.
+    #[test]
+    fn an_identity_is_the_issue_ordinal_under_the_run_scope() {
+        let cell =
+            LashlangHostIdentities::cell(EffectOpener::turn("session-1", "turn-7"), "exec-code:1");
+        assert_ne!(cell.call_id(0), cell.call_id(1));
+        assert!(
+            cell.call_id(7).ends_with(":0000000007"),
+            "{}",
+            cell.call_id(7)
+        );
+        assert!(cell.call_id(7).starts_with("lashlang:v2:"));
+        assert_eq!(
+            cell.namespace().command(7).as_str(),
+            "exec-code:1:lk2:0000000007"
+        );
+        assert_eq!(cell.namespace().seal(), "exec-code:1:lk2:~seal");
     }
 }

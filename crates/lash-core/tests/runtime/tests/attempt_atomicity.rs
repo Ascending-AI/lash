@@ -283,6 +283,7 @@ async fn fixtures() -> Fixtures {
                 fencing_token: lease.fencing_token,
                 attempt: 1,
                 started_at_ms: 1,
+                replay_grammar: None,
             },
             &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
         )

@@ -738,6 +738,14 @@ impl TurnInputStore for Store {
                             outcome,
                         });
                     }
+                    tx.execute(
+                        crate::turn_ingress::turn_ingress_sql()
+                            .family
+                            .delete_released_turn_park
+                            .sql(),
+                        params![session_id.as_str()],
+                    )
+                    .map_err(sqlite_error)?;
                     Ok(results)
                 })();
                 match outcome {
@@ -797,6 +805,14 @@ impl TurnInputStore for Store {
                                 tx, row, now, &covered,
                             )?);
                         }
+                        tx.execute(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .family
+                                .delete_released_turn_park
+                                .sql(),
+                            params![session_id.as_str()],
+                        )
+                        .map_err(sqlite_error)?;
                         Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes {
                             anchor,
                             outcomes,

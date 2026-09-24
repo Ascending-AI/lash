@@ -333,7 +333,20 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// against a foreign group under the same scope — an operator's, or one a
     /// queue drain's end owns.
     fn own_group_prefix(&self) -> String {
+        self.own_group_key_prefix()
+    }
+
+    /// The prefix every group key this opener forms carries: `{scope}:group:`.
+    pub(crate) fn own_group_key_prefix(&self) -> String {
         format!("{}:group:", self.execution_scope_id())
+    }
+
+    /// The key of the group a language command forms (FIG-3586): the opener's
+    /// group prefix, then the command's own positional key. Under the prefix,
+    /// so the opener's end finishes it like any group it formed; and scoped,
+    /// so two openers' commands never share a group row.
+    pub(crate) fn command_group_key(&self, command: &crate::CommandReplayKey) -> String {
+        format!("{}{command}", self.own_group_key_prefix())
     }
 
     /// Reserve `children` units of this opener's retained work for

@@ -343,6 +343,7 @@ pub mod facade_support {
     pub use crate::runtime::effect_replay_driver;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
+    pub use crate::runtime::process_signal_wait_key;
     pub use crate::runtime::process_wake_delivery;
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::promise_semantics;
@@ -351,7 +352,6 @@ pub mod facade_support {
     pub use crate::runtime::registry_transitions;
     pub use crate::runtime::release_process_execution_permit_while;
     pub use crate::runtime::turn_control_binding_id_for_scope;
-    pub use crate::runtime::{process_signal_await_key, process_signal_wait_key};
     pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::turn_input_vocabulary::facade_ops::TurnContextFacadeOps;
@@ -751,14 +751,14 @@ pub use runtime::{
     AcceptedTurnInputRefusal, AdmittedProcessIdentity, AdmittedScope, AdmittedScopeError,
     ArtifactOwner, AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver,
     AwaitEventWaitIdentity, BoundaryReason, CausalRef, ChargeSafetyRefusalEvidence,
-    CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime, CompletionKeyPreparation,
-    DeclaredProcessIdentity, DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild,
-    EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalRetirement, EffectJournaling, EffectOpener, EffectOpenerError,
-    EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
-    GroupChildBinding, GroupDrainReport, GroupExecutors, GroupFinalizationReport,
-    GroupOnlyFinalization, GroupSettlement, GroupWakePolicy, HandleId,
-    InMemoryProcessExecutionEnvStore, InputItem, LedgerUsageDisposition, LlmRequestSpec,
+    CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime, CommandJournalGuard,
+    CommandReplayKey, CompletionKeyPreparation, DeclaredProcessIdentity, DeliveryPolicy, DrainMode,
+    DrainModePolicy, DrainedChild, EffectAddress, EffectGroupDrainBudget, EffectGroupHandle,
+    EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectJournaling, EffectOpener,
+    EffectOpenerError, EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt,
+    ForkSessionRequest, GroupChildBinding, GroupDrainReport, GroupExecutors,
+    GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement, GroupWakePolicy,
+    HandleId, InMemoryProcessExecutionEnvStore, InputItem, LedgerUsageDisposition, LlmRequestSpec,
     LoserPolicy, NativeProcessWork, NativeSubstrateConfig, NativeSubstrateConfigError,
     NoQueuedWork, OnParentEnd, OpenerFinalizationSteps, PARENT_SCOPE_STORAGE_PAYLOAD_VERSION,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, ParentScope,
@@ -797,33 +797,33 @@ pub use runtime::{
     ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
     QueuedDrainSelection, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
     QueuedLaneHolder, QueuedLaneProbe, QueuedWorkAuthority, QueuedWorkBatchingConfig,
-    QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkSubstrate, RecoveryContract, Resolution,
-    ResolveOutcome, RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
-    RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeSessionState, ScopeBoundController, ScopedEffectController, SegmentHandover,
-    SegmentProgress, SessionDrainOutcome, SessionId, SessionListFilter, SessionRelationKind,
-    SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
-    SessionWorkTarget, SleepSpec, StoreEffectGroupClosing, StoreEffectGroupDrain, StoreRealization,
-    TokenLedgerEntry, ToolAttemptLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
-    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
-    TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
-    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
-    TurnCancelOriginHint, TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext,
-    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, TurnEvent, TurnFailureCause, TurnFailureEvidence,
-    TurnFailurePartialOutput, TurnFailureSettlement, TurnInput, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
-    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
-    TurnInputState, UnreportedLedgerAttempt, UnsettledEffectGroup, UsageDispositionError, WaitKind,
-    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy, effect_groups_unsupported,
-    ensure_process_lease_schema_version,
+    QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkSubstrate, RecordedJournal, RecordedKeyFence,
+    RecordedKeyRange, RecordedKeys, RecoveryContract, Resolution, ResolveOutcome,
+    RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
+    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
+    ScopeBoundController, ScopedEffectController, SegmentHandover, SegmentProgress,
+    SessionDrainOutcome, SessionId, SessionListFilter, SessionRelationKind, SessionScope,
+    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget, SleepSpec,
+    StoreEffectGroupClosing, StoreEffectGroupDrain, StoreRealization, TokenLedgerEntry,
+    ToolAttemptLaunch, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
+    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
+    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint,
+    TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
+    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
+    TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
+    TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
+    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
+    TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
+    UnreportedLedgerAttempt, UnsettledEffectGroup, UsageDispositionError, WaitKind, WaitState,
+    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
+    WorkerSweepPolicy, effect_groups_unsupported, ensure_process_lease_schema_version,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

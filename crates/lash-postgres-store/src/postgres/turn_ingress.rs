@@ -16,7 +16,7 @@ use lash_store_sql::turn_ingress::{
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
     retired_scopes::RetiredScopeStatements,
     session_execution_leases::SessionExecutionLeaseStatements,
-    tool_intent_submissions::ToolIntentSubmissionStatements,
+    tool_intent_submissions::ToolIntentSubmissionStatements, turn_parks::TurnParkStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -119,6 +119,8 @@ pub(crate) struct TurnIngressSql {
     /// `turn_cancel_closure_participants`, shared.
     pub(crate) closure_participants: ClosureParticipantStatements,
     /// `turn_cancel_retired_scopes`, shared.
+    /// `turn_parks`, shared.
+    pub(crate) turn_parks: TurnParkStatements,
     pub(crate) retired_scopes: RetiredScopeStatements,
     /// `turn_cancel_retired_scopes`, PostgreSQL only.
     pub(crate) retired_scopes_postgres: RetiredScopePostgresStatements,
@@ -150,6 +152,7 @@ static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
         closures: ClosureAuthorizationStatements::render(dialect),
         closures_postgres: ClosureAuthorizationPostgresStatements::render(dialect),
         closure_participants: ClosureParticipantStatements::render(dialect),
+        turn_parks: TurnParkStatements::render(dialect),
         retired_scopes: RetiredScopeStatements::render(dialect),
         retired_scopes_postgres: RetiredScopePostgresStatements::render(dialect),
         tool_intents: ToolIntentSubmissionStatements::render(dialect),

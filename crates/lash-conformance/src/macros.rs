@@ -260,6 +260,7 @@ macro_rules! runtime_persistence_tests {
             (pending_turn_input_claims_reclaim_complete_and_fence, "root"),
             (bound_turn_input_claim_is_excluded_until_its_turn_retakes_it, "turn-bound-claims"),
             (bound_claim_skips_a_pending_queued_runs_inputs, "turn-bound-queued-run"),
+            (turn_park_lives_while_its_turn_holds_work, "turn-parks"),
             (turn_input_application_identity_survives_pending_tombstone_vacuum, "turn-input-application"),
             (active_turn_input_claim_reacquires_after_unrecorded_checkpoint, "fig905-active-reacquire"),
             (pending_turn_input_cancel_covers_active_and_deferred_states, "root"),

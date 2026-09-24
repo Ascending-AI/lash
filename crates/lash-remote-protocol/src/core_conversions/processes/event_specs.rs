@@ -224,12 +224,14 @@ impl TryFrom<lash_core::ProcessStarted> for RemoteProcessStarted {
             fencing_token,
             attempt,
             started_at_ms,
+            replay_grammar,
         } = value;
         Ok(Self {
             owner: owner.into(),
             fencing_token,
             attempt,
             started_at_ms,
+            replay_grammar,
         })
     }
 }
@@ -243,12 +245,14 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
             fencing_token,
             attempt,
             started_at_ms,
+            replay_grammar,
         } = value;
         Ok(Self {
             owner: owner.into(),
             fencing_token,
             attempt,
             started_at_ms,
+            replay_grammar,
         })
     }
 }
