@@ -445,6 +445,17 @@ lash_conformance::effect_group_host_tests!(
     }
 );
 
+// The session-config settlement laws on the Restate backend: its engine host
+// over one SQLite memory store set per law.
+lash_conformance::session_config_settlement_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+        let make = harness.backend_factory();
+        (harness, make)
+    }
+);
+
 lash_conformance::effect_group_cancelled_child_terminal_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
