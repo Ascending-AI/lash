@@ -137,6 +137,7 @@ mod required_constraints;
 mod schema;
 mod schema_fragments;
 mod scope_fence;
+mod session_ingress;
 mod session_meta;
 mod session_sql;
 #[cfg(test)]

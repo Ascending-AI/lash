@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod wire;
+use wire::CanonicalHeapObject;
 pub(crate) use wire::child_location;
 
 mod durable;
@@ -43,7 +44,11 @@ pub use canonical_messagepack::{
 /// absent and an explicitly empty message stays empty, where v9 encoded both
 /// as `""`. A v9 wire would decode but resurrect `new Error('')` with no own
 /// `message`; the bump refuses it instead (FIG-3657).
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 10;
+// v11 writes a closure's ECMA `name`/`length` own-property slots. A v10 wire's
+// closures would decode under the old shape, but restoring them would silently
+// drop the properties — an empty answer where the live run reported one — so
+// the bump is what refuses the older bytes.
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 11;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 /// The longest summary [`State::opaque_bindings`] renders, in characters.
 pub const BINDING_SUMMARY_MAX_CHARS: usize = super::heap::SUMMARY_MAX_CHARS;
@@ -562,57 +567,6 @@ struct CanonicalHeapEntry {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum CanonicalHeapObject {
-    Tuple {
-        items: Vec<CanonicalValue>,
-    },
-    List {
-        items: Vec<CanonicalValue>,
-    },
-    Record {
-        fields: Vec<CanonicalBinding>,
-    },
-    Closure {
-        function: u32,
-        captures: Vec<CanonicalValue>,
-    },
-    RegExp {
-        pattern: String,
-        flags: String,
-        last_index: u64,
-    },
-    RegExpMatch {
-        items: Vec<CanonicalValue>,
-        index: CanonicalValue,
-        input: CanonicalValue,
-        groups: CanonicalValue,
-    },
-    Map {
-        entries: Vec<CanonicalMapEntry>,
-    },
-    Set {
-        values: Vec<CanonicalValue>,
-    },
-    Date {
-        milliseconds: f64,
-    },
-    Error {
-        error_kind: ErrorKind,
-        message: Option<String>,
-        cause: Option<CanonicalValue>,
-        errors: Option<CanonicalValue>,
-    },
-    Url {
-        href: String,
-        search_params: CanonicalValue,
-    },
-    UrlSearchParams {
-        entries: Vec<CanonicalUrlSearchParamsEntry>,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 struct CanonicalMapEntry {
     key: CanonicalValue,
     value: CanonicalValue,
@@ -988,6 +942,8 @@ const TAGGED_VALUE_FIELDS: &[&str] = &[
     "fields",
     "function",
     "captures",
+    "name",
+    "length",
     "pattern",
     "flags",
     "last_index",

@@ -44,6 +44,7 @@ pub use super::session_delete_blob_reclaim::*;
 pub use super::session_execution_lease_renewal::*;
 pub use super::session_graph_append::*;
 pub use super::session_graph_state_machine::*;
+pub use super::session_ingress::*;
 pub use super::session_store_factory::*;
 pub use super::session_store_factory_failure_evidence::*;
 pub use super::store_contract_state_machine::*;

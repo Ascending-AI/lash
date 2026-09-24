@@ -545,13 +545,19 @@ impl PluginSession {
         &self,
         session_id: &SessionId,
         response: crate::llm::types::LlmResponse,
+        stream_hook_states: &[crate::runtime::AssistantStreamHookState],
     ) -> Result<Vec<PluginOwned<AssistantResponseTransform>>, PluginError> {
         let mut current = response;
         let mut transforms = Vec::new();
         for registered in &self.contributions.assistant_response_hooks {
+            let stream_state = stream_hook_states
+                .iter()
+                .find(|recorded| recorded.plugin_id == registered.plugin_id)
+                .map(|recorded| recorded.state.clone());
             let transform = (registered.hook)(AssistantResponseHookContext {
                 session_id: SessionId::from(session_id.to_string()),
                 response: current.clone(),
+                stream_state,
             })
             .await?;
             current = transform.response.clone();
@@ -563,19 +569,28 @@ impl PluginSession {
         Ok(transforms)
     }
 
+    /// Runs every stream-finished hook and collects the end states they
+    /// returned, attributed to their plugins in registration order.
     pub async fn finish_assistant_stream(
         &self,
         session_id: &SessionId,
         reason: AssistantStreamFinishReason,
-    ) -> Result<(), PluginError> {
+    ) -> Result<Vec<crate::runtime::AssistantStreamHookState>, PluginError> {
+        let mut states = Vec::new();
         for registered in &self.contributions.assistant_stream_finished_hooks {
-            (registered.hook)(AssistantStreamFinishedContext {
+            let state = (registered.hook)(AssistantStreamFinishedContext {
                 session_id: SessionId::from(session_id.to_string()),
                 reason,
             })
             .await?;
+            if let Some(state) = state {
+                states.push(crate::runtime::AssistantStreamHookState {
+                    plugin_id: registered.plugin_id.to_string(),
+                    state,
+                });
+            }
         }
-        Ok(())
+        Ok(states)
     }
 
     /// The presentation boundary (ADR 0099 §6, FIG-3420): folds every

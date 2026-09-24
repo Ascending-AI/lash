@@ -15,6 +15,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             target: AssignTarget::variable("f".into()),
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
+                js_name: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),
@@ -28,6 +29,11 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             .allocate(HeapObject::Closure {
                 function: 0,
                 captures,
+                // The `name`/`length` own-property slots ride the wire, so a
+                // restored closure answers `f.name`/`f.length` as the live one
+                // did — including after a `delete` cleared a slot to `None`.
+                name: Some(Value::String("f".into())),
+                length: Some(Value::Number(2.0)),
             })
             .expect("allocate malformed snapshot closure");
         let mut runtime_globals = Record::new();
@@ -61,6 +67,8 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
         .allocate(HeapObject::Closure {
             function: 99,
             captures: Vec::new(),
+            name: None,
+            length: None,
         })
         .expect("allocate unknown snapshot closure");
     let mut runtime_globals = Record::new();
@@ -467,9 +475,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x15, 0xe5, 0x72, 0xf1, 0x73, 0x55, 0x3c, 0x46, 0x71, 0x9d, 0x76, 0x92, 0x5d, 0xa2,
-            0x2b, 0x9b, 0x69, 0x89, 0x3f, 0xb3, 0x9b, 0x5f, 0x0d, 0x30, 0xd0, 0x8f, 0xe2, 0x18,
-            0x46, 0x64, 0xc5, 0x3b,
+            0xaa, 0x1d, 0x8f, 0x15, 0xae, 0x61, 0x4e, 0x71, 0x20, 0x1a, 0x5e, 0x8f, 0xfe, 0x0f,
+            0x85, 0xb4, 0xc7, 0x3c, 0xb4, 0x92, 0x43, 0x47, 0x73, 0x98, 0x17, 0x3b, 0x3b, 0xa4,
+            0x5d, 0x12, 0x6f, 0xfe,
         ]
     );
 }
@@ -659,7 +667,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e0aa7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e0ba7676c6f62616c7390");
 }
 
 #[test]
@@ -1534,6 +1542,7 @@ fn a_restored_real_closure_does_not_reject_a_different_program() {
             target: AssignTarget::variable("f".into()),
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
+                js_name: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),

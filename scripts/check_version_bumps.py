@@ -727,9 +727,14 @@ IDENTIFIER_RENAME_BASELINES = {
     # `CompactString` alias with a serde-transparent local wrapper. The
     # wrapper's byte-agreement test pins the same strings, so the continuation
     # remains byte-identical at version 16. Any further drift re-fails.
+    #
+    # FIG-3662 (live) supersedes again after `CyclicHostValue` gained a
+    # `TS_CYCLIC_VALUE_UNSUPPORTED` prefix in its `#[error]` Display text.
+    # Serde serializes the variant fields (`id`), not the rendered message, so
+    # the continuation bytes are identical and the version stays 22.
     "crates/lashlang/src/runtime/vm/continuation.rs:"
     "VM_CONTINUATION_FORMAT_VERSION": (
-        "sha256:b07d96a2f2c5cd041c93ffcf833d693803119fcc0af6bc89e9e013bfef330f75"
+        "sha256:e5c3cbcdf1a9a83db44f6f55b60e4629fc1bbbd6bc7ed40895e2f1e19e493b98"
     ),
     # FIG-2992: a process identity's `definition` became the typed
     # `ProcessDefinitionRef` instead of a bare `serde_json::Value`. Both trigger

@@ -59,13 +59,15 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// component without moving them, so they are never discovered stale by a live
 /// run.
 const MIGRATION_FLOOR_VERSION: i32 = 101;
-/// The table component 101 lacks: the cancellation affected-input child table
-/// component 102 installed (FIG-3263).
-const POST_FLOOR_TABLES: [&str; 4] = [
+/// The tables component 101 lacks: the cancellation affected-input child table
+/// component 102 installed (FIG-3263), the queued-run tables, the effect-group
+/// child table, and the session ingress component 127 installs (FIG-3540).
+const POST_FLOOR_TABLES: [&str; 5] = [
     "lash_queued_run_members",
     "lash_queued_runs",
     "lash_turn_cancel_affected_inputs",
     "lash_runtime_effect_group_child",
+    "lash_session_ingress",
 ];
 /// The post-floor indexes the fixture must drop by name: the child table's own
 /// guards drop with it, and component 102 added no index over a table the floor
@@ -79,7 +81,7 @@ const POST_FLOOR_INDEXES: [&str; 1] = ["uq_lash_runtime_effect_replay_commit_seq
 /// arbitration state component 110 installs (FIG-3409): the commit-order
 /// counter and lifecycle on the group, the renamed arity expectation, and the
 /// commit protocol columns on the replay row.
-const POST_FLOOR_COLUMNS: [(&str, &str); 14] = [
+const POST_FLOOR_COLUMNS: [(&str, &str); 16] = [
     ("lash_pending_turn_inputs", "submitted_ingress_json"),
     ("lash_pending_turn_inputs", "claim_bound_turn_id"),
     ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
@@ -94,6 +96,8 @@ const POST_FLOOR_COLUMNS: [(&str, &str); 14] = [
     ("lash_runtime_effect_replay", "commit_seq"),
     ("lash_runtime_effect_replay", "drain_input"),
     ("lash_process_segment_handovers", "started_json"),
+    ("lash_session_meta", "drive_epoch"),
+    ("lash_session_meta", "drive_admission_id"),
 ];
 /// The named constraints absent from component 101 on tables that survive the
 /// table drops — component 114's effect-replay additions (FIG-1947), which sit
@@ -131,9 +135,9 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// the *current* catalog, so these are exactly the artifacts its refusal must
 /// enumerate.
 ///
-/// The retained 123 -> 124 generation (FIG-3587) introduced no relation or
-/// constraint the refusal would name. Component 125 is destructive: no
-/// 124 → 125 arm exists, so the component-124 stamp over the current catalog
+/// The retained 125 -> 126 generation introduced no relation or constraint
+/// the refusal would name. Component 127 (FIG-3540) is destructive: no
+/// 126 → 127 arm exists, so the component-126 stamp over the current catalog
 /// is refused for having no applicable migration and names no artifacts.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A destructive generation has no migration arm, so a predecessor stamp over

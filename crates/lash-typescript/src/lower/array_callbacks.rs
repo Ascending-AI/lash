@@ -84,6 +84,7 @@ impl Lowerer {
                 &worker,
                 LashExpr::Function(Box::new(FunctionExpr {
                     name: None,
+                    js_name: None,
                     params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                     captures: vec![
                         receiver.as_str().into(),
@@ -207,6 +208,7 @@ impl Lowerer {
                 &worker,
                 LashExpr::Function(Box::new(FunctionExpr {
                     name: None,
+                    js_name: None,
                     params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                     captures: vec![
                         source_name.as_str().into(),
@@ -297,6 +299,7 @@ impl Lowerer {
             &worker,
             LashExpr::Function(Box::new(FunctionExpr {
                 name: None,
+                js_name: None,
                 params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                 captures,
                 body: Box::new(body),

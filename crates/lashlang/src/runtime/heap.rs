@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -17,6 +18,7 @@ mod validation;
 use object::COLLECTION_ENTRY_BYTES;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use object::HEAP_OBJECT_KINDS;
+pub(crate) use object::HeapObject;
 use object::{
     OBJECT_HEADER_BYTES, RECORD_FIELD_BYTES, VALUE_SLOT_BYTES, compound_identity,
     value_logical_bytes,
@@ -43,28 +45,14 @@ use super::{
 };
 
 /// Which byte-charge schedule a persisted heap's `live_logical_bytes` was
-/// computed under. Version 2 charges a measured `VALUE_SLOT_BYTES`; version 1
-/// charged a quarter of it. A heap restored under a foreign schedule is refused
-/// by name rather than failing its own byte-counter cross-check.
-pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 2;
+/// computed under. Version 3 charges a closure's `name`/`length` own-property
+/// values (FIG-3655); version 2 charged a measured `VALUE_SLOT_BYTES`;
+/// version 1 charged a quarter of it. A heap restored under a foreign
+/// schedule is refused by name rather than failing its own byte-counter
+/// cross-check.
+pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 3;
 pub const HEAP_GC_ALLOCATION_INTERVAL: u64 = 1_024;
 pub const DEFAULT_HEAP_LOGICAL_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum HeapObject {
-    Tuple(Vec<Value>),
-    List(Vec<Value>),
-    Record(Box<Record>),
-    Closure { function: u32, captures: Vec<Value> },
-    RegExp(RegExpObject),
-    RegExpMatch(RegExpMatchObject),
-    Map(MapObject),
-    Set(SetObject),
-    Date(DateObject),
-    Error(ErrorObject),
-    Url(UrlObject),
-    UrlSearchParams(UrlSearchParamsObject),
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HeapEntry {
@@ -156,7 +144,10 @@ impl Heap {
         functions: &[CompiledFunction],
     ) -> Result<(), RuntimeError> {
         for (_, object) in self.objects_in_id_order() {
-            let HeapObject::Closure { function, captures } = object else {
+            let HeapObject::Closure {
+                function, captures, ..
+            } = object
+            else {
                 continue;
             };
             let compiled = functions
@@ -384,9 +375,16 @@ impl Heap {
         &mut self,
         function: usize,
         captures: Vec<Value>,
+        name: &Arc<str>,
+        length: usize,
     ) -> Result<Value, RuntimeError> {
         let function = u32::try_from(function).map_err(|_| RuntimeError::FunctionIndexOverflow)?;
-        self.allocate_object(HeapObject::Closure { function, captures })
+        self.allocate_object(HeapObject::Closure {
+            function,
+            captures,
+            name: Some(Value::String(name.as_ref().into())),
+            length: Some(Value::Number(length as f64)),
+        })
     }
 
     pub(crate) fn allocate_list(&mut self, values: Vec<Value>) -> Result<Value, RuntimeError> {
@@ -998,12 +996,25 @@ impl Heap {
                 }
                 HeapObject::Record(Box::new(copied))
             }
-            HeapObject::Closure { function, captures } => HeapObject::Closure {
+            HeapObject::Closure {
+                function,
+                captures,
+                name,
+                length,
+            } => HeapObject::Closure {
                 function: *function,
                 captures: captures
                     .iter()
                     .map(|value| self.stage_isolation(value, staging))
                     .collect::<Result<_, _>>()?,
+                name: name
+                    .as_ref()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .transpose()?,
+                length: length
+                    .as_ref()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .transpose()?,
             },
             HeapObject::RegExp(regexp) => HeapObject::RegExp(regexp.clone()),
             HeapObject::RegExpMatch(result) => HeapObject::RegExpMatch(RegExpMatchObject {
@@ -1469,13 +1480,21 @@ impl Heap {
                 HeapObject::Closure {
                     function: left_function,
                     captures: left,
+                    name: left_name,
+                    length: left_length,
                 },
                 HeapObject::Closure {
                     function: right_function,
                     captures: right,
+                    name: right_name,
+                    length: right_length,
                 },
             ) => {
-                if left_function != right_function || left.len() != right.len() {
+                if left_function != right_function
+                    || left.len() != right.len()
+                    || left_name != right_name
+                    || left_length != right_length
+                {
                     return Ok(false);
                 }
                 for (left, right) in left.iter().zip(right) {

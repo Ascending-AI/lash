@@ -47,6 +47,33 @@ pub trait StoreTestSupport: Send + Sync {
             operation: "stamp_session_state_version_and_corrupt_payload_for_testing",
         })
     }
+
+    /// Execute one session-ingress settlement, fenced by `fence`, in a
+    /// transaction of its own.
+    ///
+    /// Production settles ingress claims inside the head commit that
+    /// delivers or applies them; the ingress laws drive the same planner and
+    /// the same row writes through this seam until that commit carries them.
+    async fn settle_session_ingress_for_testing(
+        &self,
+        _fence: &super::DriveFence,
+        _settlement: super::IngressClaimSettlement,
+    ) -> Result<super::IngressSettlementReceipt, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "settle_session_ingress_for_testing",
+        })
+    }
+
+    /// Every session-ingress row of `session_id`, open and tombstoned, in
+    /// `(lane, enqueue_seq)` order.
+    async fn session_ingress_rows_for_testing(
+        &self,
+        _session_id: &crate::SessionId,
+    ) -> Result<Vec<super::IngressItem>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "session_ingress_rows_for_testing",
+        })
+    }
 }
 
 /// Build an identity-bearing append commit with a caller-owned clock.

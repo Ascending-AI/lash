@@ -99,6 +99,7 @@ impl Lowerer {
         );
         let wrapper = LashExpr::Function(Box::new(FunctionExpr {
             name: None,
+            js_name: None,
             params: vec![entry_slot.as_str().into()],
             captures: vec![replacement_slot.as_str().into()],
             body: Box::new(LashExpr::Return(Box::new(js_add(

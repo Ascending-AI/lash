@@ -626,7 +626,7 @@ export interface WorkflowGraph {
   declarations?: WorkflowDeclaration[];
   facet_schema_version?: number | null;
   main: WorkflowSubgraph;
-  schema_version: 16;
+  schema_version: 17;
   /**
    * The definition identity of the admitted module artifact this graph projects ([`crate::ModuleArtifact::source_identity`]), which the module's traces carry too. A draft projected from source that has not been admitted claims no runtime identity and carries `None`. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts.
    */
@@ -698,6 +698,10 @@ export interface ResourceRefExpr {
 export interface FunctionExpr {
   body: Expr;
   captures?: string[];
+  /**
+   * The ECMA-262 `name` own property the closure value carries: the function's own binding name, or the name a `NamedEvaluation` / `SetFunctionName` context assigned it. `None` is the anonymous `""` ECMA reports for a function no naming context reached.
+   */
+  js_name?: string | null;
   name?: string | null;
   params?: string[];
   [k: string]: unknown;

@@ -185,6 +185,7 @@ pub(super) fn all_settled_results(items: LashExpr) -> LashExpr {
         items: Box::new(items),
         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
             name: None,
+            js_name: None,
             params: vec![result_name.as_str().into()],
             captures: Vec::new(),
             body: Box::new(LashExpr::If {

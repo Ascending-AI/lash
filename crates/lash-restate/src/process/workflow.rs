@@ -507,7 +507,9 @@ where
                     .map_err(handler_error_from_plugin)?;
                 Ok(output.into())
             }
-            Err(err) if is_replay_mismatch(&err) => Err(handler_error_from_plugin(err)),
+            // A segment whose journal diverged cannot complete mid-replay: it
+            // ends its attempt the one way a park ends (FIG-3697).
+            Err(err) if is_replay_mismatch(&err) => Err(crate::parked_turn_failure(err)),
             Err(err) if err.is_retryable() => Err(HandlerError::from(err)),
             Err(err) if err.is_terminal() => {
                 let output = self

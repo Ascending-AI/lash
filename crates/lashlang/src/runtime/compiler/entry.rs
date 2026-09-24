@@ -201,6 +201,10 @@ impl Compiler {
                 "a function body begins with no handler installed"
             );
 
+            let js_name = definition
+                .js_name
+                .as_deref()
+                .map_or_else(Arc::default, Arc::from);
             let self_slot = definition.name.as_deref().map(|name| self.push_slot(name));
             let parameter_slots = definition
                 .params
@@ -223,6 +227,7 @@ impl Compiler {
                 parameter_count: definition.params.len(),
                 parameter_model: pending.parameter_model,
                 capture_count: definition.captures.len(),
+                js_name,
                 self_slot,
                 parameter_slots: parameter_slots.into_boxed_slice(),
                 capture_slots: capture_slots.into_boxed_slice(),
@@ -422,6 +427,8 @@ impl Compiler {
                 // callee from the chunk, so the body never needs to see itself
                 // as a value.
                 name: None,
+                // The ECMA `name` is the declaration's own.
+                js_name: Some(function.name.clone()),
                 params: function
                     .params
                     .iter()

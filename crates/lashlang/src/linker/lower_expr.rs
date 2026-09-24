@@ -1336,6 +1336,7 @@ impl<'module> Linker<'module> {
         Ok((
             Expr::Function(Box::new(crate::ast::FunctionExpr {
                 name: function.name.clone(),
+                js_name: function.js_name.clone(),
                 params: function.params.clone(),
                 captures,
                 body: Box::new(body),

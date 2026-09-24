@@ -93,9 +93,12 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// place of the per-kind sleep sequence, and embeds VM continuation state
 /// whose aggregates no longer count occurrences. A segment parked by v18
 /// resumes commands under keys a v19 run never mints, so it is refused.
+/// v20 (FIG-3655) embeds VM continuation v22, whose closures carry their own
+/// `name`/`length` metadata. A v19 segment holds continuations in the v21
+/// shape, so it is refused rather than decoded.
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 19;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 20;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

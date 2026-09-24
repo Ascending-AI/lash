@@ -24,7 +24,11 @@ pub fn register_stream_mask(
     reg: &mut PluginRegistrar,
     dialect: Arc<TypescriptDialect>,
 ) -> Result<(), PluginError> {
-    let state = Arc::new(Mutex::new(CellDetector::with_dialect(dialect)));
+    // One provider stream's scan. Only phase 1 touches it: the stream hook
+    // fills it and the stream-finished hook hands its end state to the
+    // journal and clears it. Phase 2 reads the journaled state alone, so it
+    // derives the same response on any worker, after any restart.
+    let state = Arc::new(Mutex::new(CellDetector::with_dialect(Arc::clone(&dialect))));
 
     let stream_state = Arc::clone(&state);
     reg.output()
@@ -36,35 +40,31 @@ pub fn register_stream_mask(
             })
         }));
 
-    let response_state = Arc::clone(&state);
+    let finished_state = Arc::clone(&state);
+    reg.output()
+        .stream_finished(Arc::new(move |ctx: AssistantStreamFinishedContext| {
+            let state = Arc::clone(&finished_state);
+            Box::pin(async move { state.lock_recover().finish_stream(ctx.reason) })
+        }));
+
     reg.output().response(Arc::new(
         move |ctx: lash_core::plugin::AssistantResponseHookContext| {
-            let state = Arc::clone(&response_state);
+            let dialect = Arc::clone(&dialect);
             Box::pin(async move {
-                let response = {
-                    let mut detector = state.lock_recover();
-                    let events = detector.finish_response();
-                    let response = transform_final_response(&detector, ctx.response);
-                    detector.reset();
-                    (response, events)
+                let Some(recorded) = ctx.stream_state else {
+                    // Nothing streamed that phase 2 could splice.
+                    return Ok(lash_core::plugin::AssistantResponseTransform {
+                        response: ctx.response,
+                        events: Vec::new(),
+                    });
                 };
-                Ok(lash_core::plugin::AssistantResponseTransform {
-                    response: response.0,
-                    events: response.1,
-                })
+                let mut detector = CellDetector::from_recorded(dialect, recorded)?;
+                let events = detector.finish_response();
+                let response = transform_final_response(&detector, ctx.response);
+                Ok(lash_core::plugin::AssistantResponseTransform { response, events })
             })
         },
     ));
-
-    let cleanup_state = Arc::clone(&state);
-    reg.output()
-        .stream_finished(Arc::new(move |ctx: AssistantStreamFinishedContext| {
-            let state = Arc::clone(&cleanup_state);
-            Box::pin(async move {
-                state.lock_recover().note_stream_finished(ctx.reason);
-                Ok(())
-            })
-        }));
 
     Ok(())
 }
@@ -94,6 +94,8 @@ fn transform_final_response(
 /// body, and a closed cell cannot reopen. The cell-start and cell-end events
 /// are each emitted exactly on the transition that creates the state they
 /// announce.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "phase", rename_all = "snake_case")]
 enum CellScan {
     /// Reading prose; `pending` holds bytes withheld while they might still
     /// become a start tag.
@@ -109,15 +111,15 @@ struct CellDetector {
     dialect: Arc<TypescriptDialect>,
     scan: CellScan,
     visible_prose: String,
-    /// A stream that ended with a response still to come has handed its
-    /// accumulated state to phase 2 and must not be read by anything else.
-    ///
-    /// The detector is session-scoped and outlives the turn, so "phase 2 will
-    /// reset it" is not a guarantee: a cancel or a controller error between the
-    /// phases leaves the response hook unrun. Latching the end of the stream
-    /// instead makes the *next* stream reset it on its first chunk, which is
-    /// the only moment both outcomes agree on.
-    stream_ended: bool,
+}
+
+/// The detector's end state as phase 1 journals it: what the response hook
+/// needs to splice the cell the stream saw.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecordedCellScan {
+    scan: CellScan,
+    visible_prose: String,
 }
 
 impl CellDetector {
@@ -135,35 +137,69 @@ impl CellDetector {
                 pending: String::new(),
             },
             visible_prose: String::new(),
-            stream_ended: false,
         }
     }
 
-    /// The response hook is phase 2 of the staged LLM-call boundary (FIG-1276)
-    /// and runs *after* this cleanup, so a reason that still produces a
-    /// response must leave the accumulated cell intact — clearing it here would
-    /// hand phase 2 an empty detector and silently drop the splice. Those
-    /// reasons only latch [`Self::stream_ended`]; every reason that produces no
-    /// response clears immediately.
+    /// Rebuild the detector phase 1 journaled, for the response hook.
+    fn from_recorded(
+        dialect: Arc<TypescriptDialect>,
+        recorded: serde_json::Value,
+    ) -> Result<Self, PluginError> {
+        let RecordedCellScan {
+            scan,
+            visible_prose,
+        } = serde_json::from_value(recorded).map_err(|error| {
+            PluginError::Session(format!(
+                "the journaled stream-mask state does not decode: {error}"
+            ))
+        })?;
+        Ok(Self {
+            dialect,
+            scan,
+            visible_prose,
+        })
+    }
+
+    /// End the stream: hand the end state to the journal when the stream
+    /// produced a response phase 2 will derive, and clear the detector either
+    /// way, so the next stream starts from nothing whether or not phase 2
+    /// ever runs.
     ///
-    /// Redrive caveat: this detector is stream-accumulated state, so a phase-2
-    /// redrive after a host crash sees a fresh detector and derives the raw
-    /// response rather than the spliced one. Stream deltas are not journaled
-    /// either, so recovering that needs the stream seam, not this hook.
-    fn note_stream_finished(&mut self, reason: lash_core::plugin::AssistantStreamFinishReason) {
-        match reason {
+    /// A scan still reading prose with nothing held needs no state: the
+    /// response hook has nothing to splice and no end-of-response leg to run.
+    fn finish_stream(
+        &mut self,
+        reason: lash_core::plugin::AssistantStreamFinishReason,
+    ) -> Result<Option<serde_json::Value>, PluginError> {
+        let produced_response = matches!(
+            reason,
             lash_core::plugin::AssistantStreamFinishReason::Complete
-            | lash_core::plugin::AssistantStreamFinishReason::Aborted => {
-                self.stream_ended = true;
-            }
-            lash_core::plugin::AssistantStreamFinishReason::AttemptReset
-            | lash_core::plugin::AssistantStreamFinishReason::Cancelled
-            | lash_core::plugin::AssistantStreamFinishReason::ProviderError => self.reset(),
+                | lash_core::plugin::AssistantStreamFinishReason::Aborted
+        );
+        let scan = std::mem::replace(
+            &mut self.scan,
+            CellScan::Scanning {
+                pending: String::new(),
+            },
+        );
+        let visible_prose = std::mem::take(&mut self.visible_prose);
+        if !produced_response
+            || matches!(&scan, CellScan::Scanning { pending } if pending.is_empty())
+        {
+            return Ok(None);
         }
+        serde_json::to_value(RecordedCellScan {
+            scan,
+            visible_prose,
+        })
+        .map(Some)
+        .map_err(|error| {
+            PluginError::Session(format!("the stream-mask state does not encode: {error}"))
+        })
     }
 
+    #[cfg(test)]
     fn reset(&mut self) {
-        self.stream_ended = false;
         self.scan = CellScan::Scanning {
             pending: String::new(),
         };
@@ -182,14 +218,6 @@ impl CellDetector {
     }
 
     fn process_chunk(&mut self, chunk: &str) -> AssistantStreamTransform {
-        // A chunk arriving after the previous stream ended is the first chunk of
-        // a new one, and the previous turn's state is no longer anybody's to
-        // read. Resetting here rather than trusting phase 2 to have run is what
-        // keeps an unrun response hook from suppressing the next turn entirely.
-        if self.stream_ended {
-            self.reset();
-        }
-
         match self.scan {
             CellScan::Closed { .. } => {
                 return AssistantStreamTransform {
@@ -675,25 +703,20 @@ mod tests {
     }
 
     /// The detector is session-scoped, so a turn whose phase 2 never ran must
-    /// not be able to suppress the turn after it.
-    ///
-    /// A closed cell aborts the stream (`Aborted`) and hands the accumulated
-    /// splice to the response hook. If a cancel or a controller error lands
-    /// between the phases that hook never runs, and without the stream-ended
-    /// latch the next turn opens with the scan still closed: every chunk is
-    /// swallowed and the previous turn's cell is spliced into the new response.
+    /// not be able to suppress the turn after it. The stream's end hands the
+    /// state to the journal and clears the detector, whatever happens next.
     #[test]
-    fn stream_ended_without_phase_two_does_not_poison_the_next_turn() {
+    fn a_finished_stream_leaves_nothing_for_the_next_turn() {
         let mut d = CellDetector::new();
         let t = d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(t.abort_stream);
         assert!(closed(&d));
 
-        // The turn dies between the phases: the stream teardown runs, the
-        // response hook never does.
-        d.note_stream_finished(lash_core::plugin::AssistantStreamFinishReason::Aborted);
-        assert!(closed(&d), "phase 2 still owns the splice if it runs");
+        let recorded = d
+            .finish_stream(lash_core::plugin::AssistantStreamFinishReason::Aborted)
+            .expect("encode the end state");
+        assert!(recorded.is_some(), "a closed cell is phase 2's to splice");
 
         let t = d.process_chunk("Next turn prose.");
         assert_eq!(
@@ -706,18 +729,94 @@ mod tests {
         assert_eq!(d.visible_prose, "Next turn prose.");
     }
 
-    /// The same latch must not cost the splice when phase 2 *does* run: a
-    /// completed stream keeps its accumulated cell until the response hook
-    /// consumes it.
+    /// A stream that produced no response hands phase 2 nothing, and neither
+    /// does one that never held a byte back.
     #[test]
-    fn stream_ended_keeps_the_splice_available_for_phase_two() {
+    fn only_a_stream_with_something_to_splice_records_state() {
+        for reason in [
+            lash_core::plugin::AssistantStreamFinishReason::AttemptReset,
+            lash_core::plugin::AssistantStreamFinishReason::Cancelled,
+            lash_core::plugin::AssistantStreamFinishReason::ProviderError,
+        ] {
+            let mut d = CellDetector::new();
+            d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
+            assert_eq!(d.finish_stream(reason).expect("finish"), None, "{reason:?}");
+            assert!(!inside(&d));
+        }
         let mut d = CellDetector::new();
-        d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
-        d.note_stream_finished(lash_core::plugin::AssistantStreamFinishReason::Complete);
+        d.process_chunk("Prose only.");
+        assert_eq!(
+            d.finish_stream(lash_core::plugin::AssistantStreamFinishReason::Complete)
+                .expect("finish"),
+            None
+        );
+    }
 
-        assert!(closed(&d));
-        assert_eq!(body(&d), "finish 1");
-        assert!(d.spliced_response_text().contains("finish 1"));
+    /// Phase 2 redriven alone, on a worker whose detector never saw the
+    /// stream, derives exactly the response the streaming worker would have:
+    /// it reads the journaled end state, not plugin memory.
+    #[test]
+    fn phase_two_on_another_worker_splices_from_the_journaled_state() {
+        let chunks = [
+            "Visible before",
+            " code.\n<type",
+            "script>\nfinish ",
+            "\"ok\"\n</typescript>\nignored",
+        ];
+        let raw_final = "Visible before code.\n<typescript>\nfinish \"ok\"\n</typescript>\nignored";
+
+        // The worker that streamed: the old in-memory derivation.
+        let (mut streamed, _) = stream_chunks(&chunks);
+        let in_memory_events = streamed.finish_response();
+        let in_memory = transform_final_response(&streamed, response_with_text(raw_final));
+
+        // The journal: phase 1's recorded end state, through its JSON bytes.
+        let (mut phase_one, _) = stream_only(&chunks);
+        let recorded = phase_one
+            .finish_stream(lash_core::plugin::AssistantStreamFinishReason::Aborted)
+            .expect("encode")
+            .expect("a closed cell records state");
+        let journaled: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&recorded).expect("serialize"))
+                .expect("deserialize");
+
+        // Another worker: a fresh detector rebuilt from the journal alone.
+        let mut elsewhere = CellDetector::from_recorded(
+            Arc::new(TypescriptDialect::prompt_only(
+                lash_lashlang_runtime::LashlangSurface::default(),
+            )),
+            journaled,
+        )
+        .expect("decode");
+        let events = elsewhere.finish_response();
+        let derived = transform_final_response(&elsewhere, response_with_text(raw_final));
+
+        assert_eq!(derived.parts, in_memory.parts);
+        assert_eq!(event_names(&events), event_names(&in_memory_events));
+        assert_eq!(
+            derived.full_text(),
+            "Visible before code.\n<typescript>\nfinish \"ok\"\n</typescript>"
+        );
+    }
+
+    /// The end-of-response leg runs from the journal too: an inline cell the
+    /// stream was still holding closes in phase 2.
+    #[test]
+    fn a_held_inline_cell_closes_on_the_journaled_eof_leg() {
+        let (mut d, visible) = stream_only(&["Checking.\n<typescript>finish 1</typescript>"]);
+        assert_eq!(visible, "Checking.\n");
+        let recorded = d
+            .finish_stream(lash_core::plugin::AssistantStreamFinishReason::Complete)
+            .expect("encode")
+            .expect("held bytes record state");
+        let mut phase_two =
+            CellDetector::from_recorded(Arc::clone(&d.dialect), recorded).expect("decode");
+        let events = phase_two.finish_response();
+        assert_eq!(
+            event_names(&events),
+            vec!["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
+        );
+        assert!(closed(&phase_two));
     }
 
     #[test]
@@ -808,6 +907,13 @@ mod tests {
     }
 
     fn stream_chunks(chunks: &[&str]) -> (CellDetector, String) {
+        let (mut d, visible) = stream_only(chunks);
+        d.finish_response();
+        (d, visible)
+    }
+
+    /// Phase 1 alone: the chunks, without the response hook's EOF leg.
+    fn stream_only(chunks: &[&str]) -> (CellDetector, String) {
         let mut d = CellDetector::new();
         let mut visible = String::new();
         for chunk in chunks {
@@ -818,7 +924,6 @@ mod tests {
                 break;
             }
         }
-        d.finish_response();
         (d, visible)
     }
 

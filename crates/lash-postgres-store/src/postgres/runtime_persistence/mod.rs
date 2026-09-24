@@ -361,6 +361,7 @@ use queued_run_selection::*;
 mod refusal_probe_tests;
 mod session_commit;
 mod session_execution_lease;
+mod session_ingress;
 mod turn_input;
 
 use claim_support::*;

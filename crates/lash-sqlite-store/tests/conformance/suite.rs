@@ -75,6 +75,8 @@ mod process_retention;
 mod restored_claim_cede;
 #[path = "session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
+#[path = "session_ingress.rs"]
+mod session_ingress;
 #[path = "session_meta.rs"]
 mod session_meta;
 #[path = "session_read_view.rs"]

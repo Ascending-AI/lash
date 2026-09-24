@@ -384,6 +384,32 @@ String('undefined').search(undefined)
 (() => { const r=/x/; return [[r],r].includes(r); })()
 'AB'.match({ toString: function() { return 'AB'; } })
 [0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })
+(() => {}).name
+(function () {}).name
+(function g() {}).name
+({ m() {} }).m.name
+({ p: () => {} }).p.name
+({ 'quoted key': () => {} })['quoted key'].name
+((a, b) => {}).length
+((a, b = 1, c) => {}).length
+((a, ...rest) => {}).length
+((...rest) => {}).length
+(function (a, b = 0) {}).length
+Object.keys(() => {}).length
+Object.hasOwn(() => {}, 'name')
+'name' in (() => {})
+'length' in (() => {})
+delete (() => {}).name
+(() => { const f = () => {}; return f.name; })()
+(() => { let f; f = function () {}; return f.name; })()
+(() => { const f = (a, b = 1) => {}; return f.length; })()
+(() => { function g(x, y, z = 0) {} return g.name + '|' + g.length; })()
+(() => { const [f = () => {}] = []; return f.name; })()
+(() => { const { x = () => {} } = {}; return x.name; })()
+(() => { const f = () => {}; delete f.name; return String(f.name) + '|' + Object.hasOwn(f, 'name'); })()
+(() => { const f = () => {}; delete f.name; try { f.name = 're'; return 'wrote:' + f.name; } catch (e) { return 'TypeError:' + f.name; } })()
+(() => { const f = () => {}; try { f.length = 9; return 'wrote'; } catch (e) { return e instanceof TypeError ? 'TypeError' : 'other'; } })()
+(() => { const outer = () => () => 1; return outer().name; })()
 parseFloat('infinity')
 parseFloat('5.e3')
 (25).toExponential(0)

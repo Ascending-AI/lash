@@ -26,6 +26,7 @@ async fn public_ast_constructs_and_calls_a_capturing_function() {
             "add_captured",
             Expr::Function(Box::new(FunctionExpr {
                 name: None,
+                js_name: None,
                 params: vec!["value".into()],
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Binary {
@@ -69,6 +70,7 @@ async fn a_closure_from_an_earlier_program_does_not_fail_the_next_one() {
             "add_captured",
             Expr::Function(Box::new(FunctionExpr {
                 name: None,
+                js_name: None,
                 params: vec!["value".into()],
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),

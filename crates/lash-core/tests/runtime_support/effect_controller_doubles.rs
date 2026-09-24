@@ -477,12 +477,18 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             ));
         }
         let outcome = match envelope.command {
-            RuntimeEffectCommand::LlmCall { request } => {
+            RuntimeEffectCommand::LlmCall {
+                provider_id,
+                request,
+            } => {
                 if self.execute_llm_locally {
                     local_executor
                         .execute(RuntimeEffectEnvelope::new(
                             envelope.invocation,
-                            RuntimeEffectCommand::LlmCall { request },
+                            RuntimeEffectCommand::LlmCall {
+                                provider_id,
+                                request,
+                            },
                         ))
                         .await
                 } else {
@@ -540,6 +546,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                         })),
                         text_streamed: false,
                         call_record: None,
+                        stream: Box::default(),
                     })
                 }
             }
@@ -561,11 +568,17 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     ))
                     .await
             }
-            RuntimeEffectCommand::AssistantResponseHooks { response } => {
+            RuntimeEffectCommand::AssistantResponseHooks {
+                response,
+                stream_hook_states,
+            } => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(
                         envelope.invocation,
-                        RuntimeEffectCommand::AssistantResponseHooks { response },
+                        RuntimeEffectCommand::AssistantResponseHooks {
+                            response,
+                            stream_hook_states,
+                        },
                     ))
                     .await
             }

@@ -110,9 +110,22 @@ pub const BATCH_DELETED_EVIDENCE_COLUMNS: &str =
                 meta.last_commit_at_ms, COALESCE(session.head_revision, 0),
                 COALESCE(meta.relation_kind, 'root'), meta.parent_session_id";
 
+/// A session's drive epoch and the admission that last raised it (ADR 0105
+/// §2, B3): the fence every claim, reclaim and settlement checks.
+pub const DRIVE_EPOCH_COLUMNS: &str = "drive_epoch, drive_admission_id";
+
 crate::statements! {
     /// `session_meta` statements both backends issue verbatim.
     pub struct SessionMetaStatements @ "session_meta" {
+        /// Session `?1`'s drive epoch and the admission that last raised it.
+        select_drive_epoch = "SELECT drive_epoch, drive_admission_id FROM session_meta WHERE session_id = ?1";
+
+        /// The seal's compare-and-set: raise session `?1`'s drive epoch from
+        /// `?2` to `?3` under admission `?4`. Zero rows means the epoch moved.
+        seal_drive_epoch = "UPDATE session_meta
+             SET drive_epoch = ?3, drive_admission_id = ?4
+             WHERE session_id = ?1 AND drive_epoch = ?2";
+
         /// The recorded lineage of `?1`.
         select_lineage = "SELECT relation_kind, parent_session_id, source_session_id, source_node_id
              FROM session_meta WHERE session_id = ?1";

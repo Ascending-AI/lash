@@ -152,7 +152,9 @@ pub use process_attach::{
 };
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use turn::RestateTurnAttach;
-pub use turn_handler::{TURN_HANDLER_MAX_ATTEMPTS, turn_handler_options, turn_service};
+pub use turn_handler::{
+    TURN_HANDLER_MAX_ATTEMPTS, parked_turn_failure, turn_handler_options, turn_service,
+};
 
 // Adapter-internal wire and seam types. They are `pub` so the Restate SDK's
 // generated handlers can name them; they are not a host contract.

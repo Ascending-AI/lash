@@ -196,6 +196,7 @@ impl Lowerer {
         ]);
         let transformer = LashExpr::Function(Box::new(FunctionExpr {
             name: Some(transform.as_str().into()),
+            js_name: None,
             params: vec![holder.as_str().into(), key.as_str().into()],
             captures: vec![
                 replacer_name.as_str().into(),
@@ -214,6 +215,7 @@ impl Lowerer {
             let identity_value = self.temporary("identity_value");
             LashExpr::Function(Box::new(FunctionExpr {
                 name: None,
+                js_name: None,
                 params: vec![identity_key.into(), identity_value.as_str().into()],
                 captures: Vec::new(),
                 body: Box::new(variable(&identity_value)),
@@ -258,6 +260,7 @@ impl Lowerer {
                 &worker,
                 LashExpr::Function(Box::new(FunctionExpr {
                     name: None,
+                    js_name: None,
                     params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                     captures: vec![input.as_str().into(), transform.as_str().into()],
                     body: Box::new(worker_body),

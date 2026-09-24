@@ -119,6 +119,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
         },
     },
     pair("session_execution_leases", "lash_session_execution_leases"),
+    pair("session_ingress", "lash_session_ingress"),
     pair("session_meta", "lash_session_meta"),
     pair(
         "session_meta_pending_observer_intents",

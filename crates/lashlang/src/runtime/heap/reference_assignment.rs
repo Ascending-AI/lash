@@ -204,6 +204,11 @@ impl Heap {
                 false
             }
             HeapObject::Tuple(_) => return Ok(false),
+            HeapObject::Closure { name, length, .. } => match key.as_ref() {
+                "name" => name.take().is_some(),
+                "length" => length.take().is_some(),
+                _ => false,
+            },
             object => {
                 return Err(RuntimeError::ValidationFailed {
                     reason: format!(
@@ -492,6 +497,21 @@ impl Heap {
             }
             (HeapObject::Tuple(_), CompiledAssignPathStep::Index) => {
                 return Err(RuntimeError::ImmutableTupleIndexes);
+            }
+            // A function's `name`/`length` are non-writable. `Function.prototype`
+            // carries them as non-writable data properties too, so a write never
+            // creates an own property — even after `delete` cleared the own
+            // slot, the inherited non-writable property still blocks the set.
+            (HeapObject::Closure { .. }, CompiledAssignPathStep::Field(field)) => {
+                return Err(RuntimeError::CannotAssignField {
+                    field: names[field].text.to_string(),
+                    actual: "function".to_string(),
+                });
+            }
+            (HeapObject::Closure { .. }, CompiledAssignPathStep::Index) => {
+                return Err(RuntimeError::CannotAssignIndex {
+                    actual: "function".to_string(),
+                });
             }
             (object, CompiledAssignPathStep::Field(field)) => {
                 return Err(RuntimeError::CannotAssignField {

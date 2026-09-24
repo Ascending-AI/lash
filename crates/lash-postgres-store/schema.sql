@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 125.
+-- lash-postgres-store schema, component version 127.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -138,6 +138,8 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     caused_by_node_id TEXT,
     source_session_id TEXT,
     source_node_id TEXT,
+    drive_epoch BIGINT NOT NULL DEFAULT 0,
+    drive_admission_id TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
     CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
@@ -335,6 +337,54 @@ CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_input_order
     ON lash_pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_claim
     ON lash_pending_turn_inputs(session_id, claim_id, claim_token);
+
+-- The one session ingress (ADR 0101): one row per admitted item, one
+-- per-session order taken under the session history lock, two class-level
+-- lanes. `delivery_*` is the submitted delivery, written once and never
+-- rewritten; `submission_digest` likewise. A claim's columns are set exactly
+-- on an `accepted` row, and a tombstone carries its closed cause and no claim.
+CREATE TABLE IF NOT EXISTS lash_session_ingress (
+    enqueue_seq BIGSERIAL PRIMARY KEY,
+    item_id TEXT NOT NULL UNIQUE,
+    session_id TEXT NOT NULL,
+    lane TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    source_key TEXT,
+    delivery_scope TEXT NOT NULL,
+    delivery_turn_id TEXT,
+    delivery_min_boundary TEXT,
+    submission_digest TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    authority_json TEXT,
+    merge_key TEXT,
+    wake_process_id TEXT,
+    wake_sequence BIGINT,
+    state TEXT NOT NULL,
+    terminal_cause_json TEXT,
+    enqueued_at_ms BIGINT NOT NULL,
+    terminal_at_ms BIGINT,
+    claim_id TEXT,
+    claim_token TEXT,
+    claim_admission_id TEXT,
+    claim_fencing_token BIGINT NOT NULL DEFAULT 0,
+    claim_drive_epoch BIGINT,
+    claim_turn_id TEXT,
+    CONSTRAINT ck_session_ingress_kind CHECK (kind IN ('input', 'process_wake', 'session_command')),
+    CONSTRAINT ck_session_ingress_lane CHECK ((kind = 'session_command' AND lane = 'command') OR (kind IN ('input', 'process_wake') AND lane = 'turn')),
+    CONSTRAINT ck_session_ingress_state CHECK (state IN ('open', 'accepted', 'completed', 'cancelled')),
+    CONSTRAINT ck_session_ingress_delivery CHECK ((delivery_scope = 'turn' AND delivery_turn_id IS NOT NULL AND delivery_min_boundary IN ('after_work', 'before_completion')) OR (delivery_scope IN ('any_boundary', 'next_turn') AND delivery_turn_id IS NULL AND delivery_min_boundary IS NULL)),
+    CONSTRAINT ck_session_ingress_kind_delivery CHECK (kind = 'input' OR (kind = 'process_wake' AND delivery_scope = 'any_boundary') OR (kind = 'session_command' AND delivery_scope = 'next_turn')),
+    CONSTRAINT ck_session_ingress_wake_source CHECK ((kind = 'process_wake' AND wake_process_id IS NOT NULL AND wake_sequence IS NOT NULL) OR (kind <> 'process_wake' AND wake_process_id IS NULL AND wake_sequence IS NULL)),
+    CONSTRAINT ck_session_ingress_claim CHECK ((state = 'accepted' AND claim_id IS NOT NULL AND claim_token IS NOT NULL AND claim_admission_id IS NOT NULL AND claim_drive_epoch IS NOT NULL) OR (state <> 'accepted' AND claim_id IS NULL AND claim_token IS NULL AND claim_admission_id IS NULL AND claim_drive_epoch IS NULL AND claim_turn_id IS NULL)),
+    CONSTRAINT ck_session_ingress_terminal CHECK ((state IN ('completed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL) OR (state IN ('open', 'accepted') AND terminal_cause_json IS NULL AND terminal_at_ms IS NULL)),
+    UNIQUE (session_id, source_key)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_open
+    ON lash_session_ingress(session_id, lane, enqueue_seq) WHERE state IN ('open', 'accepted');
+CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_addressed
+    ON lash_session_ingress(session_id, delivery_turn_id, enqueue_seq) WHERE delivery_turn_id IS NOT NULL AND state IN ('open', 'accepted');
+CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_claim
+    ON lash_session_ingress(session_id, claim_id) WHERE claim_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS lash_attachment_manifest (
     attachment_id TEXT NOT NULL,
@@ -856,7 +906,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 125)
+VALUES ('lash-postgres-store', 127)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

@@ -90,6 +90,7 @@ pub mod attachment;
 pub mod effect;
 pub mod process;
 pub mod session;
+pub mod session_ingress;
 pub mod trigger;
 pub mod turn_ingress;
 pub mod wait;
@@ -162,6 +163,7 @@ pub const TABLES: &[&str] = &[
     session::sessions::TABLE,
     session::turn_commits::TABLE,
     session::usage_deltas::TABLE,
+    session_ingress::TABLE,
 ];
 
 /// Every shared statement this crate owns, across every family.
@@ -204,6 +206,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(session::node_anchors::NodeAnchorStatements::NEUTRAL);
     statements.extend_from_slice(session::turn_commits::TurnCommitStatements::NEUTRAL);
     statements.extend_from_slice(session::usage_deltas::UsageDeltaStatements::NEUTRAL);
+    statements.extend_from_slice(session_ingress::SessionIngressStatements::NEUTRAL);
     statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);
     statements.extend_from_slice(wait::revoked_sessions::RevokedSessionStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::TurnIngressStatements::NEUTRAL);

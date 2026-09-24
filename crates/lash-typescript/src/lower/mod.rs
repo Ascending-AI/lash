@@ -153,6 +153,11 @@ struct Lowerer {
     /// Every name the program writes as `globalThis.name`: such a name is the
     /// program's own again, whatever the session dropped.
     global_this_writes: BTreeSet<String>,
+    /// The name ECMA-262's NamedEvaluation/SetFunctionName positions assign to
+    /// the next anonymous function lowered. Naming contexts set it just before
+    /// lowering their value expression; `lower_function` takes it at entry so
+    /// a nested function's own context can never consume it.
+    inferred_function_name: Option<String>,
 }
 
 impl Lowerer {
@@ -507,10 +512,13 @@ impl Lowerer {
                         // where a `Process` slot asks for it.
                         self.lower_process_literal_arrow(function, Some(name))?
                     } else {
+                        // A `let`/`const`/`var` initializer is ECMA's
+                        // NamedEvaluation position: an anonymous function
+                        // takes the binding's name.
                         declaration
                             .init
                             .as_ref()
-                            .map(|expr| self.lower_expr(expr))
+                            .map(|expr| self.lower_named_expr(expr, process_name))
                             .transpose()?
                             .unwrap_or(LashExpr::Undefined)
                     };
@@ -797,10 +805,14 @@ impl Lowerer {
         // The closure is created here, in the enclosing frame: this is the
         // point its captures are copied at.
         let creation = self.capture_ledger.site(&self.position.loops);
+        // The name a NamedEvaluation/SetFunctionName context left pending for
+        // this function — consumed before the body lowers so a nested
+        // function's own naming context cannot see it.
+        let inferred_name = self.inferred_function_name.take();
         let outer_position = std::mem::take(&mut self.position);
         let outer_switch_breaks = std::mem::take(&mut self.switch_breaks);
         let outer_continue_epilogues = std::mem::take(&mut self.continue_epilogues);
-        let result = self.lower_function_body(function, internal_name, creation);
+        let result = self.lower_function_body(function, internal_name, inferred_name, creation);
         self.position = outer_position;
         self.switch_breaks = outer_switch_breaks;
         self.continue_epilogues = outer_continue_epilogues;
@@ -811,6 +823,7 @@ impl Lowerer {
         &mut self,
         function: &Function,
         internal_name: Option<String>,
+        inferred_name: Option<String>,
         creation: Site,
     ) -> Result<LashExpr, Diagnostic> {
         self.next_function += 1;
@@ -953,6 +966,10 @@ impl Lowerer {
         let context = self.functions.pop().expect("function context exists");
         let function = LashExpr::Function(Box::new(FunctionExpr {
             name: internal_name.map(Into::into),
+            // The ECMA `name`: the function's own identifier when it has one,
+            // else the name the enclosing NamedEvaluation/SetFunctionName
+            // position assigned. `""` when no naming context applies.
+            js_name: function.name.clone().or(inferred_name).map(Into::into),
             params,
             captures: context.captures.into_iter().map(Into::into).collect(),
             body: Box::new(body),
@@ -969,6 +986,34 @@ impl Lowerer {
         } else {
             Ok(function)
         }
+    }
+
+    /// ECMA-262's IsAnonymousFunctionDefinition: only an anonymous function
+    /// definition — a `function`/`async function` expression or (async) arrow
+    /// with no own name — receives a name from a NamedEvaluation or
+    /// SetFunctionName context.
+    fn is_anonymous_function_definition(expr: &Expr) -> bool {
+        matches!(expr, Expr::Function(function) if function.name.is_none())
+    }
+
+    /// Lowers `expr` in a position that assigns `name` to an anonymous
+    /// function definition: NamedEvaluation (initializers, simple assigns,
+    /// keyed properties) and the SetFunctionName step of binding defaults.
+    /// The pending name is consumed by `lower_function` at entry, before its
+    /// body lowers, so only the outermost anonymous function sees it.
+    pub(super) fn lower_named_expr(
+        &mut self,
+        expr: &Expr,
+        name: Option<&str>,
+    ) -> Result<LashExpr, Diagnostic> {
+        if name.is_some() && Self::is_anonymous_function_definition(expr) {
+            self.inferred_function_name = name.map(str::to_string);
+        }
+        let lowered = self.lower_expr(expr);
+        // The definition always consumes the pending name; clearing it keeps a
+        // refused lowering from leaking one into an unrelated context.
+        self.inferred_function_name = None;
+        lowered
     }
 
     fn lower_expr(&mut self, expr: &Expr) -> Result<LashExpr, Diagnostic> {
@@ -1151,6 +1196,10 @@ impl Lowerer {
         name: Option<&str>,
     ) -> Result<LashExpr, Diagnostic> {
         debug_assert!(function.is_async, "caller checked the arrow is async");
+        // The lifted body becomes a process declaration, never a function
+        // value: no ECMA `name` is observable on it, and carrying one would
+        // perturb the content-derived identity the lift and the workflow
+        // lens must agree on.
         let closure = self.with_process(|lowerer| lowerer.lower_function(function, None))?;
         let run = match &closure {
             LashExpr::Function(function) => function.as_ref(),

@@ -15,6 +15,7 @@ where
     let scope = invocation.execution_scope().clone();
     let mut completion = journaled_conformance_envelope(&scope, "completion", "unused");
     completion.command = RuntimeEffectCommand::LlmCall {
+        provider_id: "test".to_string(),
         request: Box::new(crate::LlmRequestSpec {
             instructions: None,
             model: "counting-provider".to_string(),
@@ -31,6 +32,7 @@ where
     let mut hook = journaled_conformance_envelope(&scope, "response-hook", "unused");
     hook.command = RuntimeEffectCommand::AssistantResponseHooks {
         response: Box::default(),
+        stream_hook_states: Vec::new(),
     };
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let hook_calls = Arc::new(AtomicUsize::new(0));
@@ -50,6 +52,7 @@ where
                         result: Box::new(Ok(Default::default())),
                         text_streamed: false,
                         call_record: None,
+                        stream: Box::default(),
                     })
                 }),
             )
@@ -116,6 +119,7 @@ where
         (
             RuntimeEffectCommand::AssistantResponseHooks {
                 response: Box::default(),
+                stream_hook_states: Vec::new(),
             },
             RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectAssistantResponseHook,
@@ -131,6 +135,7 @@ where
         (
             RuntimeEffectCommand::AssistantResponseHooks {
                 response: Box::default(),
+                stream_hook_states: Vec::new(),
             },
             serde_json::from_value(
                 serde_json::to_value(RuntimeEffectControllerError::retryable_response_derivation(

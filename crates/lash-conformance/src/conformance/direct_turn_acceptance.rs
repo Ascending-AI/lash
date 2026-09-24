@@ -1100,6 +1100,37 @@ pub(super) async fn crash_turn<T>(
     panic!("the crashed worker's lease was never released");
 }
 
+/// Expire the lane a crashed worker still holds, so the redrive's admission
+/// claim proceeds instead of racing the dropped guard's best-effort release.
+///
+/// The harness reads the abandoned row and releases it under the authority the
+/// store recorded — the ghost of the crashed executor, the same role the crash
+/// matrix's `collapse_crashed_executor_lease` plays when it shortens an
+/// abandoned lease to its minimum term. Releasing rather than shortening keeps
+/// the handoff synchronous: a renewal that was in flight when the worker died,
+/// or the guard's own late release, is refused by the cleared row, so the lane
+/// stays free either way.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn expire_crashed_worker_lane(store: &Arc<dyn crate::RuntimePersistence>) {
+    let session_id = SessionId::from(SESSION_ID);
+    let Some(lease) = store
+        .get_session_execution_lease(&session_id)
+        .await
+        .expect("read the crashed worker's lane")
+        .lease
+    else {
+        return;
+    };
+    // A refused release only means the guard's own best-effort release landed
+    // first; either landing leaves the lane free.
+    let _ = store
+        .release_session_execution_lease(&lease.completion())
+        .await;
+}
+
 /// A provider that records the text of every request it answers.
 pub(super) fn recording_provider(
     answer: &str,
@@ -1848,6 +1879,12 @@ pub async fn accept_turn_input_redrive_after_store_commit_admits_one_row(
         .expect_err("the worker dies before the acceptance outcome is recorded");
     let admitted = pending_input_ids(&store).await;
     assert_eq!(admitted.len(), 1, "the first run committed its row");
+
+    // The lost-outcome error returns with the crashed worker's lane still
+    // held: only the dropped guard's spawned best-effort release frees it, so
+    // the redrive's admission claim can observe the abandoned lease and refuse
+    // with `SessionExecutionLaneBusy`. Expire it first.
+    expire_crashed_worker_lane(&store).await;
 
     let redriven = journal
         .run(&store, provider, &turn_id, "deploy staging once")

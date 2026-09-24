@@ -9,6 +9,21 @@ use lash_core_execution::store::{
 
 #[async_trait::async_trait]
 impl StoreTestSupport for PostgresSessionStore {
+    async fn settle_session_ingress_for_testing(
+        &self,
+        fence: &lash_core_execution::store::DriveFence,
+        settlement: lash_core_execution::store::IngressClaimSettlement,
+    ) -> Result<lash_core_execution::store::IngressSettlementReceipt, StoreError> {
+        self.settle_session_ingress(fence, settlement).await
+    }
+
+    async fn session_ingress_rows_for_testing(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core_execution::store::IngressItem>, StoreError> {
+        self.session_ingress_rows(session_id).await
+    }
+
     async fn rewrite_session_tool_access_for_testing(
         &self,
         schema_version: u32,
