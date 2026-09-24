@@ -89,6 +89,7 @@ use crate::{
     SessionHeadMeta, StoreError, TurnInputClaim,
 };
 
+mod after_commit_redrive;
 mod cold_process;
 mod direct_acceptance;
 mod error_return;
@@ -101,6 +102,7 @@ mod seam_controllers;
 
 use recovery::run_crash_matrix_case;
 
+pub use after_commit_redrive::turn_crash_after_commit_redrive_replays_the_committed_receipt;
 use cold_process::ColdProcessTurnAction;
 pub use cold_process::{
     cold_process_durable_recovery_expectation, cold_process_real_turn_driver,
