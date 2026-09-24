@@ -148,12 +148,9 @@ fn done_event_delta(effects: &[Effect]) -> Option<&[SessionHistoryRecord]> {
     })
 }
 
-fn find_execution_environment_sync(effects: &[Effect]) -> Option<(EffectId, bool)> {
+fn find_execution_environment_sync(effects: &[Effect]) -> Option<EffectId> {
     effects.iter().find_map(|effect| match effect {
-        Effect::SyncExecutionEnvironment {
-            id,
-            update_machine_config,
-        } => Some((*id, *update_machine_config)),
+        Effect::SyncExecutionEnvironment { id } => Some(*id),
         _ => None,
     })
 }
@@ -173,7 +170,7 @@ fn turn_checkpoint_stamps_current_generation() {
     );
     let checkpoint = machine.checkpoint();
     assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 9);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 10);
 }
 
 #[test]
@@ -1842,26 +1839,33 @@ fn checkpoint_redelivers_waiting_exec_from_state_only() {
     assert!(find_exec_call(&effects).is_some());
 }
 
+/// The protocol-start sync installs the environment it returns, so the first
+/// model call is built from the journaled surface a redrive serves, not from
+/// the config the machine was constructed with (FIG-3587).
 #[test]
-fn initial_execution_environment_sync_is_host_only() {
+fn initial_execution_environment_sync_installs_the_synced_environment() {
     let mut config = test_config(Arc::new(ProseDriver));
     config.sync_execution_environment = true;
+    config.system_prompt = Arc::from("live prompt");
     let mut machine =
         TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
 
     let effects = drain_effects(&mut machine);
-    let (sync_id, update_machine_config) =
-        find_execution_environment_sync(&effects).expect("execution environment sync");
-    assert!(!update_machine_config);
+    let sync_id = find_execution_environment_sync(&effects).expect("execution environment sync");
 
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: sync_id,
-        result: Ok(None),
+        result: Ok(Some(ExecutionEnvironmentSync {
+            system_prompt: Arc::from("journaled prompt"),
+            tool_specs: Arc::new(Vec::new()),
+            projector_turn_inputs: None,
+        })),
         cell_replay_grammar: None,
     });
 
     let effects = drain_effects(&mut machine);
-    assert!(find_llm_call(&effects).is_some());
+    let (_, request) = find_llm_call(&effects).expect("first llm call");
+    assert_eq!(request.instructions.as_deref(), Some("journaled prompt"));
 }
 
 #[test]
@@ -1873,9 +1877,8 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
         TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
 
     let effects = drain_effects(&mut machine);
-    let (initial_sync_id, update_machine_config) =
+    let initial_sync_id =
         find_execution_environment_sync(&effects).expect("initial execution environment sync");
-    assert!(!update_machine_config);
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: initial_sync_id,
         result: Ok(None),
@@ -1905,9 +1908,8 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
     });
 
     let effects = drain_effects(&mut machine);
-    let (sync_id, update_machine_config) = find_execution_environment_sync(&effects)
+    let sync_id = find_execution_environment_sync(&effects)
         .expect("protocol_iteration execution environment sync");
-    assert!(update_machine_config);
 
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: sync_id,

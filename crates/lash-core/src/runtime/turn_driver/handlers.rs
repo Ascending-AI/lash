@@ -385,18 +385,11 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
-        update_machine_config: bool,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         let (result, cell_replay_grammar) = match self
-            .invoke_turn_execution_environment_sync_effect(
-                machine,
-                id,
-                update_machine_config,
-                event_tx,
-                cancel,
-            )
+            .invoke_turn_execution_environment_sync_effect(machine, id, event_tx, cancel)
             .await
         {
             Ok(result) => result,

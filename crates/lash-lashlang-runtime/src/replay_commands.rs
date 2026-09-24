@@ -54,8 +54,60 @@ impl<'run> ReplayCommands<'_, 'run> {
         command: IssuedCommand,
         shape: CommandShape,
     ) -> Result<CommandInFlight<'run>, ExecutionHostError> {
+        self.enter_bound(command, shape, None).await
+    }
+
+    /// [`Self::enter`] for a command that calls a host tool binding which
+    /// drifted since the pass that wrote the journal (FIG-3587): `drift` is
+    /// the refusal naming it. Such a command is served only from the
+    /// journal: one the journal does not hold refuses before anything is
+    /// dispatched, and one it holds may touch only the keys whose outcome it
+    /// holds — an attempt that would run the tool live refuses with `drift`
+    /// before its claim.
+    pub async fn enter_bound(
+        &self,
+        command: IssuedCommand,
+        shape: CommandShape,
+        drift: Option<RuntimeEffectControllerError>,
+    ) -> Result<CommandInFlight<'run>, ExecutionHostError> {
         if let Err(error) = self.run.ensure_frontier(self.ctx).await {
             return Err(self.abort(error));
+        }
+        if let Some(drift) = drift {
+            let Some(settled) = self.run.settled_keys() else {
+                return Err(self.stop(drift));
+            };
+            let range = self.run.namespace().range();
+            let served_only = lash_core::ServedOnlyFence {
+                settled,
+                lower: range.lower.clone(),
+                upper: range.upper.clone(),
+                refusal: drift.clone(),
+            };
+            // A drifted binding's command replays only what the journal
+            // settled; a command the journal does not hold as issued is the
+            // run's divergence first, reported as such (FIG-3587).
+            let guard = match self.run.enter(&command, shape) {
+                Ok(CommandAdmission::Replay) => CommandJournalGuard::open(),
+                Ok(CommandAdmission::ReplayRecordedKeys { keys, divergence }) => {
+                    CommandJournalGuard::fenced(lash_core::RecordedKeyFence {
+                        keys,
+                        lower: range.lower,
+                        upper: range.upper,
+                        refusal: divergence.into_error(&self.attribution()),
+                    })
+                }
+                Ok(CommandAdmission::RefuseWrites(divergence)) | Err(divergence) => {
+                    return Err(self.stop(divergence.into_error(&self.attribution())));
+                }
+                Ok(CommandAdmission::Live) => return Err(self.stop(drift)),
+            };
+            let guard = Arc::new(guard.served_only(served_only));
+            return Ok(CommandInFlight {
+                ctx: self.ctx.with_command_journal_guard(Arc::clone(&guard)),
+                command,
+                guard,
+            });
         }
         let guard = match self.run.enter(&command, shape) {
             Ok(CommandAdmission::Replay | CommandAdmission::Live) => CommandJournalGuard::open(),
@@ -222,6 +274,7 @@ pub fn retype_replay_mismatch(
 ) -> RuntimeEffectControllerError {
     if !error.code.is_replay_mismatch()
         || error.code == lash_core::RuntimeErrorCode::LashlangCellReplayDivergence
+        || error.code == lash_core::RuntimeErrorCode::LashlangCellBindingDrift
     {
         return error;
     }
@@ -236,7 +289,7 @@ pub fn retype_replay_mismatch(
         ),
     );
     if let Some(summary) = error.summary {
-        retyped = retyped.with_summary(summary);
+        retyped = retyped.with_summary(*summary);
     }
     retyped
 }

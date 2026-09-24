@@ -341,6 +341,19 @@ paths = ["crates/lash-core-store/src/turn_input_vocabulary.rs"]
 symbols = ["turn_input_submission_preimage", "TurnInput", "InputItem"]
 
 [[surface]]
+constant = "LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION"
+constant_path = "crates/lash-lashlang-runtime/src/replay_run.rs"
+description = "journal grammar a code cell writes: the replay-key grammar plus the cell's ambient binding set, journaled before its first effect and linked against on redrive (FIG-3587)"
+outside_manifest = "a journal grammar, not a payload: the grammar a cell's journal was written under rides the execution-environment sync outcome, and a cell under any other grammar is refused before it runs"
+
+# The binding record a cell journals and links against: its key suffix, its
+# operation label and the recorded definition map.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-lashlang-runtime/src/cell_bindings.rs"]
+symbols = ["CELL_TOOL_BINDINGS_SUFFIX", "CELL_TOOL_BINDINGS_OPERATION", "resolve_ambient_bindings", "compare"]
+
+[[surface]]
 constant = "LASHLANG_REPLAY_KEY_GRAMMAR_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/replay_run.rs"
 description = "issue-ordinal replay-key grammar lashlang cells and process bodies journal their nested effects under (FIG-3586)"

@@ -126,6 +126,15 @@ crate::statements! {
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
              ORDER BY replay_key";
 
+        /// The settled subset of [`select_keys_in_range`](Self::select_keys_in_range):
+        /// rows whose outcome is recorded, completed or failed. A replayed
+        /// command whose host tool binding drifted is served only from these
+        /// (FIG-3587); an in-progress row would run its effect live.
+        select_settled_keys_in_range = "SELECT replay_key FROM runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
+               AND status <> 'in_progress'
+             ORDER BY replay_key";
+
         /// The recorded outcome of the completed replay row at `?1` (scope)
         /// / `?2` (replay key), if there is one: the attribution a
         /// recorded-frontier read serves from a namespace's closing seal.

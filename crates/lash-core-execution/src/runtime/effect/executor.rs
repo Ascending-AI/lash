@@ -31,8 +31,8 @@ pub use control::{
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, QueuedLaneAcquisition,
     QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RecordedJournal,
     RecordedKeyFence, Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
-    ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
+    ScopedEffectController, SegmentProgress, ServedOnlyFence, ToolIntentOutcomeSink,
+    ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;

@@ -837,6 +837,7 @@ impl RestateProcessRunner for ReplacementThenSuccessRunner {
                 .with_summary(lash_core::RuntimeEffectReplayMismatchReport {
                     divergent_path_count: 1,
                     first_divergent_paths: vec!["command.request.model".to_string()],
+                    effect_kind: None,
                 }),
             ));
         }

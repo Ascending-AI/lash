@@ -488,7 +488,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `started_json` start marker a Restate segment's admission writes
 // set-if-absent before its first effect. Component-122 catalogs are rejected
 // and recreated.
-const SCHEMA_VERSION: i32 = 123;
+// Version 124 (FIG-3587) extends the durable error-code vocabulary with
+// `lashlang_cell_binding_drift`, the replay-mismatch report with
+// `effect_kind`, and `lash_turn_parks.reason_json` with the `binding_drift`
+// and `effect_replay_divergence` reasons, which an older build cannot decode.
+// No relation changes; component-123 catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 124;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

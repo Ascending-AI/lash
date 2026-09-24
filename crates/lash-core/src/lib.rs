@@ -785,7 +785,7 @@ pub use runtime::{
     RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
     RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
     ScopeBoundController, ScopedEffectController, SegmentHandover, SegmentProgress,
-    SegmentStartMarker, SessionAdministration, SessionCursor, SessionCursorError,
+    SegmentStartMarker, ServedOnlyFence, SessionAdministration, SessionCursor, SessionCursorError,
     SessionDeleteContext, SessionDeleteExecution, SessionDrainOutcome, SessionId,
     SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
     SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,

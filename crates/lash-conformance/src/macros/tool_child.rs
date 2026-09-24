@@ -58,6 +58,53 @@ macro_rules! migrated_tools_redrive_tests {
     };
 }
 
+/// Register the model-call drift park law (FIG-3587): a model call replays
+/// from the journaled prompt, a recorded model call whose envelope drifted
+/// parks its turn, and restoring the surface finishes it. The fixture hands
+/// back a guard, a prefix, the tier's effect host, its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) and the RLM
+/// protocol plugin factories from the crates above this one.
+#[macro_export]
+macro_rules! model_call_drift_park_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::model_call_drift_park_tests!(@law [$(#[$attr])*] $fixture;
+            (model_call_drift_parks_then_completes_once_restored, "model-call-drift-park"));
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, runner, protocol) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, runner, protocol).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
+/// Register the cell binding-drift law (FIG-3587): a redriven RLM cell links
+/// against its journaled binding set, completing from the journal when the
+/// drifted tool's result was recorded and parking when it would reach the
+/// tool live. The fixture hands back a guard, a prefix, the tier's effect
+/// host, that host's journal fault injector, its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) and the RLM
+/// protocol plugin factories from the crates above this one.
+#[macro_export]
+macro_rules! cell_binding_drift_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::cell_binding_drift_tests!(@law [$(#[$attr])*] $fixture;
+            (redriven_cell_links_against_its_journaled_binding_set, "cell-binding-drift"));
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, faults, runner, rlm) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, faults, runner, rlm).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
 /// Register one turn-runner law.
 #[macro_export]
 macro_rules! __turn_runner_register {

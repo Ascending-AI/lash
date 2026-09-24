@@ -695,21 +695,32 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         // and the lifted-process name domain.
         let expected_key =
             "derived/v3/9579ddf94026db8f3517f8e16148c3a089d710c7efbbeffb4f74744a5b90f1dd";
-        // The fixture's production effect address gives the deferred-resolution
-        // journal its link identity, so the journaled resolution production
-        // always wrote is now the first envelope; the register is the second.
+        // The fixture's production effect address gives the cell's binding
+        // set (FIG-3587) and the deferred-resolution journal their link
+        // identity, so the journaled binding set is the first envelope, the
+        // resolution production always wrote the second, the register the
+        // third.
         let (effect_owner_scope, effect_subscription_key) = {
             let envelopes = capture.envelopes.lock_recover();
             let lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
                 &envelopes[0].command
             else {
-                panic!("expected the deferred tool resolution effect first")
+                panic!("expected the cell's binding set first")
+            };
+            assert_eq!(
+                operation,
+                "cell_tool_bindings:v1:[\"timer.Schedule\",\"triggers.register\"]"
+            );
+            let lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
+                &envelopes[1].command
+            else {
+                panic!("expected the deferred tool resolution effect second")
             };
             assert_eq!(
                 operation,
                 "deferred_tool_resolution:v2:[\"timer.Schedule\",\"triggers.register\"]"
             );
-            let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[1].command else {
+            let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[2].command else {
                 panic!("expected trigger effect")
             };
             let lash_core::TriggerCommand::Register {

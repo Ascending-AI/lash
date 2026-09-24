@@ -97,7 +97,7 @@ pub async fn prepare_tool_call_with_context(
         Arc::clone(&definition.contract),
         pending,
         tool_call_id,
-        None,
+        ProviderPreparation::Live(None),
     )
     .await
 }
@@ -125,9 +125,49 @@ pub async fn prepare_granted_tool_call_with_context(
         Arc::new(grant.contract().clone()),
         pending,
         tool_call_id,
-        Some(grant),
+        ProviderPreparation::Live(Some(grant)),
     )
     .await
+}
+
+/// Prepares a call a replayed code cell makes on a host tool binding that
+/// drifted since the pass that wrote its journal (FIG-3587): against the
+/// binding's recorded manifest and contract, with identity preparation, so
+/// the call's envelope is the one the journal recorded and it is served from
+/// there without the live tool being consulted.
+///
+/// An orchestrating tool the registry still holds is the exception: it
+/// re-runs its body against its recorded nested effects, and its own
+/// preparation shapes those effects, so its live provider prepares it.
+pub async fn prepare_recorded_tool_call_with_context(
+    context: &ToolDispatchContext<'_>,
+    binding: &ToolExecutionGrant,
+    mut pending: crate::sansio::PendingToolCall,
+    tool_call_id: Option<String>,
+) -> ToolPreparationOutcome {
+    pending.tool_name = binding.manifest().name.clone();
+    let preparation = if context.is_orchestrating_tool(&binding.manifest().id) {
+        ProviderPreparation::Live(None)
+    } else {
+        ProviderPreparation::Recorded
+    };
+    prepare_authorized_tool_call_with_context(
+        context,
+        binding.manifest().clone(),
+        Arc::new(binding.contract().clone()),
+        pending,
+        tool_call_id,
+        preparation,
+    )
+    .await
+}
+
+/// Who prepares an authorized call once its arguments are validated.
+enum ProviderPreparation<'grant> {
+    /// The live provider, under a grant's route when the call carries one.
+    Live(Option<&'grant ToolExecutionGrant>),
+    /// No provider: a recorded binding is prepared as its identity.
+    Recorded,
 }
 
 async fn prepare_authorized_tool_call_with_context(
@@ -136,7 +176,7 @@ async fn prepare_authorized_tool_call_with_context(
     contract: Arc<crate::ToolContract>,
     pending: crate::sansio::PendingToolCall,
     tool_call_id: Option<String>,
-    grant: Option<&ToolExecutionGrant>,
+    preparation: ProviderPreparation<'_>,
 ) -> ToolPreparationOutcome {
     let tool_name = manifest.name.clone();
     let mut pending = pending;
@@ -194,6 +234,15 @@ async fn prepare_authorized_tool_call_with_context(
     }
 
     pending.args = args.clone();
+    let grant = match preparation {
+        ProviderPreparation::Live(grant) => grant,
+        ProviderPreparation::Recorded => {
+            return ToolPreparationOutcome::Prepared(Box::new(crate::PreparedToolCall::identity(
+                manifest.id.clone(),
+                pending,
+            )));
+        }
+    };
     let execution_binding = grant
         .map(|grant| grant.execution_binding.clone())
         .unwrap_or(serde_json::Value::Null);

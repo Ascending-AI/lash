@@ -60,10 +60,11 @@ pub use executor::{
     RecordedKeyFence, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
     RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
-    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
-    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    concrete_turn_cancellation_authority, turn_control_binding_id_for_scope,
+    ServedOnlyFence, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
+    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
+    TurnControlBindingIdError, concrete_turn_cancellation_authority,
+    turn_control_binding_id_for_scope,
 };
 pub use group::{
     EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, GroupChildBinding,

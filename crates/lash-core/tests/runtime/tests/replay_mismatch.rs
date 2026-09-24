@@ -117,7 +117,7 @@ impl RuntimeEffectController for ProxyPumpingReplayMismatchController {
 }
 
 #[tokio::test]
-async fn controller_owned_replay_mismatch_is_recorded_with_structured_summary() {
+async fn controller_owned_replay_mismatch_parks_the_turn_with_structured_summary() {
     let controller = Arc::new(RejectingEffectController::default().with_replay_mismatch());
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
@@ -129,7 +129,7 @@ async fn controller_owned_replay_mismatch_is_recorded_with_structured_summary() 
     )
     .await;
 
-    let turn = runtime
+    let error = runtime
         .run_turn_assembled(
             TurnInput::text("hello"),
             CancellationToken::new(),
@@ -140,52 +140,33 @@ async fn controller_owned_replay_mismatch_is_recorded_with_structured_summary() 
             .expect("replay-mismatch execution scope"),
         )
         .await
-        .expect("a replay divergence is an outcome a redrive reproduces (FIG-3575)");
+        .expect_err("a replay divergence parks the turn (FIG-3587)");
 
-    assert_recorded_replay_mismatch(&turn);
+    assert_parked_replay_mismatch(&error);
 }
 
-/// A replay divergence is recorded as a failed turn that names the typed
-/// mismatch code and keeps the structured divergence summary.
-fn assert_recorded_replay_mismatch(turn: &lash_core::facade_support::AssembledTurn) {
-    assert!(
-        matches!(
-            turn.outcome,
-            lash_core::facade_support::TurnOutcome::Stopped(
-                lash_core::facade_support::TurnStop::RuntimeError
-            )
-        ),
-        "{:?}",
-        turn.outcome
-    );
-    let issue = turn
-        .errors
-        .iter()
-        .find(|issue| {
-            issue.code.as_ref()
-                == Some(&lash_core::FailureCode::from(
-                    &lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict,
-                ))
-        })
-        .expect("the recorded turn names the typed replay-mismatch code");
-    let summary: RuntimeEffectReplayMismatchReport = serde_json::from_str(
-        issue
-            .raw
-            .as_deref()
-            .expect("the recorded turn keeps the structured divergence summary"),
-    )
-    .expect("decode the divergence summary");
+/// A replay divergence parks the turn (FIG-3587, superseding FIG-3575's
+/// recorded failure): the abort names the typed mismatch code, which parks,
+/// and keeps the structured divergence summary.
+fn assert_parked_replay_mismatch(error: &RuntimeError) {
     assert_eq!(
-        summary,
-        RuntimeEffectReplayMismatchReport {
+        error.code,
+        lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+        "{error:?}"
+    );
+    assert!(error.code.parks_turn(), "a replay hash conflict parks");
+    assert_eq!(
+        error.summary.as_deref(),
+        Some(&RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
             first_divergent_paths: vec!["command.request.model".to_string()],
-        }
+            effect_kind: None,
+        })
     );
 }
 
 #[tokio::test]
-async fn proxied_controller_owned_replay_mismatch_is_recorded_with_structured_summary() {
+async fn proxied_controller_owned_replay_mismatch_parks_the_turn_with_structured_summary() {
     let controller = Arc::new(ProxyPumpingReplayMismatchController::new());
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
@@ -237,6 +218,6 @@ async fn proxied_controller_owned_replay_mismatch_is_recorded_with_structured_su
         .expect_err("proxy controller task must remain alive until explicitly stopped");
     assert!(task_error.is_cancelled());
 
-    let turn = result.expect("a proxied replay divergence is an outcome too");
-    assert_recorded_replay_mismatch(&turn);
+    let error = result.expect_err("a proxied replay divergence parks the turn too");
+    assert_parked_replay_mismatch(&error);
 }

@@ -87,6 +87,7 @@ impl RejectingEffectController {
         self.mismatch_summary = Some(RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
             first_divergent_paths: vec!["command.request.model".to_string()],
+            effect_kind: None,
         });
         self
     }
@@ -875,7 +876,7 @@ impl RuntimeEffectController for RecordingEffectController {
                 result: Ok(lash_core::CheckpointDelivery::default()),
                 claims: Box::default(),
             }),
-            RuntimeEffectCommand::SyncExecutionEnvironment { .. } => {
+            RuntimeEffectCommand::SyncExecutionEnvironment => {
                 Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
                     result: Ok(None),
                     cell_replay_grammar: None,

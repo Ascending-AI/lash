@@ -151,24 +151,25 @@ pub(super) fn setup_effect_error(
     }
 }
 
-/// Refuses a cell whose iteration's journaled sync names another replay-key
-/// grammar than the one this build mints, or none (FIG-3586). Such an
-/// iteration's journal — written under a retired grammar, or by a sync that
-/// predates the stamp — holds keys this run cannot reach, so running the cell
-/// would re-issue its nested effects live. One read of the served sync, no
+/// Refuses a cell whose iteration's journaled sync names another cell journal
+/// grammar than the one this build writes, or none (FIG-3586, FIG-3587). Such
+/// an iteration's journal — written under a retired grammar, or by a sync that
+/// predates the stamp — holds keys this run cannot reach, or no binding set to
+/// link against, so running the cell would re-issue its nested effects live or
+/// link them against the live registry. One read of the served sync, no
 /// legacy-key re-derivation.
 pub(crate) fn admit_replay_key_grammar(
     served: Option<u32>,
 ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-    let minted = lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION;
+    let minted = lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION;
     if served == Some(minted) {
         return Ok(());
     }
     Err(lash_core::RuntimeEffectControllerError::new(
         lash_core::RuntimeErrorCode::LashlangCellReplayKeyFormatCutover,
         format!(
-            "code cell refused at the replay-key grammar cutover: its iteration's journaled \
-             execution-environment sync names grammar {} and this build mints grammar \
+            "code cell refused at the cell journal grammar cutover: its iteration's journaled \
+             execution-environment sync names grammar {} and this build writes grammar \
              {minted}; its journal cannot be replayed by this build, so nothing was \
              dispatched — cancel the turn or fork it from before this cell",
             served.map_or_else(|| "none".to_string(), |grammar| grammar.to_string())
@@ -186,7 +187,7 @@ mod tests {
     /// this build mints is admitted.
     #[test]
     fn a_cell_runs_only_under_the_grammar_its_sync_names() {
-        let minted = lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION;
+        let minted = lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION;
         assert!(admit_replay_key_grammar(Some(minted)).is_ok());
         for served in [None, Some(minted - 1), Some(minted + 1)] {
             let refusal = admit_replay_key_grammar(served)

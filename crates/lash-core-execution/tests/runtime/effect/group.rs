@@ -93,9 +93,7 @@ mod effect_group_contract_tests {
             (
                 "sync_execution_environment",
                 RuntimeEffectKind::SyncExecutionEnvironment,
-                RuntimeEffectCommand::SyncExecutionEnvironment {
-                    update_machine_config: true,
-                },
+                RuntimeEffectCommand::SyncExecutionEnvironment,
             ),
             (
                 "language_runtime_value",
@@ -166,9 +164,14 @@ mod effect_group_contract_tests {
                 "exec_code",
                 "7f426da760b9b4e4fbcecbad269ddab57bfecbc805c80552f6aa29e2e27219fc",
             ),
+            // Moved by FIG-3587: the command lost `update_machine_config`, as
+            // every sync now carries the environment. A journal holding the
+            // old spelling conflicts at its first sync, and that conflict
+            // parks the turn (the clean cutover), rather than replaying a
+            // host-only protocol-start sync.
             (
                 "sync_execution_environment",
-                "6364c8fedd3f1379cfde023fd703349d4939eedf0241cd1b11161b8afde87b44",
+                "3843a915e7f7d65518f41e770c343c686f106ccc2479027e0918e50928613cd5",
             ),
             (
                 "language_runtime_value",

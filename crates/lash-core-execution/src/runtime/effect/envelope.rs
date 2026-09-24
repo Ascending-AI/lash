@@ -426,9 +426,10 @@ pub enum RuntimeEffectCommand {
     Checkpoint {
         checkpoint: CheckpointKind,
     },
-    SyncExecutionEnvironment {
-        update_machine_config: bool,
-    },
+    /// Build and journal the environment the next protocol iteration's model
+    /// call runs under (FIG-3538); every sync carries it, the protocol-start
+    /// one included (FIG-3587).
+    SyncExecutionEnvironment,
     /// Sleep for a relative duration or until an absolute wall-clock deadline.
     ///
     /// The intent is the journaled parameter, never a duration derived from the

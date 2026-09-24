@@ -197,7 +197,7 @@ impl RuntimeErrorCode {
             // the same value fails to encode again.
             Self::PostgresEffectReplayEncode => Terminal,
             // the live run diverged from its journal; a redrive diverges the same way.
-            Self::PostgresEffectReplayHashConflict => Terminal,
+            Self::PostgresEffectReplayHashConflict => Parked,
             // the effect carries no replay key; wiring, not the attempt.
             Self::PostgresEffectReplayKeyMissing => Terminal,
             // the journal row lease was lost to another owner.
@@ -268,6 +268,8 @@ impl RuntimeErrorCode {
             Self::LashlangCellReplayDivergence => Parked,
             // the journal predates this build's replay-key grammar; only a pre-cutover build serves it.
             Self::LashlangCellReplayKeyFormatCutover => Parked,
+            // a binding the cell's journal names moved; only its recorded results serve it.
+            Self::LashlangCellBindingDrift => Parked,
             // the controller cannot answer the frontier read; wiring, not the attempt.
             Self::RecordedJournalReadUnsupported => Terminal,
             // the host runs outside a handler scope; wiring, not the attempt.
@@ -418,7 +420,7 @@ impl RuntimeErrorCode {
             // the same value fails to encode again.
             Self::SqliteEffectReplayEncode => Terminal,
             // the live run diverged from its journal; a redrive diverges the same way.
-            Self::SqliteEffectReplayHashConflict => Terminal,
+            Self::SqliteEffectReplayHashConflict => Parked,
             // the effect carries no replay key; wiring, not the attempt.
             Self::SqliteEffectReplayKeyMissing => Terminal,
             // the journal row lease was lost to another owner.

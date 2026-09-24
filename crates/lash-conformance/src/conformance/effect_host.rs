@@ -1133,13 +1133,14 @@ where
         "{mismatch_code} must retain the shared typed replay-mismatch classification"
     );
     assert_eq!(
-        error.summary,
+        error.summary.map(|summary| *summary),
         Some(crate::RuntimeEffectReplayMismatchReport {
             divergent_path_count: 2,
             first_divergent_paths: vec![
                 "command.call.tool_id".to_string(),
                 "command.call.tool_name".to_string(),
             ],
+            effect_kind: Some("tool_attempt".to_string()),
         }),
         "replay mismatch must surface its divergent structural path"
     );

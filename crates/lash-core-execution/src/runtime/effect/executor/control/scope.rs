@@ -86,12 +86,47 @@ pub struct ScopedEffectController<'run> {
 /// another kind, a handle awaited in another order. Keys outside the
 /// namespace (an incorporation record, a nested process's own journal) are
 /// the host's to judge and pass.
+///
+/// A command that calls a host tool binding which drifted since the pass that
+/// wrote the journal (FIG-3587) is also **served only**: a write that would
+/// dispatch — a tool attempt, a retry sleep, anything but a pure wait — must
+/// land on a key whose outcome the journal holds, or it refuses with the
+/// drift, because serving it would reach the drifted tool live. A wait on an
+/// external completion dispatches nothing, so it passes.
 #[derive(Debug)]
 pub struct CommandJournalGuard {
     refusal: Option<RuntimeEffectControllerError>,
     fence: Option<RecordedKeyFence>,
+    served_only: Option<ServedOnlyFence>,
     touched: std::sync::atomic::AtomicBool,
     tripped: std::sync::Mutex<Option<RuntimeEffectControllerError>>,
+}
+
+/// The settled keys of a run's namespace a drifted binding's command may
+/// dispatch on (FIG-3587).
+#[derive(Clone, Debug)]
+pub struct ServedOnlyFence {
+    /// Every replay key in `[lower, upper]` whose outcome the journal holds.
+    pub settled: Arc<std::collections::BTreeSet<String>>,
+    /// The namespace's closed key range, compared bytewise.
+    pub lower: String,
+    pub upper: String,
+    /// The refusal a dispatching write to an unsettled key meets.
+    pub refusal: RuntimeEffectControllerError,
+}
+
+impl ServedOnlyFence {
+    fn refuses(&self, key: &str) -> Option<RuntimeEffectControllerError> {
+        let judged = self.lower.as_str() <= key && key <= self.upper.as_str();
+        (judged && !self.settled.contains(key)).then(|| {
+            let mut refusal = self.refusal.clone();
+            refusal.message = format!(
+                "{} (it would dispatch `{key}`, whose outcome the journal does not hold)",
+                refusal.message
+            );
+            refusal
+        })
+    }
 }
 
 /// The recorded keys of a run's namespace a replayed command's writes must
@@ -129,6 +164,7 @@ impl CommandJournalGuard {
         Self {
             refusal,
             fence,
+            served_only: None,
             touched: std::sync::atomic::AtomicBool::new(false),
             tripped: std::sync::Mutex::new(None),
         }
@@ -150,6 +186,15 @@ impl CommandJournalGuard {
         Self::with(None, Some(fence))
     }
 
+    /// This guard, also serving its command only from settled keys: a
+    /// dispatching write to a key whose outcome the journal does not hold
+    /// refuses with the fence's refusal (FIG-3587).
+    #[must_use]
+    pub fn served_only(mut self, fence: ServedOnlyFence) -> Self {
+        self.served_only = Some(fence);
+        self
+    }
+
     /// Whether the command asked to write the journal.
     pub fn touched(&self) -> bool {
         self.touched.load(std::sync::atomic::Ordering::SeqCst)
@@ -169,14 +214,35 @@ impl CommandJournalGuard {
     /// Asks to write the journal under this command, at `key` when the
     /// write names one.
     pub fn admit(&self, key: Option<&str>) -> Result<(), RuntimeEffectControllerError> {
+        self.admit_write(key, true)
+    }
+
+    /// [`Self::admit`] for a write that `dispatches` work, or only waits on
+    /// an external completion. A served-only command admits a wait at any
+    /// key its fence admits.
+    pub fn admit_write(
+        &self,
+        key: Option<&str>,
+        dispatches: bool,
+    ) -> Result<(), RuntimeEffectControllerError> {
         self.touched
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        let refusal = self.refusal.clone().or_else(|| {
-            self.fence
-                .as_ref()
-                .zip(key)
-                .and_then(|(fence, key)| fence.refuses(key))
-        });
+        let refusal = self
+            .refusal
+            .clone()
+            .or_else(|| {
+                self.fence
+                    .as_ref()
+                    .zip(key)
+                    .and_then(|(fence, key)| fence.refuses(key))
+            })
+            .or_else(|| {
+                self.served_only
+                    .as_ref()
+                    .filter(|_| dispatches)
+                    .zip(key)
+                    .and_then(|(fence, key)| fence.refuses(key))
+            });
         match refusal {
             Some(refusal) => {
                 self.tripped
@@ -304,7 +370,15 @@ impl<'run> ScopedEffectController<'run> {
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.validate_envelope_scope(&envelope)?;
-        self.admit_journal_write_at(Some(envelope.invocation.replay_key()))?;
+        // A wait on an external completion dispatches nothing (FIG-3587).
+        let dispatches = !matches!(
+            envelope.command,
+            crate::RuntimeEffectCommand::AwaitEvent { .. }
+                | crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
+        );
+        if let Some(guard) = &self.journal_guard {
+            guard.admit_write(Some(envelope.invocation.replay_key()), dispatches)?;
+        }
         self.controller()
             .execute_effect(envelope, local_executor)
             .await

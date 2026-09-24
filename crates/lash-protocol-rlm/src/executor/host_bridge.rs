@@ -38,6 +38,8 @@ pub(super) struct HostBridge<'run> {
     lashlang_execution_trace: Option<LashlangExecutionTrace>,
     host_environment: lashlang::LashlangHostEnvironment,
     deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
+    /// The cell's journaled binding set, against the live registry (FIG-3587).
+    cell_bindings: lash_lashlang_runtime::CellToolBindings,
     artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
     /// Attempt bound stamped onto children this execution starts. `None` until
     /// this execution actually starts a child: an execution that never starts
@@ -57,6 +59,7 @@ pub(super) struct HostBridgeConfig<'run> {
     pub lashlang_execution_trace: Option<LashlangExecutionTrace>,
     pub host_environment: lashlang::LashlangHostEnvironment,
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
+    pub cell_bindings: lash_lashlang_runtime::CellToolBindings,
     pub artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
     /// Bound already pinned by an earlier cell of this execution, if any.
     pub child_max_attempts: Option<std::num::NonZeroU32>,
@@ -78,6 +81,7 @@ impl<'run> HostBridge<'run> {
             lashlang_execution_trace: config.lashlang_execution_trace,
             host_environment: config.host_environment,
             deferred_execution_grants: config.deferred_execution_grants,
+            cell_bindings: config.cell_bindings,
             artifact_store: config.artifact_store,
             child_max_attempts: Mutex::new(config.child_max_attempts),
             cancellation: ExecutionCancellation::new(),
@@ -232,6 +236,33 @@ impl<'run> HostBridge<'run> {
                     host_operation: host_operation.to_string(),
                 },
             )
+        })
+    }
+
+    /// The drift refusal of the first aggregate leaf naming a drifted binding.
+    fn aggregate_drift(
+        &self,
+        leaves: &[lashlang::ResourceOperationBatchLeaf],
+    ) -> Option<lash_core::RuntimeEffectControllerError> {
+        if !self.cell_bindings.has_drift() {
+            return None;
+        }
+        leaves.iter().find_map(|leaf| {
+            let lashlang::ResourceOperationBatchLeaf::Operation(operation) = leaf else {
+                return None;
+            };
+            let FlowValue::Resource(receiver) = &operation.receiver else {
+                return None;
+            };
+            let host_operation = resolve_lashlang_module_operation(
+                &self.host_environment,
+                receiver,
+                &operation.operation,
+            )
+            .ok()?;
+            self.cell_bindings
+                .drift_for(&lash_core::ToolId::from(host_operation.as_str()))
+                .map(lash_lashlang_runtime::CellBindingDrift::refusal)
         })
     }
 
@@ -603,13 +634,26 @@ impl HostBridge<'_> {
             self.record_executed_call(index, source_operation, outcome, None)?;
             return result;
         }
-        let invocation = self.tool_invocation(
+        let mut invocation = self.tool_invocation(
             call_id.clone(),
             &host_operation,
             payload,
             call_site.as_ref(),
         );
-        let in_flight = commands.enter(command, CommandShape::ToolCall).await?;
+        // A call on a drifted binding replays under its recorded binding and
+        // is served only from the journal (FIG-3587).
+        let drift = self
+            .cell_bindings
+            .drift_for(&invocation.tool_id)
+            .map(|drift| {
+                invocation = invocation
+                    .clone()
+                    .with_recorded_binding(drift.recorded_binding());
+                drift.refusal()
+            });
+        let in_flight = commands
+            .enter_bound(command, CommandShape::ToolCall, drift)
+            .await?;
         let reply = Box::pin(
             in_flight
                 .ctx
@@ -643,6 +687,13 @@ impl HostBridge<'_> {
         // command by their first-appearance index, never by their own sites.
         let commands = self.commands()?;
         let command = commands.issue()?;
+        // An aggregate's leaves re-drive through the tool child host, which
+        // resolves each tool live: one naming a drifted binding cannot be
+        // served from the recorded binding, so the aggregate refuses before
+        // anything is dispatched (FIG-3587).
+        if let Some(drift) = self.aggregate_drift(&leaves) {
+            return Err(commands.stop(drift));
+        }
         let in_flight = commands.enter(command, CommandShape::Aggregate).await?;
         let mut bridge_leaves = Vec::with_capacity(leaves.len());
         // Per dispatched leaf: its call site, source operation, executed-call

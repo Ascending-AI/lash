@@ -468,11 +468,25 @@ fn offered_content(
 
 /// A reopen refusal re-coded as the host's replay mismatch, for a reopen the
 /// opener asked to be checked against the recorded run (FIG-3586).
+///
+/// The refusal names the diverged effect as the group head
+/// (`effect_group`), so the turn parks under that kind rather than
+/// `unknown` (FIG-3587).
 pub(crate) fn as_replay_mismatch(
     mut error: RuntimeEffectControllerError,
     mismatch_code: crate::RuntimeErrorCode,
 ) -> RuntimeEffectControllerError {
     error.code = mismatch_code;
+    let summary = error.summary.get_or_insert_with(|| {
+        Box::new(crate::RuntimeEffectReplayMismatchReport {
+            divergent_path_count: 1,
+            first_divergent_paths: vec!["group".to_string()],
+            effect_kind: None,
+        })
+    });
+    summary
+        .effect_kind
+        .get_or_insert_with(|| "effect_group".to_string());
     error
 }
 
@@ -863,3 +877,7 @@ impl Default for EffectGroupDrainBudget {
         Self::DEFAULT
     }
 }
+
+#[cfg(test)]
+#[path = "group_mismatch_tests.rs"]
+mod mismatch_tests;

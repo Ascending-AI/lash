@@ -222,14 +222,15 @@ pub use effect::{
     RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, SleepSpec,
-    StoreEffectGroupClosing, StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    ToolChildDriver, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
-    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, UnsettledEffectGroup, concrete_turn_cancellation_authority,
-    effect_groups_unsupported, refuse_unhonored_group_membership,
-    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
+    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnlyFence,
+    SleepSpec, StoreEffectGroupClosing, StoreEffectGroupDrain, ToolAttemptEffectOutcome,
+    ToolAttemptLaunch, ToolChildDriver, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
+    TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, UnsettledEffectGroup,
+    concrete_turn_cancellation_authority, effect_groups_unsupported,
+    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
+    validate_replayed_effect_envelope,
 };
 #[cfg(feature = "testing")]
 pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};

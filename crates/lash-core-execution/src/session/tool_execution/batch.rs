@@ -145,7 +145,9 @@ impl RuntimeExecutionContext<'_> {
                     ToolCallAuthorization::Granted(grant) => {
                         crate::runtime::effect::ToolChildAdmission::Granted { grant }
                     }
-                    ToolCallAuthorization::Catalog(_) => {
+                    // A recorded binding is the catalog admission the
+                    // journaled call had, under its recorded manifest.
+                    ToolCallAuthorization::Catalog(_) | ToolCallAuthorization::Recorded(_) => {
                         crate::runtime::effect::ToolChildAdmission::Catalog {
                             manifest: Box::new(entry.manifest),
                         }

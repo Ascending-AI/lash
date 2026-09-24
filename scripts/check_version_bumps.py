@@ -71,6 +71,13 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 # Entries stay after the surface lands; they are dead-but-honest history, and
 # re-adding a removed entry over a live constant is not a registration.
 REGISTRATION_BASELINES = {
+    # FIG-3587: a code cell's journal grammar is a new versioned surface. It
+    # was the replay-key grammar alone; it now also covers the ambient binding
+    # set a cell journals before its first effect and links against on
+    # redrive, which had no version constant.
+    "crates/lash-lashlang-runtime/src/replay_run.rs:LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION": (
+        "sha256:5edb043201c544b6a95a6b7c6f73538be4a0f751e2d4cbaa3f76ad9f2b741514"
+    ),
     # FIG-3586: the issue-ordinal replay-key grammar is a new versioned
     # surface. The call-site keys it replaces had no version constant: they
     # rode the VM ABI and segment-state versions, which this change bumps too.
@@ -574,7 +581,13 @@ IDENTIFIER_RENAME_BASELINES = {
     # family string, so every batch id is byte-identical and
     # TOOL_BATCH_FAMILY_VERSION stays 2. Superseded:
     # sha256:d71ea72d3b80d401109b0ca80de601bc31ff61e813392e822257ac1cda7c9644.
-    'crates/lash-core-execution/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:5726d4993280651cf025e3a365a6b395c212bc4b503fffb0e52dec6e89011f82',
+    # FIG-3587 supersedes that reading: `ToolInvocation` gained
+    # `recorded_binding`, the binding a replayed code cell recorded for a call
+    # whose live tool drifted, and the preimage's exhaustive destructure names
+    # it as ignored (`recorded_binding: _`), so every v3 batch id is
+    # byte-identical and the family stays 3. Superseded:
+    # sha256:5726d4993280651cf025e3a365a6b395c212bc4b503fffb0e52dec6e89011f82.
+    'crates/lash-core-execution/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:a9bbd29219386d6b13570db71e62c00efc02fd1ac909efd6747e622d7a6918dd',
     # FIG-2234 fix 4: the generated schema.sql header comment was aligned to
     # component version 64 (bumped in lib.rs by the BLAKE3 cutover without
     # regenerating the artifact header). Comment-only; the executed DDL is

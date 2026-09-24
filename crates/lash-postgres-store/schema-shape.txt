@@ -25,7 +25,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 123
+version 124
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -2995,6 +2995,24 @@ table lash_turn_parks
   column parked_at_ms bigint not-null
   column reason_json text not-null
   payload-shape lash_turn_parks.reason_json TurnParkReason
+    shape /oneOf/tag:type=string:%22binding_drift%22/branch schema
+    shape /oneOf/tag:type=string:%22binding_drift%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22binding_drift%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22binding_drift%22/properties/type/enum-values ["binding_drift"]
+    shape /oneOf/tag:type=string:%22binding_drift%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22binding_drift%22/required/message field
+    shape /oneOf/tag:type=string:%22binding_drift%22/required/type field
+    shape /oneOf/tag:type=string:%22binding_drift%22/type object
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/branch schema
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/effect_kind/type string
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/enum-values ["effect_replay_divergence"]
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/effect_kind field
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/type object
     shape /oneOf/tag:type=string:%22key_format_cutover%22/branch schema
     shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
     shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
@@ -3011,6 +3029,24 @@ table lash_turn_parks
     shape /oneOf/tag:type=string:%22replay_divergence%22/required/message field
     shape /oneOf/tag:type=string:%22replay_divergence%22/required/type field
     shape /oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22binding_drift%22/branch schema
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/message/type string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/type/enum-values ["binding_drift"]
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/type/type string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22binding_drift%22/required/message field
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22binding_drift%22/required/type field
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22binding_drift%22/type object
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/branch schema
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/effect_kind/type string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/message/type string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/enum-values ["effect_replay_divergence"]
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/type string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/effect_kind field
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/type object
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/branch schema
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string

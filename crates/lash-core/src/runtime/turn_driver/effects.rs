@@ -408,7 +408,6 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
-        update_machine_config: bool,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
     ) -> Result<
@@ -424,12 +423,7 @@ impl RuntimeTurnDriver<'_> {
             machine,
             event_tx,
             cancel,
-            RuntimeEffectEnvelope::new(
-                invocation,
-                RuntimeEffectCommand::SyncExecutionEnvironment {
-                    update_machine_config,
-                },
-            ),
+            RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::SyncExecutionEnvironment),
             RuntimeEffectOutcome::into_sync_execution_environment,
         )
         .await
