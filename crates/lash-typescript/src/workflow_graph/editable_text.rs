@@ -28,8 +28,14 @@ pub(super) fn parse_typescript_fragment(
     context: RenderContext<'_>,
 ) -> Result<(Program, usize), GraphRenderError> {
     let names = fragment_bindings(node);
+    // The session's globals are readable exactly as the cell's own link bound
+    // them. A name the node itself carries is the fragment's binding, so the
+    // session set drops it — which also keeps a process wrapper's `let`
+    // re-declaration of it from being shadowed by the ambient one.
+    let local: BTreeSet<String> = names.iter().cloned().collect();
+    let session: BTreeSet<String> = context.globals.difference(&local).cloned().collect();
     let (source, globals, prelude) = match context.scope {
-        RenderScope::Main => (text.to_string(), names.iter().cloned().collect(), 0),
+        RenderScope::Main => (text.to_string(), local, 0),
         // A process fragment is reparsed inside a process, and a function body
         // cannot close over a mutable outer binding. So the visible names are
         // re-declared inside the wrapper rather than left sitting above it,
@@ -46,11 +52,12 @@ pub(super) fn parse_typescript_fragment(
             )
         }
     };
-    let program = crate::parse_workflow_fragment(&source, &globals, &context.process_bindings())
-        .map_err(|error| GraphRenderError::InvalidOpaqueSource {
-            node_id: node.id.to_string(),
-            message: error.to_string(),
-        })?;
+    let program =
+        crate::parse_workflow_fragment(&source, &globals, &session, &context.process_bindings())
+            .map_err(|error| GraphRenderError::InvalidOpaqueSource {
+                node_id: node.id.to_string(),
+                message: error.to_string(),
+            })?;
     Ok((program, prelude))
 }
 
@@ -120,7 +127,7 @@ fn expression_fragment(
     } else {
         (format!("(\n{text}\n)"), false)
     };
-    let program = crate::parse_workflow_fragment(&fragment, globals, processes)
+    let program = crate::parse_workflow_fragment(&fragment, globals, &BTreeSet::new(), processes)
         .map_err(|error| error.to_string())?;
     if !program.declarations.is_empty() {
         return Err("expected one expression, found a declaration".to_string());
@@ -170,8 +177,9 @@ pub fn parse_typescript_process_statement(
         .map(|name| format!("  let {name};\n"))
         .collect::<String>();
     let source = format!("const {OPAQUE_WRAPPER} = async () => {{\n{prelude}{text}\n}};\n");
-    let program = crate::parse_workflow_fragment(&source, &BTreeSet::new(), processes)
-        .map_err(|error| TypeScriptFragmentError(error.to_string()))?;
+    let program =
+        crate::parse_workflow_fragment(&source, &BTreeSet::new(), &BTreeSet::new(), processes)
+            .map_err(|error| TypeScriptFragmentError(error.to_string()))?;
     let Some(body) = opaque_wrapper_run_body(&program) else {
         return Err(TypeScriptFragmentError(
             "expected one process statement".to_string(),

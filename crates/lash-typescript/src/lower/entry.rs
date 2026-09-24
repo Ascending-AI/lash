@@ -58,15 +58,19 @@ pub(crate) fn lower_with_ambient(
 /// A fragment is a slice cut out of a program the lens already projected, so
 /// the names it reads are the bindings live at that point rather than session
 /// globals — and a statement that reassigned one of them still has to lower,
-/// which a `const` ambient scope would refuse (FIG-3033).
+/// which a `const` ambient scope would refuse (FIG-3033). `session_globals`
+/// are the names the program itself linked against: readable as a cell's own
+/// globals are, but immutable, and a live binding of the same name wins.
 pub(crate) fn lower_workflow_fragment(
     program: &adapter::Program,
     ambient: &std::collections::BTreeSet<String>,
+    session_globals: &std::collections::BTreeSet<String>,
     processes: &std::collections::BTreeSet<String>,
 ) -> Result<LashProgram, Diagnostic> {
     lower_with_ambient_kind(
         program,
         ambient,
+        session_globals,
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::new(),
         BindingKind::Let,
@@ -83,6 +87,7 @@ pub(crate) fn lower_with_context(
     lower_with_ambient_kind(
         program,
         ambient,
+        &std::collections::BTreeSet::new(),
         process_handles,
         module_authority_roots,
         BindingKind::Const,
@@ -90,9 +95,14 @@ pub(crate) fn lower_with_context(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each set is one caller's ambient fact"
+)]
 fn lower_with_ambient_kind(
     program: &adapter::Program,
     ambient: &std::collections::BTreeSet<String>,
+    session_globals: &std::collections::BTreeSet<String>,
     process_handles: &std::collections::BTreeSet<String>,
     module_authority_roots: &std::collections::BTreeSet<String>,
     ambient_kind: BindingKind,
@@ -106,6 +116,23 @@ fn lower_with_ambient_kind(
         ..Lowerer::default()
     };
     let mut ambient_scope = Scope::default();
+    // Session globals go in first, immutable: a fragment reads one exactly as
+    // the cell's link bound it, and the fragment's own ambient names still
+    // shadow them.
+    for name in session_globals {
+        let id = lowerer.capture_ledger.declare(name, Vec::new());
+        ambient_scope.bindings.insert(
+            name.clone(),
+            Binding {
+                id,
+                internal: name.clone(),
+                kind: BindingKind::Const,
+                initialized: true,
+                owner_function: 0,
+                role: BindingRole::Plain,
+            },
+        );
+    }
     for name in ambient.union(ambient_processes) {
         let id = lowerer.capture_ledger.declare(name, Vec::new());
         ambient_scope.bindings.insert(
