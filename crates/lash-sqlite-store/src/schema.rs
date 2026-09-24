@@ -845,7 +845,11 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `effect_kind`, and a `turn_parks` reason may be `binding_drift` or
 /// `effect_replay_divergence`, which a pre-83 build cannot decode. A pre-83
 /// database is rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 83;
+/// Bumped to 84: the durable `RuntimeErrorCode` vocabulary replaces
+/// `worker_replacement_abort` with the engine-neutral, parking
+/// `effect_replay_divergence`, and the retired code is not aliased. No
+/// relation changes; a pre-84 database is rejected at open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 84;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

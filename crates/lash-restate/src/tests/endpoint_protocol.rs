@@ -11,10 +11,10 @@ use std::convert::Infallible;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-const RESTATE_INVOCATION_CONTENT_TYPE: &str = "application/vnd.restate.invocation.v6";
+pub(super) const RESTATE_INVOCATION_CONTENT_TYPE: &str = "application/vnd.restate.invocation.v6";
 
-struct FusedChannelBody {
-    receiver: tokio::sync::mpsc::Receiver<Bytes>,
+pub(super) struct FusedChannelBody {
+    pub(super) receiver: tokio::sync::mpsc::Receiver<Bytes>,
 }
 
 impl Body for FusedChannelBody {
@@ -31,7 +31,7 @@ impl Body for FusedChannelBody {
     }
 }
 
-fn encode_restate_message(message_type: u16, payload: Vec<u8>) -> Bytes {
+pub(super) fn encode_restate_message(message_type: u16, payload: Vec<u8>) -> Bytes {
     let mut encoded = BytesMut::with_capacity(8 + payload.len());
     let header = ((message_type as u64) << 48) | payload.len() as u64;
     encoded.put_u64(header);
@@ -51,18 +51,18 @@ fn put_field_key(buf: &mut BytesMut, field_number: u32, wire_type: u8) {
     put_varint(buf, ((field_number as u64) << 3) | wire_type as u64);
 }
 
-fn put_varint_field(buf: &mut BytesMut, field_number: u32, value: u64) {
+pub(super) fn put_varint_field(buf: &mut BytesMut, field_number: u32, value: u64) {
     put_field_key(buf, field_number, 0);
     put_varint(buf, value);
 }
 
-fn put_len_field(buf: &mut BytesMut, field_number: u32, value: &[u8]) {
+pub(super) fn put_len_field(buf: &mut BytesMut, field_number: u32, value: &[u8]) {
     put_field_key(buf, field_number, 2);
     put_varint(buf, value.len() as u64);
     buf.extend_from_slice(value);
 }
 
-fn encode_start_message(workflow_key: &str, known_entries: u32) -> Bytes {
+pub(super) fn encode_start_message(workflow_key: &str, known_entries: u32) -> Bytes {
     let mut payload = BytesMut::new();
     put_len_field(&mut payload, 1, workflow_key.as_bytes());
     put_len_field(&mut payload, 2, workflow_key.as_bytes());
@@ -71,7 +71,7 @@ fn encode_start_message(workflow_key: &str, known_entries: u32) -> Bytes {
     encode_restate_message(0x0000, payload.to_vec())
 }
 
-fn encode_input_command(payload: &[u8]) -> Bytes {
+pub(super) fn encode_input_command(payload: &[u8]) -> Bytes {
     let mut value = BytesMut::new();
     put_len_field(&mut value, 1, payload);
 
@@ -146,7 +146,7 @@ pub(super) struct RestateCallFrame {
     pub result_completion_id: u32,
 }
 
-fn protobuf_len_field(input: &[u8], target: u64) -> Option<&[u8]> {
+pub(super) fn protobuf_len_field(input: &[u8], target: u64) -> Option<&[u8]> {
     let mut cursor = 0;
     while cursor < input.len() {
         let key = decode_varint(input, &mut cursor)?;
@@ -195,7 +195,7 @@ fn protobuf_len_fields(input: &[u8], target: u64) -> Option<Vec<&[u8]>> {
     Some(values)
 }
 
-fn protobuf_varint_field(input: &[u8], target: u64) -> Option<u64> {
+pub(super) fn protobuf_varint_field(input: &[u8], target: u64) -> Option<u64> {
     let mut cursor = 0;
     while cursor < input.len() {
         let key = decode_varint(input, &mut cursor)?;
@@ -220,7 +220,7 @@ fn protobuf_varint_field(input: &[u8], target: u64) -> Option<u64> {
     None
 }
 
-fn decode_call_frame(frame: &[u8]) -> Option<RestateCallFrame> {
+pub(super) fn decode_call_frame(frame: &[u8]) -> Option<RestateCallFrame> {
     let payload = frame.get(8..)?;
     let headers = protobuf_len_fields(payload, 4)?
         .into_iter()
@@ -475,7 +475,7 @@ pub(super) fn restate_call_frames(input: &[u8]) -> Option<Vec<RestateCallFrame>>
     Some(calls)
 }
 
-fn encode_call_completion(completion_id: u32, value: &[u8]) -> Bytes {
+pub(super) fn encode_call_completion(completion_id: u32, value: &[u8]) -> Bytes {
     let mut nested_value = BytesMut::new();
     put_len_field(&mut nested_value, 1, value);
     let mut notification = BytesMut::new();
@@ -487,7 +487,7 @@ fn encode_call_completion(completion_id: u32, value: &[u8]) -> Bytes {
 /// FIG-3149: `PeekPromiseCompletionNotification` (0x800A). `None` is the void
 /// result an unresolved promise reads as; `Some(value)` carries the resolved
 /// payload.
-fn encode_peek_promise_completion(completion_id: u32, value: Option<&[u8]>) -> Bytes {
+pub(super) fn encode_peek_promise_completion(completion_id: u32, value: Option<&[u8]>) -> Bytes {
     let mut notification = BytesMut::new();
     put_varint_field(&mut notification, 1, u64::from(completion_id));
     match value {
@@ -501,7 +501,7 @@ fn encode_peek_promise_completion(completion_id: u32, value: Option<&[u8]>) -> B
     encode_restate_message(0x800A, notification.to_vec())
 }
 
-fn encode_invocation_id_completion(completion_id: u32, invocation_id: &str) -> Bytes {
+pub(super) fn encode_invocation_id_completion(completion_id: u32, invocation_id: &str) -> Bytes {
     let mut notification = BytesMut::new();
     put_varint_field(&mut notification, 1, u64::from(completion_id));
     put_len_field(&mut notification, 16, invocation_id.as_bytes());
@@ -829,7 +829,7 @@ fn encode_sleep_command(completion_id: u32) -> Bytes {
 
 /// FIG-779: `SleepCompletionNotification` (0x800C) with a void result, i.e. the
 /// timer already fired and its completion is in the replayed journal.
-fn encode_sleep_completion(completion_id: u32) -> Bytes {
+pub(super) fn encode_sleep_completion(completion_id: u32) -> Bytes {
     let mut payload = BytesMut::new();
     put_varint_field(&mut payload, 1, u64::from(completion_id));
     put_len_field(&mut payload, 4, &[]);
@@ -851,7 +851,7 @@ pub(super) fn encode_completed_sleep_replay<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
-fn decode_varint(input: &[u8], cursor: &mut usize) -> Option<u64> {
+pub(super) fn decode_varint(input: &[u8], cursor: &mut usize) -> Option<u64> {
     let mut value = 0_u64;
     for shift in (0..64).step_by(7) {
         let byte = *input.get(*cursor)?;

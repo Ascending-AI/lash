@@ -457,7 +457,10 @@ async fn async_main() -> anyhow_like::Result<()> {
                 Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>,
             );
             let endpoint = restate_sdk::endpoint::Endpoint::builder()
-                .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())
+                .bind(lash_restate::turn_service(
+                    AgentServiceTurnWorkflowImpl::new(state.clone()).serve(),
+                    "run",
+                ))
                 .bind(AgentServiceEffectGroupWorkflowImpl.serve())
                 .bind(
                     process_deployment

@@ -375,7 +375,16 @@ journaled prompt remove the known drifts; the backstop covers the rest. A
 replay hash conflict on any recorded effect on the SQL hosts
 (`sqlite_effect_replay_hash_conflict`, `postgres_effect_replay_hash_conflict`)
 classifies `Parked` instead of recording a failed turn (superseding FIG-3575's
-outcome reading for these codes). The mismatch report names the diverged
+outcome reading for these codes). On Restate the same divergence, and a
+reopened effect group whose child or shape is not the recorded one, refuses
+with the engine-neutral `effect_replay_divergence`, which parks the same way
+(it replaced `worker_replacement_abort`, a live fault, with no alias). The
+turn handler fails that attempt retryably, so the invocation keeps its
+journal, and bounds its attempts before the invocation pauses
+(`lash_restate::turn_service`). A parked turn issues no further journaled
+effect: its journal diverged at the refusal, so the teardown's orphan repair,
+whose cancel gate peek is journaled, is skipped, and its inputs stay pinned
+to the turn id its redrive carries. The mismatch report names the diverged
 effect's kind (its command `type`: `llm_call`, `tool_attempt`, …) as
 `effect_kind`, and the park records it
 (`TurnParkReason::EffectReplayDivergence { effect_kind, message }`), so an
@@ -388,9 +397,10 @@ Old state never reaches a replay: the SQL hosts reject and recreate a store
 written before this amendment at open (SQLite durable core 83, PostgreSQL
 component 123). On Restate, a journal written before it holds a
 protocol-start sync envelope with `update_machine_config`, so its first sync
-is refused, typed and before any effect, as `WorkerReplacementAbort` — a live
-fault there, not a park. Parking Restate's envelope mismatch is deferred to
-S7, with the Restate registration of the conformance laws
-`model_call_drift_parks_then_completes_once_restored` and
-`redriven_cell_links_against_its_journaled_binding_set`, which run on SQLite
-and PostgreSQL.
+is refused, typed and before any effect, as `effect_replay_divergence`, and
+the turn parks. The conformance law
+`model_call_drift_parks_then_completes_once_restored` runs on SQLite,
+PostgreSQL and Restate (an in-process invoker over the real endpoint).
+`redriven_cell_links_against_its_journaled_binding_set` runs on SQLite and
+PostgreSQL only: it injects faults into the SQL effect journal and reads its
+recorded keys, neither of which a positional engine journal offers.

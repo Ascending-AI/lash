@@ -294,6 +294,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     )
                     .await;
+                let end = crate::ConformanceTurnEnd::of(&turn);
                 if let Some(turn_tx) = turn_tx
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -301,6 +302,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
                 {
                     let _ = turn_tx.send(turn);
                 }
+                end
             })
         })
     };

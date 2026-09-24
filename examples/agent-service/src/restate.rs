@@ -88,10 +88,18 @@ impl AgentServiceTurnWorkflow for AgentServiceTurnWorkflowImpl {
             restate_sdk::errors::TerminalError::new("Restate authority id is not configured")
         })?;
         let controller = lash_restate::RestateRuntimeEffectController::new(ctx, authority_id);
-        run_restate_chat_turn_and_persist(self.state.clone(), request, &controller)
+        let turn_id = request.turn_id.clone();
+        match run_restate_chat_turn_and_persist(self.state.clone(), request, &controller)
             .await
-            .map_err(restate_sdk::errors::TerminalError::from_error)?;
-        Ok(restate_sdk::serde::Json(()))
+            .map_err(restate_sdk::errors::TerminalError::from_error)?
+        {
+            // A parked turn keeps its invocation's journal: the attempt fails
+            // retryably, never terminally (lash_restate::turn_service).
+            TurnAttempt::Parked => Err(restate_sdk::errors::HandlerError::from(
+                std::io::Error::other(format!("turn {turn_id} is parked")),
+            )),
+            TurnAttempt::Completed | TurnAttempt::Failed => Ok(restate_sdk::serde::Json(())),
+        }
     }
 }
 
@@ -268,7 +276,7 @@ async fn run_restate_chat_turn_and_persist(
         '_,
         restate_sdk::prelude::WorkflowContext<'_>,
     >,
-) -> AppResult<()> {
+) -> AppResult<TurnAttempt> {
     let turn_model = model_spec_for_chat_selection(&ChatModelSelection {
         model: request.model.clone(),
         model_variant: request.model_variant.clone(),
@@ -295,7 +303,7 @@ async fn run_restate_chat_turn_and_persist(
     // A zero-move turn wedges the board in this mode exactly as it does in the
     // local one, so the same host-level policy runs here (FIG-3181); only the
     // plumbing passed in below is Restate's.
-    run_turn_with_zero_move_recovery(
+    let attempt = run_turn_with_zero_move_recovery(
         &state,
         &chat_id,
         request.text.clone(),
@@ -349,6 +357,8 @@ async fn run_restate_chat_turn_and_persist(
                             .await?;
                         Ok(TurnAttempt::Completed)
                     }
+                    // A parked turn records nothing: no error row, no Done.
+                    Err(err) if parks_turn(&err) => Ok(TurnAttempt::Parked),
                     Err(err) => {
                         state
                             .with_db({
@@ -378,6 +388,9 @@ async fn run_restate_chat_turn_and_persist(
         },
     )
     .await?;
+    if matches!(attempt, TurnAttempt::Parked) {
+        return Ok(attempt);
+    }
 
     state
         .with_db({
@@ -388,7 +401,19 @@ async fn run_restate_chat_turn_and_persist(
             }
         })
         .await?;
-    Ok(())
+    Ok(attempt)
+}
+
+/// Whether `err` parked its turn: its park is written and its claims held.
+fn parks_turn(err: &lash::EmbedError) -> bool {
+    let cause = match err {
+        lash::EmbedError::Runtime(error) => error.turn_failure_cause(),
+        lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error)) => {
+            error.turn_failure_cause()
+        }
+        _ => return false,
+    };
+    cause == lash::runtime::TurnFailureCause::Parked
 }
 
 #[cfg(all(test, feature = "restate"))]
@@ -518,7 +543,10 @@ mod restate_tests {
             lash::Backend::session_store_factory(harness.backend.as_ref()),
         );
         let endpoint = restate_sdk::endpoint::Endpoint::builder()
-            .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())
+            .bind(lash_restate::turn_service(
+                AgentServiceTurnWorkflowImpl::new(state.clone()).serve(),
+                "run",
+            ))
             .bind(AgentServiceEffectGroupWorkflowImpl.serve())
             .bind(
                 harness

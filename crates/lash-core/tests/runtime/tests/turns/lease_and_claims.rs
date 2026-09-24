@@ -2301,7 +2301,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         .await
         .expect_err("the first worker is replaced after it journals the message block");
     assert!(
-        first_error.code.is_worker_replacement_abort(),
+        first_error.code == lash_core::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
         "the staged failure must be the worker replacement itself: {first_error:?}"
     );
     let late_input_id = controller.late_input_id();

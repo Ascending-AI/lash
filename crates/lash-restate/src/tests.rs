@@ -101,6 +101,7 @@ mod effect_group_sdk_preconditions;
 mod effect_group_session_gate;
 mod effect_group_shape;
 mod endpoint_protocol;
+mod endpoint_turn_runner;
 mod live_turn_probe;
 mod process_effect_summary;
 mod process_tool_replay;
@@ -1474,7 +1475,16 @@ impl Fig1142ReplayDivergence for Fig1142ReplayDivergenceImpl {
                 RuntimeEffectLocalExecutor::testing(|_| async { Ok(fig793_llm_outcome()) }),
             )
             .await
-            .map_err(TerminalError::from_error)?;
+            .map_err(|error| -> HandlerError {
+                // A turn handler's contract (lash_restate::turn_service): a
+                // divergence parks, so the attempt fails retryably and the
+                // invocation keeps its journal.
+                if error.turn_failure_cause() == lash_core::TurnFailureCause::Parked {
+                    HandlerError::from(std::io::Error::other(error.to_string()))
+                } else {
+                    TerminalError::from_error(error).into()
+                }
+            })?;
         Ok(Json(true))
     }
 }

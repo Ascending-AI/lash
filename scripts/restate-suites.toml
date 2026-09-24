@@ -62,8 +62,8 @@ report_only = "tool-result durations reach journaled identities (FIG-3672); see 
 # journaled it: `turn:1:0:llm_call:1` recorded, `turn:2:0:llm_call:1` replayed.
 "tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes" = "journal mismatch: the replayed turn derives turn index 2 where the journal recorded 1 (FIG-3682)"
 # The presented tool result's effect hash covers the tool's measured
-# `command.duration_ms`, so a replay that re-measures it aborts the worker
-# (`worker_replacement_abort ... divergent_paths=[command.duration_ms]`)
+# `command.duration_ms`, so a replay that re-measures it parks the turn
+# (`effect_replay_divergence ... divergent_paths=[command.duration_ms]`)
 # whenever the two measurements differ by a millisecond.
 "tests::conformance_and_poison::a_retained_full_output_is_a_durable_artifact_not_a_path" = "present_tool_result hash covers the wall-clock command.duration_ms, so a replay diverges (FIG-3672)"
 # The same measurement reaches the replay key of the child's follow-on call

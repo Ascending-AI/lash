@@ -73,13 +73,12 @@
 //! Await-event identity epoch 6 uses the v2 wait-index namespace and marker;
 //! requests and indexed wait values carry the `AwaitEventKey` preimage so each
 //! handler derives scope, classification, and workflow address locally.
-//! Before upgrading, drain and recreate both Restate services' state. Every
-//! post-cutover register, resolve, renew, and woken-settle path crosses the
-//! index epoch gate and rejects pre-cutover state with a recreate instruction.
-//! A fully parked pre-cutover invocation cannot execute that new gate and its v2
-//! workflow address is unreachable from v4 resolutions; it never
-//! self-terminates. Draining and purging those invocations before the cutover is
-//! the only remedy.
+//! There is no migration across that cutover: every register, resolve,
+//! renew, and woken-settle path crosses the index epoch gate and refuses
+//! pre-cutover state, typed and before any effect. A pre-cutover invocation
+//! suspended on a v2 workflow address never reaches that gate and is
+//! unreachable from v4 resolutions, so it never self-terminates; an operator
+//! cancels it.
 
 mod backend;
 mod bindings;
@@ -92,6 +91,7 @@ mod process;
 mod process_attach;
 mod session_administration;
 mod turn;
+mod turn_handler;
 
 pub use restate_sdk;
 
@@ -152,6 +152,7 @@ pub use process_attach::{
 };
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use turn::RestateTurnAttach;
+pub use turn_handler::{TURN_HANDLER_MAX_ATTEMPTS, turn_handler_options, turn_service};
 
 // Adapter-internal wire and seam types. They are `pub` so the Restate SDK's
 // generated handlers can name them; they are not a host contract.

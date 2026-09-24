@@ -13,13 +13,39 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+/// How a job's turn ended, which the tier's engine acts on. A turn that
+/// aborted without an outcome — a live fault, or a park on a replay
+/// divergence — leaves its execution open: the engine keeps its journal, and
+/// the next run of the same scope is that execution's retry, replaying it. A
+/// settled turn is done.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConformanceTurnEnd {
+    /// The turn settled: it finished, or it was recorded as a failed turn.
+    Settled,
+    /// The turn aborted without an outcome, for this cause.
+    Aborted(crate::TurnFailureCause),
+}
+
+impl ConformanceTurnEnd {
+    /// How a turn that returned `turn` ended.
+    pub fn of<T>(turn: &Result<T, crate::RuntimeError>) -> Self {
+        match turn {
+            Ok(_) => Self::Settled,
+            Err(error) => match error.turn_failure_cause() {
+                crate::TurnFailureCause::Outcome => Self::Settled,
+                cause => Self::Aborted(cause),
+            },
+        }
+    }
+}
+
 /// One turn, run on the scoped controller the tier supplies. The job owns
-/// everything it drives (the runtime and its inputs) and reports what it
-/// observed through its own channel.
+/// everything it drives (the runtime and its inputs), reports what it
+/// observed through its own channel, and answers how its turn ended.
 pub type ConformanceTurnJob = Box<
     dyn for<'a> FnOnce(
             crate::ScopedEffectController<'a>,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+        ) -> Pin<Box<dyn Future<Output = ConformanceTurnEnd> + Send + 'a>>
         + Send,
 >;
 
@@ -30,7 +56,7 @@ pub type ConformanceTurnJob = Box<
 pub type ConformanceTurnAttempt = Arc<
     dyn for<'a> Fn(
             crate::ScopedEffectController<'a>,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+        ) -> Pin<Box<dyn Future<Output = ConformanceTurnEnd> + Send + 'a>>
         + Send
         + Sync,
 >;
