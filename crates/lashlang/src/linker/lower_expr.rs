@@ -1311,6 +1311,10 @@ impl<'module> Linker<'module> {
             }
         }
         let mut function_scope = Scope::new(scope.process_body, scope.span);
+        // `this` is an implicit function binding: the frame binds it at call
+        // entry (`undefined` ordinarily, the receiver through
+        // `__typescript_call_this`), so a body that reads it resolves here.
+        function_scope.bind("this", any_binding());
         for capture in &captures {
             // A closure body sees its captures as `Any`: the value can be
             // reassigned between the closure's construction and its call, so

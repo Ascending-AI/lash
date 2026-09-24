@@ -201,6 +201,9 @@ impl Compiler {
                 "a function body begins with no handler installed"
             );
 
+            // `this` is the first slot of every frame so a `this` read always
+            // resolves; the call binds it to the receiver or `undefined`.
+            let this_slot = self.push_slot("this");
             let self_slot = definition.name.as_deref().map(|name| self.push_slot(name));
             let parameter_slots = definition
                 .params
@@ -223,6 +226,7 @@ impl Compiler {
                 parameter_count: definition.params.len(),
                 parameter_model: pending.parameter_model,
                 capture_count: definition.captures.len(),
+                this_slot,
                 self_slot,
                 parameter_slots: parameter_slots.into_boxed_slice(),
                 capture_slots: capture_slots.into_boxed_slice(),

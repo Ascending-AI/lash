@@ -224,6 +224,10 @@ pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
         arity: Arity::Exact(2),
     },
     Builtin {
+        name: "__typescript_call_this",
+        arity: Arity::Exact(3),
+    },
+    Builtin {
         name: "__typescript_pending_tool",
         arity: Arity::Exact(1),
     },
@@ -301,6 +305,7 @@ mod tests {
             ("__typescript_global_get", Arity::Exact(1)),
             ("__typescript_global_has", Arity::Exact(1)),
             ("__typescript_call_dynamic", Arity::Exact(2)),
+            ("__typescript_call_this", Arity::Exact(3)),
             ("__typescript_async_map", Arity::Exact(2)),
             ("__typescript_closure", Arity::Exact(3)),
             ("__typescript_global_set", Arity::Exact(2)),

@@ -44,6 +44,34 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.begin_direct_function_call(function, arguments)
     }
 
+    /// `__typescript_call_this(fn, receiver, args)` — ECMA `Call(fn, receiver)`
+    /// for the lowered coercions that specify a `this` (JSON replacer, the
+    /// string-coercion calls inside `split`).
+    pub(super) fn execute_javascript_call_this(&mut self) -> Result<(), RuntimeError> {
+        let arguments = self.pop_stack()?;
+        let receiver = self.pop_stack()?;
+        let function = self.pop_stack()?;
+        let arguments = match arguments {
+            Value::Ref(id) => match self.heap.get(id)? {
+                HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                object => {
+                    return Err(RuntimeError::ShapingListRequired {
+                        builtin: "call this".into(),
+                        actual: object.kind_name().to_string(),
+                    });
+                }
+            },
+            Value::List(values) | Value::Tuple(values) => values.to_vec(),
+            value => {
+                return Err(RuntimeError::ShapingListRequired {
+                    builtin: "call this".into(),
+                    actual: super::super::value_type_name(&value).to_string(),
+                });
+            }
+        };
+        self.begin_direct_function_call_this(function, receiver, arguments)
+    }
+
     pub(super) fn execute_async_map(&mut self) -> Result<(), RuntimeError> {
         let function = self.pop_stack()?;
         let receiver = self.pop_stack()?;

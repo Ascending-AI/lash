@@ -136,6 +136,11 @@ pub(crate) struct CompiledFunction {
     pub(crate) parameter_count: usize,
     pub(crate) parameter_model: ClosureParameterModel,
     pub(crate) capture_count: usize,
+    /// Every function reserves a slot for `this`, bound at call entry —
+    /// `undefined` for an ordinary call, the receiver for
+    /// `__typescript_call_this`. Keeping it unconditional means `this`
+    /// reads resolve to a slot whether or not the body uses it.
+    pub(crate) this_slot: usize,
     pub(crate) self_slot: Option<usize>,
     pub(crate) parameter_slots: Box<[usize]>,
     pub(crate) capture_slots: Box<[usize]>,
@@ -487,6 +492,7 @@ pub(crate) enum IntrinsicOp {
     JavaScriptStdlib(usize),
     JavaScriptHeapNew(usize),
     JavaScriptHeapInstanceOf,
+    JavaScriptCallThis,
     JavaScriptHeapDeleteMember,
     JavaScriptRegExp(usize),
     JavaScriptGlobalDelete,
@@ -674,7 +680,7 @@ impl IntrinsicOp {
             | IntrinsicOp::FloorDiv
             | IntrinsicOp::Push
             | IntrinsicOp::SortBy => 2,
-            IntrinsicOp::Slice | IntrinsicOp::Replace => 3,
+            IntrinsicOp::Slice | IntrinsicOp::Replace | IntrinsicOp::JavaScriptCallThis => 3,
             IntrinsicOp::Find(argc)
             | IntrinsicOp::Format(argc)
             | IntrinsicOp::Range(argc)
@@ -707,6 +713,7 @@ impl IntrinsicOp {
             IntrinsicOp::JavaScriptStdlib(_) => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::JavaScriptHeapNew(_) => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::JavaScriptHeapInstanceOf
+            | IntrinsicOp::JavaScriptCallThis
             | IntrinsicOp::JavaScriptHeapDeleteMember
             | IntrinsicOp::JavaScriptRegExp(_)
             | IntrinsicOp::JavaScriptGlobalDelete

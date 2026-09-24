@@ -952,6 +952,9 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::JavaScriptHeapInstanceOf => {
             format!("intrinsic typescript_heap_instanceof argc={argc}")
         }
+        IntrinsicOp::JavaScriptCallThis => {
+            format!("intrinsic typescript_call_this argc={argc}")
+        }
         IntrinsicOp::JavaScriptHeapDeleteMember => {
             format!("intrinsic typescript_heap_delete_member argc={argc}")
         }

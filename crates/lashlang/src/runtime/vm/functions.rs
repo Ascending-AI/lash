@@ -200,7 +200,29 @@ impl<H: ExecutionHost> Vm<'_, H> {
         closure: Value,
         args: Vec<Value>,
     ) -> Result<(), RuntimeError> {
-        self.begin_function_call(closure, CallArguments::Owned(args), ReturnTarget::Direct)
+        self.begin_function_call(
+            closure,
+            CallArguments::Owned(args),
+            ReturnTarget::Direct,
+            Value::Undefined,
+        )
+    }
+
+    /// `__typescript_call_this`: a call whose `this` is bound to `receiver`,
+    /// used by the lowered coercions (JSON replacer, split) that ECMA
+    /// specifies as `Call(fn, holder, args)`.
+    pub(super) fn begin_direct_function_call_this(
+        &mut self,
+        closure: Value,
+        receiver: Value,
+        args: Vec<Value>,
+    ) -> Result<(), RuntimeError> {
+        self.begin_function_call(
+            closure,
+            CallArguments::Owned(args),
+            ReturnTarget::Direct,
+            receiver,
+        )
     }
 
     /// Keeps a returning frame's slot state for the next call. Its contents
@@ -234,6 +256,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         closure: Value,
         mut args: CallArguments<'_>,
         return_target: ReturnTarget,
+        this: Value,
     ) -> Result<(), RuntimeError> {
         let limit = self.host.execution_bounds().max_frame_depth.get();
         if self.frames.len() as u64 >= limit {
@@ -305,6 +328,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
 
         let mut slots = self.take_slot_state(function.slot_names.len());
+        slots.values[function.this_slot] = Some(this);
         if let Some(slot) = function.self_slot {
             slots.values[slot] = Some(Value::Ref(id));
         }
@@ -392,6 +416,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         function,
                         CallArguments::Borrowed(&arguments),
                         ReturnTarget::Callback(callback),
+                        Value::Undefined,
                     )?;
                 } else {
                     self.stack.push(match callback.completion {
@@ -441,6 +466,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             function,
             CallArguments::Borrowed(&first),
             ReturnTarget::Callback(callback),
+            Value::Undefined,
         )
     }
 
@@ -479,6 +505,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             function,
             CallArguments::Owned(first),
             ReturnTarget::Callback(callback),
+            Value::Undefined,
         )
     }
 }
