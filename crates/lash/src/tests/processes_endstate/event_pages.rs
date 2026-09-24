@@ -7,12 +7,12 @@ pub(super) async fn full_events(
     let outcome = core
         .processes()
         .events(
-            process_id,
+            crate::process::ProcessEventsFrom::Start(process_id.clone()),
             std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
             lash_core::ProcessEventQueryMode::Full,
-            None,
         )
-        .await?;
+        .await?
+        .outcome;
     match outcome {
         lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
             events: lash_core::ProcessEventPageEvents::Full(events),

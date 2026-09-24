@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/remote-process-events-response/v97",
+  "$id": "https://lash.dev/schemas/remote-process-events-response/v98",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -133,6 +133,11 @@
         }
       ]
     },
+    "ProcessCursor": {
+      "description": "Opaque process cursor: `lashpc2:<epoch>:<process-reference>:<position>:<sequence>`.",
+      "pattern": "^lashpc2:[^:]+:r[0-9]+\\.[0-9a-f]+:[0-9]+:[0-9]+$",
+      "type": "string"
+    },
     "ProcessEventHistoryRetention": {
       "description": "Why the exact process history named by a page read is no longer retained.",
       "oneOf": [
@@ -261,7 +266,7 @@
       ]
     },
     "ProcessEventPageMore": {
-      "description": "Whether a bounded event page completed the retained history.",
+      "description": "Whether a bounded event page completed the retained history.\n\nA host continues through the process cursor the facade returns with the page; the registry-level boundary is the last returned sequence.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -281,8 +286,11 @@
         {
           "additionalProperties": false,
           "properties": {
-            "continuation": {
-              "type": "string"
+            "after_sequence": {
+              "description": "The exclusive sequence boundary the next page starts after.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
             },
             "status": {
               "enum": [
@@ -292,7 +300,7 @@
             }
           },
           "required": [
-            "continuation",
+            "after_sequence",
             "status"
           ],
           "type": "object"
@@ -1285,6 +1293,14 @@
     }
   },
   "properties": {
+    "cursor": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ProcessCursor"
+        }
+      ],
+      "description": "The cursor after this page: its sequence is the last event returned, or the request's when the page returned none."
+    },
     "incarnation": {
       "format": "uint64",
       "minimum": 0.0,
@@ -1298,12 +1314,13 @@
     }
   },
   "required": [
+    "cursor",
     "incarnation",
     "outcome",
     "process_id"
   ],
   "title": "RemoteProcessEventsResponse",
   "type": "object",
-  "x-lash-schema-version": 97,
+  "x-lash-schema-version": 98,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

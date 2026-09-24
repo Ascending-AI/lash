@@ -8,6 +8,7 @@ pub mod handle;
 pub mod identity;
 pub mod llm;
 pub mod plugin;
+pub mod process_cursor;
 pub mod prompt;
 mod redacted;
 pub mod sansio;
@@ -62,6 +63,10 @@ pub use llm::types::{LlmTerminalReason, ProviderFailureKind};
 pub use plugin::{
     CheckpointKind, PluginMessage, PluginRuntimeEvent, PromptContribution, PromptContributionBody,
     PromptContributionGate,
+};
+pub use process_cursor::{
+    PROCESS_CURSOR_UNROUTED_EPOCH, PROCESS_CURSOR_VERSION, ProcessCursor, ProcessCursorError,
+    ProcessCursorReference,
 };
 pub use prompt::{
     PreparedPrompt, PromptBuildInput, PromptCache, PromptContext, PromptContributionSet,

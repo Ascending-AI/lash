@@ -751,9 +751,9 @@ async fn assert_remote_process_dto_surface(
         let outcome = registry
             .event_page_ref(
                 &process_ref,
+                0,
                 std::num::NonZeroUsize::new(32).expect("nonzero page limit"),
                 lash_core::ProcessEventQueryMode::Full,
-                None,
             )
             .await
             .expect("load process event page for remote DTO round trip");
@@ -768,17 +768,29 @@ async fn assert_remote_process_dto_surface(
             .map(|event| (event.sequence, event.event_type.clone()))
             .collect::<Vec<_>>();
         let expected_more = page.more.clone();
+        let cursor = lash_sansio::ProcessCursor::new(
+            lash_sansio::PROCESS_CURSOR_UNROUTED_EPOCH,
+            lash_sansio::ProcessCursorReference::for_lifetime(
+                &process_ref.process_id,
+                process_ref.incarnation.registration_sequence(),
+            ),
+            0,
+            page_events.last().map_or(0, |event| event.sequence),
+        )
+        .expect("scenario cursor");
         let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::try_from((
             process_ref.clone(),
             outcome,
+            cursor.clone(),
         ))
         .expect("process events page serializes for the remote protocol");
         remote_events
             .validate()
             .expect("remote process event page should validate");
-        let (round_trip_process_ref, round_trip_outcome): (
+        let (round_trip_process_ref, round_trip_outcome, round_trip_cursor): (
             lash_core::ProcessRef,
             lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+            lash_sansio::ProcessCursor,
         ) = remote_events
             .try_into()
             .expect("remote process event page should convert back");
@@ -795,6 +807,7 @@ async fn assert_remote_process_dto_surface(
             .map(|event| (event.sequence, event.event_type.clone()))
             .collect::<Vec<_>>();
         assert_eq!(round_trip_process_ref, process_ref);
+        assert_eq!(round_trip_cursor, cursor);
         assert_eq!(round_trip_tail, expected_tail);
         assert_eq!(round_trip_page.more, expected_more);
     }

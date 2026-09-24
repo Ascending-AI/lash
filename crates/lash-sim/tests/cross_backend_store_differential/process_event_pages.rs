@@ -10,12 +10,13 @@ where
     R: lash_core::ProcessEventLog + ?Sized,
 {
     let limit = std::num::NonZeroUsize::new(127).unwrap_or(std::num::NonZeroUsize::MIN);
-    let mut continuation = None;
+    let process_ref = registry.resolve_process_ref(process_id).await?;
+    let mut after_sequence = 0;
     let mut expected_sequence = 1;
     let mut page_lengths = Vec::new();
     loop {
         let outcome = registry
-            .event_page(process_id, limit, mode, continuation)
+            .event_page_ref(&process_ref, after_sequence, limit, mode)
             .await?;
         let lash_core::ProcessEventReadOutcome::Retained(page) = outcome else {
             panic!("seeded event history must remain retained");
@@ -44,9 +45,9 @@ where
             assert_eq!(event_type, "page.event");
             expected_sequence += 1;
         }
-        continuation = match page.more {
+        after_sequence = match page.more {
             lash_core::ProcessEventPageMore::Complete => break,
-            lash_core::ProcessEventPageMore::More { continuation } => Some(continuation),
+            lash_core::ProcessEventPageMore::More { after_sequence } => after_sequence,
         };
     }
     Ok((expected_sequence - 1, page_lengths))

@@ -2203,6 +2203,16 @@ constant_path = "crates/lash-core-store/src/store/state_version.rs"
 reason = "lower bound of the admission window for the registered CURRENT_SESSION_STATE_VERSION, not a format of its own"
 
 [[unregistered]]
+constant = "PROCESS_CURSOR_VERSION"
+constant_path = "crates/lash-sansio/src/process_cursor.rs"
+reason = "stamps the opaque live process cursor a host holds between reads; lash persists no cursor, a retired stamp is refused by name at parse, and its wire carriers are guarded by REMOTE_PROTOCOL_VERSION"
+
+[[unregistered]]
+constant = "PROCESS_CURSOR_UNROUTED_EPOCH"
+constant_path = "crates/lash-sansio/src/process_cursor.rs"
+reason = "the reserved publisher-epoch value of a cursor minted with no live route; an epoch names a publisher lifetime, not a format"
+
+[[unregistered]]
 constant = "JOURNAL_IDENTITY_VERSION"
 constant_path = "crates/lash-sansio/src/effect_identity.rs"
 reason = "hash-domain tag of ExecutionScope journal keys: the *_FAMILY_VERSION class under another name"

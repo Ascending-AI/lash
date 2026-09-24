@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/remote-process-observation-item/v97",
+  "$id": "https://lash.dev/schemas/remote-process-observation-item/v98",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "AttachmentMaterializationReason": {
@@ -256,6 +256,9 @@
         }
       ]
     },
+    "FailureCode": {
+      "type": "string"
+    },
     "GenerationOptionOutcome": {
       "description": "What became of one caller-requested generation option on one request.\n\nAdapters emit what their wire can express and omit the rest \u2014 a model that pins sampling, extended thinking, or an endpoint with no seed field all take an option away without failing the call. This names which happened so a host can tell an honored request from a silently dropped one.",
       "oneOf": [
@@ -376,7 +379,302 @@
         }
       ]
     },
+    "ProcessCursor": {
+      "description": "Opaque process cursor: `lashpc2:<epoch>:<process-reference>:<position>:<sequence>`.",
+      "pattern": "^lashpc2:[^:]+:r[0-9]+\\.[0-9a-f]+:[0-9]+:[0-9]+$",
+      "type": "string"
+    },
+    "RemoteProcessDurableCompleteness": {
+      "description": "Durable-summary completeness, reported apart from live-graph completeness.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "enum": [
+                "complete"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "$ref": "#/definitions/RemoteProcessDurableGapReason"
+            },
+            "state": {
+              "enum": [
+                "incomplete"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessDurableGapReason": {
+      "description": "Why a durable summary fold is not the whole history through its boundary.",
+      "oneOf": [
+        {
+          "description": "Bounded acquisition stopped before the high-water mark.",
+          "enum": [
+            "acquisition_budget_exhausted"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A summary event in the history did not decode.",
+          "enum": [
+            "summary_undecodable"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "RemoteProcessDurableSnapshot": {
+      "description": "The durable half of a snapshot: status and the effect-summary fold through one exact high-water sequence, or why there is none.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "completeness": {
+              "$ref": "#/definitions/RemoteProcessDurableCompleteness"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "state": {
+              "enum": [
+                "retained"
+              ],
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/definitions/RemoteProcessStatus"
+            },
+            "summary": {
+              "items": {
+                "$ref": "#/definitions/RemoteProcessEffectNodeSummary"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "completeness",
+            "sequence",
+            "state",
+            "status",
+            "summary"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "retention": {
+              "$ref": "#/definitions/RemoteProcessHistoryRetention"
+            },
+            "state": {
+              "enum": [
+                "no_longer_retained"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "retention",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessEffectNodeSummary": {
+      "additionalProperties": false,
+      "description": "One effect node's recorded occurrences and omitted counts.",
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "occurrences": {
+          "items": {
+            "$ref": "#/definitions/RemoteProcessEffectOccurrence"
+          },
+          "type": "array"
+        },
+        "omitted": {
+          "$ref": "#/definitions/RemoteProcessEffectOmittedCounts"
+        }
+      },
+      "required": [
+        "node_id",
+        "occurrences",
+        "omitted"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessEffectOccurrence": {
+      "additionalProperties": false,
+      "description": "One recorded effect occurrence in a durable summary.",
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FailureCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurrence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "outcome_class": {
+          "$ref": "#/definitions/RemoteProcessEffectOutcomeClass"
+        },
+        "replay_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "occurrence",
+        "operation",
+        "outcome_class",
+        "replay_key"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessEffectOmittedCounts": {
+      "additionalProperties": false,
+      "description": "Omitted occurrences of one node, by outcome class.",
+      "properties": {
+        "cancelled": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "failure": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "success": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cancelled",
+        "failure",
+        "success"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessEffectOutcomeClass": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "RemoteProcessHistoryRetention": {
+      "description": "Why the exact lifetime a snapshot names has no durable history to read.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The process was pruned and its payload-free tombstone remains.",
+          "properties": {
+            "pruned_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "reason": {
+              "enum": [
+                "pruned"
+              ],
+              "type": "string"
+            },
+            "terminal_label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pruned_at_ms",
+            "reason",
+            "terminal_label"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The process id now names a later lifetime.",
+          "properties": {
+            "current_incarnation": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "reason": {
+              "enum": [
+                "retired"
+              ],
+              "type": "string"
+            },
+            "requested_incarnation": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "current_incarnation",
+            "reason",
+            "requested_incarnation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "No retained process or tombstone has this id.",
+          "properties": {
+            "reason": {
+              "enum": [
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "RemoteProcessObservationCompleteness": {
+      "description": "Live-graph completeness, reported apart from durable-summary completeness.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -415,23 +713,42 @@
       ]
     },
     "RemoteProcessObservationGapReason": {
-      "enum": [
-        "overflow",
-        "expired",
-        "subscriber_lagged",
-        "publisher_replaced",
-        "routing_unavailable",
-        "process_id_reused",
-        "cross_process",
-        "invalid_cursor",
-        "publisher_joined_mid_run",
-        "incomplete_graph",
-        "projection_truncated"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "overflow",
+            "expired",
+            "subscriber_lagged",
+            "publisher_replaced",
+            "routing_unavailable",
+            "process_id_reused",
+            "cross_process",
+            "invalid_cursor",
+            "publisher_joined_mid_run",
+            "incomplete_graph",
+            "projection_truncated"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Retained live evidence cannot bridge the cursor's durable sequence to the durable high-water mark.",
+          "enum": [
+            "sequence_unbridged"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The requested process lifetime is unknown or no longer retained.",
+          "enum": [
+            "history_unavailable"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "RemoteProcessObservationProjection": {
       "additionalProperties": false,
+      "description": "The live half of a snapshot: the publisher's graph, when this core routes the process.",
       "properties": {
         "completeness": {
           "$ref": "#/definitions/RemoteProcessObservationCompleteness"
@@ -451,6 +768,45 @@
         "completeness"
       ],
       "type": "object"
+    },
+    "RemoteProcessObservationSnapshot": {
+      "additionalProperties": false,
+      "description": "A snapshot at one exact process lifetime and durable high-water sequence, with the live graph at the cursor's live position.",
+      "properties": {
+        "durable": {
+          "$ref": "#/definitions/RemoteProcessDurableSnapshot"
+        },
+        "live": {
+          "$ref": "#/definitions/RemoteProcessObservationProjection"
+        }
+      },
+      "required": [
+        "durable",
+        "live"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessStatus": {
+      "oneOf": [
+        {
+          "enum": [
+            "running",
+            "waiting",
+            "completed",
+            "failed",
+            "cancelled",
+            "abandoned"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably distinguishable, deliberately never terminal.",
+          "enum": [
+            "caller_departed"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "TextProjectionMetadata": {
       "properties": {
@@ -4784,7 +5140,7 @@
       "additionalProperties": false,
       "properties": {
         "cursor": {
-          "type": "string"
+          "$ref": "#/definitions/ProcessCursor"
         },
         "incarnation": {
           "format": "uint64",
@@ -4794,8 +5150,8 @@
         "process_id": {
           "type": "string"
         },
-        "projection": {
-          "$ref": "#/definitions/RemoteProcessObservationProjection"
+        "snapshot": {
+          "$ref": "#/definitions/RemoteProcessObservationSnapshot"
         },
         "type": {
           "enum": [
@@ -4808,7 +5164,7 @@
         "cursor",
         "incarnation",
         "process_id",
-        "projection",
+        "snapshot",
         "type"
       ],
       "type": "object"
@@ -4817,7 +5173,7 @@
       "additionalProperties": false,
       "properties": {
         "cursor": {
-          "type": "string"
+          "$ref": "#/definitions/ProcessCursor"
         },
         "incarnation": {
           "format": "uint64",
@@ -4848,32 +5204,73 @@
     },
     {
       "additionalProperties": false,
+      "description": "A durable event committed; read it through the events operation.",
       "properties": {
+        "cursor": {
+          "$ref": "#/definitions/ProcessCursor"
+        },
+        "event_type": {
+          "type": "string"
+        },
         "incarnation": {
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
         },
-        "latest_cursor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "process_id": {
           "type": "string"
         },
-        "projection": {
-          "$ref": "#/definitions/RemoteProcessObservationProjection"
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "committed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "event_type",
+        "incarnation",
+        "process_id",
+        "sequence",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/ProcessCursor"
+        },
+        "incarnation": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "process_id": {
+          "type": "string"
         },
         "reason": {
           "$ref": "#/definitions/RemoteProcessObservationGapReason"
         },
         "requested_cursor": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProcessCursor"
+            },
+            {
+              "type": "null"
+            }
           ]
+        },
+        "snapshot": {
+          "$ref": "#/definitions/RemoteProcessObservationSnapshot"
         },
         "type": {
           "enum": [
@@ -4883,16 +5280,17 @@
         }
       },
       "required": [
+        "cursor",
         "incarnation",
         "process_id",
-        "projection",
         "reason",
+        "snapshot",
         "type"
       ],
       "type": "object"
     }
   ],
   "title": "RemoteProcessObservationItem",
-  "x-lash-schema-version": 97,
+  "x-lash-schema-version": 98,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

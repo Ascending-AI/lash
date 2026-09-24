@@ -258,20 +258,19 @@ async fn paged_summary(
 ) {
     let mut table = lash_core::ProcessEffectSummary::default();
     let mut folded = Vec::new();
-    let mut continuation = None;
+    let mut from = crate::process::ProcessEventsFrom::Start(process_id.clone());
     let mut pages = 0;
     loop {
-        let outcome = core
+        let read = core
             .processes()
             .events(
-                process_id,
+                from,
                 std::num::NonZeroUsize::new(2).expect("non-zero page size"),
                 lash_core::ProcessEventQueryMode::Full,
-                continuation,
             )
             .await
             .expect("read an event page");
-        let lash_core::ProcessEventReadOutcome::Retained(page) = outcome else {
+        let lash_core::ProcessEventReadOutcome::Retained(page) = read.outcome else {
             panic!("effect-summary process history must be retained");
         };
         pages += 1;
@@ -287,9 +286,13 @@ async fn paged_summary(
                 folded.push((event.event_type, event.payload));
             }
         }
-        continuation = match page.more {
+        from = match page.more {
             lash_core::ProcessEventPageMore::Complete => break,
-            lash_core::ProcessEventPageMore::More { continuation } => Some(continuation),
+            lash_core::ProcessEventPageMore::More { .. } => {
+                crate::process::ProcessEventsFrom::After(
+                    read.cursor.expect("a retained page carries its cursor"),
+                )
+            }
         };
     }
     assert!(pages >= 2, "the rebuild must cross a page boundary");

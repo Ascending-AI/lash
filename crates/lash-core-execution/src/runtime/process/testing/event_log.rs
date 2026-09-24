@@ -65,13 +65,19 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         .await
     }
 
-    async fn event_page(
+    async fn event_page_ref(
         &self,
-        process_id: &ProcessId,
+        process_ref: &crate::ProcessRef,
+        after_sequence: u64,
         limit: std::num::NonZeroUsize,
         mode: crate::ProcessEventQueryMode,
-        continuation: Option<crate::ProcessEventPageToken>,
     ) -> Result<crate::ProcessEventReadOutcome<crate::ProcessEventPage>, PluginError> {
+        let process_id = &process_ref.process_id;
+        if i64::try_from(after_sequence).is_err() {
+            return Err(PluginError::Session(
+                "process event page sequence exceeds the durable sequence range".to_string(),
+            ));
+        }
         if let Some(error) = self.process_events_read_error.lock().await.take() {
             return Err(error);
         }
@@ -90,30 +96,14 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
                 error => Err(error),
             };
         };
-        let after_sequence = match continuation.as_ref() {
-            Some(token) if token.process_id() != process_id => {
-                return Err(PluginError::Session(format!(
-                    "process event page token belongs to `{}`, not `{process_id}`",
-                    token.process_id()
-                )));
-            }
-            Some(token) if token.mode() != mode => {
-                return Err(PluginError::Session(
-                    "process event page token projection does not match the requested mode"
-                        .to_string(),
-                ));
-            }
-            Some(token) if token.process_incarnation() != record.record.incarnation => {
-                return Ok(crate::ProcessEventReadOutcome::NoLongerRetained(
-                    crate::ProcessEventHistoryRetention::Retired {
-                        requested_incarnation: token.process_incarnation(),
-                        current_incarnation: record.record.incarnation,
-                    },
-                ));
-            }
-            Some(token) => token.after_sequence(),
-            None => 0,
-        };
+        if process_ref.incarnation != record.record.incarnation {
+            return Ok(crate::ProcessEventReadOutcome::NoLongerRetained(
+                crate::ProcessEventHistoryRetention::Retired {
+                    requested_incarnation: process_ref.incarnation,
+                    current_incarnation: record.record.incarnation,
+                },
+            ));
+        }
         let take = limit.get().saturating_add(1);
         let events = record
             .events
@@ -123,12 +113,9 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
             .cloned()
             .collect::<Vec<_>>();
         let page = match mode {
-            crate::ProcessEventQueryMode::Full => crate::ProcessEventPage::from_full_rows(
-                events,
-                limit,
-                process_id,
-                record.record.incarnation,
-            ),
+            crate::ProcessEventQueryMode::Full => {
+                crate::ProcessEventPage::from_full_rows(events, limit)
+            }
             crate::ProcessEventQueryMode::Lite => crate::ProcessEventPage::from_lite_rows(
                 events
                     .into_iter()
@@ -138,8 +125,6 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
                     })
                     .collect(),
                 limit,
-                process_id,
-                record.record.incarnation,
             ),
         };
         Ok(crate::ProcessEventReadOutcome::Retained(page))

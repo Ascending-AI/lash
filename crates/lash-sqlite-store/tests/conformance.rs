@@ -122,28 +122,29 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
             &process_id,
             std::num::NonZeroUsize::MIN,
             lash_core_execution::ProcessEventQueryMode::Full,
-            None,
         )
         .await
         .expect("read first event page");
     let lash_core_execution::ProcessEventReadOutcome::Retained(first) = first else {
         panic!("new process history must be retained");
     };
-    let lash_core_execution::ProcessEventPageMore::More { continuation } = first.more else {
+    let lash_core_execution::ProcessEventPageMore::More { after_sequence } = first.more else {
         panic!("fixture must leave a nonempty unread tail");
     };
+    let process_ref =
+        lash_core_execution::ProcessRef::new(process_id.clone(), terminal.incarnation);
 
     let pause = injector.pause_process_event_page_after_identity();
     let read_task = tokio::spawn({
         let reader = Arc::clone(&reader);
-        let process_id = process_id.clone();
+        let process_ref = process_ref.clone();
         async move {
             reader
-                .event_page(
-                    &process_id,
+                .event_page_ref(
+                    &process_ref,
+                    after_sequence,
                     std::num::NonZeroUsize::new(16).expect("non-zero page size"),
                     lash_core_execution::ProcessEventQueryMode::Full,
-                    Some(continuation),
                 )
                 .await
         }

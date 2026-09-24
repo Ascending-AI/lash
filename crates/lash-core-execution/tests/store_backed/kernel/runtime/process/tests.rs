@@ -263,70 +263,38 @@ async fn superseded_event_cursor_is_refused_instead_of_reading_the_successor() {
     );
 }
 
+/// A page read names one exact process lifetime: a successor incarnation is
+/// a typed retired outcome, never another lifetime's events. The projection
+/// is a request parameter, not part of any continuation.
 #[tokio::test]
-async fn event_page_tokens_bind_process_incarnation_and_query_mode() {
+async fn event_pages_bind_the_exact_process_lifetime() {
     let registry = memory_registry().await;
-    let first_id = ProcessId::from("event-page-token-first");
+    let first_id = ProcessId::from("event-page-lifetime-first");
     let first = registry
         .register_process(registration(&first_id))
         .await
-        .expect("register first token process");
-    let second_id = ProcessId::from("event-page-token-second");
-    registry
-        .register_process(registration(&second_id))
-        .await
-        .expect("register second token process");
+        .expect("register lifetime process");
     let limit = std::num::NonZeroUsize::new(1).expect("non-zero page size");
 
-    let wrong_process = registry
-        .event_page(
-            &second_id,
-            limit,
-            ProcessEventQueryMode::Full,
-            Some(crate::process_event_page_token(
-                first_id.clone(),
-                first.incarnation,
-                0,
-                ProcessEventQueryMode::Full,
-            )),
-        )
-        .await;
-    assert!(
-        matches!(wrong_process, Err(crate::PluginError::Session(ref message)) if message.contains("belongs to")),
-        "a token for another process must be refused, got {wrong_process:?}"
-    );
-
-    let wrong_mode = registry
-        .event_page(
-            &first_id,
-            limit,
-            ProcessEventQueryMode::Lite,
-            Some(crate::process_event_page_token(
-                first_id.clone(),
-                first.incarnation,
-                0,
-                ProcessEventQueryMode::Full,
-            )),
-        )
-        .await;
-    assert!(
-        matches!(wrong_mode, Err(crate::PluginError::Session(ref message)) if message.contains("projection")),
-        "a token for another query mode must be refused, got {wrong_mode:?}"
-    );
+    for mode in [ProcessEventQueryMode::Full, ProcessEventQueryMode::Lite] {
+        let current = registry
+            .event_page_ref(&ProcessRef::from_record(&first), 0, limit, mode)
+            .await
+            .expect("current lifetime page");
+        assert!(matches!(current, ProcessEventReadOutcome::Retained(_)));
+    }
 
     let retired = registry
-        .event_page(
-            &first_id,
-            limit,
-            ProcessEventQueryMode::Full,
-            Some(crate::process_event_page_token(
+        .event_page_ref(
+            &ProcessRef::new(
                 first_id.clone(),
                 ProcessIncarnation::from_registration_sequence(
                     first.incarnation.registration_sequence() + 1,
                 ),
-                0,
-                ProcessEventQueryMode::Full,
-            )),
+            ),
+            0,
+            limit,
+            ProcessEventQueryMode::Full,
         )
         .await
         .expect("incarnation mismatch is a typed read outcome");
@@ -340,7 +308,7 @@ async fn event_page_tokens_bind_process_incarnation_and_query_mode() {
                 }
             ) if current_incarnation == first.incarnation
         ),
-        "a token for another incarnation must report retired history, got {retired:?}"
+        "a read of another incarnation must report retired history, got {retired:?}"
     );
 }
 

@@ -1211,19 +1211,18 @@ async fn agent_contract_process_event_facts(
 ) -> Result<Vec<Value>, FixedScriptRunnerError> {
     let mut events = Vec::new();
     for process in processes {
-        let mut continuation = None;
+        let mut from = lash::process::ProcessEventsFrom::Start(process.raw_process_id.clone());
         loop {
-            let outcome = core
+            let read = core
                 .processes()
                 .events(
-                    &process.raw_process_id,
+                    from,
                     std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN),
                     lash::process::ProcessEventQueryMode::Full,
-                    continuation,
                 )
                 .await
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-            let page = match outcome {
+            let page = match read.outcome {
                 lash::process::ProcessEventReadOutcome::Retained(page) => page,
                 lash::process::ProcessEventReadOutcome::NoLongerRetained(retention) => {
                     return Err(FixedScriptRunnerError::Runtime(format!(
@@ -1243,9 +1242,11 @@ async fn agent_contract_process_event_facts(
                     "payload": normalize_contract_process_event_payload(&event_type, event.payload),
                 }));
             }
-            continuation = match page.more {
-                lash::process::ProcessEventPageMore::Complete => break,
-                lash::process::ProcessEventPageMore::More { continuation } => Some(continuation),
+            from = match (page.more, read.cursor) {
+                (lash::process::ProcessEventPageMore::More { .. }, Some(cursor)) => {
+                    lash::process::ProcessEventsFrom::After(cursor)
+                }
+                _ => break,
             };
         }
     }

@@ -1,5 +1,4 @@
 use super::*;
-use lash_core_execution::ProcessEventPageTokenStoreExt as _;
 use lash_core_execution::ProcessQuery as _;
 use lash_core_execution::facade_support;
 use lash_sansio::ProcessId;
@@ -564,67 +563,51 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
         Ok(result)
     }
 
-    async fn event_page(
+    async fn event_page_ref(
         &self,
-        process_id: &ProcessId,
+        process_ref: &ProcessRef,
+        after_sequence: u64,
         limit: std::num::NonZeroUsize,
         mode: lash_core_execution::ProcessEventQueryMode,
-        continuation: Option<lash_core_execution::ProcessEventPageToken>,
     ) -> Result<
         lash_core_execution::ProcessEventReadOutcome<lash_core_execution::ProcessEventPage>,
         lash_core_execution::PluginError,
     > {
-        let process_id = process_id.clone();
+        let process_ref = process_ref.clone();
+        let process_id = process_ref.process_id.clone();
         #[cfg(feature = "testing")]
         let read_pause = self.conn.fault_injector();
         self.conn
             .read(move |conn| {
                 Ok((|| {
-                    if let Some(token) = continuation.as_ref() {
-                        if token.process_id() != process_id {
-                            return Err(lash_core_execution::PluginError::Session(format!(
-                                "process event page token belongs to `{}`, not `{process_id}`",
-                                token.process_id()
-                            )));
-                        }
-                        if token.mode() != mode {
-                            return Err(lash_core_execution::PluginError::Session(
-                                "process event page token projection does not match the requested mode"
-                                    .to_string(),
-                            ));
-                        }
-                    }
-                    let record_result = match continuation.as_ref() {
-                        Some(token) => Self::require_process_ref_conn(
-                            conn,
-                            &ProcessRef::new(process_id.clone(), token.process_incarnation()),
-                        ),
-                        None => Self::require_process_conn(conn, &process_id),
-                    };
-                    let record = match record_result {
+                    let record = match Self::require_process_ref_conn(conn, &process_ref) {
                         Ok(record) => record,
                         Err(lash_core_execution::PluginError::ProcessNoLongerRetained {
                             terminal_label,
                             pruned_at_ms,
                         }) => {
-                            return Ok(lash_core_execution::ProcessEventReadOutcome::NoLongerRetained(
-                                lash_core_execution::ProcessEventHistoryRetention::Pruned {
-                                    terminal_label,
-                                    pruned_at_ms,
-                                },
-                            ));
+                            return Ok(
+                                lash_core_execution::ProcessEventReadOutcome::NoLongerRetained(
+                                    lash_core_execution::ProcessEventHistoryRetention::Pruned {
+                                        terminal_label,
+                                        pruned_at_ms,
+                                    },
+                                ),
+                            );
                         }
                         Err(lash_core_execution::PluginError::ProcessIncarnationSuperseded {
                             requested_incarnation,
                             current_incarnation,
                             ..
                         }) => {
-                            return Ok(lash_core_execution::ProcessEventReadOutcome::NoLongerRetained(
-                                lash_core_execution::ProcessEventHistoryRetention::Retired {
-                                    requested_incarnation,
-                                    current_incarnation,
-                                },
-                            ));
+                            return Ok(
+                                lash_core_execution::ProcessEventReadOutcome::NoLongerRetained(
+                                    lash_core_execution::ProcessEventHistoryRetention::Retired {
+                                        requested_incarnation,
+                                        current_incarnation,
+                                    },
+                                ),
+                            );
                         }
                         Err(error) => return Err(error),
                     };
@@ -632,13 +615,9 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                     if let Some(injector) = read_pause.as_ref() {
                         injector.reach_process_event_page_after_identity();
                     }
-                    let after_sequence = continuation
-                        .as_ref()
-                        .map_or(0, lash_core_execution::ProcessEventPageToken::after_sequence);
                     let after_sequence = i64::try_from(after_sequence).map_err(|_| {
                         lash_core_execution::PluginError::Session(
-                            "process event page token sequence exceeds the SQL cursor range"
-                                .to_string(),
+                            "process event page sequence exceeds the SQL cursor range".to_string(),
                         )
                     })?;
                     let fetch_limit = limit
@@ -673,12 +652,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                                         .map_err(process_decode_error)?,
                                 );
                             }
-                            lash_core_execution::ProcessEventPage::from_full_rows(
-                                events,
-                                limit,
-                                &process_id,
-                                record.incarnation,
-                            )
+                            lash_core_execution::ProcessEventPage::from_full_rows(events, limit)
                         }
                         lash_core_execution::ProcessEventQueryMode::Lite => {
                             let mut stmt = conn
@@ -714,12 +688,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                             let events = rows
                                 .map(|row| row.map_err(process_sqlite_error))
                                 .collect::<Result<Vec<_>, _>>()?;
-                            lash_core_execution::ProcessEventPage::from_lite_rows(
-                                events,
-                                limit,
-                                &process_id,
-                                record.incarnation,
-                            )
+                            lash_core_execution::ProcessEventPage::from_lite_rows(events, limit)
                         }
                     };
                     Ok(lash_core_execution::ProcessEventReadOutcome::Retained(page))

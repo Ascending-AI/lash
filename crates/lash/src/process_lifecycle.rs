@@ -38,6 +38,8 @@ pub(crate) struct ProcessLifecycleFeed {
     /// publisher per session publishes each transition exactly once.
     routes: Mutex<HashMap<SessionId, Vec<Arc<SessionPublisher>>>>,
     store: Arc<dyn LiveReplayStore>,
+    /// Durable commits reach the process observation hub as `Committed` items.
+    observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
     host_sink: Option<Arc<dyn ProcessEventSink>>,
     forward_host_events: bool,
 }
@@ -45,6 +47,7 @@ pub(crate) struct ProcessLifecycleFeed {
 impl ProcessLifecycleFeed {
     pub(crate) fn new(
         store: Arc<dyn LiveReplayStore>,
+        observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
         host_sink: Option<Arc<dyn ProcessEventSink>>,
         forward_host_events: bool,
     ) -> Self {
@@ -52,6 +55,7 @@ impl ProcessLifecycleFeed {
             registry: OnceLock::new(),
             routes: Mutex::new(HashMap::new()),
             store,
+            observation_hub,
             host_sink,
             forward_host_events,
         }
@@ -122,6 +126,7 @@ impl ProcessLifecycleFeed {
 #[async_trait::async_trait]
 impl ProcessEventSink for ProcessLifecycleFeed {
     async fn emit(&self, event: &ProcessEvent) {
+        self.observation_hub.publish_committed(event);
         if let Some(kind) =
             SessionProcessEventKind::from_durable_event(&event.event_type, event.sequence)
             && !self.routes.lock_recover().is_empty()

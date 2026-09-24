@@ -17,8 +17,7 @@ use crate::{EffectHost, ExecutionScope};
 use super::ProcessCompletionOutcome;
 use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessEventPage, ProcessEventPageToken, ProcessEventQueryMode,
-    ProcessEventReadOutcome,
+    ProcessEventAppendRequest, ProcessEventPage, ProcessEventQueryMode, ProcessEventReadOutcome,
 };
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority,
@@ -407,46 +406,45 @@ pub trait ProcessEventLog: ProcessQuery {
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
-    /// Read at most `limit` events from one exact process lifetime.
+    /// Read at most `limit` events of one exact process lifetime, strictly
+    /// after `after_sequence`.
     ///
-    /// `continuation` is opaque to hosts and must have been issued for the same
-    /// process id and projection mode. Implementations fetch at most one extra
-    /// row to determine whether another page exists.
+    /// A successor lifetime under the same process id answers
+    /// [`ProcessEventHistoryRetention::Retired`](super::events::ProcessEventHistoryRetention::Retired)
+    /// and a pruned one answers `Pruned`; neither collapses into an empty page.
+    /// Implementations fetch at most one extra row to determine whether another
+    /// page exists.
+    async fn event_page_ref(
+        &self,
+        process_ref: &ProcessRef,
+        after_sequence: u64,
+        limit: NonZeroUsize,
+        mode: ProcessEventQueryMode,
+    ) -> Result<ProcessEventReadOutcome<ProcessEventPage>, PluginError>;
+
+    /// Read the first page of the lifetime `process_id` currently names.
     async fn event_page(
         &self,
         process_id: &ProcessId,
         limit: NonZeroUsize,
         mode: ProcessEventQueryMode,
-        continuation: Option<ProcessEventPageToken>,
-    ) -> Result<ProcessEventReadOutcome<ProcessEventPage>, PluginError>;
-
-    async fn event_page_ref(
-        &self,
-        process_ref: &ProcessRef,
-        limit: NonZeroUsize,
-        mode: ProcessEventQueryMode,
-        continuation: Option<ProcessEventPageToken>,
     ) -> Result<ProcessEventReadOutcome<ProcessEventPage>, PluginError> {
-        if let Some(token) = continuation.as_ref()
-            && (token.process_id() != process_ref.process_id
-                || token.process_incarnation() != process_ref.incarnation
-                || token.mode() != mode)
-        {
-            return Err(PluginError::Session(
-                "process event page token does not match the requested process reference and mode"
-                    .to_string(),
-            ));
-        }
-        let continuation = continuation.or_else(|| {
-            Some(ProcessEventPageToken::new(
-                process_ref.process_id.clone(),
-                process_ref.incarnation,
-                0,
-                mode,
-            ))
-        });
-        self.event_page(&process_ref.process_id, limit, mode, continuation)
-            .await
+        let process_ref = match self.resolve_process_ref(process_id).await {
+            Ok(process_ref) => process_ref,
+            Err(PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                return Ok(ProcessEventReadOutcome::NoLongerRetained(
+                    super::events::ProcessEventHistoryRetention::Pruned {
+                        terminal_label,
+                        pruned_at_ms,
+                    },
+                ));
+            }
+            Err(error) => return Err(error),
+        };
+        self.event_page_ref(&process_ref, 0, limit, mode).await
     }
 
     /// This is the signal-ordinal query: the Nth occurrence of a signal event

@@ -812,8 +812,8 @@ trait SignalWaitProcesses: Send + Sync {
 
     async fn event_page(
         &self,
+        after_sequence: u64,
         limit: std::num::NonZeroUsize,
-        continuation: Option<lash_core::ProcessEventPageToken>,
     ) -> Result<
         lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
         lash_core::PluginError,
@@ -830,14 +830,18 @@ impl SignalWaitProcesses for lash_core::facade_support::ProcessEngineProcessCont
 
     async fn event_page(
         &self,
+        after_sequence: u64,
         limit: std::num::NonZeroUsize,
-        continuation: Option<lash_core::ProcessEventPageToken>,
     ) -> Result<
         lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
         lash_core::PluginError,
     > {
-        self.event_page(limit, lash_core::ProcessEventQueryMode::Full, continuation)
-            .await
+        self.event_page(
+            after_sequence,
+            limit,
+            lash_core::ProcessEventQueryMode::Full,
+        )
+        .await
     }
 
     async fn set_wait(&self, wait: lash_core::WaitState) -> Result<(), lash_core::PluginError> {
@@ -896,10 +900,10 @@ async fn wait_since_ms(
     }
 
     let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
-    let mut continuation = None;
+    let mut after_sequence = 0;
     let mut matched_since_ms = None;
     loop {
-        let outcome = processes.event_page(limit, continuation).await?;
+        let outcome = processes.event_page(after_sequence, limit).await?;
         let page = match outcome {
             lash_core::ProcessEventReadOutcome::Retained(page) => page,
             lash_core::ProcessEventReadOutcome::NoLongerRetained(
@@ -942,9 +946,9 @@ async fn wait_since_ms(
                 matched_since_ms = Some(wait.since_ms);
             }
         }
-        continuation = match page.more {
+        after_sequence = match page.more {
             lash_core::ProcessEventPageMore::Complete => break,
-            lash_core::ProcessEventPageMore::More { continuation } => Some(continuation),
+            lash_core::ProcessEventPageMore::More { after_sequence } => after_sequence,
         };
     }
     Ok(matched_since_ms.unwrap_or_else(lash_core::facade_support::current_epoch_ms))

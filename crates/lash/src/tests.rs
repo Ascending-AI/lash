@@ -2252,6 +2252,18 @@ fn checkpoint_gated_provider(
         .into_handle()
 }
 
+/// A standard core whose native process path decorates `registry`.
+pub(crate) fn standard_core_with_process_registry(
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+) -> LashCore {
+    explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .process_registry(registry)
+        .build(crate::testing::runtime_lease_owner())
+        .expect("standard core over a process registry")
+}
+
 pub(crate) fn standard_core() -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())

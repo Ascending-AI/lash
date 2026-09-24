@@ -758,12 +758,19 @@ finish(value);"#,
     );
 
     let process_ref = lash_core::ProcessRef::new(running.process_id.clone(), running.incarnation);
-    let mut subscription = core.processes().subscribe_observation(&process_ref, None);
-    let Some(crate::process::ProcessObservationItem::Snapshot { graph, .. }) =
-        subscription.recv().await
+    let mut subscription = core
+        .processes()
+        .subscribe_observation(&process_ref, None)
+        .await?;
+    let Some(crate::process::ProcessObservationItem::Snapshot { snapshot, .. }) =
+        subscription.recv().await?
     else {
         panic!("facade process subscription must start with a graph snapshot");
     };
+    let graph = snapshot
+        .live
+        .graph
+        .expect("a routed running process snapshot carries its live graph");
     assert_eq!(graph.graph_key, graph_key);
 
     release_tx.send(()).expect("release tool provider");

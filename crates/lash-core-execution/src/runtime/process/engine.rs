@@ -182,6 +182,7 @@ type RuntimeContextBuilder<'run> = Box<
 #[derive(Clone)]
 pub struct ProcessEngineProcessContext {
     process_id: ProcessId,
+    incarnation: ProcessIncarnation,
     process_work: crate::ProcessWorkWiring,
     execution_write_authority: super::model::ProcessExecutionWriteAuthority,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -195,6 +196,7 @@ impl ProcessEngineProcessContext {
     #[allow(clippy::too_many_arguments)]
     fn new(
         process_id: ProcessId,
+        incarnation: ProcessIncarnation,
         process_work: crate::ProcessWorkWiring,
         execution_write_authority: super::model::ProcessExecutionWriteAuthority,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -205,6 +207,7 @@ impl ProcessEngineProcessContext {
     ) -> Self {
         Self {
             process_id,
+            incarnation,
             process_work,
             execution_write_authority,
             store,
@@ -222,18 +225,25 @@ impl ProcessEngineProcessContext {
             .await
     }
 
+    /// Read a page of this run's own process lifetime strictly after
+    /// `after_sequence`; a successor lifetime is never read.
     pub async fn event_page(
         &self,
+        after_sequence: u64,
         limit: std::num::NonZeroUsize,
         mode: super::events::ProcessEventQueryMode,
-        continuation: Option<super::events::ProcessEventPageToken>,
     ) -> Result<
         super::events::ProcessEventReadOutcome<super::events::ProcessEventPage>,
         crate::PluginError,
     > {
         self.process_work
             .registry()
-            .event_page(&self.process_id, limit, mode, continuation)
+            .event_page_ref(
+                &super::model::ProcessRef::new(self.process_id.clone(), self.incarnation),
+                after_sequence,
+                limit,
+                mode,
+            )
             .await
     }
 
@@ -362,6 +372,7 @@ impl<'run> ProcessEngineRunContext<'run> {
             .expect("process worker installs execution write authority");
         let processes = ProcessEngineProcessContext::new(
             registration.id.clone(),
+            incarnation,
             process_work,
             execution_write_authority,
             store.clone(),

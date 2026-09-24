@@ -194,20 +194,15 @@ impl NativeProcessAwaiter {
         after_sequence: u64,
     ) -> Result<Option<ProcessEvent>, PluginError> {
         let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
-        let mut continuation = Some(crate::ProcessEventPageToken::new(
-            process_ref.process_id.clone(),
-            process_ref.incarnation,
-            after_sequence,
-            crate::ProcessEventQueryMode::Full,
-        ));
+        let mut after_sequence = after_sequence;
         loop {
             let outcome = self
                 .registry
                 .event_page_ref(
                     process_ref,
+                    after_sequence,
                     limit,
                     crate::ProcessEventQueryMode::Full,
-                    continuation,
                 )
                 .await?;
             let page = match outcome {
@@ -245,9 +240,9 @@ impl NativeProcessAwaiter {
             {
                 return Ok(Some(event));
             }
-            continuation = match page.more {
+            after_sequence = match page.more {
                 crate::ProcessEventPageMore::Complete => return Ok(None),
-                crate::ProcessEventPageMore::More { continuation } => Some(continuation),
+                crate::ProcessEventPageMore::More { after_sequence } => after_sequence,
             };
         }
     }

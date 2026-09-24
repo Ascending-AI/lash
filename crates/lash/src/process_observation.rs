@@ -1,10 +1,37 @@
-//! Best-effort, process-scoped replay of identified execution observations.
+//! One process cursor across durable history and the live hub (FIG-3571 §E).
+//!
+//! A [`ProcessCursor`] pages a process's durable event history through
+//! [`crate::Processes::events`] and resumes its live observation through
+//! [`crate::Processes::subscribe_observation`]. The hub carries two kinds of
+//! evidence per process lifetime, in one ordered ring:
+//!
+//! - live execution observations (trace records), best-effort, and
+//! - `Committed { sequence }` items, published through the ADR 0017 sink after
+//!   each durable commit. Publication never fails the commit.
+//!
+//! A subscription resumes silently only when the ring still holds every item
+//! after the cursor's live position and its retained `Committed` evidence
+//! bridges the cursor's durable sequence to the durable high-water mark. Any
+//! other case — an epoch change, a trimmed ring, an incarnation change, an
+//! unknown or pruned process, or a sequence the ring cannot bridge — answers
+//! `Gap` with a snapshot and a new cursor, even when the process is idle.
+//!
+//! The snapshot names one exact process lifetime and durable high-water
+//! sequence. Its durable half is the status plus the effect-summary fold
+//! through that boundary, read with Full payloads under a bounded acquisition
+//! budget; its live half is the publisher's graph at the cursor's live
+//! position. The two report completeness separately.
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_sansio::ProcessId;
+use lash_core::{
+    PluginError, ProcessEffectSummary, ProcessEvent, ProcessEventHistoryRetention,
+    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
+    ProcessRef, ProcessRegistry, ProcessStatus,
+};
 use lash_sansio::sync::MutexExt;
+use lash_sansio::{PROCESS_CURSOR_UNROUTED_EPOCH, ProcessId};
 use lash_trace::{
     TraceEvent, TraceLanguageExecutionPayload, TraceLashlangGraph, TraceLashlangGraphCompleteness,
     TraceLashlangGraphStore, TraceRecord, TraceRuntimeSubject, TraceSink, TraceSinkError,
@@ -12,37 +39,7 @@ use lash_trace::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
-const CURSOR_PREFIX: &str = "lashpc1:";
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ProcessObservationCursor(String);
-
-impl ProcessObservationCursor {
-    /// Adopt a wire token; subscription validates its process, incarnation and epoch.
-    pub fn from_token(token: impl Into<String>) -> Self {
-        Self(token.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    fn new(process_id: &ProcessId, incarnation: u64, epoch: &str, position: u64) -> Self {
-        Self(format!(
-            "{CURSOR_PREFIX}{epoch}:{incarnation}:{position}:{process_id}"
-        ))
-    }
-
-    fn parse(&self) -> Option<(&str, u64, u64, &str)> {
-        let mut parts = self.0.strip_prefix(CURSOR_PREFIX)?.splitn(4, ':');
-        let epoch = parts.next().filter(|part| !part.is_empty())?;
-        let incarnation = parts.next()?.parse().ok()?;
-        let position = parts.next()?.parse().ok()?;
-        let process_id = parts.next().filter(|part| !part.is_empty())?;
-        Some((epoch, incarnation, position, process_id))
-    }
-}
+pub use lash_sansio::{ProcessCursor, ProcessCursorError, ProcessCursorReference};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,8 +55,14 @@ pub enum ProcessObservationGapReason {
     PublisherJoinedMidRun,
     IncompleteGraph,
     ProjectionTruncated,
+    /// Retained `Committed` evidence cannot bridge the cursor's durable
+    /// sequence to the durable high-water mark.
+    SequenceUnbridged,
+    /// The requested process lifetime is unknown or no longer retained.
+    HistoryUnavailable,
 }
 
+/// Live-graph completeness.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ProcessObservationCompleteness {
@@ -67,114 +70,282 @@ pub enum ProcessObservationCompleteness {
     Incomplete { reason: ProcessObservationGapReason },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// The live half of a snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessObservationProjection {
-    /// Missing when the process has no local publisher.
+    /// Missing when this core routes no live publisher for the process.
     pub graph: Option<TraceLashlangGraph>,
     pub completeness: ProcessObservationCompleteness,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+/// Why a durable summary fold stops short of its high-water mark.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessDurableGapReason {
+    AcquisitionBudgetExhausted,
+    SummaryUndecodable,
+}
+
+/// Durable-summary completeness, reported apart from the live graph's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ProcessDurableCompleteness {
+    Complete,
+    Incomplete { reason: ProcessDurableGapReason },
+}
+
+/// The durable half of a snapshot at one exact process lifetime.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessDurableSnapshot {
+    /// Status and the effect-summary fold through `sequence`, the durable
+    /// high-water mark read with the status.
+    Retained {
+        sequence: u64,
+        status: ProcessStatus,
+        summary: ProcessEffectSummary,
+        completeness: ProcessDurableCompleteness,
+    },
+    /// The lifetime's history is typed-absent: pruned or retired.
+    NoLongerRetained(ProcessEventHistoryRetention),
+    /// No retained process or tombstone has this id.
+    Unknown,
+}
+
+impl ProcessDurableSnapshot {
+    fn high_water(&self) -> u64 {
+        match self {
+            Self::Retained { sequence, .. } => *sequence,
+            Self::NoLongerRetained(_) | Self::Unknown => 0,
+        }
+    }
+
+    fn gap_reason(&self) -> Option<ProcessObservationGapReason> {
+        match self {
+            Self::Retained { .. } => None,
+            Self::NoLongerRetained(ProcessEventHistoryRetention::Retired { .. }) => {
+                Some(ProcessObservationGapReason::ProcessIdReused)
+            }
+            Self::NoLongerRetained(ProcessEventHistoryRetention::Pruned { .. }) | Self::Unknown => {
+                Some(ProcessObservationGapReason::HistoryUnavailable)
+            }
+        }
+    }
+}
+
+/// A snapshot at one exact process lifetime and durable high-water sequence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessObservationSnapshot {
+    pub durable: ProcessDurableSnapshot,
+    pub live: ProcessObservationProjection,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum ProcessObservationItem {
     Snapshot {
-        cursor: ProcessObservationCursor,
-        graph: TraceLashlangGraph,
-        completeness: ProcessObservationCompleteness,
+        cursor: ProcessCursor,
+        snapshot: ProcessObservationSnapshot,
     },
     Event {
-        cursor: ProcessObservationCursor,
+        cursor: ProcessCursor,
         record: Box<TraceRecord>,
     },
+    /// A durable event committed; read it through [`crate::Processes::events`].
+    Committed {
+        cursor: ProcessCursor,
+        sequence: u64,
+        event_type: String,
+    },
     Gap {
-        requested_cursor: Option<ProcessObservationCursor>,
-        latest_cursor: Option<ProcessObservationCursor>,
-        projection: ProcessObservationProjection,
+        requested_cursor: Option<ProcessCursor>,
+        cursor: ProcessCursor,
         reason: ProcessObservationGapReason,
+        snapshot: ProcessObservationSnapshot,
     },
 }
 
 impl ProcessObservationItem {
+    pub fn cursor(&self) -> &ProcessCursor {
+        match self {
+            Self::Snapshot { cursor, .. }
+            | Self::Event { cursor, .. }
+            | Self::Committed { cursor, .. }
+            | Self::Gap { cursor, .. } => cursor,
+        }
+    }
+
     /// Project a local item to the exact-version remote envelope body.
     pub fn into_remote(
         self,
         process_id: ProcessId,
         incarnation: u64,
     ) -> lash_remote_protocol::RemoteProcessObservationItem {
-        use lash_remote_protocol::{
-            RemoteProcessObservationCompleteness as RemoteCompleteness,
-            RemoteProcessObservationGapReason as RemoteReason,
-            RemoteProcessObservationItem as RemoteItem,
-            RemoteProcessObservationProjection as RemoteProjection,
-        };
-        fn reason(value: ProcessObservationGapReason) -> RemoteReason {
-            match value {
-                ProcessObservationGapReason::Overflow => RemoteReason::Overflow,
-                ProcessObservationGapReason::Expired => RemoteReason::Expired,
-                ProcessObservationGapReason::SubscriberLagged => RemoteReason::SubscriberLagged,
-                ProcessObservationGapReason::PublisherReplaced => RemoteReason::PublisherReplaced,
-                ProcessObservationGapReason::RoutingUnavailable => RemoteReason::RoutingUnavailable,
-                ProcessObservationGapReason::ProcessIdReused => RemoteReason::ProcessIdReused,
-                ProcessObservationGapReason::CrossProcess => RemoteReason::CrossProcess,
-                ProcessObservationGapReason::InvalidCursor => RemoteReason::InvalidCursor,
-                ProcessObservationGapReason::PublisherJoinedMidRun => {
-                    RemoteReason::PublisherJoinedMidRun
-                }
-                ProcessObservationGapReason::IncompleteGraph => RemoteReason::IncompleteGraph,
-                ProcessObservationGapReason::ProjectionTruncated => {
-                    RemoteReason::ProjectionTruncated
-                }
-            }
-        }
+        use lash_remote_protocol::RemoteProcessObservationItem as RemoteItem;
         match self {
-            Self::Snapshot {
+            Self::Snapshot { cursor, snapshot } => RemoteItem::Snapshot {
+                process_id,
+                incarnation,
                 cursor,
-                graph,
-                completeness,
-            } => {
-                let completeness = match completeness {
-                    ProcessObservationCompleteness::Complete => RemoteCompleteness::Complete,
-                    ProcessObservationCompleteness::Incomplete { reason: gap_reason } => {
-                        RemoteCompleteness::Incomplete {
-                            reason: reason(gap_reason),
-                        }
-                    }
-                };
-                RemoteItem::Snapshot {
-                    process_id,
-                    incarnation,
-                    cursor: cursor.0,
-                    projection: RemoteProjection {
-                        graph: Some(graph),
-                        completeness,
-                    },
-                }
-            }
+                snapshot: remote_snapshot(snapshot),
+            },
             Self::Event { cursor, record } => RemoteItem::Event {
                 process_id,
                 incarnation,
-                cursor: cursor.0,
+                cursor,
                 record,
+            },
+            Self::Committed {
+                cursor,
+                sequence,
+                event_type,
+            } => RemoteItem::Committed {
+                process_id,
+                incarnation,
+                cursor,
+                sequence,
+                event_type,
             },
             Self::Gap {
                 requested_cursor,
-                latest_cursor,
-                projection,
-                reason: gap_reason,
+                cursor,
+                reason,
+                snapshot,
             } => RemoteItem::Gap {
                 process_id,
                 incarnation,
-                requested_cursor: requested_cursor.map(|cursor| cursor.0),
-                latest_cursor: latest_cursor.map(|cursor| cursor.0),
-                projection: RemoteProjection {
-                    graph: projection.graph,
-                    completeness: RemoteCompleteness::Incomplete {
-                        reason: reason(gap_reason),
-                    },
-                },
-                reason: reason(gap_reason),
+                requested_cursor,
+                cursor,
+                reason: remote_reason(reason),
+                snapshot: remote_snapshot(snapshot),
             },
         }
+    }
+}
+
+fn remote_reason(
+    value: ProcessObservationGapReason,
+) -> lash_remote_protocol::RemoteProcessObservationGapReason {
+    use lash_remote_protocol::RemoteProcessObservationGapReason as Remote;
+    match value {
+        ProcessObservationGapReason::Overflow => Remote::Overflow,
+        ProcessObservationGapReason::Expired => Remote::Expired,
+        ProcessObservationGapReason::SubscriberLagged => Remote::SubscriberLagged,
+        ProcessObservationGapReason::PublisherReplaced => Remote::PublisherReplaced,
+        ProcessObservationGapReason::RoutingUnavailable => Remote::RoutingUnavailable,
+        ProcessObservationGapReason::ProcessIdReused => Remote::ProcessIdReused,
+        ProcessObservationGapReason::CrossProcess => Remote::CrossProcess,
+        ProcessObservationGapReason::InvalidCursor => Remote::InvalidCursor,
+        ProcessObservationGapReason::PublisherJoinedMidRun => Remote::PublisherJoinedMidRun,
+        ProcessObservationGapReason::IncompleteGraph => Remote::IncompleteGraph,
+        ProcessObservationGapReason::ProjectionTruncated => Remote::ProjectionTruncated,
+        ProcessObservationGapReason::SequenceUnbridged => Remote::SequenceUnbridged,
+        ProcessObservationGapReason::HistoryUnavailable => Remote::HistoryUnavailable,
+    }
+}
+
+fn remote_snapshot(
+    snapshot: ProcessObservationSnapshot,
+) -> lash_remote_protocol::RemoteProcessObservationSnapshot {
+    use lash_remote_protocol::{
+        RemoteProcessDurableCompleteness as DurableCompleteness,
+        RemoteProcessDurableGapReason as DurableGap, RemoteProcessDurableSnapshot as Durable,
+        RemoteProcessEffectNodeSummary, RemoteProcessEffectOccurrence,
+        RemoteProcessEffectOmittedCounts, RemoteProcessEffectOutcomeClass as OutcomeClass,
+        RemoteProcessHistoryRetention as Retention,
+        RemoteProcessObservationCompleteness as LiveCompleteness,
+        RemoteProcessObservationProjection,
+    };
+    let durable = match snapshot.durable {
+        ProcessDurableSnapshot::Retained {
+            sequence,
+            status,
+            summary,
+            completeness,
+        } => Durable::Retained {
+            sequence,
+            status: status.into(),
+            summary: summary
+                .nodes()
+                .map(|node| RemoteProcessEffectNodeSummary {
+                    node_id: node.node_id.clone(),
+                    occurrences: node
+                        .occurrences
+                        .iter()
+                        .map(|occurrence| RemoteProcessEffectOccurrence {
+                            occurrence: occurrence.occurrence,
+                            operation: occurrence.operation.clone(),
+                            outcome_class: match occurrence.outcome_class {
+                                lash_core::ProcessEffectOutcomeClass::Success => {
+                                    OutcomeClass::Success
+                                }
+                                lash_core::ProcessEffectOutcomeClass::Failure => {
+                                    OutcomeClass::Failure
+                                }
+                                lash_core::ProcessEffectOutcomeClass::Cancelled => {
+                                    OutcomeClass::Cancelled
+                                }
+                            },
+                            code: occurrence.code.clone(),
+                            replay_key: occurrence.replay_key.clone(),
+                        })
+                        .collect(),
+                    omitted: RemoteProcessEffectOmittedCounts {
+                        success: node.omitted.success,
+                        failure: node.omitted.failure,
+                        cancelled: node.omitted.cancelled,
+                    },
+                })
+                .collect(),
+            completeness: match completeness {
+                ProcessDurableCompleteness::Complete => DurableCompleteness::Complete,
+                ProcessDurableCompleteness::Incomplete { reason } => {
+                    DurableCompleteness::Incomplete {
+                        reason: match reason {
+                            ProcessDurableGapReason::AcquisitionBudgetExhausted => {
+                                DurableGap::AcquisitionBudgetExhausted
+                            }
+                            ProcessDurableGapReason::SummaryUndecodable => {
+                                DurableGap::SummaryUndecodable
+                            }
+                        },
+                    }
+                }
+            },
+        },
+        ProcessDurableSnapshot::NoLongerRetained(ProcessEventHistoryRetention::Pruned {
+            terminal_label,
+            pruned_at_ms,
+        }) => Durable::NoLongerRetained {
+            retention: Retention::Pruned {
+                terminal_label,
+                pruned_at_ms,
+            },
+        },
+        ProcessDurableSnapshot::NoLongerRetained(ProcessEventHistoryRetention::Retired {
+            requested_incarnation,
+            current_incarnation,
+        }) => Durable::NoLongerRetained {
+            retention: Retention::Retired {
+                requested_incarnation: requested_incarnation.registration_sequence(),
+                current_incarnation: current_incarnation.registration_sequence(),
+            },
+        },
+        ProcessDurableSnapshot::Unknown => Durable::NoLongerRetained {
+            retention: Retention::Unknown,
+        },
+    };
+    lash_remote_protocol::RemoteProcessObservationSnapshot {
+        durable,
+        live: RemoteProcessObservationProjection {
+            graph: snapshot.live.graph,
+            completeness: match snapshot.live.completeness {
+                ProcessObservationCompleteness::Complete => LiveCompleteness::Complete,
+                ProcessObservationCompleteness::Incomplete { reason } => {
+                    LiveCompleteness::Incomplete {
+                        reason: remote_reason(reason),
+                    }
+                }
+            },
+        },
     }
 }
 
@@ -182,6 +353,10 @@ impl ProcessObservationItem {
 pub struct ProcessObservationConfig {
     pub capacity: usize,
     pub ttl: Duration,
+    /// Durable pages one snapshot acquisition may read.
+    pub snapshot_page_budget: usize,
+    /// Events per durable page a snapshot acquisition reads.
+    pub snapshot_page_size: std::num::NonZeroUsize,
 }
 
 impl Default for ProcessObservationConfig {
@@ -189,20 +364,29 @@ impl Default for ProcessObservationConfig {
         Self {
             capacity: 2048,
             ttl: Duration::from_secs(120),
+            snapshot_page_budget: 64,
+            snapshot_page_size: std::num::NonZeroUsize::new(256)
+                .unwrap_or(std::num::NonZeroUsize::MIN),
         }
     }
+}
+
+#[derive(Clone)]
+enum PublishedItem {
+    Live(Box<TraceRecord>),
+    Committed { sequence: u64, event_type: String },
 }
 
 #[derive(Clone)]
 struct Published {
     position: u64,
     at: Instant,
-    record: TraceRecord,
+    item: PublishedItem,
 }
 
 #[derive(Clone)]
 enum PublishedNotification {
-    Event(ProcessObservationCursor, Box<TraceRecord>),
+    Item(u64, PublishedItem),
     Replaced(ProcessObservationGapReason),
 }
 
@@ -226,7 +410,7 @@ impl ProcessState {
         let (sender, _) = broadcast::channel(capacity.max(1));
         Self {
             incarnation,
-            epoch: uuid::Uuid::new_v4().to_string(),
+            epoch: uuid::Uuid::new_v4().simple().to_string(),
             position: 0,
             base_position: 0,
             base_graph: None,
@@ -238,10 +422,6 @@ impl ProcessState {
             trim_reason: ProcessObservationGapReason::Overflow,
             sender,
         }
-    }
-
-    fn cursor(&self, process_id: &ProcessId, position: u64) -> ProcessObservationCursor {
-        ProcessObservationCursor::new(process_id, self.incarnation, &self.epoch, position)
     }
 
     fn trim(&mut self, now: Instant, config: ProcessObservationConfig) {
@@ -258,7 +438,9 @@ impl ProcessState {
                 .is_some_and(|item| now.duration_since(item.at) > config.ttl);
             if let Some(old) = self.ring.pop_front() {
                 self.base_position = old.position;
-                evicted.push(old.record);
+                if let PublishedItem::Live(record) = old.item {
+                    evicted.push(*record);
+                }
                 self.trim_reason = if expired {
                     ProcessObservationGapReason::Expired
                 } else {
@@ -272,24 +454,15 @@ impl ProcessState {
         }
     }
 
-    fn graph_at(&self, position: u64) -> Option<TraceLashlangGraph> {
-        if position == self.position {
-            return self.current_graph.clone();
-        }
-        let records = self
-            .ring
-            .iter()
-            .filter(|item| item.position <= position)
-            .map(|item| item.record.clone())
-            .collect::<Vec<_>>();
-        if records.is_empty() {
-            self.base_graph.clone()
-        } else {
-            TraceLashlangGraphStore::fold(self.base_graph.as_ref(), &records).ok()
-        }
-    }
-
-    fn snapshot_completeness(&self, graph: &TraceLashlangGraph) -> ProcessObservationCompleteness {
+    fn live_projection(&self) -> ProcessObservationProjection {
+        let Some(graph) = self.current_graph.clone() else {
+            return ProcessObservationProjection {
+                graph: None,
+                completeness: ProcessObservationCompleteness::Incomplete {
+                    reason: ProcessObservationGapReason::RoutingUnavailable,
+                },
+            };
+        };
         let reason = if !self.joined_at_start {
             Some(ProcessObservationGapReason::PublisherJoinedMidRun)
         } else if graph.completeness != TraceLashlangGraphCompleteness::Complete {
@@ -299,21 +472,61 @@ impl ProcessState {
         } else {
             None
         };
-        match reason {
-            Some(reason) => ProcessObservationCompleteness::Incomplete { reason },
-            None => ProcessObservationCompleteness::Complete,
+        ProcessObservationProjection {
+            graph: Some(graph),
+            completeness: match reason {
+                Some(reason) => ProcessObservationCompleteness::Incomplete { reason },
+                None => ProcessObservationCompleteness::Complete,
+            },
         }
+    }
+
+    fn publish(&mut self, item: PublishedItem, config: ProcessObservationConfig) {
+        let now = Instant::now();
+        self.position += 1;
+        self.last_published = now;
+        let position = self.position;
+        self.ring.push_back(Published {
+            position,
+            at: now,
+            item: item.clone(),
+        });
+        self.trim(now, config);
+        let _ = self
+            .sender
+            .send(PublishedNotification::Item(position, item));
+    }
+
+    fn replace(&mut self, incarnation: u64, reason: ProcessObservationGapReason, capacity: usize) {
+        let _ = self.sender.send(PublishedNotification::Replaced(reason));
+        *self = Self::new(incarnation, capacity);
     }
 }
 
-/// One publisher-local observation route. A new core build creates a new epoch.
+/// What one lock hold captured of a process's live route.
+struct Capture {
+    state: Arc<Mutex<ProcessState>>,
+    /// The hub had no route for this process before this capture.
+    created: bool,
+    epoch: String,
+    position: u64,
+    base_position: u64,
+    trim_reason: ProcessObservationGapReason,
+    /// The route serves this exact lifetime.
+    serves_lifetime: bool,
+    live: ProcessObservationProjection,
+    tail: VecDeque<(u64, PublishedItem)>,
+    receiver: Option<broadcast::Receiver<PublishedNotification>>,
+}
+
+/// One core's live observation routes. A new core build creates new epochs,
+/// and so does a publisher restart.
 ///
 /// Lock order: the `states` map lock is taken before a per-process state lock
 /// and only for lookup, insertion and release; graph folds run under the
 /// per-process lock alone. A process's state is released once no subscription
 /// holds it and it has either published `ExecutionFinished` or published
-/// nothing for `ttl`, so retention follows the ring and TTL settings rather
-/// than the life of the core.
+/// nothing for `ttl`.
 pub struct ProcessObservationHub {
     config: ProcessObservationConfig,
     states: Mutex<HashMap<ProcessId, Arc<Mutex<ProcessState>>>>,
@@ -335,126 +548,200 @@ impl ProcessObservationHub {
         }
     }
 
-    pub fn subscribe(
-        self: &std::sync::Arc<Self>,
-        process_id: &ProcessId,
-        incarnation: u64,
-        from: Option<&ProcessObservationCursor>,
-    ) -> ProcessObservationSubscription {
-        let state = self.states.lock_recover().get(process_id).cloned();
-        let Some(state) = state else {
-            return ProcessObservationSubscription::gap(
-                self.clone(),
-                process_id.clone(),
-                incarnation,
-                from.cloned(),
-                ProcessObservationGapReason::RoutingUnavailable,
-                None,
-                None,
-            );
-        };
-        let mut publisher = state.lock_recover();
-        publisher.trim(Instant::now(), self.config);
-        let latest = publisher.cursor(process_id, publisher.position);
-        let reason = match from.map(ProcessObservationCursor::parse) {
-            Some(None) => Some(ProcessObservationGapReason::InvalidCursor),
-            Some(Some((_, _, _, named_process))) if named_process != process_id.as_str() => {
-                Some(ProcessObservationGapReason::CrossProcess)
-            }
-            Some(Some((_, named_incarnation, _, _))) if named_incarnation != incarnation => {
-                Some(ProcessObservationGapReason::ProcessIdReused)
-            }
-            _ if publisher.incarnation != incarnation => {
-                Some(ProcessObservationGapReason::ProcessIdReused)
-            }
-            Some(Some((epoch, _, _, _))) if epoch != publisher.epoch => {
-                Some(ProcessObservationGapReason::PublisherReplaced)
-            }
-            Some(Some((_, _, position, _))) if position > publisher.position => {
-                Some(ProcessObservationGapReason::RoutingUnavailable)
-            }
-            Some(Some((_, _, position, _))) if position < publisher.base_position => {
-                Some(publisher.trim_reason)
-            }
-            _ => None,
-        };
-        if let Some(reason) = reason {
-            return ProcessObservationSubscription::gap(
-                self.clone(),
-                process_id.clone(),
-                incarnation,
-                from.cloned(),
-                reason,
-                Some(latest),
-                publisher.current_graph.clone(),
-            );
-        }
-        let position = from
-            .and_then(|cursor| cursor.parse().map(|(_, _, pos, _)| pos))
-            .unwrap_or(publisher.position);
-        let Some(graph) = publisher.graph_at(position) else {
-            return ProcessObservationSubscription::gap(
-                self.clone(),
-                process_id.clone(),
-                incarnation,
-                from.cloned(),
-                ProcessObservationGapReason::RoutingUnavailable,
-                Some(latest),
-                publisher.current_graph.clone(),
-            );
-        };
-        let completeness = publisher.snapshot_completeness(&graph);
-        let receiver = publisher.sender.subscribe();
-        let replay = publisher
-            .ring
-            .iter()
-            .filter(|item| item.position > position)
-            .map(|item| ProcessObservationItem::Event {
-                cursor: publisher.cursor(process_id, item.position),
-                record: Box::new(item.record.clone()),
-            })
-            .collect();
-        ProcessObservationSubscription {
-            hub: self.clone(),
-            state: Some(Arc::clone(&state)),
-            process_id: process_id.clone(),
-            incarnation,
-            next: Some(ProcessObservationItem::Snapshot {
-                cursor: publisher.cursor(process_id, position),
-                graph,
-                completeness,
-            }),
-            replay,
-            receiver: Some(receiver),
-            last_position: position,
-        }
-    }
-
-    fn gap_at_latest(
+    /// The state for `process_id`, created for `incarnation` when absent. A
+    /// newer incarnation replaces an older route; an older one is not routed.
+    fn state_for(
         &self,
         process_id: &ProcessId,
         incarnation: u64,
-        requested_cursor: Option<ProcessObservationCursor>,
-        reason: ProcessObservationGapReason,
-    ) -> ProcessObservationItem {
-        let state = self.states.lock_recover().get(process_id).cloned();
-        let state = state.as_ref().map(|state| state.lock_recover());
-        let state = state
-            .as_deref()
-            .filter(|state| state.incarnation == incarnation);
-        ProcessObservationItem::Gap {
-            requested_cursor,
-            latest_cursor: state.map(|state| state.cursor(process_id, state.position)),
-            projection: ProcessObservationProjection {
-                graph: state.and_then(|state| state.current_graph.clone()),
-                completeness: ProcessObservationCompleteness::Incomplete { reason },
-            },
-            reason,
+    ) -> (Arc<Mutex<ProcessState>>, bool) {
+        let mut states = self.states.lock_recover();
+        match states.get(process_id) {
+            Some(state) => (Arc::clone(state), false),
+            None => {
+                let state = Arc::new(Mutex::new(ProcessState::new(
+                    incarnation,
+                    self.config.capacity,
+                )));
+                states.insert(process_id.clone(), Arc::clone(&state));
+                (state, true)
+            }
         }
     }
 
+    /// Capture the route for one lifetime: the live projection at the current
+    /// position, the retained items after `after_position` (when given), and a
+    /// receiver for everything published after this capture.
+    ///
+    /// `confirmed_current` says the durable registry just named this lifetime
+    /// current; only then may it replace a route for an older incarnation, so a
+    /// read naming a lifetime that does not exist never disturbs a live one.
+    fn capture(
+        &self,
+        process_ref: &ProcessRef,
+        after_position: Option<u64>,
+        confirmed_current: bool,
+    ) -> Capture {
+        let incarnation = process_ref.incarnation.registration_sequence();
+        let (state, created) = self.state_for(&process_ref.process_id, incarnation);
+        let mut publisher = state.lock_recover();
+        if confirmed_current && publisher.incarnation < incarnation {
+            publisher.replace(
+                incarnation,
+                ProcessObservationGapReason::ProcessIdReused,
+                self.config.capacity,
+            );
+        }
+        publisher.trim(Instant::now(), self.config);
+        let serves_lifetime = publisher.incarnation == incarnation;
+        let tail = match after_position {
+            Some(after) if serves_lifetime => publisher
+                .ring
+                .iter()
+                .filter(|item| item.position > after)
+                .map(|item| (item.position, item.item.clone()))
+                .collect(),
+            _ => VecDeque::new(),
+        };
+        let capture = Capture {
+            state: Arc::clone(&state),
+            created,
+            epoch: if serves_lifetime {
+                publisher.epoch.clone()
+            } else {
+                PROCESS_CURSOR_UNROUTED_EPOCH.to_string()
+            },
+            position: if serves_lifetime {
+                publisher.position
+            } else {
+                0
+            },
+            base_position: publisher.base_position,
+            trim_reason: publisher.trim_reason,
+            serves_lifetime,
+            live: if serves_lifetime {
+                publisher.live_projection()
+            } else {
+                ProcessObservationProjection {
+                    graph: None,
+                    completeness: ProcessObservationCompleteness::Incomplete {
+                        reason: ProcessObservationGapReason::ProcessIdReused,
+                    },
+                }
+            },
+            tail,
+            receiver: serves_lifetime.then(|| publisher.sender.subscribe()),
+        };
+        drop(publisher);
+        capture
+    }
+
+    /// The live route a cursor minted now names: `(epoch, position)`, taken
+    /// before the durable read it will be paired with so no commit can fall
+    /// between the two unseen.
+    pub(crate) fn route(&self, process_ref: &ProcessRef) -> (String, u64) {
+        let capture = self.capture(process_ref, None, false);
+        (capture.epoch, capture.position)
+    }
+
+    /// Subscribe to one exact process lifetime.
+    ///
+    /// Without a cursor the first item is a `Snapshot`. With a cursor the
+    /// subscription resumes after it when the ring bridges it; otherwise the
+    /// first item is a `Gap` with a snapshot and a new cursor.
+    pub async fn subscribe(
+        self: &Arc<Self>,
+        registry: Arc<dyn ProcessRegistry>,
+        process_ref: &ProcessRef,
+        from: Option<&ProcessCursor>,
+    ) -> Result<ProcessObservationSubscription, PluginError> {
+        let incarnation = process_ref.incarnation.registration_sequence();
+        let reference = ProcessCursorReference::for_lifetime(&process_ref.process_id, incarnation);
+        let mut subscription = ProcessObservationSubscription {
+            hub: Arc::clone(self),
+            registry,
+            process_ref: process_ref.clone(),
+            reference,
+            state: None,
+            epoch: PROCESS_CURSOR_UNROUTED_EPOCH.to_string(),
+            position: 0,
+            sequence: 0,
+            pending: VecDeque::new(),
+            replay: VecDeque::new(),
+            receiver: None,
+        };
+        let Some(from) = from else {
+            subscription.resync(None, None).await?;
+            return Ok(subscription);
+        };
+        let identity_gap = if !from.reference().names_process(&process_ref.process_id) {
+            Some(ProcessObservationGapReason::CrossProcess)
+        } else if !from.reference().names(&process_ref.process_id, incarnation) {
+            Some(ProcessObservationGapReason::ProcessIdReused)
+        } else {
+            None
+        };
+        if let Some(reason) = identity_gap {
+            subscription
+                .resync(Some(reason), Some(from.clone()))
+                .await?;
+            return Ok(subscription);
+        }
+        // The high-water mark is read before the capture, so every commit it
+        // names that was published is already in the captured tail.
+        let durable = subscription
+            .registry
+            .get_process_ref(process_ref)
+            .await
+            .map(|record| record.map(|record| record.last_event_sequence));
+        let high_water = match durable {
+            Ok(Some(high_water)) => high_water,
+            Ok(None)
+            | Err(
+                PluginError::ProcessNoLongerRetained { .. }
+                | PluginError::ProcessIncarnationSuperseded { .. },
+            ) => {
+                subscription.resync(None, Some(from.clone())).await?;
+                return Ok(subscription);
+            }
+            Err(error) => return Err(error),
+        };
+        let capture = self.capture(process_ref, Some(from.position()), true);
+        let reason = if !capture.serves_lifetime {
+            Some(ProcessObservationGapReason::ProcessIdReused)
+        } else if from.epoch() != capture.epoch {
+            Some(if capture.created {
+                ProcessObservationGapReason::RoutingUnavailable
+            } else {
+                ProcessObservationGapReason::PublisherReplaced
+            })
+        } else if from.position() > capture.position || from.sequence() > high_water {
+            Some(ProcessObservationGapReason::InvalidCursor)
+        } else if from.position() < capture.base_position {
+            Some(capture.trim_reason)
+        } else if !bridges(&capture.tail, from.sequence(), high_water) {
+            Some(ProcessObservationGapReason::SequenceUnbridged)
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            drop(capture);
+            subscription
+                .resync(Some(reason), Some(from.clone()))
+                .await?;
+            return Ok(subscription);
+        }
+        subscription.epoch = capture.epoch;
+        subscription.position = from.position();
+        subscription.sequence = from.sequence();
+        subscription.state = Some(capture.state);
+        subscription.replay = capture.tail;
+        subscription.receiver = capture.receiver;
+        Ok(subscription)
+    }
+
     /// Release every state no subscription holds whose publisher finished or
-    /// went idle for `ttl`. Runs at most once per `ttl` from `append`.
+    /// went idle for `ttl`. Runs at most once per `ttl` from a publish.
     fn sweep_idle(&self, now: Instant) {
         {
             let mut last_sweep = self.last_sweep.lock_recover();
@@ -474,7 +761,6 @@ impl ProcessObservationHub {
     }
 
     /// Lock order: map before a state only for this short terminal check.
-    /// Append and subscribe release the map lock before folding a graph.
     fn evict_if_terminal(&self, process_id: &ProcessId, state: &Arc<Mutex<ProcessState>>) {
         let mut states = self.states.lock_recover();
         if states
@@ -486,6 +772,159 @@ impl ProcessObservationHub {
             states.remove(process_id);
         }
     }
+
+    /// Publish one durable commit. Called after the commit, from the ADR 0017
+    /// sink; it cannot fail the write.
+    pub(crate) fn publish_committed(&self, event: &ProcessEvent) {
+        let incarnation = event.process_incarnation.registration_sequence();
+        let (state, _) = self.state_for(&event.process_id, incarnation);
+        let mut publisher = state.lock_recover();
+        if publisher.incarnation > incarnation {
+            return;
+        }
+        if publisher.incarnation < incarnation {
+            publisher.replace(
+                incarnation,
+                ProcessObservationGapReason::ProcessIdReused,
+                self.config.capacity,
+            );
+        }
+        publisher.publish(
+            PublishedItem::Committed {
+                sequence: event.sequence,
+                event_type: event.event_type.clone(),
+            },
+            self.config,
+        );
+        drop(publisher);
+        drop(state);
+        self.sweep_idle(Instant::now());
+    }
+}
+
+/// Whether `tail` holds contiguous `Committed` evidence from just after
+/// `from_sequence` through at least `high_water` (the session rule of
+/// `observation.rs`, per durable event).
+fn bridges(tail: &VecDeque<(u64, PublishedItem)>, from_sequence: u64, high_water: u64) -> bool {
+    if from_sequence == high_water {
+        return true;
+    }
+    let mut next = from_sequence.saturating_add(1);
+    for (_, item) in tail {
+        let PublishedItem::Committed { sequence, .. } = item else {
+            continue;
+        };
+        if *sequence < next {
+            continue;
+        }
+        if *sequence != next {
+            return false;
+        }
+        if next >= high_water {
+            return true;
+        }
+        next += 1;
+    }
+    false
+}
+
+/// Read the durable half of a snapshot at one exact lifetime: the record's
+/// status and high-water sequence, then the effect-summary fold through that
+/// sequence with Full payloads, within the acquisition budget.
+///
+/// Events are append-only, so a concurrent append past the high-water mark
+/// never changes the fold; a concurrent prune or id reuse surfaces as the
+/// typed retention outcome of the page read, never as an empty history.
+async fn acquire_durable(
+    registry: &dyn ProcessRegistry,
+    process_ref: &ProcessRef,
+    config: ProcessObservationConfig,
+) -> Result<ProcessDurableSnapshot, PluginError> {
+    let record = match registry.get_process_ref(process_ref).await {
+        Ok(Some(record)) => record,
+        Ok(None) => return Ok(ProcessDurableSnapshot::Unknown),
+        Err(PluginError::ProcessNoLongerRetained {
+            terminal_label,
+            pruned_at_ms,
+        }) => {
+            return Ok(ProcessDurableSnapshot::NoLongerRetained(
+                ProcessEventHistoryRetention::Pruned {
+                    terminal_label,
+                    pruned_at_ms,
+                },
+            ));
+        }
+        Err(PluginError::ProcessIncarnationSuperseded {
+            requested_incarnation,
+            current_incarnation,
+            ..
+        }) => {
+            return Ok(ProcessDurableSnapshot::NoLongerRetained(
+                ProcessEventHistoryRetention::Retired {
+                    requested_incarnation,
+                    current_incarnation,
+                },
+            ));
+        }
+        Err(PluginError::ProcessUnknown { .. }) => return Ok(ProcessDurableSnapshot::Unknown),
+        Err(error) => return Err(error),
+    };
+    let high_water = record.last_event_sequence;
+    let mut summary = ProcessEffectSummary::default();
+    let mut completeness = ProcessDurableCompleteness::Complete;
+    let mut after = 0;
+    let mut pages = 0;
+    'pages: while after < high_water {
+        if pages >= config.snapshot_page_budget {
+            completeness = ProcessDurableCompleteness::Incomplete {
+                reason: ProcessDurableGapReason::AcquisitionBudgetExhausted,
+            };
+            break;
+        }
+        pages += 1;
+        let page = match registry
+            .event_page_ref(
+                process_ref,
+                after,
+                config.snapshot_page_size,
+                ProcessEventQueryMode::Full,
+            )
+            .await?
+        {
+            ProcessEventReadOutcome::Retained(page) => page,
+            ProcessEventReadOutcome::NoLongerRetained(retention) => {
+                return Ok(ProcessDurableSnapshot::NoLongerRetained(retention));
+            }
+        };
+        let ProcessEventPageEvents::Full(events) = page.events else {
+            return Err(PluginError::Session(
+                "a Full process event page returned Lite events".to_string(),
+            ));
+        };
+        for event in events {
+            if event.sequence > high_water {
+                break 'pages;
+            }
+            if summary
+                .fold_event(&event.event_type, &event.payload)
+                .is_err()
+            {
+                completeness = ProcessDurableCompleteness::Incomplete {
+                    reason: ProcessDurableGapReason::SummaryUndecodable,
+                };
+            }
+            after = event.sequence;
+        }
+        if matches!(page.more, ProcessEventPageMore::Complete) {
+            break;
+        }
+    }
+    Ok(ProcessDurableSnapshot::Retained {
+        sequence: high_water,
+        status: record.status,
+        summary,
+        completeness,
+    })
 }
 
 impl TraceSink for ProcessObservationHub {
@@ -502,18 +941,11 @@ impl TraceSink for ProcessObservationHub {
         let Some(incarnation) = event.identity.incarnation() else {
             return Ok(());
         };
-        let state = self
-            .states
-            .lock_recover()
-            .entry(process_id.clone())
-            .or_insert_with(|| {
-                Arc::new(Mutex::new(ProcessState::new(
-                    incarnation,
-                    self.config.capacity,
-                )))
-            })
-            .clone();
+        let (state, _) = self.state_for(process_id, incarnation);
         let mut publisher = state.lock_recover();
+        if publisher.incarnation > incarnation {
+            return Ok(());
+        }
         let replaced = if publisher.incarnation != incarnation {
             Some(ProcessObservationGapReason::ProcessIdReused)
         } else if publisher.current_graph.as_ref().is_some_and(|graph| {
@@ -528,10 +960,7 @@ impl TraceSink for ProcessObservationHub {
             None
         };
         if let Some(reason) = replaced {
-            let _ = publisher
-                .sender
-                .send(PublishedNotification::Replaced(reason));
-            *publisher = ProcessState::new(incarnation, self.config.capacity);
+            publisher.replace(incarnation, reason, self.config.capacity);
         }
         let Ok(graph) = TraceLashlangGraphStore::fold(
             publisher.current_graph.as_ref(),
@@ -539,7 +968,7 @@ impl TraceSink for ProcessObservationHub {
         ) else {
             return Ok(());
         };
-        if publisher.position == 0 {
+        if publisher.current_graph.is_none() {
             publisher.joined_at_start = matches!(
                 &event.payload,
                 TraceLanguageExecutionPayload::ExecutionStarted { .. }
@@ -549,134 +978,214 @@ impl TraceSink for ProcessObservationHub {
             &event.payload,
             TraceLanguageExecutionPayload::ExecutionFinished { .. }
         );
-        let now = Instant::now();
         publisher.current_graph = Some(graph);
-        publisher.position += 1;
-        publisher.last_published = now;
-        let position = publisher.position;
-        let cursor = publisher.cursor(process_id, position);
-        publisher.ring.push_back(Published {
-            position,
-            at: now,
-            record: record.clone(),
-        });
-        publisher.trim(now, self.config);
-        let _ = publisher.sender.send(PublishedNotification::Event(
-            cursor,
-            Box::new(record.clone()),
-        ));
+        publisher.publish(PublishedItem::Live(Box::new(record.clone())), self.config);
         let terminal = publisher.terminal;
         drop(publisher);
         if terminal {
             self.evict_if_terminal(process_id, &state);
         }
         drop(state);
-        self.sweep_idle(now);
+        self.sweep_idle(Instant::now());
         Ok(())
     }
 }
 
 pub struct ProcessObservationSubscription {
-    hub: std::sync::Arc<ProcessObservationHub>,
+    hub: Arc<ProcessObservationHub>,
+    registry: Arc<dyn ProcessRegistry>,
+    process_ref: ProcessRef,
+    reference: ProcessCursorReference,
     state: Option<Arc<Mutex<ProcessState>>>,
-    process_id: ProcessId,
-    incarnation: u64,
-    next: Option<ProcessObservationItem>,
-    replay: VecDeque<ProcessObservationItem>,
+    epoch: String,
+    position: u64,
+    sequence: u64,
+    pending: VecDeque<ProcessObservationItem>,
+    replay: VecDeque<(u64, PublishedItem)>,
     receiver: Option<broadcast::Receiver<PublishedNotification>>,
-    last_position: u64,
 }
 
 impl ProcessObservationSubscription {
-    fn gap(
-        hub: std::sync::Arc<ProcessObservationHub>,
-        process_id: ProcessId,
-        incarnation: u64,
-        requested: Option<ProcessObservationCursor>,
-        reason: ProcessObservationGapReason,
-        latest: Option<ProcessObservationCursor>,
-        graph: Option<TraceLashlangGraph>,
-    ) -> Self {
-        Self {
-            hub,
-            state: None,
-            process_id,
-            incarnation,
-            next: Some(ProcessObservationItem::Gap {
+    fn cursor(&self) -> ProcessCursor {
+        ProcessCursor::new(
+            self.epoch.clone(),
+            self.reference.clone(),
+            self.position,
+            self.sequence,
+        )
+        .unwrap_or_else(|_| {
+            // Hub epochs never contain `:`; a failure here is a hub bug.
+            unreachable!("a hub epoch is always a valid cursor epoch")
+        })
+    }
+
+    /// Take a snapshot at a new boundary and continue from it.
+    ///
+    /// The live route is captured first, so everything published after the
+    /// captured position reaches this subscription; the durable high-water
+    /// mark is read after it, and buffered `Committed` items at or below it
+    /// are dropped as already folded. The stream ends when the lifetime is no
+    /// longer routable or retained.
+    async fn resync(
+        &mut self,
+        reason: Option<ProcessObservationGapReason>,
+        requested: Option<ProcessCursor>,
+    ) -> Result<(), PluginError> {
+        self.release_state();
+        let current = match self.registry.get_process_ref(&self.process_ref).await {
+            Ok(record) => record.is_some(),
+            Err(
+                PluginError::ProcessNoLongerRetained { .. }
+                | PluginError::ProcessIncarnationSuperseded { .. }
+                | PluginError::ProcessUnknown { .. },
+            ) => false,
+            Err(error) => return Err(error),
+        };
+        let capture = current.then(|| self.hub.capture(&self.process_ref, None, true));
+        let durable =
+            acquire_durable(self.registry.as_ref(), &self.process_ref, self.hub.config).await?;
+        let lifetime_gap = durable.gap_reason();
+        self.sequence = durable.high_water();
+        let (live, continues) = match &capture {
+            Some(capture) => {
+                self.epoch = capture.epoch.clone();
+                self.position = capture.position;
+                (
+                    capture.live.clone(),
+                    capture.serves_lifetime && lifetime_gap.is_none(),
+                )
+            }
+            None => {
+                self.epoch = PROCESS_CURSOR_UNROUTED_EPOCH.to_string();
+                self.position = 0;
+                (
+                    ProcessObservationProjection {
+                        graph: None,
+                        completeness: ProcessObservationCompleteness::Incomplete {
+                            reason: lifetime_gap
+                                .unwrap_or(ProcessObservationGapReason::HistoryUnavailable),
+                        },
+                    },
+                    false,
+                )
+            }
+        };
+        let snapshot = ProcessObservationSnapshot { durable, live };
+        let cursor = self.cursor();
+        let item = match reason.or(lifetime_gap) {
+            None => ProcessObservationItem::Snapshot { cursor, snapshot },
+            Some(reason) => ProcessObservationItem::Gap {
                 requested_cursor: requested,
-                latest_cursor: latest,
-                projection: ProcessObservationProjection {
-                    graph,
-                    completeness: ProcessObservationCompleteness::Incomplete { reason },
-                },
+                cursor,
                 reason,
-            }),
-            replay: VecDeque::new(),
-            receiver: None,
-            last_position: 0,
+                snapshot,
+            },
+        };
+        self.pending.push_back(item);
+        self.replay.clear();
+        if let Some(capture) = capture
+            && continues
+        {
+            self.state = Some(capture.state);
+            self.receiver = capture.receiver;
+        }
+        Ok(())
+    }
+
+    fn release_state(&mut self) {
+        self.receiver = None;
+        if let Some(state) = self.state.take() {
+            self.hub
+                .evict_if_terminal(&self.process_ref.process_id, &state);
         }
     }
 
-    pub async fn recv(&mut self) -> Option<ProcessObservationItem> {
-        if let Some(item) = self.next.take() {
-            return Some(item);
-        }
-        if let Some(item) = self.replay.pop_front() {
-            if let ProcessObservationItem::Event { cursor, .. } = &item {
-                self.last_position = cursor
-                    .parse()
-                    .map_or(self.last_position, |(_, _, pos, _)| pos);
-            }
-            return Some(item);
-        }
+    /// The next item, or `None` once the subscription ended after a gap that
+    /// left nothing to follow.
+    pub async fn recv(&mut self) -> Result<Option<ProcessObservationItem>, PluginError> {
         loop {
-            let receiver = self.receiver.as_mut()?;
-            match receiver.recv().await {
-                Ok(PublishedNotification::Event(cursor, record)) => {
-                    let Some((_, _, position, _)) = cursor.parse() else {
-                        continue;
-                    };
-                    if position <= self.last_position {
+            if let Some(item) = self.pending.pop_front() {
+                return Ok(Some(item));
+            }
+            let (position, item) = if let Some(next) = self.replay.pop_front() {
+                next
+            } else {
+                let Some(receiver) = self.receiver.as_mut() else {
+                    return Ok(None);
+                };
+                match receiver.recv().await {
+                    Ok(PublishedNotification::Item(position, item)) => (position, item),
+                    Ok(PublishedNotification::Replaced(reason)) => {
+                        let requested = self.cursor();
+                        self.resync(Some(reason), Some(requested)).await?;
                         continue;
                     }
-                    if position != self.last_position + 1 {
-                        self.receiver = None;
-                        return Some(self.hub.gap_at_latest(
-                            &self.process_id,
-                            self.incarnation,
-                            Some(cursor),
-                            ProcessObservationGapReason::SubscriberLagged,
-                        ));
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let requested = self.cursor();
+                        self.resync(
+                            Some(ProcessObservationGapReason::SubscriberLagged),
+                            Some(requested),
+                        )
+                        .await?;
+                        continue;
                     }
-                    self.last_position = position;
-                    return Some(ProcessObservationItem::Event { cursor, record });
+                    Err(broadcast::error::RecvError::Closed) => {
+                        let requested = self.cursor();
+                        self.resync(
+                            Some(ProcessObservationGapReason::PublisherReplaced),
+                            Some(requested),
+                        )
+                        .await?;
+                        continue;
+                    }
                 }
-                Ok(PublishedNotification::Replaced(reason)) => {
-                    self.receiver = None;
-                    return Some(self.hub.gap_at_latest(
-                        &self.process_id,
-                        self.incarnation,
-                        None,
-                        reason,
-                    ));
+            };
+            if position <= self.position {
+                continue;
+            }
+            if position != self.position + 1 {
+                let requested = self.cursor();
+                self.resync(
+                    Some(ProcessObservationGapReason::SubscriberLagged),
+                    Some(requested),
+                )
+                .await?;
+                continue;
+            }
+            match item {
+                PublishedItem::Live(record) => {
+                    self.position = position;
+                    return Ok(Some(ProcessObservationItem::Event {
+                        cursor: self.cursor(),
+                        record,
+                    }));
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    self.receiver = None;
-                    return Some(self.hub.gap_at_latest(
-                        &self.process_id,
-                        self.incarnation,
-                        None,
-                        ProcessObservationGapReason::SubscriberLagged,
-                    ));
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    self.receiver = None;
-                    return Some(self.hub.gap_at_latest(
-                        &self.process_id,
-                        self.incarnation,
-                        None,
-                        ProcessObservationGapReason::PublisherReplaced,
-                    ));
+                PublishedItem::Committed {
+                    sequence,
+                    event_type,
+                } => {
+                    if sequence <= self.sequence {
+                        self.position = position;
+                        continue;
+                    }
+                    if sequence != self.sequence + 1 {
+                        // A publication was lost between the two: the durable
+                        // log is the truth, so re-read it.
+                        let requested = self.cursor();
+                        self.resync(
+                            Some(ProcessObservationGapReason::SequenceUnbridged),
+                            Some(requested),
+                        )
+                        .await?;
+                        continue;
+                    }
+                    self.position = position;
+                    self.sequence = sequence;
+                    return Ok(Some(ProcessObservationItem::Committed {
+                        cursor: self.cursor(),
+                        sequence,
+                        event_type,
+                    }));
                 }
             }
         }
@@ -685,713 +1194,114 @@ impl ProcessObservationSubscription {
     /// Receive the next item with this subscription's process identity on the wire.
     pub async fn recv_remote(
         &mut self,
-    ) -> Option<lash_remote_protocol::RemoteProcessObservationItem> {
-        self.recv()
-            .await
-            .map(|item| item.into_remote(self.process_id.clone(), self.incarnation))
+    ) -> Result<Option<lash_remote_protocol::RemoteProcessObservationItem>, PluginError> {
+        let process_id = self.process_ref.process_id.clone();
+        let incarnation = self.process_ref.incarnation.registration_sequence();
+        Ok(self
+            .recv()
+            .await?
+            .map(|item| item.into_remote(process_id, incarnation)))
     }
 }
 
 impl Drop for ProcessObservationSubscription {
     fn drop(&mut self) {
-        if let Some(state) = self.state.take() {
-            self.hub.evict_if_terminal(&self.process_id, &state);
-        }
+        self.release_state();
     }
+}
+
+/// Where a durable event read starts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessEventsFrom {
+    /// The first event of the lifetime `ProcessId` currently names.
+    Start(ProcessId),
+    /// The events after a cursor's durable sequence, of the lifetime it names.
+    After(ProcessCursor),
+}
+
+/// One durable event page and the cursor after it.
+#[derive(Clone, Debug)]
+pub struct ProcessEventsRead {
+    pub outcome: lash_core::facade_support::ObservedProcessEventReadOutcome,
+    /// The cursor after this page: its sequence is the last event returned, or
+    /// the starting one when the page returned none. `None` only when a
+    /// `Start` read found no lifetime to name.
+    pub cursor: Option<ProcessCursor>,
+}
+
+/// Read one durable event page for a cursor, minting the cursor's live route
+/// from `hub` before the durable read (or the unrouted epoch without one).
+pub(crate) async fn read_events(
+    registry: &Arc<dyn ProcessRegistry>,
+    hub: Option<&ProcessObservationHub>,
+    from: ProcessEventsFrom,
+    limit: std::num::NonZeroUsize,
+    mode: ProcessEventQueryMode,
+) -> Result<ProcessEventsRead, PluginError> {
+    let observer = lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(registry));
+    let (process_ref, cursor) = match from {
+        ProcessEventsFrom::Start(process_id) => {
+            let process_ref = match registry.resolve_process_ref(&process_id).await {
+                Ok(process_ref) => process_ref,
+                Err(PluginError::ProcessNoLongerRetained {
+                    terminal_label,
+                    pruned_at_ms,
+                }) => {
+                    return Ok(ProcessEventsRead {
+                        outcome: ProcessEventReadOutcome::NoLongerRetained(
+                            ProcessEventHistoryRetention::Pruned {
+                                terminal_label,
+                                pruned_at_ms,
+                            },
+                        ),
+                        cursor: None,
+                    });
+                }
+                Err(error) => return Err(error),
+            };
+            let (epoch, position) = match hub {
+                Some(hub) => hub.route(&process_ref),
+                None => (PROCESS_CURSOR_UNROUTED_EPOCH.to_string(), 0),
+            };
+            let reference = ProcessCursorReference::for_lifetime(
+                &process_ref.process_id,
+                process_ref.incarnation.registration_sequence(),
+            );
+            let cursor = ProcessCursor::new(epoch, reference, position, 0)
+                .map_err(|error| PluginError::Session(error.to_string()))?;
+            (process_ref, cursor)
+        }
+        ProcessEventsFrom::After(cursor) => {
+            let (process_id, incarnation) =
+                cursor.reference().decode_lifetime().ok_or_else(|| {
+                    PluginError::Session("process cursor names no process lifetime".to_string())
+                })?;
+            let process_ref = ProcessRef::new(
+                process_id,
+                lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
+            );
+            (process_ref, cursor)
+        }
+    };
+    let outcome = observer
+        .event_page(&process_ref, cursor.sequence(), limit, mode)
+        .await?;
+    let last = match &outcome {
+        ProcessEventReadOutcome::Retained(page) => {
+            page.last_sequence(|event| event.sequence, |event| event.sequence)
+        }
+        ProcessEventReadOutcome::NoLongerRetained(_) => None,
+    };
+    let cursor = match last {
+        Some(sequence) => cursor.with_sequence(sequence),
+        None => cursor,
+    };
+    Ok(ProcessEventsRead {
+        outcome,
+        cursor: Some(cursor),
+    })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_remote_protocol::{
-        RemoteProcessObservationGapReason as RemoteGap, RemoteProcessObservationItem as RemoteItem,
-        RemoteProcessObservationRequest,
-    };
-    use lash_trace::{
-        TraceContext, TraceLanguageExecution, TraceLanguageExecutionGeneration,
-        TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapNode,
-        TraceLanguageExecutionPayload, TraceRuntimeScope,
-    };
-
-    fn record(process_id: &str, incarnation: u64, attempt: u32, occurrence: u64) -> TraceRecord {
-        let payload = if occurrence == 0 {
-            TraceLanguageExecutionPayload::ExecutionStarted {
-                execution_map: TraceLanguageExecutionMap {
-                    nodes: vec![TraceLanguageExecutionMapNode {
-                        id: "node".to_string(),
-                        site: lash_sansio::WorkflowExecutionSite::new(
-                            "main",
-                            [0],
-                            lash_sansio::ExecutionNodeKind::Call,
-                            "call()",
-                        ),
-                        kind: lash_sansio::ExecutionNodeKind::Call,
-                        label: "call()".to_string(),
-                        branch_memberships: Vec::new(),
-                        label_metadata: None,
-                    }],
-                    edges: Vec::new(),
-                },
-            }
-        } else {
-            TraceLanguageExecutionPayload::NodeStarted {
-                node_id: "node".to_string(),
-                node_kind: lash_sansio::ExecutionNodeKind::Call,
-                label: "call()".to_string(),
-                occurrence,
-                call_id: None,
-            }
-        };
-        TraceRecord::new(
-            TraceContext::default(),
-            TraceEvent::LanguageExecution {
-                language: "lashlang".to_string(),
-                event: TraceLanguageExecution {
-                    event_key: format!("{process_id}:{incarnation}:{attempt}:{occurrence}"),
-                    identity: TraceLanguageExecutionIdentity {
-                        scope: TraceRuntimeScope::none(),
-                        subject: TraceRuntimeSubject::Process {
-                            process_id: ProcessId::from(process_id),
-                        },
-                        source_identity: "source".to_string(),
-                        module_ref: "module".to_string(),
-                        entry_kind: "main".to_string(),
-                        entry_ref: None,
-                        entry_name: "main".to_string(),
-                        restate_invocation_id: None,
-                        generation: Some(TraceLanguageExecutionGeneration::new(
-                            attempt,
-                            incarnation,
-                        )),
-                    },
-                    payload,
-                },
-            },
-        )
-    }
-
-    fn finished_record(process_id: &str) -> TraceRecord {
-        let mut finished = record(process_id, 1, 1, 1);
-        let TraceEvent::LanguageExecution { event, .. } = &mut finished.event else {
-            unreachable!()
-        };
-        event.payload = TraceLanguageExecutionPayload::ExecutionFinished {
-            status: lash_trace::TraceLanguageExecutionStatus::Completed,
-            error: None,
-        };
-        finished
-    }
-
-    fn append(hub: &ProcessObservationHub, process_id: &str, incarnation: u64, occurrence: u64) {
-        hub.append(&record(process_id, incarnation, 1, occurrence))
-            .expect("publish observation");
-    }
-
-    async fn initial_cursor(
-        hub: &std::sync::Arc<ProcessObservationHub>,
-        process_id: &str,
-        incarnation: u64,
-    ) -> ProcessObservationCursor {
-        let mut subscriber = hub.subscribe(&ProcessId::from(process_id), incarnation, None);
-        let Some(ProcessObservationItem::Snapshot { cursor, .. }) = subscriber.recv().await else {
-            panic!("expected initial snapshot");
-        };
-        cursor
-    }
-
-    async fn assert_gap_wire(
-        mut subscriber: ProcessObservationSubscription,
-        process_id: &str,
-        incarnation: u64,
-        expected: ProcessObservationGapReason,
-    ) {
-        let item = subscriber.recv().await.expect("typed gap");
-        let ProcessObservationItem::Gap {
-            reason, projection, ..
-        } = &item
-        else {
-            panic!("expected typed gap");
-        };
-        assert_eq!(*reason, expected);
-        assert_eq!(
-            projection.completeness,
-            ProcessObservationCompleteness::Incomplete { reason: expected }
-        );
-        let remote = item.into_remote(ProcessId::from(process_id), incarnation);
-        let wire = remote.encode_json().expect("encode remote gap");
-        assert_eq!(
-            lash_remote_protocol::RemoteProcessObservationItem::decode_json(&wire)
-                .expect("decode remote gap"),
-            remote,
-        );
-    }
-
-    #[tokio::test]
-    async fn process_subscription_replays_with_snapshot_boundary_and_wire_round_trip() {
-        let hub = std::sync::Arc::new(ProcessObservationHub::default());
-        let id = ProcessId::from("process:one");
-        append(&hub, id.as_str(), 1, 0);
-        let mut uninterrupted = hub.subscribe(&id, 1, None);
-        let snapshot = uninterrupted.recv().await.expect("initial snapshot");
-        let ProcessObservationItem::Snapshot { cursor, .. } = &snapshot else {
-            panic!("initial snapshot");
-        };
-        let cursor = cursor.clone();
-        let wire = snapshot
-            .clone()
-            .into_remote(id.clone(), 1)
-            .encode_json()
-            .expect("snapshot wire");
-        assert!(matches!(
-            lash_remote_protocol::RemoteProcessObservationItem::decode_json(&wire),
-            Ok(lash_remote_protocol::RemoteProcessObservationItem::Snapshot { .. })
-        ));
-        append(&hub, id.as_str(), 1, 1);
-        let Some(ProcessObservationItem::Event {
-            cursor: after_one,
-            record: first,
-        }) = uninterrupted.recv().await
-        else {
-            panic!("first node event");
-        };
-        assert_eq!(
-            after_one.parse().expect("cursor").2,
-            cursor.parse().expect("cursor").2 + 1
-        );
-        append(&hub, id.as_str(), 1, 2);
-        let Some(ProcessObservationItem::Event {
-            cursor: after_two,
-            record: second,
-        }) = uninterrupted.recv().await
-        else {
-            panic!("second node event");
-        };
-        let first_graph = match snapshot {
-            ProcessObservationItem::Snapshot { graph, .. } => graph,
-            _ => unreachable!(),
-        };
-        let uninterrupted_graph = TraceLashlangGraphStore::fold(
-            Some(&first_graph),
-            &[first.as_ref().clone(), second.as_ref().clone()],
-        )
-        .expect("uninterrupted fold");
-
-        drop(uninterrupted);
-        let mut resumed = hub.subscribe(&id, 1, Some(&after_one));
-        let Some(ProcessObservationItem::Snapshot {
-            cursor: boundary,
-            graph,
-            ..
-        }) = resumed.recv().await
-        else {
-            panic!("resumed snapshot");
-        };
-        assert_eq!(boundary, after_one);
-        let Some(ProcessObservationItem::Event {
-            cursor: replay_cursor,
-            record: replay,
-        }) = resumed.recv().await
-        else {
-            panic!("retained replay");
-        };
-        assert_eq!(replay_cursor, after_two);
-        assert_eq!(replay, second);
-        let replay_graph = TraceLashlangGraphStore::fold(Some(&graph), &[replay.as_ref().clone()])
-            .expect("replayed fold");
-        assert_eq!(replay_graph, uninterrupted_graph);
-        let remote = ProcessObservationItem::Event {
-            cursor: replay_cursor,
-            record: first,
-        }
-        .into_remote(id, 1);
-        let wire = remote.encode_json().expect("event wire");
-        assert_eq!(
-            lash_remote_protocol::RemoteProcessObservationItem::decode_json(&wire)
-                .expect("event decode"),
-            remote
-        );
-    }
-
-    #[tokio::test]
-    async fn process_subscription_gap_matrix_is_complete_locally_and_on_wire() {
-        let id = ProcessId::from("process:one");
-        let hub = std::sync::Arc::new(ProcessObservationHub::default());
-        assert_gap_wire(
-            hub.subscribe(&id, 1, None),
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::RoutingUnavailable,
-        )
-        .await;
-
-        let overflow = std::sync::Arc::new(ProcessObservationHub::new(ProcessObservationConfig {
-            capacity: 1,
-            ttl: Duration::from_secs(120),
-        }));
-        append(&overflow, id.as_str(), 1, 0);
-        let cursor = initial_cursor(&overflow, id.as_str(), 1).await;
-        append(&overflow, id.as_str(), 1, 1);
-        append(&overflow, id.as_str(), 1, 2);
-        assert_gap_wire(
-            overflow.subscribe(&id, 1, Some(&cursor)),
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::Overflow,
-        )
-        .await;
-
-        let expiry = std::sync::Arc::new(ProcessObservationHub::new(ProcessObservationConfig {
-            capacity: 2,
-            ttl: Duration::ZERO,
-        }));
-        append(&expiry, id.as_str(), 1, 0);
-        let cursor = expiry
-            .states
-            .lock_recover()
-            .get(&id)
-            .expect("publisher")
-            .lock_recover()
-            .cursor(&id, 0);
-        assert_gap_wire(
-            expiry.subscribe(&id, 1, Some(&cursor)),
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::Expired,
-        )
-        .await;
-
-        let replacement = std::sync::Arc::new(ProcessObservationHub::default());
-        append(&replacement, id.as_str(), 1, 0);
-        let cursor = initial_cursor(&replacement, id.as_str(), 1).await;
-        let mut stale = replacement.subscribe(&id, 1, None);
-        assert!(matches!(
-            stale.recv().await,
-            Some(ProcessObservationItem::Snapshot { .. })
-        ));
-        replacement
-            .append(&record(id.as_str(), 1, 2, 0))
-            .expect("new publisher");
-        assert_gap_wire(
-            stale,
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::PublisherReplaced,
-        )
-        .await;
-        assert_gap_wire(
-            replacement.subscribe(&id, 1, Some(&cursor)),
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::PublisherReplaced,
-        )
-        .await;
-        let same_key_cursor = initial_cursor(&replacement, id.as_str(), 1).await;
-        replacement
-            .append(&record(id.as_str(), 1, 2, 0))
-            .expect("same-key publisher restart");
-        assert_gap_wire(
-            replacement.subscribe(&id, 1, Some(&same_key_cursor)),
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::PublisherReplaced,
-        )
-        .await;
-
-        let reuse = std::sync::Arc::new(ProcessObservationHub::default());
-        append(&reuse, id.as_str(), 1, 0);
-        let cursor = initial_cursor(&reuse, id.as_str(), 1).await;
-        append(&reuse, id.as_str(), 2, 0);
-        assert_gap_wire(
-            reuse.subscribe(&id, 1, Some(&cursor)),
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::ProcessIdReused,
-        )
-        .await;
-
-        let other = ProcessId::from("process:other");
-        append(&reuse, other.as_str(), 1, 0);
-        assert_gap_wire(
-            reuse.subscribe(&other, 1, Some(&cursor)),
-            other.as_str(),
-            1,
-            ProcessObservationGapReason::CrossProcess,
-        )
-        .await;
-        let invalid = ProcessObservationCursor::from_token("invalid");
-        assert_gap_wire(
-            reuse.subscribe(&other, 1, Some(&invalid)),
-            other.as_str(),
-            1,
-            ProcessObservationGapReason::InvalidCursor,
-        )
-        .await;
-
-        let lag = std::sync::Arc::new(ProcessObservationHub::new(ProcessObservationConfig {
-            capacity: 1,
-            ttl: Duration::from_secs(120),
-        }));
-        append(&lag, id.as_str(), 1, 0);
-        let mut subscriber = lag.subscribe(&id, 1, None);
-        assert!(matches!(
-            subscriber.recv().await,
-            Some(ProcessObservationItem::Snapshot { .. })
-        ));
-        append(&lag, id.as_str(), 1, 1);
-        append(&lag, id.as_str(), 1, 2);
-        assert_gap_wire(
-            subscriber,
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::SubscriberLagged,
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn publisher_joined_mid_run_never_claims_a_complete_snapshot() {
-        let id = ProcessId::from("process:joined-late");
-        let hub = Arc::new(ProcessObservationHub::default());
-        append(&hub, id.as_str(), 1, 1);
-        let mut subscriber = hub.subscribe(&id, 1, None);
-        let item = subscriber.recv().await.expect("snapshot");
-        let ProcessObservationItem::Snapshot {
-            graph,
-            completeness,
-            ..
-        } = &item
-        else {
-            panic!("expected snapshot");
-        };
-        assert_eq!(
-            graph.completeness,
-            TraceLashlangGraphCompleteness::IncompleteMap
-        );
-        assert_eq!(
-            completeness,
-            &ProcessObservationCompleteness::Incomplete {
-                reason: ProcessObservationGapReason::PublisherJoinedMidRun
-            }
-        );
-        let wire = item
-            .into_remote(id, 1)
-            .encode_json()
-            .expect("wire snapshot");
-        assert!(matches!(
-            lash_remote_protocol::RemoteProcessObservationItem::decode_json(&wire),
-            Ok(lash_remote_protocol::RemoteProcessObservationItem::Snapshot { projection, .. })
-                if projection.completeness
-                    == lash_remote_protocol::RemoteProcessObservationCompleteness::Incomplete {
-                        reason: lash_remote_protocol::RemoteProcessObservationGapReason::PublisherJoinedMidRun
-                    }
-        ));
-    }
-
-    #[tokio::test]
-    async fn live_process_id_reuse_is_not_a_publisher_restart() {
-        let id = ProcessId::from("process:reused-live");
-        let hub = Arc::new(ProcessObservationHub::default());
-        append(&hub, id.as_str(), 1, 0);
-        let mut subscriber = hub.subscribe(&id, 1, None);
-        assert!(matches!(
-            subscriber.recv().await,
-            Some(ProcessObservationItem::Snapshot { .. })
-        ));
-        append(&hub, id.as_str(), 2, 0);
-        assert_gap_wire(
-            subscriber,
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::ProcessIdReused,
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn worker_restart_epoch_refuses_the_old_cursor() {
-        let id = ProcessId::from("process:worker-restart");
-        let before = Arc::new(ProcessObservationHub::default());
-        append(&before, id.as_str(), 1, 0);
-        let cursor = initial_cursor(&before, id.as_str(), 1).await;
-        let restarted = Arc::new(ProcessObservationHub::default());
-        assert_gap_wire(
-            restarted.subscribe(&id, 1, Some(&cursor)),
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::RoutingUnavailable,
-        )
-        .await;
-        append(&restarted, id.as_str(), 1, 0);
-        assert_gap_wire(
-            restarted.subscribe(&id, 1, Some(&cursor)),
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::PublisherReplaced,
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn another_worker_publisher_has_an_independent_epoch() {
-        let id = ProcessId::from("process:other-worker");
-        let first_worker = Arc::new(ProcessObservationHub::default());
-        first_worker
-            .append(&record(id.as_str(), 1, 1, 0))
-            .expect("first worker");
-        let cursor = initial_cursor(&first_worker, id.as_str(), 1).await;
-        let other_worker = Arc::new(ProcessObservationHub::default());
-        other_worker
-            .append(&record(id.as_str(), 1, 2, 0))
-            .expect("other worker");
-        assert_gap_wire(
-            other_worker.subscribe(&id, 1, Some(&cursor)),
-            id.as_str(),
-            1,
-            ProcessObservationGapReason::PublisherReplaced,
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn finished_processes_release_their_hub_entries_without_subscribers() {
-        let hub = Arc::new(ProcessObservationHub::default());
-        for index in 0..64 {
-            let id = format!("process:finished:{index}");
-            append(&hub, &id, 1, 0);
-            hub.append(&finished_record(&id))
-                .expect("terminal observation");
-        }
-        assert_eq!(hub.states.lock_recover().len(), 0);
-
-        let watched = ProcessId::from("process:finished:watched");
-        append(&hub, watched.as_str(), 1, 0);
-        let mut subscriber = hub.subscribe(&watched, 1, None);
-        assert!(matches!(
-            subscriber.recv().await,
-            Some(ProcessObservationItem::Snapshot { .. })
-        ));
-        hub.append(&finished_record(watched.as_str()))
-            .expect("terminal observation");
-        assert_eq!(
-            hub.states.lock_recover().len(),
-            1,
-            "a live subscriber keeps its finished process"
-        );
-        assert!(matches!(
-            subscriber.recv().await,
-            Some(ProcessObservationItem::Event { .. })
-        ));
-        drop(subscriber);
-        assert_eq!(hub.states.lock_recover().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn idle_unfinished_processes_are_released_after_the_ttl() {
-        let hub = Arc::new(ProcessObservationHub::new(ProcessObservationConfig {
-            capacity: 8,
-            ttl: Duration::from_millis(1),
-        }));
-        for index in 0..16 {
-            append(&hub, &format!("process:suspended:{index}"), 1, 0);
-        }
-        let watched = ProcessId::from("process:suspended:watched");
-        append(&hub, watched.as_str(), 1, 0);
-        let _subscriber = hub.subscribe(&watched, 1, None);
-        tokio::time::sleep(Duration::from_millis(5)).await;
-        append(&hub, "process:live", 1, 0);
-        let mut remaining = hub
-            .states
-            .lock_recover()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        remaining.sort();
-        assert_eq!(
-            remaining,
-            [ProcessId::from("process:live"), watched],
-            "idle states without subscribers are released; a held one stays"
-        );
-    }
-
-    async fn through_remote_facade(
-        core: &crate::LashCore,
-        process_id: &str,
-        incarnation: u64,
-        cursor: Option<String>,
-    ) -> RemoteItem {
-        let request = RemoteProcessObservationRequest {
-            process_id: ProcessId::from(process_id),
-            incarnation,
-            cursor,
-        };
-        let request = RemoteProcessObservationRequest::decode_json(
-            &request.encode_json().expect("encode request"),
-        )
-        .expect("decode request");
-        let process_ref = lash_core::ProcessRef::new(
-            request.process_id.clone(),
-            lash_core::ProcessIncarnation::from_registration_sequence(request.incarnation),
-        );
-        let cursor = request
-            .cursor
-            .as_deref()
-            .map(ProcessObservationCursor::from_token);
-        let mut local = core
-            .processes()
-            .subscribe_observation(&process_ref, cursor.as_ref());
-        let mut subscription = core
-            .processes()
-            .subscribe_observation_remote(&request)
-            .expect("facade route");
-        let item = subscription.recv_remote().await.expect("first item");
-        let decoded = RemoteItem::decode_json(&item.encode_json().expect("encode item"))
-            .expect("client decode");
-        assert_eq!(
-            local
-                .recv()
-                .await
-                .expect("local item")
-                .into_remote(request.process_id, request.incarnation),
-            decoded,
-        );
-        decoded
-    }
-
-    fn assert_remote_gap(item: RemoteItem, expected: RemoteGap) {
-        assert!(
-            matches!(&item, RemoteItem::Gap { reason, .. } if reason == &expected),
-            "expected {expected:?}, received {item:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn remote_facade_gap_matrix_and_drop_resubscribe() {
-        let mut core = crate::tests::standard_core();
-        let hub = Arc::new(ProcessObservationHub::new(ProcessObservationConfig {
-            capacity: 1,
-            ttl: Duration::from_secs(120),
-        }));
-        core.process_observation_hub = Arc::clone(&hub);
-        let id = "process:facade-wire";
-        assert_remote_gap(
-            through_remote_facade(&core, id, 1, None).await,
-            RemoteGap::RoutingUnavailable,
-        );
-        append(&hub, id, 1, 0);
-        let RemoteItem::Snapshot {
-            cursor, projection, ..
-        } = through_remote_facade(&core, id, 1, None).await
-        else {
-            panic!("snapshot")
-        };
-        assert!(projection.graph.is_some());
-        assert_eq!(
-            through_remote_facade(&core, id, 1, None).await,
-            through_remote_facade(&core, id, 1, None).await,
-            "resubscribing after the first subscription drops rebuilds the snapshot"
-        );
-        assert_remote_gap(
-            through_remote_facade(&core, id, 1, Some("invalid".into())).await,
-            RemoteGap::InvalidCursor,
-        );
-        append(&hub, "process:other", 1, 0);
-        assert_remote_gap(
-            through_remote_facade(&core, "process:other", 1, Some(cursor.clone())).await,
-            RemoteGap::CrossProcess,
-        );
-        append(&hub, id, 1, 1);
-        append(&hub, id, 1, 2);
-        assert_remote_gap(
-            through_remote_facade(&core, id, 1, Some(cursor.clone())).await,
-            RemoteGap::Overflow,
-        );
-        let current_cursor = match through_remote_facade(&core, id, 1, None).await {
-            RemoteItem::Snapshot { cursor, .. } => cursor,
-            _ => panic!("current snapshot"),
-        };
-        append(&hub, id, 2, 0);
-        assert_remote_gap(
-            through_remote_facade(&core, id, 1, Some(current_cursor)).await,
-            RemoteGap::ProcessIdReused,
-        );
-        let zero = RemoteProcessObservationRequest {
-            process_id: ProcessId::from(id),
-            incarnation: 0,
-            cursor: None,
-        };
-        assert!(
-            RemoteProcessObservationRequest::decode_json(&zero.encode_json().expect("zero wire"))
-                .is_err()
-        );
-    }
-
-    #[tokio::test]
-    async fn remote_facade_reports_expiry_lag_and_replaced_publisher() {
-        let id = "process:facade-gaps";
-        let mut core = crate::tests::standard_core();
-        let expiring = Arc::new(ProcessObservationHub::new(ProcessObservationConfig {
-            capacity: 4,
-            ttl: Duration::from_millis(1),
-        }));
-        core.process_observation_hub = Arc::clone(&expiring);
-        append(&expiring, id, 1, 0);
-        let cursor = match through_remote_facade(&core, id, 1, None).await {
-            RemoteItem::Snapshot { cursor, .. } => cursor,
-            _ => panic!("snapshot"),
-        };
-        tokio::time::sleep(Duration::from_millis(3)).await;
-        append(&expiring, id, 1, 1);
-        tokio::time::sleep(Duration::from_millis(3)).await;
-        append(&expiring, id, 1, 2);
-        assert_remote_gap(
-            through_remote_facade(&core, id, 1, Some(cursor.clone())).await,
-            RemoteGap::Expired,
-        );
-
-        let restarted = Arc::new(ProcessObservationHub::default());
-        core.process_observation_hub = Arc::clone(&restarted);
-        append(&restarted, id, 1, 0);
-        assert_remote_gap(
-            through_remote_facade(&core, id, 1, Some(cursor)).await,
-            RemoteGap::PublisherReplaced,
-        );
-
-        let lagging = Arc::new(ProcessObservationHub::new(ProcessObservationConfig {
-            capacity: 1,
-            ttl: Duration::from_secs(120),
-        }));
-        core.process_observation_hub = Arc::clone(&lagging);
-        append(&lagging, id, 1, 0);
-        let request = RemoteProcessObservationRequest {
-            process_id: ProcessId::from(id),
-            incarnation: 1,
-            cursor: None,
-        };
-        let request = RemoteProcessObservationRequest::decode_json(
-            &request.encode_json().expect("request wire"),
-        )
-        .expect("client request");
-        let mut subscriber = core
-            .processes()
-            .subscribe_observation_remote(&request)
-            .expect("facade route");
-        assert!(matches!(
-            subscriber.recv_remote().await,
-            Some(RemoteItem::Snapshot { .. })
-        ));
-        append(&lagging, id, 1, 1);
-        append(&lagging, id, 1, 2);
-        assert_remote_gap(
-            RemoteItem::decode_json(
-                &subscriber
-                    .recv_remote()
-                    .await
-                    .expect("lag gap")
-                    .encode_json()
-                    .expect("gap wire"),
-            )
-            .expect("client gap"),
-            RemoteGap::SubscriberLagged,
-        );
-    }
-}
+#[path = "process_observation/tests.rs"]
+mod tests;

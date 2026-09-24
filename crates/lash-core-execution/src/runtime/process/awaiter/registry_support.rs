@@ -42,20 +42,15 @@ impl WatchedProcessRegistry {
             return;
         };
         let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
-        let mut continuation = Some(crate::ProcessEventPageToken::new(
-            process_ref.process_id.clone(),
-            process_ref.incarnation,
-            cursor,
-            crate::ProcessEventQueryMode::Full,
-        ));
+        let mut after_sequence = cursor;
         loop {
             let Ok(crate::ProcessEventReadOutcome::Retained(page)) = self
                 .inner
-                .event_page(
-                    process_id,
+                .event_page_ref(
+                    &process_ref,
+                    after_sequence,
                     limit,
                     crate::ProcessEventQueryMode::Full,
-                    continuation,
                 )
                 .await
             else {
@@ -69,9 +64,9 @@ impl WatchedProcessRegistry {
                     sink.emit(&event).await;
                 }
             }
-            continuation = match page.more {
+            after_sequence = match page.more {
                 crate::ProcessEventPageMore::Complete => return,
-                crate::ProcessEventPageMore::More { continuation } => Some(continuation),
+                crate::ProcessEventPageMore::More { after_sequence } => after_sequence,
             };
         }
     }

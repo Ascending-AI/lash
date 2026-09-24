@@ -152,7 +152,7 @@ fn process_node_record() -> lash_trace::TraceRecord {
 /// event record are typed trace shapes, not opaque JSON.
 fn published_observation_item_schema() -> jsonschema::JSONSchema {
     let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/host/remote-process-observation-item/v97.schema.json"
+        "../../../schemas/host/remote-process-observation-item/v98.schema.json"
     ))
     .expect("published observation item schema parses");
     assert_eq!(
@@ -184,9 +184,10 @@ fn assert_process_observation_wire_contract(item: RemoteProcessObservationItem) 
     }
     let mut untyped = body.clone();
     let typed_field = match &item {
-        RemoteProcessObservationItem::Snapshot { .. } => Some("/projection/graph/status"),
+        RemoteProcessObservationItem::Snapshot { .. } => Some("/snapshot/live/graph/status"),
         RemoteProcessObservationItem::Event { .. } => Some("/record/type"),
-        RemoteProcessObservationItem::Gap { .. } => None,
+        RemoteProcessObservationItem::Committed { .. }
+        | RemoteProcessObservationItem::Gap { .. } => None,
     };
     if let Some(pointer) = typed_field {
         *untyped.pointer_mut(pointer).expect("typed trace field") =
@@ -217,12 +218,62 @@ fn assert_process_observation_wire_contract(item: RemoteProcessObservationItem) 
     assert!(RemoteProcessObservationItem::decode_json(value.to_string().as_bytes()).is_err());
 }
 
+fn wire_cursor(process_id: &str, position: u64, sequence: u64) -> lash_sansio::ProcessCursor {
+    lash_sansio::ProcessCursor::new(
+        "epoch",
+        lash_sansio::ProcessCursorReference::for_lifetime(
+            &lash_sansio::ProcessId::from(process_id),
+            1,
+        ),
+        position,
+        sequence,
+    )
+    .expect("wire cursor")
+}
+
+fn wire_snapshot(
+    graph: Option<lash_trace::TraceLashlangGraph>,
+) -> RemoteProcessObservationSnapshot {
+    RemoteProcessObservationSnapshot {
+        durable: RemoteProcessDurableSnapshot::Retained {
+            sequence: 3,
+            status: crate::RemoteProcessStatus::Running,
+            summary: vec![RemoteProcessEffectNodeSummary {
+                node_id: "node".to_string(),
+                occurrences: vec![RemoteProcessEffectOccurrence {
+                    occurrence: 1,
+                    operation: "tools.echo".to_string(),
+                    outcome_class: RemoteProcessEffectOutcomeClass::Failure,
+                    code: Some(lash_sansio::FailureCode::provider("tool_failed")),
+                    replay_key: "replay:1".to_string(),
+                }],
+                omitted: RemoteProcessEffectOmittedCounts {
+                    success: 0,
+                    failure: 2,
+                    cancelled: 0,
+                },
+            }],
+            completeness: RemoteProcessDurableCompleteness::Complete,
+        },
+        live: RemoteProcessObservationProjection {
+            completeness: if graph.is_some() {
+                RemoteProcessObservationCompleteness::Complete
+            } else {
+                RemoteProcessObservationCompleteness::Incomplete {
+                    reason: RemoteProcessObservationGapReason::RoutingUnavailable,
+                }
+            },
+            graph,
+        },
+    }
+}
+
 #[test]
 fn process_observation_cursor_wire_contract() {
     let request = RemoteProcessObservationRequest {
         process_id: lash_sansio::ProcessId::from("process:wire"),
         incarnation: 1,
-        cursor: Some("lashpc1:epoch:1:1:process:wire".to_string()),
+        cursor: Some(wire_cursor("process:wire", 1, 1)),
     };
     let wire = request.encode_json().expect("request wire");
     assert_eq!(
@@ -238,6 +289,13 @@ fn process_observation_cursor_wire_contract() {
     ));
     value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION);
     assert!(RemoteProcessObservationRequest::decode_json(value.to_string().as_bytes()).is_err());
+
+    // A retired `lashpc1` cursor is refused at decode, naming its version.
+    let mut retired: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
+    retired["cursor"] = serde_json::json!("lashpc1:epoch:1:1:process:wire");
+    let error = RemoteProcessObservationRequest::decode_json(retired.to_string().as_bytes())
+        .expect_err("a retired cursor is refused");
+    assert!(error.to_string().contains("lashpc1"), "{error}");
 }
 
 #[test]
@@ -247,12 +305,19 @@ fn process_observation_snapshot_wire_contract() {
     assert_process_observation_wire_contract(RemoteProcessObservationItem::Snapshot {
         process_id: lash_sansio::ProcessId::from("process:wire"),
         incarnation: 1,
-        cursor: "lashpc1:epoch:1:1:process:wire".to_string(),
-        projection: RemoteProcessObservationProjection {
-            graph: Some(graph),
-            completeness: RemoteProcessObservationCompleteness::Complete,
-        },
+        cursor: wire_cursor("process:wire", 1, 3),
+        snapshot: wire_snapshot(Some(graph)),
     });
+    let misplaced = RemoteProcessObservationItem::Snapshot {
+        process_id: lash_sansio::ProcessId::from("process:wire"),
+        incarnation: 1,
+        cursor: wire_cursor("process:wire", 1, 2),
+        snapshot: wire_snapshot(None),
+    };
+    assert!(
+        RemoteProcessObservationItem::decode_json(&misplaced.encode_json().expect("wire")).is_err(),
+        "a snapshot cursor must carry the snapshot's high-water sequence"
+    );
 }
 
 #[test]
@@ -260,13 +325,13 @@ fn process_observation_event_wire_contract() {
     assert_process_observation_wire_contract(RemoteProcessObservationItem::Event {
         process_id: lash_sansio::ProcessId::from("process:wire"),
         incarnation: 1,
-        cursor: "lashpc1:epoch:1:1:process:wire".to_string(),
+        cursor: wire_cursor("process:wire", 1, 1),
         record: Box::new(process_node_record()),
     });
     let foreign = RemoteProcessObservationItem::Event {
         process_id: lash_sansio::ProcessId::from("process:other"),
         incarnation: 1,
-        cursor: "lashpc1:epoch:1:1:process:other".to_string(),
+        cursor: wire_cursor("process:other", 1, 1),
         record: Box::new(process_node_record()),
     };
     assert!(
@@ -274,6 +339,38 @@ fn process_observation_event_wire_contract() {
             &foreign.encode_json().expect("foreign event wire")
         )
         .is_err()
+    );
+    let cross = RemoteProcessObservationItem::Event {
+        process_id: lash_sansio::ProcessId::from("process:wire"),
+        incarnation: 1,
+        cursor: wire_cursor("process:other", 1, 1),
+        record: Box::new(process_node_record()),
+    };
+    assert!(
+        RemoteProcessObservationItem::decode_json(&cross.encode_json().expect("wire")).is_err(),
+        "an item cursor must name the item's process lifetime"
+    );
+}
+
+#[test]
+fn process_observation_committed_wire_contract() {
+    assert_process_observation_wire_contract(RemoteProcessObservationItem::Committed {
+        process_id: lash_sansio::ProcessId::from("process:wire"),
+        incarnation: 1,
+        cursor: wire_cursor("process:wire", 4, 7),
+        sequence: 7,
+        event_type: "process.waiting".to_string(),
+    });
+    let mismatched = RemoteProcessObservationItem::Committed {
+        process_id: lash_sansio::ProcessId::from("process:wire"),
+        incarnation: 1,
+        cursor: wire_cursor("process:wire", 4, 6),
+        sequence: 7,
+        event_type: "process.waiting".to_string(),
+    };
+    assert!(
+        RemoteProcessObservationItem::decode_json(&mismatched.encode_json().expect("wire"))
+            .is_err()
     );
 }
 
@@ -288,17 +385,44 @@ fn process_observation_gap_wire_contract() {
         RemoteProcessObservationGapReason::ProcessIdReused,
         RemoteProcessObservationGapReason::CrossProcess,
         RemoteProcessObservationGapReason::InvalidCursor,
+        RemoteProcessObservationGapReason::SequenceUnbridged,
+        RemoteProcessObservationGapReason::HistoryUnavailable,
     ] {
         assert_process_observation_wire_contract(RemoteProcessObservationItem::Gap {
             process_id: lash_sansio::ProcessId::from("process:wire"),
             incarnation: 1,
-            requested_cursor: Some("lashpc1:old:1:0:process:wire".to_string()),
-            latest_cursor: None,
-            projection: RemoteProcessObservationProjection {
-                graph: None,
-                completeness: RemoteProcessObservationCompleteness::Incomplete { reason },
-            },
+            requested_cursor: Some(wire_cursor("process:wire", 0, 0)),
+            cursor: wire_cursor("process:wire", 2, 3),
             reason,
+            snapshot: wire_snapshot(None),
+        });
+    }
+    for retention in [
+        RemoteProcessHistoryRetention::Unknown,
+        RemoteProcessHistoryRetention::Pruned {
+            terminal_label: "completed".to_string(),
+            pruned_at_ms: 9,
+        },
+        RemoteProcessHistoryRetention::Retired {
+            requested_incarnation: 1,
+            current_incarnation: 2,
+        },
+    ] {
+        assert_process_observation_wire_contract(RemoteProcessObservationItem::Gap {
+            process_id: lash_sansio::ProcessId::from("process:wire"),
+            incarnation: 1,
+            requested_cursor: None,
+            cursor: wire_cursor("process:wire", 0, 0),
+            reason: RemoteProcessObservationGapReason::HistoryUnavailable,
+            snapshot: RemoteProcessObservationSnapshot {
+                durable: RemoteProcessDurableSnapshot::NoLongerRetained { retention },
+                live: RemoteProcessObservationProjection {
+                    graph: None,
+                    completeness: RemoteProcessObservationCompleteness::Incomplete {
+                        reason: RemoteProcessObservationGapReason::HistoryUnavailable,
+                    },
+                },
+            },
         });
     }
 }
@@ -448,7 +572,7 @@ fn paged_process_events_wire_contract() {
         incarnation: 1,
         limit: std::num::NonZeroUsize::new(2).expect("nonzero limit"),
         mode: lash_core::ProcessEventQueryMode::Lite,
-        continuation: None,
+        cursor: None,
     };
     let wire = request.encode_json().expect("request wire");
     assert_eq!(
@@ -467,6 +591,12 @@ fn paged_process_events_wire_contract() {
     value["mode"] = serde_json::json!("lite");
     value["after_sequence"] = serde_json::json!(0);
     assert!(RemoteProcessEventsRequest::decode_json(value.to_string().as_bytes()).is_err());
+    let mut retired_token: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
+    retired_token["continuation"] = serde_json::json!("process-event-page:v1:00");
+    assert!(
+        RemoteProcessEventsRequest::decode_json(retired_token.to_string().as_bytes()).is_err(),
+        "the retired page token field is refused"
+    );
 
     let response = RemoteProcessEventsResponse {
         process_id: request.process_id.clone(),
@@ -478,6 +608,7 @@ fn paged_process_events_wire_contract() {
             }]),
             more: lash_core::ProcessEventPageMore::Complete,
         }),
+        cursor: wire_cursor("process:wire", 0, 4),
     };
     let wire = response.encode_json().expect("response wire");
     assert_eq!(
@@ -494,6 +625,15 @@ fn paged_process_events_wire_contract() {
         RemoteProcessEventsResponse::decode_json(value.to_string().as_bytes()).is_err(),
         "lite event must refuse a payload field"
     );
+    let stale_cursor = RemoteProcessEventsResponse {
+        cursor: wire_cursor("process:wire", 0, 3),
+        ..response.clone()
+    };
+    assert!(
+        RemoteProcessEventsResponse::decode_json(&stale_cursor.encode_json().expect("wire"))
+            .is_err(),
+        "a page's cursor carries its last sequence"
+    );
     let retention = RemoteProcessEventsResponse {
         process_id: request.process_id,
         incarnation: 1,
@@ -503,6 +643,7 @@ fn paged_process_events_wire_contract() {
                 pruned_at_ms: 42,
             },
         ),
+        cursor: wire_cursor("process:wire", 0, 0),
     };
     let wire = retention.encode_json().expect("retention wire");
     assert_eq!(
@@ -510,22 +651,6 @@ fn paged_process_events_wire_contract() {
         retention
     );
 
-    let token_payload = serde_json::json!({
-        "process_id": "process:wire",
-        "process_incarnation": 1,
-        "after_sequence": 4,
-        "mode": "lite",
-    });
-    let encoded = token_payload
-        .to_string()
-        .as_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    let token: lash_core::ProcessEventPageToken = serde_json::from_value(serde_json::json!(
-        format!("process-event-page:v1:{encoded}")
-    ))
-    .expect("bound continuation token");
     let more = RemoteProcessEventsResponse {
         process_id: lash_sansio::ProcessId::from("process:wire"),
         incarnation: 1,
@@ -534,10 +659,9 @@ fn paged_process_events_wire_contract() {
                 sequence: 4,
                 event_type: "process.waiting".to_string(),
             }]),
-            more: lash_core::ProcessEventPageMore::More {
-                continuation: token.clone(),
-            },
+            more: lash_core::ProcessEventPageMore::More { after_sequence: 4 },
         }),
+        cursor: wire_cursor("process:wire", 0, 4),
     };
     let wire = more.encode_json().expect("continuation response wire");
     assert_eq!(
@@ -548,19 +672,20 @@ fn paged_process_events_wire_contract() {
         process_id: more.process_id.clone(),
         incarnation: 1,
         limit: std::num::NonZeroUsize::new(2).expect("nonzero limit"),
-        mode: lash_core::ProcessEventQueryMode::Lite,
-        continuation: Some(token),
+        mode: lash_core::ProcessEventQueryMode::Full,
+        cursor: Some(more.cursor.clone()),
     };
     let wire = continued.encode_json().expect("continuation request wire");
     assert_eq!(
         RemoteProcessEventsRequest::decode_json(&wire).expect("continuation"),
-        continued
+        continued,
+        "the projection is a request parameter, not part of the cursor"
     );
-    let mut wrong_mode = continued;
-    wrong_mode.mode = lash_core::ProcessEventQueryMode::Full;
+    let mut other_lifetime = continued;
+    other_lifetime.incarnation = 2;
     assert!(
         RemoteProcessEventsRequest::decode_json(
-            &wrong_mode.encode_json().expect("wrong mode wire")
+            &other_lifetime.encode_json().expect("other lifetime wire")
         )
         .is_err()
     );
