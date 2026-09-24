@@ -29,9 +29,9 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use super::effect_group_drain::{
-    CRASH_LEASE_MS, DrainWorld, DrainWorldFactory, LIVE_LEASE_MS, RecordingExecutors, blocking,
-    close, crashed_process, group_key, never, next, open, scope, settles, spec, spec_with_budget,
-    until,
+    AWAIT_BUDGET, CRASH_LEASE_MS, DrainWorld, DrainWorldFactory, LIVE_LEASE_MS, RecordingExecutors,
+    blocking, close, crashed_process, group_key, never, next, open, scope, settles, spec,
+    spec_with_budget, until,
 };
 use super::helpers::admit;
 use crate::{
@@ -93,6 +93,23 @@ async fn until_rank_seated(scoped: &crate::ScopedEffectController<'_>, group_key
         }
     })
     .await;
+}
+
+/// `resume_closing_groups`, bounded: a resume that never returns fails the law
+/// with its name instead of hanging the suite under its database lock.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the resume answers for a closing the law recorded"
+)]
+async fn resume(
+    closing: &Arc<dyn StoreEffectGroupClosing>,
+    scope: &crate::ExecutionScope,
+    steps: &dyn OpenerFinalizationSteps,
+) -> Vec<GroupFinalizationReport> {
+    tokio::time::timeout(AWAIT_BUDGET, closing.resume_closing_groups(scope, steps))
+        .await
+        .unwrap_or_else(|_| panic!("resume_closing_groups did not return within {AWAIT_BUDGET:?}"))
+        .expect("the resume finishes the recorded closing groups")
 }
 
 /// Wait until the group's durable lifecycle reaches `settled`.
@@ -352,10 +369,12 @@ pub async fn closing_is_recorded_before_any_cancel_is_issued(make: DrainWorldFac
     // dropped with its group — in which case the resume correctly finds no
     // closing group under the scope — and it may settle between the read and
     // the resume, so the assertion asks only that one of the two held.
-    let reports = closing_b
-        .resume_closing_groups(scoped_b.execution_scope(), &GroupOnlyFinalization)
-        .await
-        .expect("resume runs the recorded closing groups");
+    let reports = resume(
+        &closing_b,
+        scoped_b.execution_scope(),
+        &GroupOnlyFinalization,
+    )
+    .await;
     if !reports
         .iter()
         .any(|report| matches!(report, GroupFinalizationReport::Settled { group_key } if *group_key == key))
@@ -461,10 +480,7 @@ pub async fn a_crash_after_drain_resumes_at_outcome_commit(make: DrainWorldFacto
     // finished exactly once (by the first resume's drain pass), and the group
     // settles.
     let healthy = RecordingFinalization::new(Injection::Never, Injection::Never);
-    let reports = closing
-        .resume_closing_groups(&group_scope, &healthy)
-        .await
-        .expect("the resume finishes the recorded closing");
+    let reports = resume(&closing, &group_scope, &healthy).await;
     assert!(
         reports
             .iter()
@@ -546,10 +562,7 @@ pub async fn a_crash_after_accounting_resumes_at_parent_end(make: DrainWorldFact
     assert_eq!(probe.outcome_calls(), 1, "step 2 ran exactly once");
 
     let healthy = RecordingFinalization::new(Injection::Never, Injection::Never);
-    let reports = closing
-        .resume_closing_groups(&group_scope, &healthy)
-        .await
-        .expect("the resume finishes the recorded closing");
+    let reports = resume(&closing, &group_scope, &healthy).await;
     assert!(
         reports
             .iter()

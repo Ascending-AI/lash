@@ -1187,7 +1187,7 @@ pub(crate) const LIVE_LEASE_MS: u64 = 60_000;
 const POLL: Duration = Duration::from_millis(25);
 
 /// Hang detector for the entire conformance law, not a latency expectation.
-const AWAIT_BUDGET: Duration = Duration::from_secs(60);
+pub(crate) const AWAIT_BUDGET: Duration = Duration::from_secs(60);
 
 pub(crate) fn spec(lease_ttl_ms: u64, executors: &Arc<RecordingExecutors>) -> DrainWorldSpec {
     spec_with_budget(lease_ttl_ms, executors, None)
@@ -1220,30 +1220,71 @@ pub(crate) fn unwired_spec(lease_ttl_ms: u64) -> DrainWorldSpec {
 /// including the host-owned tasks a group's children run on, and it drops the
 /// host's substrate handles with them. What is left behind is what a killed
 /// process leaves: journal rows under leases nobody renews.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub(crate) async fn crashed_process<P>(make: &DrainWorldFactory, phase: P)
 where
     P: FnOnce(DrainWorld) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static,
 {
     let make = Arc::clone(make);
     let executors = RecordingExecutors::settling();
-    std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("the crashing process gets a runtime of its own");
-        runtime.block_on(async move {
+    doomed_process(move || {
+        Box::pin(async move {
             let world = make(spec(CRASH_LEASE_MS, &executors)).await;
             phase(world).await;
-        });
-        drop(runtime);
+        })
     })
-    .join()
-    .expect("the crashing process runs its phase before dying");
+    .await;
+}
+
+/// Runs `body` on a runtime of its own on a thread of its own, drops that
+/// runtime, and fails the law loudly unless both finish within
+/// [`AWAIT_BUDGET`].
+///
+/// The thread is awaited, never joined: a join has no timeout, and dropping a
+/// multi-thread runtime waits for every worker to reach a yield point. A task
+/// on the dying runtime that spins without yielding — the FIG-3555 finalizer
+/// that re-polled a `Notified` that had already fired — would otherwise turn
+/// the crash into a hang of the whole suite, under whatever database lock the
+/// law holds. On a timeout the stuck thread is leaked and the law panics
+/// naming which half stalled.
+pub(crate) async fn doomed_process<B>(body: B)
+where
+    B: FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static,
+{
+    let phase_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (died, dead) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn({
+        let phase_done = Arc::clone(&phase_done);
+        move || {
+            #[expect(
+                clippy::expect_used,
+                reason = "conformance-law fixture: a runtime that cannot build fails the law"
+            )]
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("the crashing process gets a runtime of its own");
+            runtime.block_on(body());
+            phase_done.store(true, Ordering::SeqCst);
+            drop(runtime);
+            let _ = died.send(());
+        }
+    });
+    match tokio::time::timeout(AWAIT_BUDGET, dead).await {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => {
+            panic!("the crashing process panicked before it died; its panic is printed above")
+        }
+        Err(_) if phase_done.load(Ordering::SeqCst) => panic!(
+            "the crashing process ran its phase but its runtime did not shut down within \
+             {AWAIT_BUDGET:?}: a task on the dying runtime is running without ever yielding, \
+             and dropping a runtime waits for every worker to reach a yield point"
+        ),
+        Err(_) => panic!(
+            "the crashing process did not finish its phase within {AWAIT_BUDGET:?}; \
+             the phase is stuck before the crash it sets up"
+        ),
+    }
 }
 
 /// Drains until a pass finds nothing left under a live lease, and returns that

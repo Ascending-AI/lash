@@ -53,9 +53,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::effect_group_drain::{
     CRASH_LEASE_MS, DrainWorld, DrainWorldFactory, RUN, RecordingExecutors, blocking,
-    child_replay_key, close, crashed_process, drain_until_no_live_lease, group_key, impostor,
-    impostor_group, never, next, open, open_with, orphan_two_losers, outcome_of, pass, scope,
-    settles, spec, until, until_leases_lapse, unwired_spec,
+    child_replay_key, close, crashed_process, doomed_process, drain_until_no_live_lease, group_key,
+    impostor, impostor_group, never, next, open, open_with, orphan_two_losers, outcome_of, pass,
+    scope, settles, spec, until, until_leases_lapse, unwired_spec,
 };
 use super::*;
 use lash_core::testing::conformance_support::ChildDrainOutcome;
@@ -826,33 +826,22 @@ fn counting(ran: &Arc<Mutex<Vec<usize>>>, position: usize) -> RuntimeEffectLocal
 /// [`crashed_process`]'s two-world variant: the crashed world plus a probe
 /// world on the same doomed runtime, for windows whose residue is only
 /// meaningful while the crashed world's claims are still live.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn crashed_process_with_probe<P>(make: &DrainWorldFactory, phase: P)
 where
     P: FnOnce(DrainWorld, DrainWorld) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static,
 {
     let make = Arc::clone(make);
-    std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("the crashing process gets a runtime of its own");
-        runtime.block_on(async move {
+    doomed_process(move || {
+        Box::pin(async move {
             let world = make(spec(CRASH_LEASE_MS, &RecordingExecutors::settling())).await;
             // A refusing resolver asks the drain's question and answers
             // `NoExecutor`: the probe reads the queue without writing anything
             // into it.
             let probe = make(spec(CRASH_LEASE_MS, &RecordingExecutors::refusing())).await;
             phase(world, probe).await;
-        });
-        drop(runtime);
+        })
     })
-    .join()
-    .expect("the crashing process runs its phase before dying");
+    .await;
 }
 
 #[cfg(test)]
