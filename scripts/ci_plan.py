@@ -30,6 +30,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # The one binary the Cargo workspace partition still owns on a trusted event.
 WORKBENCH_MANIFEST_DIR = "examples/agent-workbench"
 
+# The package whose test binaries `Test Postgres store` runs.
+POSTGRES_STORE_MANIFEST_DIR = "crates/lash-postgres-store"
+
 
 FAMILIES = (
     "rust",
@@ -187,6 +190,31 @@ def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
     way Cargo unifies features within one build.
     """
 
+    return _first_party_closure(repo_root, WORKBENCH_MANIFEST_DIR, every_optional=False)
+
+
+@lru_cache(maxsize=None)
+def postgres_store_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
+    """The first-party manifest directories the Postgres store suites compile.
+
+    `Test Postgres store` runs the `lash-postgres-store` test binaries, and a
+    change anywhere in their first-party closure can break them: FIG-3595
+    and FIG-3550 were runtime changes outside every store crate. The walk
+    takes every optional dependency, not only the ones a feature enables:
+    trusted events build those binaries under Bazel at the workspace's
+    unified feature resolution, which is a superset of what `cargo test -p`
+    asks for. `scripts/test_ci_plan.py` cross-checks it against the declared
+    graph in `cargo metadata`.
+    """
+
+    return _first_party_closure(repo_root, POSTGRES_STORE_MANIFEST_DIR, every_optional=True)
+
+
+def _first_party_closure(
+    repo_root: str | None, start: str, *, every_optional: bool
+) -> frozenset[str]:
+    """The first-party manifest directories `start`'s tests compile."""
+
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
 
     def manifest(directory: str) -> Mapping:
@@ -197,11 +225,12 @@ def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
         workspace_manifest = tomllib.load(handle)
     workspace_dependencies = workspace_manifest.get("workspace", {}).get("dependencies", {})
 
-    # The workbench's own dev-dependencies compile for its tests; a transitive
-    # dependency's dev-dependencies do not, exactly as `cargo test -p` resolves.
+    # The start package's own dev-dependencies compile for its tests; a
+    # transitive dependency's dev-dependencies do not, exactly as `cargo test
+    # -p` resolves.
     requested: dict[str, set[str]] = {}
     visited: set[str] = set()
-    pending = [(WORKBENCH_MANIFEST_DIR, frozenset({"default"}), True)]
+    pending = [(start, frozenset({"default"}), True)]
     while pending:
         directory, features, include_dev = pending.pop()
         known = requested.setdefault(directory, set())
@@ -215,7 +244,11 @@ def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
             for name, spec in table.items():
                 if not isinstance(spec, Mapping):
                     continue
-                if spec.get("optional") is True and name not in enabled:
+                if (
+                    not every_optional
+                    and spec.get("optional") is True
+                    and name not in enabled
+                ):
                     continue
                 dependency = _first_party_dependency_dir(
                     name, spec, directory, workspace_dependencies
@@ -245,12 +278,13 @@ GATED_JOBS = {
     "unicode-tests": "regress",
 }
 
-# `feature-lanes` and `lashlang-git-consumer` used to run on pull requests or
-# merge groups: the lane graph is a pool cache lookup and the consumer compile
-# is resolved nowhere else. Both left the PR critical path when the board was
-# cut to its minimum: a PR runs only the Bazel partition plus path-gated jobs,
-# and the release dispatch is now their sole home alongside the other
-# deferred families.
+# `feature-lanes` runs on every trusted event (FIG-3572): #1979 merged a
+# feature variant that did not compile because the lane graph was
+# dispatch-only. It needs the pool's cache credentials, so an untrusted pull
+# request skips it and the merge group, which is always trusted, proves every
+# variant before anything lands. `lashlang-git-consumer` stays dispatch-only,
+# where the cut to the minimum PR board left it.
+FEATURE_LANES_JOB = "feature-lanes"
 
 
 # Jobs deferred entirely to the manual full-profile run (workflow_dispatch):
@@ -258,16 +292,15 @@ GATED_JOBS = {
 # There is no automatic trunk run to carry them any more — an automatic push to
 # main triggers no CI at all — so a dispatch is their sole home, and it is the
 # profile release.yml certifies against.
-# postgres-store is intentionally absent: its focused runtime Agent Scenario
-# runs on pull requests and merge groups while its heavier steps remain
-# dispatch-only.
+# postgres-store is intentionally absent: every `lash-postgres-store` test
+# binary runs on pull requests and merge groups, while its simulator,
+# pool-wait and cross-backend steps remain dispatch-only.
 DISPATCH_ONLY_JOBS = {
     "heavy-tests",
     "stack-budget",
     "s3-store",
     "functional-e2e",
     "functional-e2e-process-operations",
-    "feature-lanes",
     "unicode-tests",
     "lashlang-git-consumer",
     # The fuzz smoke stays off the pull-request critical path by design: its
@@ -846,26 +879,23 @@ def _is_schema_path(path: str) -> bool:
     return path.startswith(("crates/lash-postgres-store/", "crates/lash-sqlite-store/"))
 
 
-# `stores` is path-derived: every production diff used to pay 7-18 min of
-# runner Cargo for the PG16 leg. The release dispatch still runs the full
-# matrix, so only the PR/merge-queue trigger narrows. A SQL script or a SQLite
-# database anywhere -- a store crate's migrations or a durable-read fixture --
-# is store input.
-def _is_stores_path(path: str) -> bool:
-    return (
-        path.startswith(
-            (
-                "crates/lash-postgres-store/",
-                "crates/lash-s3-store/",
-                "crates/lash-core-store/",
-                "crates/lash-conformance/",
-                "crates/lash-sim/",
-                "crates/lash-sqlite-store/",
-            )
-        )
-        or "migrations" in PurePosixPath(path).parts
-        or PurePosixPath(path).suffix in {".sql", ".db"}
-    )
+# `stores` gates `Test Postgres store`, whose pull-request and merge-group
+# steps run every `lash-postgres-store` test binary against a live database.
+# A package path selects it when the package is in those binaries'
+# first-party closure (`postgres_store_dependency_dirs`): FIG-3595 and
+# FIG-3550 were runtime changes outside every store crate, invisible to the
+# hand list of store crates this replaced. The root `fixtures/` tree is their
+# `//:durable_fixtures` input, and a SQL script or a SQLite database anywhere
+# is store input. Build tooling does not select it: the Lint job's workspace
+# clippy compiles every one of these test targets, so a tooling diff that
+# breaks their build fails there, and the release dispatch runs them all.
+def _is_stores_path(path: str, path_class: PathClass, store_dirs: frozenset[str]) -> bool:
+    posix = PurePosixPath(path)
+    if "migrations" in posix.parts or posix.suffix in {".sql", ".db"}:
+        return True
+    if path_class.kind is PathKind.PACKAGE:
+        return path_class.package in store_dirs
+    return path_class.kind is PathKind.DATA and path.startswith("fixtures/")
 
 
 # `facade` gates the untrusted Cargo seal lane: only the facade crate's public
@@ -1138,6 +1168,7 @@ def classify(
     changes: list[tuple[str, str]],
     event_name: str = "",
     workbench_dirs: frozenset[str] | None = None,
+    store_dirs: frozenset[str] | None = None,
 ) -> dict[str, str]:
     if not changes:
         raise PlanError("the changed path set was empty")
@@ -1146,6 +1177,11 @@ def classify(
             workbench_dirs = workbench_dependency_dirs()
         except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
             return fail_open(f"workbench dependency closure is underivable: {error}")
+    if store_dirs is None:
+        try:
+            store_dirs = postgres_store_dependency_dirs()
+        except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
+            return fail_open(f"Postgres store dependency closure is underivable: {error}")
     unknown_statuses = sorted({status for status, _ in changes if status not in CHANGE_STATUSES})
     if unknown_statuses:
         statuses = ", ".join(repr(status) for status in unknown_statuses)
@@ -1220,10 +1256,12 @@ def classify(
         "schema": any(_is_schema_path(path) for path in build),
         "facade": any(_is_facade_path(path) for path in build),
         "tooling": any(_is_tooling_class(classes[path]) for path in build),
-        # `stores` is path-derived (see _is_stores_path); `functional_e2e`
-        # and `workers_e2e` keep the breadth flag because their jobs are
-        # dispatch/label-only anyway.
-        "stores": any(_is_stores_path(path) for path in build),
+        # `stores` follows the Postgres store closure (see _is_stores_path);
+        # `functional_e2e` and `workers_e2e` keep the breadth flag because
+        # their jobs are dispatch/label-only anyway.
+        "stores": any(
+            _is_stores_path(path, classes[path], store_dirs) for path in build
+        ),
     }
     outputs.update(
         {family: str(selected[family] or family in ci_families).lower() for family in FAMILIES}
@@ -1307,6 +1345,17 @@ def evaluate_conclusion(
                 problems.append(
                     f"dispatch-only job {job} ended with {result!r} on a"
                     f" {event_name} event, expected skipped"
+                )
+            continue
+        if job == FEATURE_LANES_JOB:
+            rust_on = plan_outputs.get("rust") == "true"
+            wanted = "success" if bazel_is_trusted and rust_on else "skipped"
+            if result != wanted:
+                problems.append(
+                    f"{job} ended with {result!r} for a"
+                    f" {'trusted' if bazel_is_trusted else 'untrusted'}"
+                    f"{'' if rust_on else ' non-rust'} event,"
+                    f" expected {wanted}"
                 )
             continue
         if job == "check":

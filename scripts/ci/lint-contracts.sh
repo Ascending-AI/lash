@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Keep portable Cargo contracts and frontend type checks in one bounded group.
-# Trusted OFF and schema actions have already run alongside Clippy.
+# Trusted events prove the OFF and Restate release resolutions in the
+# feature-lanes job and run the schema actions alongside Clippy.
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo"

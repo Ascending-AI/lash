@@ -138,7 +138,7 @@ class ClassifyTests(unittest.TestCase):
         """
         plan = ci_plan.classify([("M", "crates/lash-core/src/session/mod.rs")])
         self.assertEqual("true", plan["rust"])
-        self.assertEqual("false", plan["stores"])
+        self.assertEqual("true", plan["stores"])
         self.assertEqual("true", plan["workbench"])
         self.assertEqual("false", plan["regress"])
         self.assertEqual("false", plan["schema"])
@@ -226,16 +226,28 @@ class ClassifyTests(unittest.TestCase):
                     expected, ci_plan.classify([("M", path)])["facade"]
                 )
 
-    def test_stores_is_path_derived(self) -> None:
+    def test_stores_follows_the_postgres_store_closure(self) -> None:
+        """Every package the Postgres store tests compile selects them.
+
+        FIG-3595 and FIG-3550 were runtime changes outside every store crate
+        that broke `lash-postgres-store` tests while a hand list of store
+        crates gated the job.
+        """
         for path, expected in (
             ("crates/lash-postgres-store/src/lib.rs", "true"),
             ("crates/lash-s3-store/src/lib.rs", "true"),
             ("crates/lash-core-store/src/lib.rs", "true"),
             ("crates/lash-conformance/src/lib.rs", "true"),
-            ("crates/lash-sim/src/lib.rs", "true"),
             ("crates/lash-sqlite-store/migrations/0001_init/up.sql", "true"),
-            ("crates/lash-core/src/lib.rs", "false"),
+            ("crates/lash-core/src/lib.rs", "true"),
+            ("crates/lash-core-execution/src/lib.rs", "true"),
+            ("crates/lash/src/lib.rs", "true"),
+            ("fixtures/durable-read/v1/manifest.json", "true"),
+            ("crates/lash-sim/src/lib.rs", "false"),
+            ("crates/lash-perf/src/lib.rs", "false"),
             ("examples/agent-workbench/src/main.rs", "false"),
+            ("schemas/host/workflow/v1.schema.json", "false"),
+            ("tools/bazel/clippy.bzl", "false"),
         ):
             with self.subTest(path=path):
                 self.assertEqual(
@@ -302,8 +314,10 @@ class PathClassifierTests(unittest.TestCase):
         # The repository gates read every manifest (feature-lane resolution,
         # dependency boundary); nothing else widens.
         self.assertEqual("true", plan["tooling"])
-        for family in ("stores", "schema", "facade", "regress"):
+        for family in ("schema", "facade", "regress"):
             self.assertEqual("false", plan[family], family)
+        # lash-core is in the Postgres store tests' closure.
+        self.assertEqual("true", plan["stores"])
         store = ci_plan.classify([("M", "crates/lash-postgres-store/Cargo.toml")])
         self.assertEqual("true", store["stores"])
         self.assertEqual("true", store["schema"])
@@ -980,7 +994,7 @@ class ConclusionTests(unittest.TestCase):
         self.assertEqual([], ci_plan.evaluate_conclusion(trusted, bazel_is_trusted=True))
 
         untrusted = successful_needs()
-        for job in ci_plan.BAZEL_TEST_JOBS:
+        for job in ci_plan.BAZEL_TEST_JOBS | {ci_plan.FEATURE_LANES_JOB}:
             untrusted[job]["result"] = "skipped"
         untrusted["workspace-tests"]["result"] = "success"
         untrusted["check"]["result"] = "success"
@@ -1089,7 +1103,7 @@ class ConclusionTests(unittest.TestCase):
             {family: "false" for family in ci_plan.FAMILIES} | {"tooling": "true"}
         )
         for job in ("bazel-tests", "bazel-tests-tail", "workspace-tests", "check",
-                    "postgres-store", "unused-deps"):
+                    "postgres-store", "unused-deps", "feature-lanes"):
             needs[job]["result"] = "skipped"
         apply_event_deferrals(needs, "pull_request")
         self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
@@ -1198,7 +1212,6 @@ POSTGRES_TEST_STEPS = {
     "Test PostgreSQL catalog compatibility",
     "Test Postgres store (conformance and attempt atomicity)",
     "Test runtime pool-wait binding",
-    "Test runtime Postgres agent scenarios",
     "Test cross-backend store differential",
 }
 
@@ -1232,11 +1245,12 @@ def selected_postgres_test_steps(event: str, compatibility: bool) -> set[str]:
 
 class PostgresMatrixTests(unittest.TestCase):
     COMPATIBILITY = {"Test PostgreSQL catalog compatibility"}
-    PRIMARY_PR = {"Test runtime Postgres agent scenarios"}
+    # Every event runs the whole store package (FIG-3572): FIG-3595 and
+    # FIG-3550 broke it while it was dispatch-only.
+    PRIMARY_PR = {"Test Postgres store (conformance and attempt atomicity)"}
     PRIMARY_TRUNK = {
         "Test Postgres store (conformance and attempt atomicity)",
         "Test runtime pool-wait binding",
-        "Test runtime Postgres agent scenarios",
         "Test cross-backend store differential",
     }
 
@@ -1339,7 +1353,7 @@ class PostgresMatrixTests(unittest.TestCase):
                         expected, selected_postgres_test_steps(event, compatibility)
                     )
 
-    def test_commands_pin_live_catalog_version_and_runtime_identity_oracle(self) -> None:
+    def test_commands_pin_live_catalog_version_oracles(self) -> None:
         """The named oracles must survive the Bazel/Cargo dispatch, on both paths.
 
         The steps delegate to scripts/ci/store-tests.sh, so the pin follows the
@@ -1378,14 +1392,6 @@ class PostgresMatrixTests(unittest.TestCase):
             (
                 "a_mismatched_version_stamp_is_reported_without_a_column_diff",
                 "Test PostgreSQL catalog compatibility",
-            ),
-            (
-                "public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres",
-                "Test runtime Postgres agent scenarios",
-            ),
-            (
-                "automatic_queued_retry_reuses_recorded_completion_before_new_arrivals",
-                "Test runtime Postgres agent scenarios",
             ),
         ):
             with self.subTest(oracle=oracle):
@@ -1664,6 +1670,55 @@ class WorkbenchClosureContractTests(unittest.TestCase):
             self.cargo_workbench_closure(), set(ci_plan.workbench_dependency_dirs())
         )
 
+    def test_the_postgres_store_closure_matches_the_declared_cargo_graph(self) -> None:
+        """Every first-party package a declared edge reaches, optional or not.
+
+        The trusted job builds the store tests under Bazel at the workspace's
+        unified features, so the walk must not drop an optional edge that a
+        feature somewhere else in the workspace turns on. That is the
+        manifest's declared graph, not the per-package `resolve`.
+        """
+        if shutil.which("cargo") is None:
+            if os.environ.get("CI") == "true":
+                self.fail("CI must run this contract with a Rust toolchain on PATH")
+            self.skipTest("cargo is not on PATH")
+        metadata = json.loads(
+            subprocess.run(
+                ["cargo", "metadata", "--format-version", "1", "--locked", "--no-deps"],
+                cwd=ROOT, text=True, capture_output=True, check=True,
+            ).stdout
+        )
+        workspace_root = Path(metadata["workspace_root"])
+        directory = {
+            package["name"]: Path(package["manifest_path"])
+            .parent.relative_to(workspace_root)
+            .as_posix()
+            for package in metadata["packages"]
+        }
+        packages = {package["name"]: package for package in metadata["packages"]}
+        closure: set[str] = set()
+        pending = [(
+            next(
+                name for name, path in directory.items()
+                if path == ci_plan.POSTGRES_STORE_MANIFEST_DIR
+            ),
+            True,
+        )]
+        while pending:
+            name, include_dev = pending.pop()
+            if directory[name] in closure:
+                continue
+            closure.add(directory[name])
+            for dependency in packages[name]["dependencies"]:
+                if dependency.get("path") is None or dependency["name"] not in packages:
+                    continue
+                if dependency.get("kind") == "dev" and not include_dev:
+                    continue
+                pending.append((dependency["name"], False))
+        self.assertIn("crates/lash-core", closure)
+        self.assertNotIn("crates/lash-sim", closure)
+        self.assertEqual(closure, set(ci_plan.postgres_store_dependency_dirs()))
+
 
 class WorkflowRegistrationTests(unittest.TestCase):
     def test_every_ci_job_is_registered_or_allowlisted(self) -> None:
@@ -1775,15 +1830,15 @@ class AggregatorAllowlistTests(unittest.TestCase):
 class DispatchOnlyJobTests(unittest.TestCase):
     """Deferred compile lanes live on workflow_dispatch alone.
 
-    The queue now runs the same minimal board as a pull request, so
-    `lashlang-git-consumer`, `feature-lanes` and `unicode-tests` joined the
-    other deferred jobs. The job IDs and conditions are spelled out by hand
+    The queue runs the same minimal board as a pull request, so
+    `lashlang-git-consumer` and `unicode-tests` joined the other deferred
+    jobs. `feature-lanes` left them again (FIG-3572; see FeatureLanesTests). The job IDs and conditions are spelled out by hand
     here rather than derived from ``ci_plan.DISPATCH_ONLY_JOBS``: a test that
     reads its expectation out of the set under test still passes after someone
     empties the set.
     """
 
-    JOBS = ("lashlang-git-consumer", "feature-lanes", "unicode-tests")
+    JOBS = ("lashlang-git-consumer", "unicode-tests")
 
     def board(self, event: str, docs_only: bool = False) -> dict:
         needs = successful_needs()
@@ -1851,6 +1906,75 @@ class DispatchOnlyJobTests(unittest.TestCase):
         for job in still_deferred:
             with self.subTest(job=job):
                 self.assertIn(job, ci_plan.DISPATCH_ONLY_JOBS)
+
+
+class FeatureLanesTests(unittest.TestCase):
+    """Every trusted event proves that every feature variant compiles.
+
+    #1979 merged a `lash-remote-protocol` variant that did not compile while
+    `feature-lanes` ran on workflow_dispatch alone (FIG-3572). The condition
+    is spelled out by hand rather than read from the plan module.
+    """
+
+    def board(self, event: str, trusted: bool = True, rust: bool = True) -> dict:
+        needs = apply_event_deferrals(successful_needs(), event)
+        needs["plan"]["outputs"]["rust"] = str(rust).lower()
+        if not trusted:
+            for job in ci_plan.BAZEL_TEST_JOBS:
+                needs[job]["result"] = "skipped"
+            needs["workspace-tests"]["result"] = "success" if rust else "skipped"
+            needs["check"]["result"] = "success"
+        if not rust:
+            for job, family in ci_plan.GATED_JOBS.items():
+                if family == "rust":
+                    needs[job]["result"] = "skipped"
+            for job in ci_plan.BAZEL_TEST_JOBS:
+                needs[job]["result"] = "skipped"
+        needs[ci_plan.FEATURE_LANES_JOB]["result"] = (
+            "success" if trusted and rust else "skipped"
+        )
+        return needs
+
+    def test_the_job_runs_on_every_trusted_rust_event(self) -> None:
+        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["feature-lanes"]
+        self.assertEqual(
+            "needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'",
+            job["if"],
+        )
+        self.assertNotIn("feature-lanes", ci_plan.DISPATCH_ONLY_JOBS)
+        steps = [step.get("name") for step in job["steps"]]
+        self.assertIn("Compile every feature lane", steps)
+
+    def test_a_trusted_rust_event_requires_success(self) -> None:
+        for event in ("pull_request", "merge_group", "workflow_dispatch"):
+            self.assertEqual([], ci_plan.evaluate_conclusion(self.board(event), event))
+            for result in ("skipped", "failure", "cancelled"):
+                with self.subTest(event=event, result=result):
+                    needs = self.board(event)
+                    needs["feature-lanes"]["result"] = result
+                    self.assertIn(
+                        f"feature-lanes ended with {result!r} for a trusted event,"
+                        " expected success",
+                        ci_plan.evaluate_conclusion(needs, event),
+                    )
+
+    def test_an_untrusted_or_non_rust_event_requires_a_skip(self) -> None:
+        for trusted, rust in ((False, True), (True, False)):
+            with self.subTest(trusted=trusted, rust=rust):
+                needs = self.board("pull_request", trusted=trusted, rust=rust)
+                self.assertEqual(
+                    [],
+                    ci_plan.evaluate_conclusion(
+                        needs, "pull_request", bazel_is_trusted=trusted
+                    ),
+                )
+                needs["feature-lanes"]["result"] = "success"
+                self.assertTrue(any(
+                    "feature-lanes" in problem
+                    for problem in ci_plan.evaluate_conclusion(
+                        needs, "pull_request", bazel_is_trusted=trusted
+                    )
+                ))
 
 
 class FacadeAndToolingGatingTests(unittest.TestCase):

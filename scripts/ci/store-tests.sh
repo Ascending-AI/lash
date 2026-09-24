@@ -114,7 +114,6 @@ labels() {
 # `s3-store` take a generated label file rather than one label. Forcing a shape
 # variation into the table for those buys nothing.
 declare -A uniform_store_suites=(
-  [pg-agent-scenario]="//crates/lash-postgres-store:integration__test|public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres,automatic_queued_retry_reuses_recorded_completion_before_new_arrivals|lash-internal-postgres-store|--test integration|nextest-ci|"
   [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|pool_wait|lash-perf||nextest|"
   [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|"
   [pg-cross-backend]="//crates/lash-sim:cross_backend_store_differential__test||lash-sim|--test cross_backend_store_differential|nextest-ci|include-ignored,single-threaded,nocapture"

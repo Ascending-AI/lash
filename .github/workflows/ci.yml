@@ -17,19 +17,35 @@ name: CI
 #
 # Pull requests get fast signal; the merge group gets breadth. A pull request
 # runs the core Bazel suite (`//:workspace_tests` minus its tail, plus the
-# API seal `//crates/lash:ui_fixtures`), the workspace clippy, one PostgreSQL
-# major (16) and the path-gated script jobs. The merge group runs the same set on
-# the combined tree plus the test tail, the feature-lane clippy, the
-# `//:runtime_off` witness and, for a schema diff, the PG14/PG18 compatibility
-# legs. Cached Bazel results mean a merge group re-executes only what its
-# combined tree changed.
+# API seal `//crates/lash:ui_fixtures`), the workspace clippy, the feature
+# lanes (every feature variant of scripts/feature-coverage.toml compiled, plus
+# the executable lanes), the `lash-postgres-store` suites on one PostgreSQL
+# major (16) when the diff reaches that crate's closure, and the path-gated
+# script jobs. The merge group runs the same set on the combined tree plus
+# the test tail, the feature-lane clippy and, for a schema diff, the PG14/PG18
+# compatibility legs. Cached Bazel results mean a merge group re-executes
+# only what its combined tree changed. "CI conclusion" is the one required
+# check; scripts/ci/conclusion.py holds it to what the plan and event require.
 #
-# The breadth families — Test heavy suites, Test S3 store, Functional E2E,
-# Restate workers E2E, Fuzz smoke, Stack budget, deferred Unicode, worker
-# artifacts — are gated to `workflow_dispatch` alone, which is also the
-# profile release.yml certifies against and the sole home of feature lanes,
-# the PG14/PG18 legs on a non-schema diff, deferred Unicode, and the lashlang
-# consumer.
+# Manual-only gates run on `workflow_dispatch` alone, the full profile
+# release.yml certifies against, and why each stays there:
+#
+# * Test heavy suites, Test S3 store against MinIO, Functional E2E, the
+#   stack budget and the PostgreSQL pool-wait, simulator-backend-fault and
+#   cross-backend-differential steps of Test Postgres store: deferred by the
+#   2026-08-25 CI-scope ruling for their runner cost, until the FIG-2169
+#   test-prune sweep reassesses them.
+# * Fuzz smoke: a bounded libFuzzer run on the nightly toolchain, kept off
+#   the pull-request critical path by design (FIG-878).
+# * Test deferred Unicode suites: slow regress suites, excluded from the PR
+#   Bazel partition.
+# * Lashlang Git consumer: a compile configuration no other job resolves,
+#   carried by the release dispatch (FIG-2854).
+# * Worker release artifacts and the Restate + Postgres + MinIO workers E2E:
+#   release builds and multi-service harnesses. A pull request opts in with
+#   the `ci:workers` label.
+# * The PG14/PG18 compatibility legs on a non-schema diff: they compare
+#   catalog rendering, which only a schema diff can move.
 
 on:
   # The full profile, and the only home of the heavy families. A manual
@@ -579,17 +595,21 @@ jobs:
   # (`cargo tree`) and the cfg-predicate analysis are pure analysis over
   # `cargo metadata`; they cost seconds and stay where they are.
   #
-  # Dispatch-only: the lane graph is a shared-cache lookup on the pool, but it
-  # still doubles the PR job count for evidence the release dispatch already
-  # collects. On the dispatch profile `bazel_trusted` is always true, so the
-  # Cargo fallback below is dead code kept only as documentation of the
-  # untrusted path.
+  # Every trusted event runs it, pull requests and merge groups included
+  # (FIG-3572): while it was dispatch-only, #1979 merged a feature variant
+  # that did not compile. It runs beside the Bazel partition on its own
+  # runner, so it adds to a run's wall-clock only when it is the slowest job.
+  # `//:feature_lanes` is the whole lane graph, so it also covers the runtime
+  # OFF witness (FIG-3427) and the Restate release resolution (FIG-3610) that
+  # used to be named individually for the Lint job. It needs the pool's cache
+  # credentials, so an untrusted pull request skips it; the merge group is
+  # always trusted and proves every variant before anything lands.
   feature-lanes:
     name: Feature lanes
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: plan
-    if: github.event_name == 'workflow_dispatch' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')
+    if: needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'
     environment: build-cache
     steps:
       - *checkout
@@ -1215,27 +1235,18 @@ jobs:
       # and a trailing `-D warnings`, in the order Cargo emits them. See
       # `tools/bazel/clippy.bzl`.
       #
-      # Breadth rides the merge group and the dispatch only. On those events
-      # `//:feature_lane_clippy` lints the slack-clone `e2e` variant and the
-      # other feature-lane variants in the same invocation, and
-      # `//:runtime_off` compiles the facade with every optional feature off,
-      # the feature-lane variant of `cargo check -p lash-runtime --lib
-      # --no-default-features`. Together they are about 45
-      # feature-variant compiles on a core-touching diff, evidence no pull
-      # request needs for its first signal; the merge group proves them on the
-      # combined tree before anything lands.
-      #
-      # `//:restate_release` rides every event: lash-restate at the resolution
-      # the dispatch-only release worker build compiles it at, where no
-      # dev-dependency unifies `lash-core/testing` in (FIG-3610). It is a
-      # metadata-only check of one lane unit, so a pull request can afford it.
+      # Lint breadth rides the merge group and the dispatch only: on those
+      # events `//:feature_lane_clippy` lints the slack-clone `e2e` variant
+      # and the other feature-lane variants in the same invocation. That every
+      # feature variant compiles is the `feature-lanes` job's proof on every
+      # trusted event, pull requests included.
       - name: Clippy (workspace, all targets, shared cache)
         if: needs.plan.outputs.bazel_trusted == 'true'
         shell: bash
         run: |
-          targets=(//:workspace_clippy //:schema_checks //:restate_release)
+          targets=(//:workspace_clippy //:schema_checks)
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
-            targets+=(//:feature_lane_clippy //:runtime_off)
+            targets+=(//:feature_lane_clippy)
           fi
           # shellcheck disable=SC2086
           bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
@@ -1319,10 +1330,10 @@ jobs:
       # that every referenced path exists at that feature set (FIG-3427:
       # `lash_core::runtime::effect` is `pub(crate)` without `testing`, and a
       # downstream `crate::runtime::effect::…` path broke only under this
-      # command). Trusted merge groups and dispatches build the
-      # //:runtime_off variant alongside Clippy above. Untrusted events retain
-      # the Cargo OFF witness here because the feature-lanes job is
-      # dispatch-only and repo-gates skips Rust-only diffs.
+      # command). Trusted events prove both resolutions in the feature-lanes
+      # job. Untrusted events retain the Cargo witnesses here because they
+      # have no pool credentials for that job and repo-gates skips Rust-only
+      # diffs.
       - name: Check feature and schema contracts
         env:
           BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
@@ -1337,9 +1348,9 @@ jobs:
       # The recreation E2E's fixtures are pinned to the newest component
       # generation. Catch a stale pin here rather than one container gate later.
       # This also sweeps the component-version literals in the Postgres store
-      # test suite and the committed fixtures (FIG-3413): the suites that read
-      # them need a database and are gated off pull requests and the merge
-      # queue, so this is the only job that sees a bump leave one behind.
+      # test suite and the committed fixtures (FIG-3413). The suites that read
+      # them run only when the stores family is selected; this check runs on
+      # every event, so a bump that leaves one behind fails here too.
       - name: Check version-bump recreation fixtures
         run: python3 scripts/check_version_bump_fixtures.py
 
@@ -1438,12 +1449,14 @@ jobs:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
       LASH_REQUIRE_POSTGRES: "1"
       POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}
-    # The stores family is path-derived: only diffs touching a store crate, a
-    # migrations path, or a `.sql` file pay this leg; every other pull request
-    # used to spend 7-18 minutes of runner Cargo on PG16 for evidence nothing
-    # in the diff could change. The heavier PG16 store/perf coverage remains
-    # deferred to the manual full-profile dispatch, which still runs the full
-    # matrix, per the 2026-08-25 CI-scope ruling.
+    # The stores family follows the first-party closure of
+    # `lash-postgres-store` (scripts/ci_plan.py `_is_stores_path`): a diff
+    # to any package its test binaries compile, to the root `fixtures/` they
+    # read, or to a SQL script runs this job; a package outside that closure
+    # (an example host, lash-sim, lash-perf) skips it. The hand list of store
+    # crates it replaced hid FIG-3595 and FIG-3550, which were runtime
+    # changes. The simulator, pool-wait and cross-backend steps remain
+    # deferred to the manual full-profile dispatch, which runs the full matrix.
     if: needs.plan.outputs.stores == 'true'
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
@@ -1461,10 +1474,10 @@ jobs:
     # compile, each against its own container: a separate runner per major
     # re-analysed the graph and re-queued the same build three times.
     # scripts/ci_plan.py `postgres-matrix` owns the per-event majors. PG16 is
-    # the sole primary lane and runs on every event. On PR-class events it runs
-    # the proven runtime identity oracle; on full-profile runs it retains the
-    # package-wide, pool-wait, runtime, and cross-backend behavior coverage
-    # without triplicating it across majors.
+    # the sole primary lane and runs on every event. Every event runs the
+    # package-wide store suites on it; full-profile runs add the pool-wait,
+    # simulator and cross-backend coverage without triplicating it across
+    # majors.
     steps:
       - *checkout
 
@@ -1512,8 +1525,11 @@ jobs:
       # process-per-test model would race the suites against each other.
       # Keep this package-wide: tests/attempt_atomicity.rs is part of this gate;
       # narrowing to --test conformance would silently drop attempt atomicity.
+      # It runs on every event (FIG-3572): FIG-3595 and FIG-3550 broke these
+      # suites while they were dispatch-only. `integration__test` is one of
+      # its binaries, so it also covers the parent-end recovery and automatic
+      # queued retry scenarios a narrower pull-request step used to filter.
       - name: Test Postgres store (conformance and attempt atomicity)
-        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-store
@@ -1523,14 +1539,6 @@ jobs:
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-pool-wait
-
-      # Primary PostgreSQL runs cover parent-end recovery and automatic queued
-      # retry through the real journal on PRs, merge groups, and releases.
-      # The shared service wrapper requires a live database for both scenarios.
-      - name: Test runtime Postgres agent scenarios
-        run: |
-          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
-            bash scripts/ci/store-tests.sh pg-agent-scenario
 
       # The simulator's backend-fault scenarios against a real PostgreSQL. They
       # compare fault semantics, not catalog rendering, so they run once on the
