@@ -695,7 +695,9 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
         .expect("claim selected-drain plan lease")
         .acquired()
         .expect("selected-drain plan lane is free");
-    sqlx::query("SELECT pg_stat_statements_reset()")
+    sqlx::query(
+        "SELECT pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0)",
+    )
         .execute(storage.pool())
         .await
         .expect("reset selected-drain statement statistics");
@@ -1700,7 +1702,9 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         .await
         .expect("seed statement-pin head");
 
-    sqlx::query("SELECT pg_stat_statements_reset()")
+    sqlx::query(
+        "SELECT pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0)",
+    )
         .execute(storage.pool())
         .await
         .expect("reset statement statistics before the claim measurement");
@@ -1728,7 +1732,9 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         "claim round trips changed",
     );
 
-    sqlx::query("SELECT pg_stat_statements_reset()")
+    sqlx::query(
+        "SELECT pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0)",
+    )
         .execute(storage.pool())
         .await
         .expect("reset statement statistics before the head-commit measurement");
