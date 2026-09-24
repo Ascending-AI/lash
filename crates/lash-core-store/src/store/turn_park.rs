@@ -84,7 +84,8 @@ impl TurnParkReason {
                 Some(Self::KeyFormatCutover { message })
             }
             RuntimeErrorCode::LashlangCellBindingDrift => Some(Self::BindingDrift { message }),
-            RuntimeErrorCode::SqliteEffectReplayHashConflict
+            RuntimeErrorCode::EffectReplayDivergence
+            | RuntimeErrorCode::SqliteEffectReplayHashConflict
             | RuntimeErrorCode::PostgresEffectReplayHashConflict => {
                 Some(Self::EffectReplayDivergence {
                     effect_kind: error

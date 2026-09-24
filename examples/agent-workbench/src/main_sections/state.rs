@@ -537,8 +537,7 @@ impl TurnDoneOutcome {
 }
 
 pub(crate) const PUBLIC_TURN_FAILURE_MESSAGE: &str = "turn could not be completed";
-pub(crate) const REPLAY_DIVERGENCE_TURN_FAILURE_MESSAGE: &str =
-    "durable replay diverged for this turn; retry after the deployment is stable";
+pub(crate) const PARKED_TURN_MESSAGE: &str = "durable replay diverged for this turn; it is parked until the deployment that wrote it is restored";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ProductEvent {

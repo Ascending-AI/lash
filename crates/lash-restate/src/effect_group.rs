@@ -64,7 +64,7 @@ pub(crate) use protocol::protocol_refusal_in;
 #[cfg(test)]
 pub(crate) use protocol::protocol_retired_error;
 use protocol::{load_index, load_index_shared};
-pub(crate) use reopen::content_checked_shape_mismatch;
+pub(crate) use reopen::{content_checked_shape_mismatch, content_mismatch};
 pub(crate) use wire::btree_map_as_pairs;
 pub use wire::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupPhase,

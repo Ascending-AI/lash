@@ -625,16 +625,23 @@ impl LashRuntime {
                 // is invalidated exactly like a rejected follow-on turn's: the
                 // next use reloads from the accepted snapshot instead of running
                 // the executor this turn dirtied.
+                //
+                // A parked turn is exempt: its journal diverged at the refusal,
+                // so it issues no further journaled effect (the repair's cancel
+                // gate peek is one), and its turn id is the one its redrive
+                // carries, so the inputs routed to it are not orphaned.
                 Err(err) if turns.is_empty() => {
-                    self.defer_orphaned_turn_inputs_after_teardown(
-                        &turn_trace_turn_id,
-                        session_execution_lease
-                            .as_ref()
-                            .map(|lease| lease.fence())
-                            .as_ref(),
-                        &teardown_effect_controller,
-                    )
-                    .await;
+                    if !parks(&err) {
+                        self.defer_orphaned_turn_inputs_after_teardown(
+                            &turn_trace_turn_id,
+                            session_execution_lease
+                                .as_ref()
+                                .map(|lease| lease.fence())
+                                .as_ref(),
+                            &teardown_effect_controller,
+                        )
+                        .await;
+                    }
                     self.invalidate_resident_session_state();
                     if let Some(withheld) = carried_withheld.take() {
                         self.abandon_withheld_terminal_work(withheld).await;
@@ -642,15 +649,17 @@ impl LashRuntime {
                     return Err(err);
                 }
                 Err(err) => {
-                    self.defer_orphaned_turn_inputs_after_teardown(
-                        &turn_trace_turn_id,
-                        session_execution_lease
-                            .as_ref()
-                            .map(|lease| lease.fence())
-                            .as_ref(),
-                        &teardown_effect_controller,
-                    )
-                    .await;
+                    if !parks(&err) {
+                        self.defer_orphaned_turn_inputs_after_teardown(
+                            &turn_trace_turn_id,
+                            session_execution_lease
+                                .as_ref()
+                                .map(|lease| lease.fence())
+                                .as_ref(),
+                            &teardown_effect_controller,
+                        )
+                        .await;
+                    }
                     self.record_follow_on_failure(&mut turns, err);
                     if let Some(withheld) = carried_withheld.take() {
                         self.abandon_withheld_terminal_work(withheld).await;
@@ -997,4 +1006,9 @@ pub(super) fn agent_frame_follow_turn_id(
     completed_turn_count: usize,
 ) -> TurnId {
     crate::store::QueuedRunPosition::derive_turn_id(root_turn_id, completed_turn_count as u64)
+}
+
+/// Whether `err` parked its turn on a replay refusal (FIG-3586).
+fn parks(err: &crate::RuntimeError) -> bool {
+    err.turn_failure_cause() == crate::TurnFailureCause::Parked
 }

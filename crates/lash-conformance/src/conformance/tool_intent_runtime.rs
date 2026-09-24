@@ -232,7 +232,9 @@ pub async fn public_signal_intent_wakes_parked_process(
                             ),
                         )
                         .await;
+                    let end = crate::ConformanceTurnEnd::of(&turn);
                     let _ = turn_tx.send(turn);
+                    end
                 })
             }),
         )

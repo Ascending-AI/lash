@@ -263,9 +263,13 @@ pub enum RuntimeErrorCode {
     /// commands the journal holds, so it refuses to run rather than dispatch
     /// blind (FIG-3586).
     RecordedJournalReadUnsupported,
-    /// A Restate redrive diverged from its durable journal and cannot replay it
-    /// safely; a fresh turn on the same session is safe.
-    WorkerReplacementAbort,
+    /// A redriven effect's reconstructed envelope, or an effect group's
+    /// reopened shape, differs from the one its engine journal recorded. The
+    /// engine-neutral divergence code for journals the engine owns (the SQL
+    /// hosts keep their store-qualified hash-conflict codes). Nothing was
+    /// dispatched; the turn parks and the engine keeps the journal until an
+    /// operator redeploys the build that wrote it, cancels, or forks.
+    EffectReplayDivergence,
     RestateEffectHostRequiresHandlerScope,
     /// A journaled Restate effect produced an unacceptable outcome and became
     /// terminal rather than failing every enclosing-turn redrive.
@@ -629,7 +633,7 @@ impl RuntimeErrorCode {
             Self::LashlangCellReplayKeyFormatCutover => "lashlang_cell_replay_key_format_cutover",
             Self::LashlangCellBindingDrift => "lashlang_cell_binding_drift",
             Self::RecordedJournalReadUnsupported => "recorded_journal_read_unsupported",
-            Self::WorkerReplacementAbort => "worker_replacement_abort",
+            Self::EffectReplayDivergence => "effect_replay_divergence",
             Self::RestateJournaledEffectPoisoned => "restate_journaled_effect_poisoned",
             Self::RestateEffectHostRequiresHandlerScope => {
                 "restate_effect_host_requires_handler_scope"
@@ -775,7 +779,7 @@ impl RuntimeErrorCode {
             Self::SqliteEffectReplayHashConflict
                 | Self::PostgresEffectReplayHashConflict
                 | Self::RestateProcessJournalIdentityDrift
-                | Self::WorkerReplacementAbort
+                | Self::EffectReplayDivergence
                 | Self::ToolIntentReplayKeyFormatCutover
                 | Self::LashlangCellReplayDivergence
                 | Self::LashlangCellReplayKeyFormatCutover
@@ -789,12 +793,6 @@ impl RuntimeErrorCode {
     /// it waits for an operator.
     pub fn parks_turn(&self) -> bool {
         self.turn_failure_cause() == TurnFailureCause::Parked
-    }
-
-    /// Whether this error aborts only the in-flight turn because its durable
-    /// journal belongs to a replaced worker.
-    pub fn is_worker_replacement_abort(&self) -> bool {
-        matches!(self, Self::WorkerReplacementAbort)
     }
 
     /// Whether retrying the identical operation is explicitly safe.
@@ -907,7 +905,7 @@ impl RuntimeErrorCode {
         Self::RestateAwaitEventRevoke,
         Self::RestateAwaitEventSessionUpdate,
         Self::RestateEffectController,
-        Self::WorkerReplacementAbort,
+        Self::EffectReplayDivergence,
         Self::ToolIntentReplayKeyFormatCutover,
         Self::LashlangCellReplayDivergence,
         Self::LashlangCellReplayKeyFormatCutover,
@@ -1124,9 +1122,7 @@ impl RuntimeErrorCode {
             "lashlang_cell_replay_key_format_cutover" => Self::LashlangCellReplayKeyFormatCutover,
             "lashlang_cell_binding_drift" => Self::LashlangCellBindingDrift,
             "recorded_journal_read_unsupported" => Self::RecordedJournalReadUnsupported,
-            "worker_replacement_abort" | "restate_effect_hash_mismatch" => {
-                Self::WorkerReplacementAbort
-            }
+            "effect_replay_divergence" => Self::EffectReplayDivergence,
             "restate_effect_host_requires_handler_scope" => {
                 Self::RestateEffectHostRequiresHandlerScope
             }

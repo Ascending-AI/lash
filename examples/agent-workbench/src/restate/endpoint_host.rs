@@ -47,8 +47,14 @@ async fn endpoint(
     process_worker: lash::durability::DurableProcessWorker,
 ) -> Endpoint {
     let endpoint = Endpoint::builder()
-        .bind(WorkbenchTurnWorkflowImpl::new(state.clone()).serve())
-        .bind(WorkbenchQueuedTurnWorkflowImpl::new(state.clone()).serve())
+        .bind(lash_restate::turn_service(
+            WorkbenchTurnWorkflowImpl::new(state.clone()).serve(),
+            "run",
+        ))
+        .bind(lash_restate::turn_service(
+            WorkbenchQueuedTurnWorkflowImpl::new(state.clone()).serve(),
+            "run",
+        ))
         .bind(WorkbenchButtonTriggerWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchMailReceivedWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchSessionDeleteWorkflowImpl::new(state.clone()).serve())

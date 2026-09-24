@@ -770,17 +770,10 @@ where
             EffectGroupOpenResponse::ShapeMismatch => Err(group_shape_error(format!(
                 "effect group {group_key} was reopened with a different durable shape"
             ))),
-            // The engine tier's replay-mismatch code, exactly as a recorded
-            // run whose envelope drifted reports it.
+            // The engine-neutral divergence, exactly as a recorded run whose
+            // envelope drifted reports it: the turn parks.
             EffectGroupOpenResponse::ContentMismatch { position } => {
-                Err(RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
-                    format!(
-                        "effect group {group_key} was reopened with a child at position \
-                         {position} that is not the retained one; the group head refuses a \
-                         redrive whose aggregate differs from the recorded one"
-                    ),
-                ))
+                Err(crate::effect_group::content_mismatch(&group_key, position))
             }
         }
     }
@@ -1620,7 +1613,7 @@ pub(crate) fn validate_recorded_effect_envelope(
     validate_replayed_effect_envelope(
         recorded.envelope.as_ref(),
         reconstructed,
-        RuntimeErrorCode::WorkerReplacementAbort,
+        RuntimeErrorCode::EffectReplayDivergence,
         trace,
     )?;
     Ok(recorded.outcome)

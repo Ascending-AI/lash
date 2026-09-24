@@ -53,10 +53,9 @@ pub(super) fn session_delete_handler_error(err: AppError) -> HandlerError {
 
 pub(super) fn settlement_handler_error(err: AppError) -> HandlerError {
     match err.verdict {
-        AppErrorVerdict::Retryable => HandlerError::from(err),
-        AppErrorVerdict::ReplacementAbort | AppErrorVerdict::Terminal => {
-            terminal_handler_error(err)
-        }
+        // A parked turn keeps its invocation's journal: fail retryably.
+        AppErrorVerdict::Retryable | AppErrorVerdict::Parked => HandlerError::from(err),
+        AppErrorVerdict::Terminal => terminal_handler_error(err),
         AppErrorVerdict::Ambiguous => {
             // Ambiguous settlement failures remain retryable.
             HandlerError::from(err)

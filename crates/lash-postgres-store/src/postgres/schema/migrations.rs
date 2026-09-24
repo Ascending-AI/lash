@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// These declarations retain the component-123 endpoint: the five
+/// These declarations retain the component-124 endpoint: the five
 /// effect-replay constraints component 115 installed, the durable queued-run
 /// admission component 116 adds, the runtime-commit receipt version component
 /// 117 stamps, the NOT NULL `submitted_ingress_json` and
@@ -18,8 +18,10 @@ use super::*;
 /// adds the nullable `started_json` segment start marker to
 /// `lash_process_segment_handovers`. Component 124 (FIG-3587) changes
 /// persisted vocabularies (runtime-error codes, turn-park reasons) and moves
-/// no relation. No arm targets 123 or 124: the current build refuses every
-/// predecessor, including 122 and 123.
+/// no relation, and component 125 replaces a runtime-error code
+/// (`worker_replacement_abort` by `effect_replay_divergence`) and moves no
+/// relation either. No arm targets 123, 124 or 125: the current build refuses
+/// every predecessor, including 122, 123 and 124.
 /// Source-shape
 /// declarations remain keyed to this build's catalog for precise older-store
 /// fixture construction.
@@ -78,7 +80,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         // The lists are keyed to the floor, not to one generation: a relation,
         // column, or constraint introduced after 105 belongs here too, so the
         // fixture rebuilds the published component-101 catalog by removing them.
-        to: 123,
+        to: 124,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -120,7 +122,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 123,
+        to: 124,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -153,7 +155,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 123,
+        to: 124,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -185,7 +187,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // models, so a component-104 catalog lacks exactly those columns.
     SchemaMigration {
         from: 104,
-        to: 123,
+        to: 124,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -218,7 +220,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // parent payload, and the arbitration state alone.
     SchemaMigration {
         from: 105,
-        to: 123,
+        to: 124,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -251,7 +253,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // to its siblings.
     SchemaMigration {
         from: 106,
-        to: 123,
+        to: 124,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -286,7 +288,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // 108 added no relational DDL of its own.
     SchemaMigration {
         from: 107,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -314,7 +316,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // guards a component-107 catalog does against this build.
     SchemaMigration {
         from: 108,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -352,7 +354,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // columns and guards plus the five effect-replay constraints.
     SchemaMigration {
         from: 109,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -384,7 +386,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // All are refused at the queued-run cutover.
     SchemaMigration {
         from: 110,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -401,7 +403,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 111,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -418,7 +420,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 112,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -435,7 +437,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 113,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -455,7 +457,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // current component-117 cutover offers no executable migration.
     SchemaMigration {
         from: 114,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -476,7 +478,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // foreign key ride the table drops, so only the relations are enumerated.
     SchemaMigration {
         from: 115,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -502,7 +504,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 116,
-        to: 123,
+        to: 124,
         source_missing_tables: &[],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -522,7 +524,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // could be claiming.
     SchemaMigration {
         from: 117,
-        to: 123,
+        to: 124,
         source_missing_tables: &[],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -543,7 +545,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // claiming.
     SchemaMigration {
         from: 118,
-        to: 123,
+        to: 124,
         source_missing_tables: &[],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -561,7 +563,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // rewound stamp could be claiming.
     SchemaMigration {
         from: 119,
-        to: 123,
+        to: 124,
         source_missing_tables: &[],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -579,7 +581,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // a rewound stamp could be claiming.
     SchemaMigration {
         from: 120,
-        to: 123,
+        to: 124,
         source_missing_tables: &["lash_turn_parks"],
         source_missing_columns: &[("lash_process_segment_handovers", "started_json")],
         source_missing_guards: &[],
@@ -595,7 +597,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 121,
-        to: 123,
+        to: 124,
         source_missing_tables: &[],
         source_missing_columns: &[("lash_process_segment_handovers", "started_json")],
         source_missing_guards: &[],
@@ -604,16 +606,30 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_constraints: &[],
         statements: &[],
     },
-    // The immediate predecessor of the retained endpoint 123. Component 123
-    // (FIG-3588) added the nullable `started_json` segment start marker,
-    // which a component-122 catalog lacks; component 124 (FIG-3587) moves
-    // persisted vocabularies, so the row is a refusal boundary that
-    // introduces nothing a rewound stamp could be claiming.
+    // Component 123 (FIG-3588) added the nullable `started_json` segment
+    // start marker, which a component-122 catalog lacks; the row is a refusal
+    // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 122,
-        to: 123,
+        to: 124,
         source_missing_tables: &[],
         source_missing_columns: &[("lash_process_segment_handovers", "started_json")],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
+        introduced_relations: &[],
+        introduced_constraints: &[],
+        statements: &[],
+    },
+    // The immediate predecessor of the retained endpoint 124. Component 124
+    // (FIG-3587) changed persisted vocabularies and moved no relation, so a
+    // component-123 catalog lacks nothing the endpoint models; component 125
+    // replaces a runtime-error code, so the row is a refusal boundary that
+    // introduces nothing a rewound stamp could be claiming.
+    SchemaMigration {
+        from: 123,
+        to: 124,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
         introduced_relations: &[],

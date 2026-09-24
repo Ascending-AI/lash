@@ -812,7 +812,7 @@ pub(super) struct AlreadyStartedRunner {
 
 pub(super) struct TerminalFailureRunner;
 
-pub(super) struct ReplacementThenSuccessRunner {
+pub(super) struct DivergenceThenSuccessRunner {
     pub(super) runs: AtomicUsize,
 }
 
@@ -821,7 +821,7 @@ pub(super) struct OpaqueFailureThenSuccessRunner {
 }
 
 #[async_trait::async_trait]
-impl RestateProcessRunner for ReplacementThenSuccessRunner {
+impl RestateProcessRunner for DivergenceThenSuccessRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -834,7 +834,7 @@ impl RestateProcessRunner for ReplacementThenSuccessRunner {
         if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
             return Err(PluginError::RuntimeEffectController(
                 lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                    lash_core::RuntimeErrorCode::EffectReplayDivergence,
                     "recorded runtime effect did not match the reconstructed envelope",
                 )
                 .with_summary(lash_core::RuntimeEffectReplayMismatchReport {

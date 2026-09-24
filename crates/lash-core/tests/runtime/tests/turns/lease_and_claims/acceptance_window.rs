@@ -81,7 +81,7 @@ impl lash_core::testing::EffectLayer for AcceptanceWindowJournalController {
             lash_core::facade_support::validate_replayed_effect_envelope(
                 &recorded,
                 &reconstructed,
-                lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                lash_core::RuntimeErrorCode::EffectReplayDivergence,
                 None,
             )?;
             return Ok(outcome);
@@ -90,7 +90,7 @@ impl lash_core::testing::EffectLayer for AcceptanceWindowJournalController {
             && self.kill_armed.swap(false, Ordering::SeqCst)
         {
             return Err(lash_core::RuntimeEffectControllerError::new(
-                lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                lash_core::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                 "worker replaced after the turn's message block was journaled",
             ));
         }
