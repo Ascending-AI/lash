@@ -122,22 +122,31 @@ requests are composed by hand, that has to be a refusal, not a reading.
 ## Phase 2 — A blind root set is refused, and no policy value talks past it
 
 Upload a small PNG and record its byte length and SHA-256. Do **not** send a turn
-yet. On a stack where no turn has run, the session catalog
-(`$work/data/lash-sessions/durable-core.db`) has not been created, so the mark
-phase has nothing to read.
+yet. The backend creates the session catalog
+(`$work/data/lash-sessions/durable-core.db`) at boot, and the upload's bytes land
+in its `attachment_blobs` table beside the manifest the mark phase reads — there
+is no `attachments/` directory, and the workbench refuses one as a prior store
+layout. The blind-root arm is therefore staged: move the catalog aside, run the
+sweep, then put the same files back. While the catalog is aside, nothing else
+may touch the stack — a write against the absent path would create a fresh empty
+catalog beside the moved one.
 
 ```sh
 curl -s -X POST "http://127.0.0.1:$port/api/attachments" \
   -H 'content-type: application/json' \
   -d "{\"name\":\"probe.png\",\"mime\":\"image/png\",\"data_base64\":\"$(base64 -w0 probe.png)\"}"
+mkdir "$work/aside" && mv "$work/data/lash-sessions"/durable-core.db* "$work/aside/"
 curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-maintenance" \
   -H 'content-type: application/json' \
   -d '{"reclaim_attachments":{"grace_period_ms":604800000,"empty_root_set":"refuse"}}'
+mv "$work/aside"/durable-core.db* "$work/data/lash-sessions/" && rmdir "$work/aside"
 ```
 
 **Judge.** `409`, and the message must say that the root set *could not be
 enumerated*, that a blind root set could not be told apart from an empty one, and
-that the sweep deleted nothing — naming the missing catalog path. Note what this
+that the sweep deleted nothing — naming the missing catalog path. Record the
+`409` before the catalog goes back; the move-back is part of the arm, not a
+cleanup to defer. Note what this
 arm proves about ordering: the request carries a week-long grace period under
 which nothing is deletion-eligible anyway, and the refusal still fires. Enumeration
 failure is judged before eligibility, so an operator cannot make a blind sweep
@@ -147,27 +156,32 @@ A `200` here with `scanned_blob_count: 1, reclaimed_count: 0` would be the most
 dangerous possible outcome and is Abort/RCA: it would read as a clean protected
 zero while the mark phase had in fact read nothing at all.
 
-## Phase 3 — Establish the catalog, then the empty-root refusal
+## Phase 3 — An enumerated-but-empty root set is refused
 
 Send one text-only turn. The scripted provider **does** fail the turn under this fixture —
 both turns in this rehearsal settle as `turn could not be completed`, which is also why
-Phase 7's `removed_node_count` is 0 while the tombstone count is 2. The catalog write is what
-this step needs, not a completion. Then re-run the reclaim
-at a **zero-length** grace period.
+Phase 7's `removed_node_count` is 0 while the tombstone count is 2. The catalog has existed
+since boot and Phase 2 restored it; what this step adds is the turn the later phases score,
+not a completion. Then re-run the reclaim at a **zero-length** grace period, with the
+catalog's own counts beside it.
 
 ```sh
 curl -s -X POST "http://127.0.0.1:$port/api/turn" \
   -H 'content-type: application/json' -d '{"text":"hello"}'
-test -f "$work/data/lash-sessions/durable-core.db"
+sqlite3 "$work/data/lash-sessions/durable-core.db" \
+  "SELECT (SELECT count(*) FROM attachment_blobs),
+          (SELECT count(*) FROM attachment_manifest WHERE committed_at_ms IS NOT NULL)"
 curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-maintenance" \
   -H 'content-type: application/json' \
   -d '{"reclaim_attachments":{"grace_period_ms":0,"empty_root_set":"refuse"}}'
 ```
 
-**Judge.** `409` again, and it must be a *different* refusal from Phase 2: the
-root authority enumerated successfully and found zero live refs while a
-deletion-eligible blob was present, so proceeding would have deleted every blob in
-the backend. The message must point at the store factory and name
+**Judge.** The catalog counts must read `1|0` — one stored blob, zero committed
+manifest rows — so the mark phase below is enumerating a real catalog, not the
+absent one Phase 2 staged. `409` again, and it must be a *different* refusal from
+Phase 2: the root authority enumerated successfully and found zero live refs
+while a deletion-eligible blob was present, so proceeding would have deleted
+every blob in the backend. The message must point at the store factory and name
 `empty_root_set=authorize_delete_all` as the explicit opt-in. Recording "409" for
 both phases without the two messages collapses a working mark phase and a broken
 one into one artifact, which is exactly the distinction this lever exists to draw.
@@ -205,7 +219,10 @@ curl -s -X POST "http://127.0.0.1:$port/api/turn" -H 'content-type: application/
   -d '{"text":"describe this","attachment_id":"<id>"}'
 # Wait for the COMMITTED reference, not the in-flight user row: poll until
 # /api/state.active_turns is empty and the attachment manifest row carries a
-# non-null committed_at_ms (equivalently, until the attachment appears as a
+# non-null committed_at_ms —
+#   sqlite3 "$work/data/lash-sessions/durable-core.db" \
+#     "SELECT committed_at_ms FROM attachment_manifest WHERE attachment_id = '<id>'"
+# (equivalently, until the attachment appears as a
 # graph_nodes reference). committed_at_ms is what promotes the blob to a root.
 # Waiting on the in-flight row instead produces a false Abort here.
 curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-maintenance" \
@@ -229,7 +246,11 @@ curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-ma
   -d '{"reclaim_attachments":{"grace_period_ms":0,"empty_root_set":"refuse"}}'
 curl -s -o referenced.png -w '%{http_code}\n' "http://127.0.0.1:$port/api/attachments/<referenced-id>"
 curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:$port/api/attachments/<orphan-id>"
-find "$work/data/attachments" -type f
+sqlite3 "$work/data/lash-sessions/durable-core.db" \
+  "SELECT attachment_id, length(content) FROM attachment_blobs"
+sqlite3 "$work/data/lash-sessions/durable-core.db" \
+  "SELECT lower(hex(content)) FROM attachment_blobs WHERE attachment_id = '<referenced-id>'"
+od -An -v -tx1 probe.png | tr -d ' \n'; echo
 ```
 
 **Judge.** `scanned_blob_count: 2`, `reclaimed_count: 1`, `sweep: "swept"`,
@@ -237,9 +258,11 @@ find "$work/data/attachments" -type f
 
 Then prove the deletion in three places rather than one: the referenced id must
 retrieve `200` with the **source file's** SHA-256 unchanged, the reclaimed id must
-retrieve `404`, and exactly one file must remain under the blob directory. The
-reclaimed blob's shard *directory* stays behind empty — count files, not
-directories, or this check reads as a failed deletion.
+retrieve `404`, and `attachment_blobs` must hold exactly one row — the backend
+keeps attachment bytes in the session catalog, not in an `attachments/`
+directory. The surviving row must be keyed by the referenced id, with
+`length(content)` equal to the source file's byte length and `hex(content)` equal
+to the source file's bytes exactly.
 `reclaimed_count: 1` on its own does not say *which* one; comparing bytes does.
 A non-empty `deleted_while_referenced` is Abort/RCA whatever the counts say.
 
