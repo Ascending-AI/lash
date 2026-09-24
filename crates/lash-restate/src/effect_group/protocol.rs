@@ -19,7 +19,9 @@ use super::*;
 /// (FIG-3630).
 /// 3: a rank read says whether it is the caller's own await, and the index
 /// refuses a caller's read of a group closed to it (FIG-3676).
-pub const EFFECT_GROUP_INDEX_PROTOCOL_VERSION: u32 = 3;
+/// 4: a recorded settlement ends the child's cancel wait as `Settled`, which
+/// the child's dispatch invocation reads as no cancel (FIG-3709).
+pub const EFFECT_GROUP_INDEX_PROTOCOL_VERSION: u32 = 4;
 
 /// The record field the protocol version is stamped under.
 const PROTOCOL_VERSION_FIELD: &str = "protocol_version";

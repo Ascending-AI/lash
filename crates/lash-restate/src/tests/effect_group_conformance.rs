@@ -30,8 +30,8 @@ use super::live_turn_probe::ConformanceTurnProbe as _;
 use crate::RestateConnection;
 use crate::durable_wait::arm_wait_registration_witness;
 use crate::effect_group::{
-    EffectGroupChildRequest, admit_wait_request, arm_admission_witness, decode_wait_resolution,
-    payload_key, rank_wait_request, ready_wait_request,
+    EffectGroupChildRequest, admit_wait_request, arm_admission_witness, cancel_wait_request,
+    decode_wait_resolution, payload_key, rank_wait_request, ready_wait_request,
 };
 use crate::process::{LashProcessWorkflowImpl, RestateProcessCancelRequest, RestateProcessRunner};
 use crate::{
@@ -1072,6 +1072,94 @@ impl LiveConformanceHarness {
         assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
     }
 
+    /// FIG-3709: a settled child leaves nothing open on the deployment. Each
+    /// dispatched child watches its cancel wait through an ingress call of
+    /// its own; the index ends that wait as `Settled` when it seats the
+    /// child's settlement, so once every child settled the deployment drains
+    /// without the group closing or retiring.
+    pub(super) async fn run_settled_children_release_their_cancel_watches_witness(&self) {
+        let ingress = RestateIngressClient::new(self.connection.clone());
+        let witness_executors = Arc::new(WitnessExecutors::default());
+        self.executors
+            .install_mapping_current(Arc::clone(&witness_executors) as Arc<dyn GroupExecutors>);
+        let group_key = witness_key("settled-cancel-watch");
+        let children = [witness_child(&group_key, 0), witness_child(&group_key, 1)];
+        let shape = witness_shape(&group_key, &children);
+        let executions = Arc::new(AtomicUsize::new(0));
+        for child in &children {
+            witness_executors.stage(child, Arc::clone(&executions), "settled-cancel-watch");
+        }
+        let before = open_invocations(&self.admin).await;
+
+        let opened: EffectGroupOpenResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "open",
+                &EffectGroupOpenRequest {
+                    shape: shape.clone(),
+                    content_checked: false,
+                },
+            )
+            .await
+            .expect("the witness group opens");
+        assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+        ingress
+            .send_workflow_json(
+                "EffectGroupDispatch",
+                &group_key,
+                "run",
+                &EffectGroupDispatchRequest {
+                    group_key: group_key.clone(),
+                },
+            )
+            .await
+            .expect("the dispatcher submission is accepted");
+        for rank in 1..=2 {
+            assert_eq!(
+                await_group_wait(
+                    &ingress,
+                    rank_wait_request(&shape.wait_scope, &group_key, rank).unwrap()
+                )
+                .await,
+                EffectGroupWaitResolution::Rank
+            );
+        }
+        assert_eq!(executions.load(Ordering::SeqCst), 2, "each child runs once");
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let still_open = open_invocations(&self.admin)
+                .await
+                .into_iter()
+                .filter(|(id, _)| !before.contains_key(id))
+                .collect::<Vec<_>>();
+            if still_open.is_empty() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the deployment did not drain after every child settled; still open: {still_open:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        for child in &children {
+            let request =
+                cancel_wait_request(&shape.wait_scope, &group_key, child.invocation.replay_key())
+                    .expect("the child's cancel wait key derives");
+            assert_eq!(
+                await_group_wait(&ingress, request).await,
+                EffectGroupWaitResolution::Settled,
+                "a settled child's cancel wait ends as settled, not cancelled"
+            );
+        }
+
+        ingress
+            .call_workflow_json::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
+            .await
+            .expect("retirement saga completes");
+    }
+
     /// Prove both serialized orders between an await workflow's durable index
     /// registration and scope retirement.
     ///
@@ -1990,6 +2078,44 @@ fn assert_admission_enumerated(cleanup: &EffectGroupCleanupFacts, invocation_id:
         cleanup.dispatched.get(&0).map(String::as_str),
         Some(invocation_id)
     );
+}
+
+/// Every invocation the server holds open, by id, with its target.
+async fn open_invocations(admin: &HarnessAdmin) -> HashMap<String, String> {
+    match admin {
+        HarnessAdmin::Live { admin_url } => {
+            #[derive(serde::Deserialize)]
+            struct Row {
+                id: String,
+                target: String,
+            }
+            let admin = crate::RestateAdminClient::new(RestateConnection::new(admin_url.clone()));
+            // A server that just started answers its SQL surface only once its
+            // partition is up, so an early query is retried.
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                match admin
+                    .query_json::<Row>(
+                        "SELECT id, target FROM sys_invocation WHERE status != 'completed'",
+                    )
+                    .await
+                {
+                    Ok(rows) => break rows.into_iter().map(|row| (row.id, row.target)).collect(),
+                    Err(error) => assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "query the server's open invocations: {error}"
+                    ),
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+        HarnessAdmin::InProcess { server } => server
+            .invocations()
+            .into_iter()
+            .filter(|view| view.status != "completed")
+            .map(|view| (view.id, view.target))
+            .collect(),
+    }
 }
 
 fn required(name: &str) -> String {

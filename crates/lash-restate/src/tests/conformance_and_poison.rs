@@ -541,6 +541,19 @@ async fn live_restate_close_releases_an_unstarted_wait_child() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+async fn live_restate_settled_children_release_their_cancel_watches() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    tokio::time::timeout(
+        Duration::from_secs(90),
+        harness.run_settled_children_release_their_cancel_watches_witness(),
+    )
+    .await
+    .expect("Restate settled-cancel-watch witness exceeded 90 seconds");
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 async fn live_restate_executing_effect_quiescence_witness() {
     let harness = effect_group_conformance::LiveConformanceHarness::start().await;
     tokio::time::timeout(
@@ -698,6 +711,18 @@ mod on_the_server_double {
         )
         .await
         .expect("unstarted-wait-child witness on the server double exceeded 60 seconds");
+        harness.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn settled_children_release_their_cancel_watches() {
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        tokio::time::timeout(
+            Duration::from_secs(90),
+            harness.run_settled_children_release_their_cancel_watches_witness(),
+        )
+        .await
+        .expect("settled-cancel-watch witness on the server double exceeded 90 seconds");
         harness.finish().await;
     }
 

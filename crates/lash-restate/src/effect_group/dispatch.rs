@@ -421,17 +421,7 @@ impl EffectGroupDispatch {
             &request.group_key,
             EffectGroupWaitKind::Cancel(request.shape.replay_key(request.position)?),
         )?;
-        let cancel_address = RestateDurableWaitAddress::for_key(&cancel_key);
-        let cancel_request = RestateDurableWaitAwaitRequest {
-            key: cancel_key,
-            deadline: None,
-        };
-        let cancel_watch = self.ingress.call_workflow_json::<_, Resolution>(
-            crate::LashService::DurableWaitWorkflow.name(),
-            &cancel_address.workflow_key,
-            "await_resolution",
-            &cancel_request,
-        );
+        let cancel_watch = watch_child_cancellation(&self.ingress, cancel_key);
         tokio::pin!(cancel_watch);
 
         if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
@@ -489,9 +479,7 @@ impl EffectGroupDispatch {
             let outcome = tokio::select! {
                 biased;
                 cancel = &mut cancel_watch => {
-                    cancel.map_err(|error| std::io::Error::other(format!(
-                        "observe effect-group child cancellation: {error}"
-                    )))?;
+                    cancel?;
                     // Dropping the drive is the leaf path's cancellation
                     // lifted to handler level: whatever step the child was
                     // parked on is abandoned, and the settlement recorded is
@@ -545,9 +533,7 @@ impl EffectGroupDispatch {
                 tokio::select! {
                     biased;
                     cancel = &mut cancel_watch => {
-                        cancel.map_err(|error| std::io::Error::other(format!(
-                            "observe effect-group child cancellation: {error}"
-                        )))?;
+                        cancel?;
                         EffectGroupChildRunOutcome::Cancelled
                     }
                     outcome = &mut wait => EffectGroupChildRunOutcome::Completed { outcome },
@@ -606,9 +592,7 @@ impl EffectGroupDispatch {
         let Json(outcome) = tokio::select! {
             biased;
             cancel = &mut cancel_watch => {
-                cancel.map_err(|error| std::io::Error::other(format!(
-                    "observe effect-group child cancellation: {error}"
-                )))?;
+                cancel?;
                 cancellation.cancel();
                 run.await?
             }
@@ -851,6 +835,43 @@ fn refuse_unrecorded_abort(
         }
         _ => Ok(()),
     }
+}
+
+/// A dispatched child's cancellation watch: an ingress call on the child's
+/// cancel wait, kept out of the child's journal, that completes only when a
+/// cancel reaches the child.
+///
+/// The index ends the wait as `Settled` once the child's settlement is seated
+/// (FIG-3709), so the watch does not stay open on the deployment after the
+/// child finishes. `Settled` is no cancel: a dispatch invocation that replays
+/// after its settlement and finds the wait already ended keeps to the work its
+/// journal recorded.
+async fn watch_child_cancellation(
+    ingress: &RestateIngressClient,
+    key: AwaitEventKey,
+) -> std::io::Result<()> {
+    let address = RestateDurableWaitAddress::for_key(&key);
+    let resolution = ingress
+        .call_workflow_json::<_, Resolution>(
+            crate::LashService::DurableWaitWorkflow.name(),
+            &address.workflow_key,
+            "await_resolution",
+            &RestateDurableWaitAwaitRequest {
+                key,
+                deadline: None,
+            },
+        )
+        .await
+        .map_err(|error| {
+            std::io::Error::other(format!("observe effect-group child cancellation: {error}"))
+        })?;
+    if matches!(
+        decode_wait_resolution(resolution),
+        Ok(EffectGroupWaitResolution::Settled)
+    ) {
+        std::future::pending::<()>().await;
+    }
+    Ok(())
 }
 
 /// Records one child's terminal in the index, writing its payload first when
