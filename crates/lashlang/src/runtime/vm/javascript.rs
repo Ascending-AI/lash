@@ -680,92 +680,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             (
                 "Set",
-                "union" | "intersection" | "difference" | "symmetricDifference",
-                [Value::Ref(other)],
-            ) if matches!(self.heap.get(*other)?, HeapObject::Set(_)) => {
-                let left = self
-                    .heap
-                    .set_values(receiver)?
-                    .expect("Set receiver was checked");
-                let right = self
-                    .heap
-                    .set_values(*other)?
-                    .expect("Set argument was checked");
-                let mut output = Vec::new();
-                match method {
-                    "union" => {
-                        output.extend(left.iter().cloned());
-                        for value in &right {
-                            if !self.heap.set_has(receiver, value)? {
-                                output.push(value.clone());
-                            }
-                        }
-                    }
-                    "intersection" => {
-                        // ECMA iterates the smaller set and keeps its order:
-                        // `this` when it is no larger than the argument,
-                        // otherwise the argument's own insertion order.
-                        if left.len() <= right.len() {
-                            for value in &left {
-                                if self.heap.set_has(*other, value)? {
-                                    output.push(value.clone());
-                                }
-                            }
-                        } else {
-                            for value in &right {
-                                if self.heap.set_has(receiver, value)? {
-                                    output.push(value.clone());
-                                }
-                            }
-                        }
-                    }
-                    "difference" => {
-                        for value in &left {
-                            if !self.heap.set_has(*other, value)? {
-                                output.push(value.clone());
-                            }
-                        }
-                    }
-                    "symmetricDifference" => {
-                        for value in &left {
-                            if !self.heap.set_has(*other, value)? {
-                                output.push(value.clone());
-                            }
-                        }
-                        for value in &right {
-                            if !self.heap.set_has(receiver, value)? {
-                                output.push(value.clone());
-                            }
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-                Some(self.heap.allocate_set(output)?)
-            }
-            ("Set", "isSubsetOf" | "isSupersetOf" | "isDisjointFrom", [Value::Ref(other)])
-                if matches!(self.heap.get(*other)?, HeapObject::Set(_)) =>
-            {
-                let left = self
-                    .heap
-                    .set_values(receiver)?
-                    .expect("Set receiver was checked");
-                let right = self
-                    .heap
-                    .set_values(*other)?
-                    .expect("Set argument was checked");
-                Some(Value::Bool(match method {
-                    "isSubsetOf" => left
-                        .iter()
-                        .all(|value| self.heap.set_has(*other, value).unwrap_or(false)),
-                    "isSupersetOf" => right
-                        .iter()
-                        .all(|value| self.heap.set_has(receiver, value).unwrap_or(false)),
-                    "isDisjointFrom" => left
-                        .iter()
-                        .all(|value| !self.heap.set_has(*other, value).unwrap_or(false)),
-                    _ => unreachable!(),
-                }))
-            }
+                "union"
+                | "intersection"
+                | "difference"
+                | "symmetricDifference"
+                | "isSubsetOf"
+                | "isSupersetOf"
+                | "isDisjointFrom",
+                [other],
+            ) => Some(self.execute_javascript_set_method(method, receiver, other)?),
             _ => {
                 return Err(js_stdlib_error(format!(
                     "TS_METHOD_UNSUPPORTED: {kind}.{method} with {} argument(s)",

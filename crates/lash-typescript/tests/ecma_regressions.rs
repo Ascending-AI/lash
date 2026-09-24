@@ -371,6 +371,38 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "1,2,3|2|true",
         ),
         (
+            "const s=new Set([1,2]); const m=new Map([[2,'x'],[3,'y']]); finish([...s.union(m)].join(',')+'|'+[...s.intersection(m)].join(',')+'|'+[...s.difference(m)].join(',')+'|'+[...s.symmetricDifference(m)].join(','));",
+            "1,2,3|2|1|1,3",
+        ),
+        (
+            "const m=new Map([[2,'a']]); finish(new Set([2]).isSubsetOf(m)+'|'+new Set([2,5]).isSupersetOf(m)+'|'+new Set([1]).isDisjointFrom(m));",
+            "true|true|true",
+        ),
+        (
+            "finish([...new Set([3,2,1,0]).intersection(new Set([1,3,5]))].join(',')+'|'+[...new Set([1,2,3]).difference(new Set([7,6,3,2]))].join(','));",
+            "1,3|1",
+        ),
+        (
+            "try { new Set([1]).union([3]); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const o={size:2,has:()=>true,keys:undefined}; try { new Set([1]).union(o); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const o={size:2,has:undefined,keys:()=>[]}; try { new Set([1]).difference(o); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const o={size:'x',has:()=>true,keys:()=>[]}; try { new Set([1]).isSubsetOf(o); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "try { new Set([1]).isDisjointFrom(null); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
             "finish(JSON.stringify(Object.groupBy([1,2,3,4],v=>v%2)));",
             "{\"0\":[2,4],\"1\":[1,3]}",
         ),
@@ -1649,4 +1681,31 @@ fn function_name_and_length_are_non_writable_and_configurable() {
     for (source, expected) in cases {
         assert_eq!(finished(source), Value::Bool(expected), "{source}");
     }
+}
+
+/// A record that passes GetSetRecord validation — numeric `size`, callable
+/// `has` and `keys` — still cannot be a Set argument: those members are guest
+/// closures and a synchronous builtin cannot invoke them, so the method
+/// refuses only when the algorithm actually reaches a callback (FIG-3704).
+#[test]
+fn set_like_objects_with_guest_callbacks_stay_a_refusal() {
+    for source in [
+        "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set([1]).union(o));",
+        "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set([1]).isSubsetOf(o));",
+    ] {
+        let error =
+            execute(source).expect_err("a set-like record's guest callbacks cannot be invoked");
+        assert!(
+            error.to_string().contains("TS_METHOD_UNSUPPORTED"),
+            "{source}: {error}"
+        );
+    }
+    // An empty `this` never reaches a callback, so the validated set-like
+    // still answers ECMA's result.
+    assert_eq!(
+        finished(
+            "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set().isSubsetOf(o)+'|'+new Set().isDisjointFrom(o));"
+        ),
+        Value::String("true|true".into())
+    );
 }
