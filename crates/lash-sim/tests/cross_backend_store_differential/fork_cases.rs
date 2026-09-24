@@ -3,12 +3,19 @@ use lash_sansio::SessionId;
 
 /// Agreement alone misses a missing-root defect shared by every backend.
 /// Apply the same independent byte-survival and rollback oracle to all three.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn cross_owner_attachment_adoption(
     sqlite_root: &Path,
     postgres: &PostgresStorage,
 ) {
+    let memory = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("SQLite memory backend");
     let factories: [Arc<dyn SessionStoreFactory>; 3] = [
-        Arc::new(InMemorySessionStoreFactory::new()),
+        memory.session_store_factory(),
         Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             sqlite_root.join("cross-owner"),
         )),
@@ -303,14 +310,14 @@ pub(super) async fn selected_observer_intents(
     let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(&path, &root)
         .await
         .expect("SQLite observer registry");
+    let memory = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("SQLite memory observer backend");
     let backends: Vec<(
         Arc<dyn SessionStoreFactory>,
         Arc<dyn lash_core::ProcessRegistry>,
     )> = vec![
-        (
-            Arc::new(InMemorySessionStoreFactory::new()),
-            Arc::new(lash_core::TestLocalProcessRegistry::default()),
-        ),
+        (memory.session_store_factory(), memory.process_registry()),
         (
             Arc::new(
                 lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(root, path),

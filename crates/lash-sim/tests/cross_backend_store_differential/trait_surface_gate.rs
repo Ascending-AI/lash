@@ -127,7 +127,8 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
 /// their durable surface is the attachment *manifest* row, which the
 /// residue digest already covers. The blob store itself is compared by
 /// `attachment_blob_store_differential_agrees` in the same crate, which runs
-/// the same three-backend comparison over file, S3, and in-memory blob stores.
+/// the same three-backend comparison over SQLite memory, file and S3 blob
+/// stores.
 const ATTACHMENT_STORE_EXCLUSIONS: &[(&str, &str)] = &[
     (
         "put",

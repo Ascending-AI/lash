@@ -1,8 +1,9 @@
 //! The generator is deliberately table-driven for its first landing. These
 //! malformed shapes are individually named, reviewable, and shrink no further
 //! than the short sequences below. Add a case by extending `generated_cases`;
-//! the runner automatically applies every operation to in-memory, SQLite, and
-//! Postgres and compares the observation after each step.
+//! the runner automatically applies every operation to a SQLite memory
+//! backend, a SQLite file backend and Postgres and compares the observation
+//! after each step.
 //!
 //! Agreement is not correctness: a differential cannot detect a defect shared
 //! by all backends. The FIG-641 case below is the live example of that limit.
@@ -18,9 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash_core::facade_support::ToolStateFacadeOps;
-use lash_core::runtime::{
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-};
+use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary};
 use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory};
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::{
@@ -32,8 +31,7 @@ use lash_core::{
     SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage,
     ToolState, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress,
-    TurnInputStateKind, facade_support::InMemorySessionStore,
-    facade_support::InMemorySessionStoreFactory,
+    TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -118,12 +116,9 @@ enum CaseName {
 enum ComparisonMode {
     /// Every backend, compared through the decoded durable digest.
     Decoded,
-    /// The two SQL backends only, compared without decoding any row.
-    ///
-    /// A deliberately undecodable record is not a state the in-memory
-    /// reference store can hold, and the decoded digest cannot read one. See
-    /// `corrupt_input_cases.rs` for why this narrows the backend set without
-    /// weakening the comparison.
+    /// Every backend, compared without decoding any row: the decoded digest
+    /// cannot read a deliberately undecodable record. See
+    /// `corrupt_input_cases.rs`.
     RawOnly,
 }
 
@@ -949,10 +944,8 @@ type QueuedWorkBatchRow = (
 type QueuedWorkItemRow = (String, i64, String);
 
 enum RawDurableReader {
-    InMemory {
-        store: Arc<InMemorySessionStore>,
-        factory: Arc<InMemorySessionStoreFactory>,
-    },
+    /// A SQLite durable core, file or memory: `path` is the file, or the
+    /// memory database's URI, a raw connection opens.
     Sqlite {
         path: PathBuf,
         session_id: SessionId,
@@ -963,25 +956,6 @@ enum RawDurableReader {
         session_id: SessionId,
         store: Option<Arc<dyn ConformancePersistence>>,
     },
-}
-
-fn attachment_manifest_observation(
-    entry: lash_core::AttachmentManifestEntry,
-) -> AttachmentManifestObservation {
-    AttachmentManifestObservation {
-        attachment_id: entry.attachment_id,
-        canonical_uri: entry.canonical_uri,
-        intent_at_epoch_ms: entry.intent_at_epoch_ms,
-        written: entry.written_at_epoch_ms.is_some(),
-        committed: entry.committed_at_epoch_ms.is_some(),
-        owner_kind: entry.owner.as_ref().map(lash_core::AttachmentOwner::kind),
-        owner_id: entry.owner.as_ref().map(|owner| owner.id().to_string()),
-        owner_incarnation: entry
-            .owner
-            .as_ref()
-            .and_then(lash_core::AttachmentOwner::incarnation)
-            .map(|incarnation| incarnation.registration_sequence()),
-    }
 }
 
 fn decode_attachment_owner_kind(value: Option<&str>) -> Option<AttachmentOwnerKind> {
@@ -1023,24 +997,6 @@ fn decode_lease_owner(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-fn normalized_in_memory_node_json(node: &lash_core::SessionNodeRecord) -> Vec<u8> {
-    // The in-memory backend holds records rather than rows, so it has no
-    // `node_json` to read back; this side of the comparison has to produce one.
-    // It produces it with the same storage-body codec the SQL backends write
-    // with, which is what keeps this a comparison of backend semantics instead
-    // of a comparison of two separately maintained envelopes -- the codec already
-    // omits node identity and parent topology, both of which SQL keeps in indexed
-    // columns and which are compared as dedicated `DurableNode` fields.
-    let body = node
-        .encode_storage_body()
-        .expect("encode in-memory durable node");
-    normalized_sql_node_json(&body)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
 fn normalized_sql_node_json(node_json: &str) -> Vec<u8> {
     let value = serde_json::from_str(node_json).expect("decode SQL durable node");
     normalized_node_json(value)
@@ -1054,66 +1010,12 @@ fn normalized_node_json(value: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&value).expect("encode normalized durable node")
 }
 
-/// The in-memory lane's lifecycle backend: a SQLite memory backend
-/// whose session catalog is the in-memory backend under comparison. The
-/// in-memory store has no backend of its own, so its lifecycle core borrows
-/// every other port.
-struct InMemoryCatalogBackend {
-    inner: Arc<lash_sqlite_store::SqliteBackend>,
-    catalog: Arc<dyn SessionStoreFactory>,
-}
-
-impl lash::Backend for InMemoryCatalogBackend {
-    fn binding_identity(&self) -> &str {
-        lash::Backend::binding_identity(self.inner.as_ref())
-    }
-
-    fn clock(&self) -> Arc<dyn Clock> {
-        lash::Backend::clock(self.inner.as_ref())
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
-        Arc::clone(&self.catalog)
-    }
-
-    fn effect_host(&self) -> Arc<dyn lash::durability::EffectHost> {
-        lash::Backend::effect_host(self.inner.as_ref())
-    }
-
-    fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
-        lash::Backend::process_registry(self.inner.as_ref())
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core::TriggerStore> {
-        lash::Backend::trigger_store(self.inner.as_ref())
-    }
-
-    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
-        lash::Backend::process_definition_registry(self.inner.as_ref())
-    }
-
-    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
-        lash::Backend::process_env_store(self.inner.as_ref())
-    }
-
-    fn attachment_store(&self) -> Arc<dyn lash_core::AttachmentStore> {
-        lash::Backend::attachment_store(self.inner.as_ref())
-    }
-
-    fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
-        lash::Backend::process_work(self.inner.as_ref())
-    }
-
-    fn queued_work(&self) -> lash_core::BackendQueuedWork {
-        lash::Backend::queued_work(self.inner.as_ref())
-    }
-}
-
 #[derive(Clone)]
 enum BackendReopen {
-    /// Retained-factory, same-object reopen only; this cannot establish
-    /// independent cold-instance reconstruction for the in-memory backend.
-    InMemory,
+    /// Fresh handles on the memory backend's databases.
+    SqliteMemory {
+        backend: Arc<lash_sqlite_store::SqliteBackend>,
+    },
     Sqlite {
         root: PathBuf,
     },
@@ -1612,15 +1514,33 @@ impl BackendRunner {
             StoreOperation::ColdReopenSession => {
                 let request = self.create_request();
                 let reopened = match self.reopen.clone() {
-                    // This is intentionally a retained-factory, same-object
-                    // reopen. Only the SQL legs prove independent cold-instance
-                    // reconstruction.
-                    BackendReopen::InMemory => self
-                        .factory()
-                        .open_existing_conformance_store(&request)
-                        .await
-                        .map_err(StoreError::Backend)?
-                        .expect("in-memory retained factory must still expose the live session"),
+                    BackendReopen::SqliteMemory { backend } => {
+                        self.store.take();
+                        self.factory.take();
+                        self.raw_reader.detach_store();
+
+                        let reopened_backend = backend
+                            .reopen_with_clock(Arc::clone(&self.clock))
+                            .await
+                            .expect("reopen the SQLite memory backend");
+                        let concrete_factory = reopened_backend.session_store_factory();
+                        let reopened = concrete_factory
+                            .open_existing_conformance_store(&request)
+                            .await
+                            .map_err(StoreError::Backend)?
+                            .expect("SQLite memory session must survive an independent reopen");
+                        self.factory =
+                            Some(concrete_factory as Arc<dyn ConformanceSessionStoreFactory>);
+                        self.raw_reader = RawDurableReader::Sqlite {
+                            path: PathBuf::from(
+                                reopened_backend
+                                    .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+                            ),
+                            session_id: self.session_id.clone(),
+                            store: Some(Arc::clone(&reopened)),
+                        };
+                        reopened
+                    }
                     BackendReopen::Sqlite { root } => {
                         self.store.take();
                         self.factory.take();
@@ -2019,8 +1939,8 @@ fn normalized_store_errors_compare_typedness_and_variant_not_prose() {
         "different typed variants must remain distinct"
     );
     assert_ne!(
-        normalized_store_error("in-memory", &first_capture_failure),
-        normalized_store_error("in-memory", &second_capture_failure),
+        normalized_store_error("sqlite-memory", &first_capture_failure),
+        normalized_store_error("sqlite-memory", &second_capture_failure),
         "the existing execution-state capture diagnostic comparison remains exact"
     );
 }
@@ -2112,16 +2032,23 @@ async fn runners_for_case_with_clock(
         relation,
     };
 
-    let memory_factory = Arc::new(InMemorySessionStoreFactory::with_clock(Arc::clone(&clock)));
+    let memory_backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory_with_clock(Arc::clone(&clock))
+            .await
+            .expect("open the SQLite memory differential backend"),
+    );
+    let memory_factory = memory_backend.session_store_factory();
     let memory_store = memory_factory
         .create_conformance_store(&create_request)
         .await
-        .expect("create in-memory differential store");
-    let memory = memory_factory
-        .raw_store_for_testing(&session_id)
-        .expect("factory retains concrete in-memory store");
-    memory.replace_session_meta_for_testing(expected_meta.clone());
+        .expect("create SQLite memory differential store");
+    memory_store
+        .save_session_meta(expected_meta.clone())
+        .await
+        .expect("install deterministic SQLite memory session metadata");
     let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn ConformanceSessionStoreFactory>;
+    let memory_path =
+        PathBuf::from(memory_backend.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore));
 
     let sqlite_case_root = sqlite_root.join(case.as_str());
     let sqlite_factory = Arc::new(
@@ -2156,14 +2083,8 @@ async fn runners_for_case_with_clock(
     let postgres_factory_dyn =
         Arc::clone(&postgres_factory) as Arc<dyn ConformanceSessionStoreFactory>;
 
-    let memory_lifecycle: Arc<dyn lash::Backend> = Arc::new(InMemoryCatalogBackend {
-        inner: Arc::new(
-            lash_sqlite_store::SqliteBackend::memory_with_clock(Arc::clone(&clock))
-                .await
-                .expect("open the in-memory lane's lifecycle backend"),
-        ),
-        catalog: Arc::clone(&memory_factory) as Arc<dyn SessionStoreFactory>,
-    });
+    let memory_lifecycle: Arc<dyn lash::Backend> =
+        Arc::clone(&memory_backend) as Arc<dyn lash::Backend>;
     let sqlite_lifecycle: Arc<dyn lash::Backend> = Arc::new(
         lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
             &sqlite_case_root,
@@ -2186,15 +2107,18 @@ async fn runners_for_case_with_clock(
 
     vec![
         BackendRunner {
-            name: "in-memory",
+            name: "sqlite-memory",
             session_id: session_id.clone(),
-            store: Some(memory_store),
+            store: Some(Arc::clone(&memory_store)),
             factory: Some(memory_factory_dyn),
-            raw_reader: RawDurableReader::InMemory {
-                store: memory,
-                factory: memory_factory,
+            raw_reader: RawDurableReader::Sqlite {
+                path: memory_path,
+                session_id: session_id.clone(),
+                store: Some(memory_store),
             },
-            reopen: BackendReopen::InMemory,
+            reopen: BackendReopen::SqliteMemory {
+                backend: memory_backend,
+            },
             clock: Arc::clone(&clock),
             handles: BTreeMap::new(),
             lifecycle_backend: memory_lifecycle,
@@ -2362,7 +2286,7 @@ async fn cross_backend_store_differential_agrees() {
             );
             eprintln!(
                 "SKIPPED cross-backend store differential; compared_backends=[]; \
-                 required_backends=[in-memory,sqlite,postgres]; \
+                 required_backends=[sqlite-memory,sqlite,postgres]; \
                  reason=LASH_POSTGRES_DATABASE_URL is not set"
             );
             return;
@@ -2375,7 +2299,7 @@ async fn cross_backend_store_differential_agrees() {
             );
             eprintln!(
                 "SKIPPED cross-backend store differential; compared_backends=[]; \
-                 required_backends=[in-memory,sqlite,postgres]; \
+                 required_backends=[sqlite-memory,sqlite,postgres]; \
                  reason=LASH_POSTGRES_DATABASE_URL is not set"
             );
             return;
@@ -2416,7 +2340,7 @@ async fn cross_backend_store_differential_agrees() {
     let mut residue_violations = String::new();
     eprintln!(
         "RUNNING cross-backend store differential; \
-         compared_backends=[in-memory,sqlite,postgres]; cases={}",
+         compared_backends=[sqlite-memory,sqlite,postgres]; cases={}",
         generated_cases().len()
     );
 
@@ -2429,14 +2353,6 @@ async fn cross_backend_store_differential_agrees() {
             &run_nonce,
         )
         .await;
-        if case.name.comparison() == ComparisonMode::RawOnly {
-            runners.retain(|runner| runner.name != "in-memory");
-            assert_eq!(
-                runners.len(),
-                2,
-                "corrupt-input cases compare exactly the two backends that can hold                  undecodable bytes"
-            );
-        }
         fork_cases::prepare_retention_case(case.name, &runners).await;
         for (step_index, operation) in case.operations.iter().enumerate() {
             let mut observations = Vec::with_capacity(runners.len());
@@ -2500,6 +2416,6 @@ async fn cross_backend_store_differential_agrees() {
     assert_storage_failure_mappings_agree(sqlite_root.path(), &postgres).await;
     eprintln!(
         "PASSED cross-backend store differential; \
-         compared_backends=[in-memory,sqlite,postgres]"
+         compared_backends=[sqlite-memory,sqlite,postgres]"
     );
 }

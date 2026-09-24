@@ -1045,8 +1045,8 @@ run_scenario_harnesses() {
 
     step "Durable store-contract state-machine properties"
     LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
-      run_cargo_tests -p lash-internal-conformance --locked \
-      ::tests::store_contract_state_machine
+      run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
+      store_contract_state_machine
     LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
       run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
       store_contract_state_machine
@@ -1069,8 +1069,8 @@ run_scenario_harnesses() {
     build_conformance_helpers
     step "Runtime-persistence state-machine properties"
     LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-      run_cargo_tests -p lash-internal-conformance --locked \
-      ::tests::runtime_persistence_state_machine
+      run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
+      runtime_persistence_state_machine
     LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
       run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
       runtime_persistence_state_machine
@@ -1080,8 +1080,8 @@ run_scenario_harnesses() {
 
     step "Session graph state-machine property harness"
     LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
-      run_cargo_tests -p lash-internal-conformance --locked \
-      ::tests::session_graph_state_machine
+      run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
+      session_graph_state_machine
     LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
       run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
       session_graph_state_machine
@@ -1110,6 +1110,7 @@ run_scenario_harnesses() {
 
 run_state_machine_and_fault_matrix() {
   if area_selected process; then
+    build_conformance_helpers
     step "Runtime state-machine property runner"
     run_cargo_tests -p lash-internal-core --locked runtime_state_machine_property
     step "Durable fault matrix metadata"
@@ -1117,11 +1118,11 @@ run_state_machine_and_fault_matrix() {
     step "Durable process fault-matrix evidence"
     run_cargo_tests -p lash-runtime --locked --features rlm,testing \
       runtime_rebuild_and_worker_recovery_with_durable_stores
-    run_cargo_tests -p lash-internal-conformance --locked \
+    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
       queued_work_claims_supersede_across_session_lease_generations
-    run_cargo_tests -p lash-internal-conformance --locked \
+    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
       turn_input_claims_supersede_across_session_lease_generations
-    run_cargo_tests -p lash-internal-conformance --locked \
+    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
       same_generation_claim_scans_reach_rows_beyond_the_scan_surplus
   fi
 
@@ -1142,8 +1143,9 @@ run_state_machine_and_fault_matrix() {
   fi
 
   if area_selected effect-host; then
-    step "Native effect-host await-event session-cancel conformance"
-    run_cargo_tests -p lash-internal-conformance --locked ::tests::effect_host
+    build_conformance_helpers
+    step "Effect-host await-event session-cancel conformance (SQLite memory)"
+    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory effect_host
   fi
 
   if area_selected trigger; then
