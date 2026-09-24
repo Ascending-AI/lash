@@ -297,57 +297,6 @@ fn project_trigger_process_input(
     }
 }
 
-pub(super) fn reserve_in_memory_for_occurrence(
-    state: &mut InMemoryTriggerEventState,
-    occurrence: &TriggerOccurrenceRecord,
-    clock: &dyn crate::Clock,
-) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
-    let subscriptions = state
-        .subscriptions
-        .values()
-        .filter(|record| {
-            record.routable()
-                && record.source_type == occurrence.source_type
-                && record.source_key == occurrence.source_key
-                && occurrence
-                    .session_id
-                    .as_ref()
-                    .is_none_or(|session_id| record.registrant_session_id() == Some(session_id))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut reservations = Vec::new();
-    for subscription in subscriptions {
-        let process_id = deterministic_delivery_process_id(
-            &occurrence.occurrence_id,
-            &subscription.subscription_id,
-            &subscription.incarnation,
-            subscription.revision,
-        )?;
-        let key = (
-            occurrence.occurrence_id.clone(),
-            subscription.subscription_id.clone(),
-        );
-        let delivery = InMemoryTriggerDeliveryRecord {
-            occurrence_id: occurrence.occurrence_id.clone(),
-            subscription_id: subscription.subscription_id.clone(),
-            process_id,
-            created_at_ms: clock.timestamp_ms(),
-            subscription_snapshot: subscription.clone(),
-        };
-        state.deliveries.insert(key, delivery.clone());
-        reservations.push(TriggerDeliveryReservation {
-            occurrence: occurrence.clone(),
-            subscription,
-            process_id: delivery.process_id,
-            created_at_ms: delivery.created_at_ms,
-            reservation_status: TriggerDeliveryReservationOutcome::Reserved,
-        });
-    }
-    sort_trigger_delivery_reservations(&mut reservations);
-    Ok(reservations)
-}
-
 pub(super) fn default_enabled() -> bool {
     true
 }

@@ -158,23 +158,22 @@ impl Default for InMemoryTriggerStore {
 }
 
 #[derive(Clone, Default)]
-pub(super) struct InMemoryTriggerEventState {
-    pub(super) subscriptions: BTreeMap<String, TriggerSubscriptionRecord>,
-    pub(super) mutation_receipts:
-        BTreeMap<String, (TriggerOwnerScope, String, TriggerEffectResult, u64)>,
-    pub(super) occurrences: BTreeMap<String, TriggerOccurrenceRecord>,
-    pub(super) occurrence_id_by_idempotency_key: BTreeMap<String, String>,
-    pub(super) occurrence_reclaimable_at_ms: BTreeMap<String, u64>,
-    pub(super) deliveries: BTreeMap<(String, String), InMemoryTriggerDeliveryRecord>,
+struct InMemoryTriggerEventState {
+    subscriptions: BTreeMap<String, TriggerSubscriptionRecord>,
+    mutation_receipts: BTreeMap<String, (TriggerOwnerScope, String, TriggerEffectResult, u64)>,
+    occurrences: BTreeMap<String, TriggerOccurrenceRecord>,
+    occurrence_id_by_idempotency_key: BTreeMap<String, String>,
+    occurrence_reclaimable_at_ms: BTreeMap<String, u64>,
+    deliveries: BTreeMap<(String, String), InMemoryTriggerDeliveryRecord>,
 }
 
 #[derive(Clone)]
-pub(super) struct InMemoryTriggerDeliveryRecord {
-    pub(super) occurrence_id: String,
-    pub(super) subscription_id: String,
-    pub(super) process_id: ProcessId,
-    pub(super) created_at_ms: u64,
-    pub(super) subscription_snapshot: TriggerSubscriptionRecord,
+struct InMemoryTriggerDeliveryRecord {
+    occurrence_id: String,
+    subscription_id: String,
+    process_id: ProcessId,
+    created_at_ms: u64,
+    subscription_snapshot: TriggerSubscriptionRecord,
 }
 
 fn in_memory_delivery_reservation(
@@ -734,7 +733,7 @@ fn execute_in_memory_trigger_command(
     }
 
     let owner_scope = command.owner_scope().clone();
-    let result = apply_in_memory_trigger_command(state, command, now);
+    let result = apply_trigger_command(&mut state.subscriptions, command, now);
     if is_mutation {
         state.mutation_receipts.insert(
             receipt_id,
@@ -744,251 +743,53 @@ fn execute_in_memory_trigger_command(
     Ok(result)
 }
 
-pub(super) fn apply_in_memory_trigger_command(
+fn reserve_in_memory_for_occurrence(
     state: &mut InMemoryTriggerEventState,
-    command: TriggerCommand,
-    now: u64,
-) -> TriggerEffectResult {
-    apply_in_memory_trigger_command_with_incarnation(state, command, now, &mut || {
-        uuid::Uuid::new_v4().to_string()
-    })
-}
-
-pub(super) fn apply_in_memory_trigger_command_with_incarnation(
-    state: &mut InMemoryTriggerEventState,
-    command: TriggerCommand,
-    now: u64,
-    new_incarnation: &mut dyn FnMut() -> String,
-) -> TriggerEffectResult {
-    match command {
-        TriggerCommand::List {
-            owner_scope,
-            mut filter,
-        } => {
-            filter.registrant_scope_id = Some(owner_scope.namespace());
-            let mut records = state
-                .subscriptions
-                .values()
-                .filter(|record| filter.matches(record))
-                .cloned()
-                .collect::<Vec<_>>();
-            records.sort_by(|left, right| left.subscription_key.cmp(&right.subscription_key));
-            Ok(TriggerCommandOutcome::List { records })
-        }
-        TriggerCommand::Prune {
-            owner_scope,
-            actor,
-            subscription_keys,
-        } => {
-            let records = state.subscriptions.values().cloned().collect::<Vec<_>>();
-            let result =
-                evaluate_trigger_prune(records, owner_scope, actor, subscription_keys, now)?;
-            if let TriggerCommandOutcome::Prune { receipts } = &result {
-                for receipt in receipts {
-                    state.subscriptions.insert(
-                        receipt.subscription_id.clone(),
-                        receipt.record_snapshot.clone(),
-                    );
-                }
-            }
-            Ok(result)
-        }
-        TriggerCommand::Register {
-            owner_scope,
-            actor,
-            draft,
-        } => {
-            draft.validate().map_err(TriggerOperationError::from)?;
-            let subscription_id =
-                deterministic_subscription_id(&owner_scope, &draft.subscription_key);
-            let definition_fingerprint =
-                trigger_subscription_definition_fingerprint(&owner_scope, &draft);
-            if let Some(existing) = state.subscriptions.get(&subscription_id).cloned() {
-                if !existing.is_tombstoned()
-                    && existing.definition_fingerprint == definition_fingerprint
-                {
-                    return Ok(TriggerCommandOutcome::Mutation {
-                        receipt: Box::new(TriggerMutationReceipt::from_record(
-                            existing,
-                            TriggerMutationOutcome::Unchanged,
-                        )),
-                    });
-                }
-                return Err(subscription_conflict(
-                    &draft.subscription_key,
-                    Some(&existing),
-                    Some(definition_fingerprint),
-                    if existing.is_tombstoned() {
-                        "subscription is tombstoned; use revive"
-                    } else {
-                        "register does not replace a different definition; use update"
-                    },
-                ));
-            }
-            let record = subscription_record_from_draft(
-                owner_scope,
-                actor,
-                draft,
-                subscription_id.clone(),
-                new_incarnation(),
-                1,
-                definition_fingerprint,
-                true,
-                now,
-                now,
-            );
-            state.subscriptions.insert(subscription_id, record.clone());
-            Ok(TriggerCommandOutcome::Mutation {
-                receipt: Box::new(TriggerMutationReceipt::from_record(
-                    record,
-                    TriggerMutationOutcome::Created,
-                )),
-            })
-        }
-        TriggerCommand::Update {
-            owner_scope,
-            actor,
-            subscription_key,
-            mut draft,
-            expected_revision,
-        } => {
-            draft.subscription_key.clone_from(&subscription_key);
-            draft.validate().map_err(TriggerOperationError::from)?;
-            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
-            let requested_hash = trigger_subscription_definition_fingerprint(&owner_scope, &draft);
-            let Some(existing) = state.subscriptions.get(&subscription_id).cloned() else {
-                return Err(subscription_conflict(
-                    &subscription_key,
-                    None,
-                    Some(requested_hash),
-                    "subscription does not exist",
-                ));
-            };
-            ensure_live_revision(&existing, expected_revision, Some(requested_hash.clone()))?;
-            let next_revision = next_trigger_revision(&existing)?;
-            let record = subscription_record_from_draft(
-                owner_scope,
-                actor,
-                draft,
-                subscription_id.clone(),
-                existing.incarnation,
-                next_revision,
-                requested_hash,
-                existing.lifecycle.enabled(),
-                existing.created_at_ms,
-                now,
-            );
-            state.subscriptions.insert(subscription_id, record.clone());
-            Ok(TriggerCommandOutcome::Mutation {
-                receipt: Box::new(TriggerMutationReceipt::from_record(
-                    record,
-                    TriggerMutationOutcome::Updated,
-                )),
-            })
-        }
-        TriggerCommand::Enable {
-            owner_scope,
-            actor,
-            subscription_key,
-            expected_revision,
-        } => mutate_enabled(
-            state,
-            owner_scope,
-            actor,
-            subscription_key,
-            expected_revision,
-            true,
-            now,
-        ),
-        TriggerCommand::Disable {
-            owner_scope,
-            actor,
-            subscription_key,
-            expected_revision,
-        } => mutate_enabled(
-            state,
-            owner_scope,
-            actor,
-            subscription_key,
-            expected_revision,
-            false,
-            now,
-        ),
-        TriggerCommand::Delete {
-            owner_scope,
-            actor,
-            subscription_key,
-            expected_revision,
-        } => {
-            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
-            let Some(existing) = state.subscriptions.get_mut(&subscription_id) else {
-                return Err(subscription_conflict(
-                    &subscription_key,
-                    None,
-                    None,
-                    "subscription does not exist",
-                ));
-            };
-            ensure_live_revision(existing, expected_revision, None)?;
-            let next_revision = next_trigger_revision(existing)?;
-            existing.registrant = actor;
-            existing.tombstone(now);
-            existing.revision = next_revision;
-            existing.updated_at_ms = now;
-            Ok(TriggerCommandOutcome::Mutation {
-                receipt: Box::new(TriggerMutationReceipt::from_record(
-                    existing.clone(),
-                    TriggerMutationOutcome::Deleted,
-                )),
-            })
-        }
-        TriggerCommand::Revive {
-            owner_scope,
-            actor,
-            subscription_key,
-            mut draft,
-            expected_revision,
-        } => {
-            draft.subscription_key.clone_from(&subscription_key);
-            draft.validate().map_err(TriggerOperationError::from)?;
-            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
-            let requested_hash = trigger_subscription_definition_fingerprint(&owner_scope, &draft);
-            let Some(existing) = state.subscriptions.get(&subscription_id).cloned() else {
-                return Err(subscription_conflict(
-                    &subscription_key,
-                    None,
-                    Some(requested_hash),
-                    "subscription does not exist; use register",
-                ));
-            };
-            if !existing.is_tombstoned() || existing.revision != expected_revision {
-                return Err(subscription_conflict(
-                    &subscription_key,
-                    Some(&existing),
-                    Some(requested_hash),
-                    "revive requires the current tombstone revision",
-                ));
-            }
-            let next_revision = next_trigger_revision(&existing)?;
-            let record = subscription_record_from_draft(
-                owner_scope,
-                actor,
-                draft,
-                subscription_id.clone(),
-                new_incarnation(),
-                next_revision,
-                requested_hash,
-                true,
-                existing.created_at_ms,
-                now,
-            );
-            state.subscriptions.insert(subscription_id, record.clone());
-            Ok(TriggerCommandOutcome::Mutation {
-                receipt: Box::new(TriggerMutationReceipt::from_record(
-                    record,
-                    TriggerMutationOutcome::Revived,
-                )),
-            })
-        }
+    occurrence: &TriggerOccurrenceRecord,
+    clock: &dyn crate::Clock,
+) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
+    let subscriptions = state
+        .subscriptions
+        .values()
+        .filter(|record| {
+            record.routable()
+                && record.source_type == occurrence.source_type
+                && record.source_key == occurrence.source_key
+                && occurrence
+                    .session_id
+                    .as_ref()
+                    .is_none_or(|session_id| record.registrant_session_id() == Some(session_id))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut reservations = Vec::new();
+    for subscription in subscriptions {
+        let process_id = deterministic_delivery_process_id(
+            &occurrence.occurrence_id,
+            &subscription.subscription_id,
+            &subscription.incarnation,
+            subscription.revision,
+        )?;
+        let key = (
+            occurrence.occurrence_id.clone(),
+            subscription.subscription_id.clone(),
+        );
+        let delivery = InMemoryTriggerDeliveryRecord {
+            occurrence_id: occurrence.occurrence_id.clone(),
+            subscription_id: subscription.subscription_id.clone(),
+            process_id,
+            created_at_ms: clock.timestamp_ms(),
+            subscription_snapshot: subscription.clone(),
+        };
+        state.deliveries.insert(key, delivery.clone());
+        reservations.push(TriggerDeliveryReservation {
+            occurrence: occurrence.clone(),
+            subscription,
+            process_id: delivery.process_id,
+            created_at_ms: delivery.created_at_ms,
+            reservation_status: TriggerDeliveryReservationOutcome::Reserved,
+        });
     }
+    sort_trigger_delivery_reservations(&mut reservations);
+    Ok(reservations)
 }
