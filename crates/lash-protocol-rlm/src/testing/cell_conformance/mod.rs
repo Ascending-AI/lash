@@ -30,6 +30,8 @@
 //!   deep; [`generative`] stays beside it because it needs no engine, so it
 //!   sweeps thousands of sessions through failing cells of every kind at a
 //!   cost the checked-in Node answers could not carry.
+//! * [`prompt_bindings`] — the prompt's "Bound Variables" section names every
+//!   binding a later cell can use, the ones with no host view included.
 //!
 //! Every scenario is its own `#[test]`, so `nextest` shards them and a failure
 //! names one cell sequence rather than a bundle. The whole suite runs with a
@@ -45,6 +47,7 @@ mod no_poisoning;
 mod node_oracle;
 mod parked_continuation;
 mod persistence;
+mod prompt_bindings;
 mod syntax;
 
 use harness::{CellOutcome, HarnessMode, Session};

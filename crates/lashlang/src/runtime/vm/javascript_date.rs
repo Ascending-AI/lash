@@ -331,7 +331,7 @@ fn date_parts(milliseconds: f64) -> Option<DateParts> {
     })
 }
 
-pub(super) fn to_iso_string(milliseconds: f64) -> Option<String> {
+pub(crate) fn to_iso_string(milliseconds: f64) -> Option<String> {
     let parts = date_parts(milliseconds)?;
     let year = if (0..=9_999).contains(&parts.year) {
         format!("{:04}", parts.year)

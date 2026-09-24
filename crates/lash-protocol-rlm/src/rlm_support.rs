@@ -258,9 +258,14 @@ pub(crate) fn render_read_only_variables(
     lines.join("\n")
 }
 
+/// Renders the session's bindings: `globals` are the host-view values, shown
+/// with their shapes and previews; `opaque` are the bindings with no host view
+/// (a `Map`, a `Date`, a record holding one), shown by their bounded runtime
+/// summary, so the listing names every binding a cell can use (FIG-3629).
 pub(crate) fn render_bound_variables(
     cache: &mut BoundVariableRenderCache,
     globals: &[(String, FlowValue)],
+    opaque: &[(String, String)],
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> Arc<str> {
     let mut lines = vec![
@@ -326,6 +331,7 @@ pub(crate) fn render_bound_variables(
 
     lines.push(String::new());
     lines.push("Available variables:".to_string());
+    let mut listed = Vec::with_capacity(rows.len() + opaque.len());
     for row in &rows {
         let line = render_row_line(row, &registry, vocabulary);
         cache.entries.insert(
@@ -338,10 +344,15 @@ pub(crate) fn render_bound_variables(
                 preview: row.preview.clone(),
             },
         );
-        lines.push(line);
+        listed.push((row.name.as_str(), line));
     }
+    for (name, summary) in opaque {
+        listed.push((name.as_str(), format!("- `{name}`: {summary}")));
+    }
+    listed.sort_by(|left, right| left.0.cmp(right.0));
+    lines.extend(listed.into_iter().map(|(_, line)| line));
 
-    if rows.is_empty() {
+    if rows.is_empty() && opaque.is_empty() {
         return Arc::from("");
     }
     if rows
@@ -900,6 +911,7 @@ mod bound_variable_tests {
         render_bound_variables(
             cache,
             &globals,
+            &[],
             crate::dialect::DialectPromptVocabulary::default(),
         )
         .to_string()
@@ -912,6 +924,7 @@ mod bound_variable_tests {
         let rendered = render_bound_variables(
             &mut cache,
             &g,
+            &[],
             crate::dialect::DialectPromptVocabulary::default(),
         );
         let s = &rendered;
@@ -954,6 +967,7 @@ mod bound_variable_tests {
         let rendered = render_bound_variables(
             &mut cache,
             &g,
+            &[],
             crate::dialect::DialectPromptVocabulary::default(),
         );
         let s = &rendered;
@@ -974,6 +988,7 @@ mod bound_variable_tests {
         let s = render_bound_variables(
             &mut cache,
             &g,
+            &[],
             crate::dialect::DialectPromptVocabulary::default(),
         )
         .to_string();
@@ -992,6 +1007,7 @@ mod bound_variable_tests {
         let s = render_bound_variables(
             &mut cache,
             &g,
+            &[],
             crate::dialect::DialectPromptVocabulary::default(),
         )
         .to_string();
@@ -1095,6 +1111,7 @@ mod bound_variable_tests {
         let rendered = render_bound_variables(
             &mut cache,
             &[("payload".to_string(), value)],
+            &[],
             crate::dialect::DialectPromptVocabulary::default(),
         );
         assert!(

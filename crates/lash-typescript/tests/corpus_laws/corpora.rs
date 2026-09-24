@@ -167,7 +167,8 @@ fn sessions() -> Vec<CorpusProgram> {
         .sessions
         .iter()
         .flat_map(|session| {
-            let mut globals = BTreeSet::new();
+            let host = session.host.keys().cloned().collect::<BTreeSet<_>>();
+            let mut globals = host.clone();
             let mut programs = Vec::new();
             for (index, cell) in session.cells.iter().enumerate() {
                 if !cell.refused() {
@@ -178,6 +179,7 @@ fn sessions() -> Vec<CorpusProgram> {
                     });
                 }
                 globals = session.bound_after(cell);
+                globals.extend(host.iter().cloned());
             }
             programs
         })

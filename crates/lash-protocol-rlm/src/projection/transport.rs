@@ -384,104 +384,81 @@ pub(crate) struct ProjectedGlobalRehydration {
     pub(crate) degraded_bindings: Vec<lash_core::DegradedBinding>,
 }
 
-/// The successfully rehydrated bindings are committed as one batch: the turn's
-/// whole rehydration costs one heap copy and one collection rather than one of
-/// each per key. A reference failure leaves only its top-level binding in the
-/// loudly unavailable state installed by snapshot restore.
+/// Re-resolves every projection placeholder a reload left, by its
+/// `projection_ref`, and rebinds it in place.
+///
+/// The rebinding writes inside the objects that hold the placeholders, so a
+/// binding is never replaced by a copy of itself: an object two bindings share
+/// stays one object (FIG-3628). A live projection is left alone. A reference
+/// that fails to resolve leaves its placeholder, which refuses reads, and
+/// degrades every binding that reaches it.
 pub(crate) async fn rehydrate_projected_globals(
     rlm: &mut FlowState,
     projection_resolver: Arc<dyn ProjectionResolver>,
 ) -> Result<ProjectedGlobalRehydration, String> {
-    let keys = rlm.globals().keys().map(str::to_string).collect::<Vec<_>>();
-    let mut patch = Vec::new();
-    let mut degraded_bindings = Vec::new();
-    for key in keys {
-        if let Some(mut value) = rlm.globals().get(&key).cloned() {
-            match rehydrate_projected_value(&mut value, Arc::clone(&projection_resolver)).await {
-                Ok(true) => patch.push(lashlang::GlobalPatch::Insert { name: key, value }),
-                Ok(false) => {}
-                Err(reason) => {
-                    degraded_bindings.push(lash_core::DegradedBinding { name: key, reason })
-                }
-            }
+    let placeholders = rlm.unavailable_projections();
+    let mut resolved = std::collections::BTreeMap::<String, Result<ProjectedValue, String>>::new();
+    for (_, placeholder) in &placeholders {
+        let Some(key) = placeholder_key(placeholder) else {
+            continue;
+        };
+        if resolved.contains_key(&key) {
+            continue;
+        }
+        let outcome = resolve_placeholder(placeholder, &projection_resolver).await;
+        resolved.insert(key, outcome);
+    }
+    let mut degraded_bindings = Vec::<lash_core::DegradedBinding>::new();
+    for (name, placeholder) in &placeholders {
+        let Some(Err(reason)) = placeholder_key(placeholder).and_then(|key| resolved.get(&key))
+        else {
+            continue;
+        };
+        if !degraded_bindings
+            .iter()
+            .any(|degraded| degraded.name == *name)
+        {
+            degraded_bindings.push(lash_core::DegradedBinding {
+                name: name.clone(),
+                reason: reason.clone(),
+            });
         }
     }
-    rlm.patch_globals(patch)
-        .map_err(|error| error.to_string())?;
+    rlm.rebind_projections(|placeholder| {
+        placeholder_key(placeholder)
+            .and_then(|key| resolved.get(&key))
+            .and_then(|outcome| outcome.as_ref().ok().cloned())
+    })
+    .map_err(|error| error.to_string())?;
     Ok(ProjectedGlobalRehydration { degraded_bindings })
 }
 
-fn rehydrate_projected_value<'a>(
-    value: &'a mut FlowValue,
-    projection_resolver: Arc<dyn ProjectionResolver>,
-) -> ProjectedFuture<'a, Result<bool, String>> {
-    Box::pin(async move {
-        match value {
-            FlowValue::Projected(projected) => {
-                let Some(ref_json) = projected.projection_ref().cloned() else {
-                    return Ok(false);
-                };
-                let name = projected.name().to_string();
-                let reference = serde_json::from_value::<ProjectionRef>(ref_json.clone())
-                    .map_err(|err| format!("invalid projection ref for `{name}`: {err}"))?;
-                let resolved = projection_resolver
-                    .resolve_projection(&reference)
-                    .await
-                    .map_err(|err| err.to_string())?;
-                *value = FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
-                    name, resolved, ref_json,
-                ));
-                Ok(true)
-            }
-            FlowValue::Tuple(values) => {
-                let mut changed = false;
-                let mut restored = values.iter().cloned().collect::<Vec<_>>();
-                for value in restored.iter_mut() {
-                    changed |=
-                        rehydrate_projected_value(value, Arc::clone(&projection_resolver)).await?;
-                }
-                if changed {
-                    *value = FlowValue::Tuple(restored.into());
-                }
-                Ok(changed)
-            }
-            FlowValue::List(values) => {
-                let mut changed = false;
-                let mut restored = values.iter().cloned().collect::<Vec<_>>();
-                for value in restored.iter_mut() {
-                    changed |=
-                        rehydrate_projected_value(value, Arc::clone(&projection_resolver)).await?;
-                }
-                if changed {
-                    *value = FlowValue::List(restored.into());
-                }
-                Ok(changed)
-            }
-            FlowValue::Record(record) => {
-                let mut changed = false;
-                let record = Arc::make_mut(record);
-                let keys = record.keys().map(str::to_string).collect::<Vec<_>>();
-                for key in keys {
-                    if let Some(value) = record.get_mut(&key) {
-                        changed |=
-                            rehydrate_projected_value(value, Arc::clone(&projection_resolver))
-                                .await?;
-                    }
-                }
-                Ok(changed)
-            }
-            FlowValue::Null
-            | FlowValue::Undefined
-            | FlowValue::Bool(_)
-            | FlowValue::Number(_)
-            | FlowValue::String(_)
-            | FlowValue::Resource(_)
-            | FlowValue::Image(_) => Ok(false),
-            FlowValue::Ref(_) => {
-                unreachable!("VM heap references must be materialized before projection restore")
-            }
-        }
-    })
+/// A placeholder's identity for re-resolution: its name and its reference.
+/// A placeholder without a reference has nothing to re-resolve by.
+fn placeholder_key(placeholder: &ProjectedValue) -> Option<String> {
+    placeholder
+        .projection_ref()
+        .map(|reference| format!("{}\u{0}{reference}", placeholder.name()))
+}
+
+async fn resolve_placeholder(
+    placeholder: &ProjectedValue,
+    projection_resolver: &Arc<dyn ProjectionResolver>,
+) -> Result<ProjectedValue, String> {
+    let name = placeholder.name().to_string();
+    let ref_json = placeholder
+        .projection_ref()
+        .cloned()
+        .ok_or_else(|| format!("projection `{name}` carries no reference"))?;
+    let reference = serde_json::from_value::<ProjectionRef>(ref_json.clone())
+        .map_err(|err| format!("invalid projection ref for `{name}`: {err}"))?;
+    let resolved = projection_resolver
+        .resolve_projection(&reference)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(ProjectedValue::custom_with_projection_ref(
+        name, resolved, ref_json,
+    ))
 }
 
 fn json_map_to_image(map: &serde_json::Map<String, Value>) -> Option<ImageValue> {

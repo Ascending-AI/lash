@@ -55,12 +55,15 @@ function parseCorpus(text) {
     const argument = rest.join(' ');
     if (keyword === 'session') {
       if (session) throw new Error(`${where}: session ${session.id} has no end`);
-      session = { id: argument, about: '', probe: [], deviations: [], cells: [] };
+      session = { id: argument, about: '', host: {}, probe: [], deviations: [], cells: [] };
       continue;
     }
     if (!session) throw new Error(`${where}: \`${keyword}\` outside a session`);
     if (keyword === 'about') {
       session.about = argument;
+    } else if (keyword === 'host' && !cell) {
+      const [name, ...json] = rest;
+      session.host[name] = JSON.parse(json.join(' '));
     } else if (keyword === 'probe') {
       session.probe = rest;
     } else if (keyword === 'deviation' && !cell) {
@@ -102,7 +105,7 @@ function parseCorpus(text) {
 const sessions = parseCorpus(readFileSync(join(directory, 'corpus.txt'), 'utf8'));
 const output = { node: NODE_VERSION, sessions: [] };
 for (const session of sessions) {
-  const observations = observeSession(session.probe, session.cells);
+  const observations = observeSession(session.probe, session.cells, session.host);
   const cells = session.cells.map((cell, index) => {
     const entry = {
       source: cell.source,
@@ -117,6 +120,7 @@ for (const session of sessions) {
   output.sessions.push({
     id: session.id,
     about: session.about,
+    ...(Object.keys(session.host).length ? { host: session.host } : {}),
     probe: session.probe,
     deviations: session.deviations,
     cells,

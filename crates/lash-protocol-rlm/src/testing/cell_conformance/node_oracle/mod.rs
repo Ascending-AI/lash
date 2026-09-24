@@ -173,7 +173,9 @@ fn numbers_as_floats(value: &serde_json::Value) -> serde_json::Value {
 /// exactly as the executor links a cell: against the session's live globals.
 /// The diagnostic's message is returned beside its code.
 fn static_rejection(session: &Session, source: &str) -> Option<(String, String)> {
-    link_rejection(source, session.global_names())
+    let mut globals = session.global_names();
+    globals.extend(session.host_binding_names());
+    link_rejection(source, globals)
 }
 
 /// The diagnostic `source` is refused with when linked against `globals` on
