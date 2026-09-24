@@ -355,12 +355,15 @@ pub mod persistence {
     pub use lash_core::store::{
         AppendRequestIdentity, BeginQueuedRun, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
-        OrphanedTurnInputScope, PersistedSessionRead, QueuedRunAdmission, QueuedRunCommit,
-        QueuedRunMember, QueuedRunPosition, QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal,
-        RuntimeCommit, RuntimeCommitReceipt, RuntimePersistenceDecorator, RuntimeTurnCommitStamp,
+        OrphanedTurnInputScope, ParkCancelCause, ParkId, ParkReason, ParkReasonCode,
+        PersistedSessionRead, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember,
+        QueuedRunPosition, QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal, RuntimeCommit,
+        RuntimeCommitReceipt, RuntimePersistenceDecorator, RuntimeTurnCommitStamp,
         RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SelectedQueuedRun, SemanticBoundaryOperation,
-        SessionCheckpoint, SessionHead, SessionHeadMeta, SessionHeadPayload, UnsettledTurnCounts,
-        commit_runtime_state_verified, load_persisted_session_state,
+        SessionCheckpoint, SessionHead, SessionHeadMeta, SessionHeadPayload, TurnPark,
+        TurnParkEventKind, TurnParkFeedCursor, TurnParkFeedEvent, TurnParkFeedPage, TurnParkQuery,
+        TurnParkWrite, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
+        load_persisted_session_state,
     };
     /// Test-only store hooks and the conformance-suite handle types that
     /// carry them (`testing` feature only; no production trait requires them).

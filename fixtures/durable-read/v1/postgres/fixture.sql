@@ -938,14 +938,49 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancellation_bindings (
 
 
 --
+-- Name: lash_turn_park_clock; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_park_clock (
+    singleton boolean DEFAULT true NOT NULL,
+    current_seq bigint DEFAULT 0 NOT NULL,
+    compaction_horizon bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_turn_park_clock_singleton CHECK (singleton)
+);
+
+
+--
+-- Name: lash_turn_park_events; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_park_events (
+    seq bigint NOT NULL,
+    session_id text NOT NULL,
+    turn_id text NOT NULL,
+    park_id bigint NOT NULL,
+    kind text NOT NULL,
+    cause text,
+    reason_json text,
+    at_ms bigint NOT NULL,
+    CONSTRAINT ck_turn_park_events_kind CHECK ((kind = ANY (ARRAY['parked'::text, 'unparked'::text, 'cancelled'::text]))),
+    CONSTRAINT ck_turn_park_events_parked_reason CHECK ((((kind = 'parked'::text) AND (reason_json IS NOT NULL) AND (cause IS NULL)) OR ((kind <> 'parked'::text) AND (reason_json IS NULL) AND (cause IS NOT NULL))))
+);
+
+
+--
 -- Name: lash_turn_parks; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_turn_parks (
     session_id text NOT NULL,
     turn_id text NOT NULL,
+    park_id bigint NOT NULL,
+    reason_code text NOT NULL,
     reason_json text NOT NULL,
-    parked_at_ms bigint NOT NULL
+    since_ms bigint NOT NULL,
+    last_refused_ms bigint NOT NULL,
+    attempts bigint NOT NULL,
+    CONSTRAINT ck_turn_parks_attempts CHECK ((attempts >= 1))
 );
 
 
@@ -1267,7 +1302,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 -- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=127', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=128', 1700000000000);
 
 
 --
@@ -1302,7 +1337,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 127);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 128);
 
 
 --
@@ -1404,6 +1439,19 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_subscriptions VALUES ('trigge
 
 --
 -- Data for Name: lash_turn_cancellation_bindings; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_turn_park_clock; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+INSERT INTO lash_durable_read_fixture.lash_turn_park_clock VALUES (true, 0, 0);
+
+
+--
+-- Data for Name: lash_turn_park_events; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -2000,6 +2048,22 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancellation_bindings
 
 
 --
+-- Name: lash_turn_park_clock lash_turn_park_clock_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_park_clock
+    ADD CONSTRAINT lash_turn_park_clock_pkey PRIMARY KEY (singleton);
+
+
+--
+-- Name: lash_turn_park_events lash_turn_park_events_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_park_events
+    ADD CONSTRAINT lash_turn_park_events_pkey PRIMARY KEY (seq);
+
+
+--
 -- Name: lash_turn_parks lash_turn_parks_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2380,6 +2444,13 @@ CREATE INDEX idx_lash_trigger_subscriptions_registrant ON lash_durable_read_fixt
 --
 
 CREATE INDEX idx_lash_trigger_subscriptions_source ON lash_durable_read_fixture.lash_trigger_subscriptions USING btree (source_type, source_key, lifecycle);
+
+
+--
+-- Name: idx_lash_turn_parks_since; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_turn_parks_since ON lash_durable_read_fixture.lash_turn_parks USING btree (since_ms, session_id);
 
 
 --

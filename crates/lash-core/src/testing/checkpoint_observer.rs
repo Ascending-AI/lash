@@ -425,6 +425,28 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
         self.inner.count_unsettled_turns().await
     }
 
+    async fn list_turn_parks(
+        &self,
+        query: &crate::store::TurnParkQuery,
+    ) -> Result<Vec<crate::store::TurnPark>, StoreError> {
+        self.inner.list_turn_parks(query).await
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: crate::store::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<crate::store::TurnParkFeedPage, StoreError> {
+        self.inner.turn_park_feed(after, limit).await
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: crate::store::TurnParkFeedCursor,
+    ) -> Result<(), StoreError> {
+        self.inner.compact_turn_park_feed(through).await
+    }
+
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }

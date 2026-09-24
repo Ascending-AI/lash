@@ -133,7 +133,7 @@
   },
   "lash_turn_parks.reason_json": {
     "verdict": "enroll-now",
-    "reason": "TurnParkReason is the typed reason a parked turn is recorded under (FIG-3586); both SQL backends persist its serde form, so its schemars shape participates in the component shape gate."
+    "reason": "ParkReason is the typed reason a parked turn is recorded under (FIG-3586, FIG-3659); both SQL backends persist its serde form, so its schemars shape participates in the component shape gate."
   },
   "lash_session_ingress.payload_json": {
     "verdict": "deliberately-excluded",
@@ -146,5 +146,9 @@
   "lash_session_ingress.terminal_cause_json": {
     "verdict": "deliberately-excluded",
     "reason": "IngressTerminalCause is a closed tombstone cause fenced by the store component version; its schema is enrolled with the ingress payload family at the FIG-3540 cutover, not ahead of the runtime reading it."
+  },
+  "lash_turn_park_events.reason_json": {
+    "verdict": "enroll-now",
+    "reason": "A `parked` feed event carries the same ParkReason payload lash_turn_parks.reason_json stores (FIG-3659); its schemars shape participates in the component shape gate with it."
   }
 }

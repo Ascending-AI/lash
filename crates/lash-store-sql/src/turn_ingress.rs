@@ -32,6 +32,8 @@ pub mod queued_runs;
 pub mod retired_scopes;
 pub mod session_execution_leases;
 pub mod tool_intent_submissions;
+pub mod turn_park_clock;
+pub mod turn_park_events;
 pub mod turn_parks;
 
 crate::statements! {
@@ -39,8 +41,9 @@ crate::statements! {
     /// backends issue verbatim.
     pub struct TurnIngressStatements @ "turn_ingress" {
         /// Clear session `?1`'s park once its turn holds no work: no input
-        /// row bound to the parked turn and no pending queued run.
-        delete_released_turn_park = "DELETE FROM turn_parks
+        /// row bound to the parked turn and no pending queued run. The
+        /// returning projection names the park the `Cancelled` event logs.
+        delete_released_turn_park_returning = "DELETE FROM turn_parks
              WHERE session_id = ?1
                AND NOT EXISTS(
                   SELECT 1 FROM pending_turn_inputs pti
@@ -51,13 +54,15 @@ crate::statements! {
                AND NOT EXISTS(
                   SELECT 1 FROM queued_runs qr
                   WHERE qr.session_id = ?1 AND qr.status = 'pending'
-               )";
+               )
+             RETURNING turn_id, park_id";
 
-        /// The deployment's parked turns, and its turns in flight: a session
-        /// with a pending queued run, a claimed turn input that is not
-        /// settled, or a parked turn.
+        /// The deployment's parked turns, the oldest live park's instant,
+        /// and its turns in flight: a session with a pending queued run, a
+        /// claimed turn input that is not settled, or a parked turn.
         count_unsettled_turns = "SELECT
                 (SELECT COUNT(*) FROM turn_parks) AS parked_turns,
+                (SELECT MIN(since_ms) FROM turn_parks) AS oldest_parked_since_ms,
                 (SELECT COUNT(*) FROM (
                     SELECT session_id FROM turn_parks
                     UNION
@@ -67,6 +72,12 @@ crate::statements! {
                     WHERE claim_id IS NOT NULL
                       AND {{nonterminal_turn_input_state(state)}}
                 ) AS unsettled) AS in_flight_turns";
+
+        /// Live parked turns grouped by their reason's stable code. All four
+        /// `ParkReasonCode` cells stay observable: the reader zero-fills.
+        count_parks_by_reason = "SELECT reason_code, COUNT(*) AS parks
+             FROM turn_parks
+             GROUP BY reason_code";
 
         /// Whether session `?1` has work a runner could pick up at `?2`:
         /// an unfinished queued run, an available queued batch, or an input

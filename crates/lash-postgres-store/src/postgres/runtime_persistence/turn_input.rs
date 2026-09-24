@@ -731,16 +731,31 @@ impl TurnInputStore for PostgresSessionStore {
                 };
             results.push(lash_core_execution::PendingTurnInputCancelReceipt { target, outcome });
         }
-        sqlx::query(
+        let released = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .family
-                .delete_released_turn_park
+                .delete_released_turn_park_returning
                 .sql(),
         )
         .bind(session_id.as_str())
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
+        if let Some(released) = released {
+            let released_turn_id: String = released.get(0);
+            let released_park_id: i64 = released.get(1);
+            crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
+                &mut tx,
+                session_id,
+                &released_turn_id,
+                released_park_id,
+                &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                    cause: lash_core_execution::store::ParkCancelCause::InputWithdrawn,
+                },
+                now,
+            )
+            .await?;
+        }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(results)
     }
@@ -796,16 +811,31 @@ impl TurnInputStore for PostgresSessionStore {
         for row in rows {
             outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row, now, &covered).await?);
         }
-        sqlx::query(
+        let released = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .family
-                .delete_released_turn_park
+                .delete_released_turn_park_returning
                 .sql(),
         )
         .bind(session_id.as_str())
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
+        if let Some(released) = released {
+            let released_turn_id: String = released.get(0);
+            let released_park_id: i64 = released.get(1);
+            crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
+                &mut tx,
+                session_id,
+                &released_turn_id,
+                released_park_id,
+                &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                    cause: lash_core_execution::store::ParkCancelCause::InputWithdrawn,
+                },
+                now,
+            )
+            .await?;
+        }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })
     }

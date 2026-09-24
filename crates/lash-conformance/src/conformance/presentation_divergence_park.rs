@@ -272,7 +272,7 @@ pub async fn a_diverged_tool_presentation_parks_the_turn(
             .expect("read the park")
             .expect("the diverged turn is parked");
         assert_eq!(park.turn_id, parts.turn_id);
-        let crate::store::TurnParkReason::EffectReplayDivergence { effect_kind, .. } = &park.reason
+        let crate::store::ParkReason::EffectReplayDivergence { effect_kind, .. } = &park.reason
         else {
             panic!("{redrive} redrive: the park names an effect replay divergence: {park:?}");
         };

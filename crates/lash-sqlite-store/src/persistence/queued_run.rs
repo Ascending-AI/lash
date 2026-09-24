@@ -303,14 +303,29 @@ impl Store {
                     }
                     settle_run_members_conn(tx, &fence, &settlement.scope)?;
                     // Settling the run settles the turn it had parked (FIG-3586).
-                    tx.execute(
-                        crate::turn_ingress::turn_ingress_sql()
-                            .turn_parks
-                            .delete_by_session
-                            .sql(),
-                        params![fence.session_id.as_str()],
-                    )
-                    .map_err(sqlite_error)?;
+                    let released: Option<(String, i64)> = tx
+                        .query_row(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .turn_parks
+                                .delete_by_session_returning
+                                .sql(),
+                            params![fence.session_id.as_str()],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
+                    if let Some((released_turn_id, released_park_id)) = released {
+                        crate::persistence::turn_park_feed::log_turn_park_closed_conn(
+                            tx,
+                            &fence.session_id,
+                            &released_turn_id,
+                            released_park_id,
+                            &lash_core_execution::store::TurnParkEventKind::Unparked {
+                                cause: lash_core_execution::store::UnparkCause::RunSettled,
+                            },
+                            crate::clamp_epoch_ms(clock.timestamp_ms()),
+                        )?;
+                    }
                     if matches!(settlement.progress, QueuedRunProgress::ForgetUnworked) {
                         let scope_key = scope_key(&settlement.scope)?;
                         tx.execute(

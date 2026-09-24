@@ -157,6 +157,9 @@ touches = [
     "turn_cancel_closure_authorizations",
     "turn_cancel_requests",
     "turn_cancellation_bindings",
+    "turn_park_clock",
+    "turn_park_events",
+    "turn_parks",
     "wake_allocation_floors",
     "wake_redelivery_fences",
 ]
@@ -167,11 +170,29 @@ the same session array, and a writer landing between two of them would leave a
 session whose queue is gone and whose metadata is not. Two of the fourteen
 tables belong to the process family — a session's wake redelivery fences and
 the allocation floors targeting it. The turn-ingress family owns the queue,
-inputs, lane lease and cancellation facts. They all go with
+inputs, lane lease and cancellation facts, plus the park record and the feed
+the parks' `Cancelled{SessionDeleted}` events append to — the clock bump and
+the ledger insert ride the same CTE chain so the transition is durable in the
+delete's own transaction. They all go with
 the session that owns them, so the session-core family owns the whole cascade
 and deletes from the other two families' tables inside it. SQLite's session
 delete is per session and issues the named per-table deletes in sequence under
 `BEGIN IMMEDIATE`, which is the same atomicity without the CTE.
+"""
+
+[[cross_family]]
+statement = "turn_commit.select_receipt_settling_turn_park"
+owner = "crates/lash-postgres-store/src/postgres/session_sql.rs"
+touches = ["turn_park_clock", "turn_park_events", "turn_parks"]
+reason = """
+A turn's commit settles its park in the commit's transaction, and the durable
+`Unparked{TurnCommitted}` event rides the same round trip: the receipt read's
+CTE chain deletes the park row, bumps the feed's clock and appends the ledger
+row. The receipt itself is a session-core fact and the park feed belongs to
+the turn-ingress family; folding them into one statement is what keeps the
+hot commit path at a single round trip (FIG-3659). SQLite has no
+data-modifying CTE and issues the same transition as named turn-ingress
+statements in-process, where a statement costs no round trip.
 """
 
 [[cross_family]]
@@ -640,6 +661,9 @@ tables = [
     "turn_cancel_closure_participants",
     "turn_cancel_retired_scopes",
     "turn_cancellation_bindings",
+    "turn_parks",
+    "turn_park_clock",
+    "turn_park_events",
 ]
 statement_prefixes = [
     "turn_ingress",
@@ -655,6 +679,9 @@ statement_prefixes = [
     "turn_cancel_closure_participant",
     "turn_cancel_retired_scope",
     "turn_cancellation_binding",
+    "turn_park",
+    "turn_park_clock",
+    "turn_park_event",
 ]
 shared = [
     "crates/lash-store-sql/src/turn_ingress.rs",
@@ -671,6 +698,9 @@ shared = [
     "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs",
     "crates/lash-store-sql/src/turn_ingress/session_execution_leases.rs",
     "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs",
+    "crates/lash-store-sql/src/turn_ingress/turn_park_clock.rs",
+    "crates/lash-store-sql/src/turn_ingress/turn_park_events.rs",
+    "crates/lash-store-sql/src/turn_ingress/turn_parks.rs",
 ]
 # One owner module per group of forks, because the family is ten tables and a
 # single file would sit over the production file-size budget. The three
@@ -683,6 +713,7 @@ sqlite = [
     "crates/lash-sqlite-store/src/turn_ingress/pending_inputs.rs",
     "crates/lash-sqlite-store/src/turn_ingress/queued_work.rs",
     "crates/lash-sqlite-store/src/turn_ingress/turn_cancel.rs",
+    "crates/lash-sqlite-store/src/turn_ingress/turn_parks.rs",
 ]
 postgres = [
     "crates/lash-postgres-store/src/postgres/turn_ingress.rs",
@@ -691,6 +722,7 @@ postgres = [
     "crates/lash-postgres-store/src/postgres/turn_ingress/pending_inputs.rs",
     "crates/lash-postgres-store/src/postgres/turn_ingress/queued_work.rs",
     "crates/lash-postgres-store/src/postgres/turn_ingress/turn_cancel.rs",
+    "crates/lash-postgres-store/src/postgres/turn_ingress/turn_parks.rs",
 ]
 schema = [
     "crates/lash-sqlite-store/src/schema.rs",
@@ -734,6 +766,9 @@ turn_cancel_closure_authorizations = "crates/lash-store-sql/src/turn_ingress/clo
 turn_cancel_closure_participants = "crates/lash-store-sql/src/turn_ingress/closure_participants.rs"
 turn_cancel_retired_scopes = "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs"
 turn_cancellation_bindings = "crates/lash-store-sql/src/turn_ingress/cancellation_bindings.rs"
+turn_parks = "crates/lash-store-sql/src/turn_ingress/turn_parks.rs"
+turn_park_clock = "crates/lash-store-sql/src/turn_ingress/turn_park_clock.rs"
+turn_park_events = "crates/lash-store-sql/src/turn_ingress/turn_park_events.rs"
 
 # `state` is this family's lifecycle column. Its partitions are generated from
 # `TurnInputStateKind`, so a statement names one as a `{{term(column)}}` token
@@ -3665,6 +3700,88 @@ statement = "turn_ingress.select_claimed_batch_source_key"
 backends = ["postgres"]
 kind = "operation exists on one backend only"
 reason = "The read half of the same fork as turn_ingress.record_wake_fence_from_claim."
+
+[[dialect_only]]
+statement = "turn_park.list"
+backends = ["sqlite", "postgres"]
+kind = "list bind"
+reason = """
+A variable-length reason-code set binds as one JSON array through
+`json_each` on SQLite and as a text array through `= ANY(...)` on
+PostgreSQL.
+"""
+
+[[dialect_only]]
+statement = "turn_park.select_for_update_by_session"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+The park row's lock is what makes the record path's read-then-write atomic
+under READ COMMITTED: a same-turn re-park and a superseding park decide on
+the row this statement saw. SQLite takes the same decision under its write
+lock and reads through the shared `turn_park.select_by_session`.
+"""
+
+[[dialect_only]]
+statement = "turn_park_clock.bump"
+backends = ["sqlite"]
+kind = "boolean representation"
+reason = """
+The singleton flag is INTEGER 1 on SQLite and BOOLEAN TRUE on PostgreSQL, and
+SQLite reads the bumped value back with a second statement where PostgreSQL
+uses RETURNING.
+"""
+
+[[dialect_only]]
+statement = "turn_park_clock.select_current"
+backends = ["sqlite"]
+kind = "boolean representation"
+reason = "Singleton-flag fork; the second half of SQLite's bump pair."
+
+[[dialect_only]]
+statement = "turn_park_clock.bump_returning"
+backends = ["postgres"]
+kind = "boolean representation"
+reason = "The PostgreSQL half of the turn_park_clock.bump fork."
+
+[[dialect_only]]
+statement = "turn_park_clock.select_current_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+Compaction must clamp `through` to a `current_seq` it holds under the row's
+write lock: taking the lock before the delete serializes against in-flight
+appends so the horizon can never pass a sequence that is already allocated.
+SQLite takes the same decision under its database write lock and reads
+through the shared `turn_park_clock.select_current`.
+"""
+
+[[dialect_only]]
+statement = "turn_park_clock.select_compaction_horizon"
+backends = ["sqlite"]
+kind = "boolean representation"
+reason = "Singleton-flag fork; PostgreSQL's read takes a share lock, which is the entry below."
+
+[[dialect_only]]
+statement = "turn_park_clock.select_compaction_horizon_for_share"
+backends = ["postgres"]
+kind = "FOR SHARE"
+reason = """
+A feed reader must not accept a cursor that an in-flight compaction is about
+to refuse: the share lock waits out the compacting writer, which holds the
+row's write lock from its horizon raise to its commit, so the horizon the
+reader sees and the events still on disk agree.
+"""
+
+[[dialect_only]]
+statement = "turn_park_clock.raise_compaction_horizon"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation; scalar max"
+reason = """
+The singleton flag forks as everywhere on this table, and the
+raise-not-lower max is SQLite's two-argument `MAX` where PostgreSQL spells
+it `GREATEST`.
+"""
 
 [[dialect_only]]
 statement = "effect_replay.release_uncommitted_derivation"

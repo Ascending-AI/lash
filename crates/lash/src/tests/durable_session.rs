@@ -114,6 +114,28 @@ impl SessionStoreFactory for CountingSessionStoreFactory {
     ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
         self.inner.count_unsettled_turns().await
     }
+
+    async fn list_turn_parks(
+        &self,
+        query: &lash_core::store::TurnParkQuery,
+    ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
+        self.inner.list_turn_parks(query).await
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: lash_core::store::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+        self.inner.turn_park_feed(after, limit).await
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: lash_core::store::TurnParkFeedCursor,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        self.inner.compact_turn_park_feed(through).await
+    }
 }
 
 /// A counting catalog over a fresh memory backend's own.
@@ -949,6 +971,28 @@ impl SessionStoreFactory for NoByIdLookupFactory {
         &self,
     ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
         self.inner.count_unsettled_turns().await
+    }
+
+    async fn list_turn_parks(
+        &self,
+        query: &lash_core::store::TurnParkQuery,
+    ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
+        self.inner.list_turn_parks(query).await
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: lash_core::store::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+        self.inner.turn_park_feed(after, limit).await
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: lash_core::store::TurnParkFeedCursor,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        self.inner.compact_turn_park_feed(through).await
     }
 }
 

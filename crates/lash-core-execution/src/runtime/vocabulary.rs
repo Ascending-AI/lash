@@ -483,6 +483,39 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         &self,
     ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError>;
 
+    /// List the deployment's parked turns under `query` (FIG-3659), ordered by
+    /// `(since_ms, session_id)` with `query.after` as the keyset. A parked
+    /// turn is unfinished work a host must be able to enumerate across
+    /// sessions, so this is required with no default: a decorator forwards to
+    /// the catalog it wraps, and a factory with no park ledger returns
+    /// `StoreError::UnsupportedStoreOperation` rather than an empty page.
+    async fn list_turn_parks(
+        &self,
+        query: &crate::store::TurnParkQuery,
+    ) -> Result<Vec<crate::store::TurnPark>, crate::StoreError>;
+
+    /// Read the durable turn park feed strictly after `after` (FIG-3659): one
+    /// event per park transition, in commit order. A position below the
+    /// compaction horizon fails with
+    /// `StoreError::ParkFeedCursorCompacted`.
+    ///
+    /// Required, with no default, like [`Self::count_unsettled_turns`].
+    async fn turn_park_feed(
+        &self,
+        after: crate::store::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<crate::store::TurnParkFeedPage, crate::StoreError>;
+
+    /// Compact the turn park feed: events at or below `through` are removed
+    /// and the cursor horizon advances to it. Host-gated — the feed's
+    /// retention lever — never automatic (FIG-3659).
+    ///
+    /// Required, with no default, like [`Self::count_unsettled_turns`].
+    async fn compact_turn_park_feed(
+        &self,
+        through: crate::store::TurnParkFeedCursor,
+    ) -> Result<(), crate::StoreError>;
+
     /// Open an existing session when only its durable routing identity is
     /// known, without creating one.
     ///

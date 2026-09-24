@@ -1027,23 +1027,285 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         let conn = SqliteConnection::open_readonly(self.core.target())
             .await
             .map_err(|error| StoreError::Backend(error.to_string()))?;
-        let (parked, in_flight): (i64, i64) = conn
-            .call(|conn| {
-                conn.query_row(
+        conn.read(|conn| {
+            let (parked, oldest_since_ms, in_flight): (i64, Option<i64>, i64) = conn
+                .query_row(
                     crate::turn_ingress::turn_ingress_sql()
                         .family
                         .count_unsettled_turns
                         .sql(),
                     [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
+                .map_err(|err| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(sqlite_error(err)))
+                })?;
+            let mut statement = conn
+                .prepare(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .family
+                        .count_parks_by_reason
+                        .sql(),
+                )
+                .map_err(|err| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(sqlite_error(err)))
+                })?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|err| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(sqlite_error(err)))
+                })?;
+            let mut parked_by_reason = std::collections::BTreeMap::new();
+            for row in rows {
+                let (code, count) = row.map_err(|err| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(sqlite_error(err)))
+                })?;
+                let Some(code) = lash_core_execution::store::ParkReasonCode::from_code(&code)
+                else {
+                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                        StoreError::StoredDataCorrupt {
+                            record_kind: "TurnPark",
+                            message: format!("stored park reason code `{code}` is unknown"),
+                        },
+                    )));
+                };
+                parked_by_reason.insert(code, usize::try_from(count).unwrap_or_default());
+            }
+            Ok(lash_core_execution::store::UnsettledTurnCounts {
+                parked_turns: usize::try_from(parked).unwrap_or_default(),
+                in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
+                oldest_parked_since_ms: oldest_since_ms
+                    .map(|ms| u64::try_from(ms).unwrap_or_default()),
+                parked_by_reason,
+            })
+        })
+        .await
+        .map_err(sqlite_error)
+    }
+
+    async fn list_turn_parks(
+        &self,
+        query: &lash_core_execution::store::TurnParkQuery,
+    ) -> Result<Vec<lash_core_execution::store::TurnPark>, StoreError> {
+        if !self.core.target().exists() {
+            return Ok(Vec::new());
+        }
+        let conn = SqliteConnection::open_readonly(self.core.target())
+            .await
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let limit = i64::try_from(query.limit.get()).unwrap_or(i64::MAX);
+        let session = query.session.as_ref().map(|id| id.as_str().to_string());
+        let at_or_before = query
+            .parked_at_or_before_ms
+            .map(|ms| i64::try_from(ms).unwrap_or(i64::MAX));
+        let (after_since, after_session) = match query.after.as_ref() {
+            Some((since_ms, session_id)) => (
+                Some(i64::try_from(*since_ms).unwrap_or(i64::MAX)),
+                Some(session_id.as_str().to_string()),
+            ),
+            None => (None, None),
+        };
+        let reasons = query
+            .reasons
+            .as_ref()
+            .filter(|reasons| !reasons.is_empty())
+            .map(|reasons| {
+                serde_json::to_string(&reasons.iter().map(|code| code.as_str()).collect::<Vec<_>>())
+                    .map_err(|error| StoreError::Backend(error.to_string()))
+            })
+            .transpose()?;
+        let rows = conn
+            .call(move |conn| {
+                let mut statement = conn.prepare(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .turn_parks_sqlite
+                        .list
+                        .sql(),
+                )?;
+                let rows = statement.query_map(
+                    params![
+                        limit,
+                        session,
+                        at_or_before,
+                        after_since,
+                        after_session,
+                        reasons
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, i64>(6)?,
+                            row.get::<_, i64>(7)?,
+                        ))
+                    },
+                )?;
+                rows.collect::<Result<Vec<_>, _>>()
             })
             .await
             .map_err(sqlite_error)?;
-        Ok(lash_core_execution::store::UnsettledTurnCounts {
-            parked_turns: usize::try_from(parked).unwrap_or_default(),
-            in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
+        rows.into_iter()
+            .map(
+                |(
+                    session_id,
+                    turn_id,
+                    park_id,
+                    reason_code,
+                    reason_json,
+                    since_ms,
+                    last_refused_ms,
+                    attempts,
+                )| {
+                    lash_core_execution::store::TurnPark::decode(
+                        SessionId::from(session_id),
+                        lash_sansio::TurnId::from(turn_id),
+                        lash_core_execution::store::ParkId::from_feed_sequence(
+                            u64::try_from(park_id).unwrap_or_default(),
+                        ),
+                        &reason_code,
+                        &reason_json,
+                        u64::try_from(since_ms).unwrap_or_default(),
+                        u64::try_from(last_refused_ms).unwrap_or_default(),
+                        u32::try_from(attempts).unwrap_or(u32::MAX),
+                    )
+                },
+            )
+            .collect()
+    }
+
+    async fn turn_park_feed(
+        &self,
+        after: lash_core_execution::store::TurnParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash_core_execution::store::TurnParkFeedPage, StoreError> {
+        let mut page = lash_core_execution::store::TurnParkFeedPage {
+            events: Vec::new(),
+            next: after,
+        };
+        if !self.core.target().exists() {
+            return Ok(page);
+        }
+        let conn = SqliteConnection::open_readonly(self.core.target())
+            .await
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let after_seq = i64::try_from(after.store_sequence()).unwrap_or(i64::MAX);
+        let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
+        let rows: Vec<(
+            i64,
+            String,
+            String,
+            i64,
+            String,
+            Option<String>,
+            Option<String>,
+            i64,
+        )> = conn
+            .read(move |conn| {
+                let clock = &crate::turn_ingress::turn_ingress_sql().turn_park_clock;
+                let horizon: i64 = conn
+                    .query_row(clock.select_compaction_horizon.sql(), [], |row| row.get(0))
+                    .optional()?
+                    .unwrap_or(0);
+                if after_seq < horizon {
+                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                        StoreError::ParkFeedCursorCompacted {
+                            horizon:
+                                lash_core_execution::store::TurnParkFeedCursor::from_store_sequence(
+                                    u64::try_from(horizon).unwrap_or_default(),
+                                ),
+                        },
+                    )));
+                }
+                let mut statement = conn.prepare(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .turn_park_events
+                        .select_events_after
+                        .sql(),
+                )?;
+                let rows = statement.query_map(params![after_seq, limit], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, i64>(7)?,
+                    ))
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        for (seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms) in rows {
+            let kind = lash_core_execution::store::TurnParkEventKind::decode_columns(
+                &kind,
+                cause.as_deref(),
+                reason_json.as_deref(),
+            )?;
+            page.events
+                .push(lash_core_execution::store::TurnParkFeedEvent {
+                    seq: u64::try_from(seq).unwrap_or_default(),
+                    at_ms: u64::try_from(at_ms).unwrap_or_default(),
+                    session_id: SessionId::from(session_id),
+                    turn_id: lash_sansio::TurnId::from(turn_id),
+                    park_id: lash_core_execution::store::ParkId::from_feed_sequence(
+                        u64::try_from(park_id).unwrap_or_default(),
+                    ),
+                    kind,
+                });
+            page.next = lash_core_execution::store::TurnParkFeedCursor::from_store_sequence(
+                u64::try_from(seq).unwrap_or_default(),
+            );
+        }
+        Ok(page)
+    }
+
+    async fn compact_turn_park_feed(
+        &self,
+        through: lash_core_execution::store::TurnParkFeedCursor,
+    ) -> Result<(), StoreError> {
+        if !self.core.target().exists() {
+            return Ok(());
+        }
+        let conn =
+            SqliteConnection::open_with_policy(self.core.target(), self.options.connection_policy)
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+        ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
+            .await
+            .map_err(|err| StoreError::Backend(err.to_string()))?;
+        let through_seq = i64::try_from(through.store_sequence()).unwrap_or(i64::MAX);
+        conn.write_flow(move |tx| {
+            let sql = crate::turn_ingress::turn_ingress_sql();
+            // The write lock is held, so this read is the clock's committed
+            // sequence. `through` is clamped to it: raising the horizon past
+            // `current_seq` would strand events the feed has not yet
+            // appended.
+            let through_seq = tx
+                .query_row(sql.turn_park_clock.select_current.sql(), [], |row| {
+                    row.get::<_, i64>(0)
+                })?
+                .min(through_seq);
+            tx.execute(
+                sql.turn_park_events.delete_events_through.sql(),
+                params![through_seq],
+            )?;
+            tx.execute(
+                sql.turn_park_clock.raise_compaction_horizon.sql(),
+                params![through_seq],
+            )?;
+            Ok(TxOutcome::Commit(Ok(())))
         })
+        .await
+        .map_err(sqlite_error)?
     }
 
     async fn open_existing_store_by_id(
@@ -1222,9 +1484,13 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
         lash_core_execution::store::validate_session_id(session_id)
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
-        let report =
-            delete_session_from_catalog(&self.core, session_id, self.options.connection_policy)
-                .await?;
+        let report = delete_session_from_catalog(
+            &self.core,
+            session_id,
+            self.options.connection_policy,
+            self.clock.timestamp_ms(),
+        )
+        .await?;
         if let Some(process_registry) = self.process_registry.as_ref() {
             delete_wake_allocation_floors_from_process_registry(
                 process_registry,

@@ -942,6 +942,52 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
             "artifact_cleanup_completed IN (0, 1)",
         ),
     ),
+    // FIG-3659's turn park feed: the live-park row's attempt count, the
+    // singleton clock row, and the event vocabulary checks.
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered("turn_parks", "ck_turn_parks_attempts", "attempts >= 1"),
+        rendered("lash_turn_parks", "ck_turn_parks_attempts", "attempts >= 1"),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "turn_park_clock",
+            "ck_turn_park_clock_singleton",
+            "singleton = 1",
+        ),
+        rendered(
+            "lash_turn_park_clock",
+            "ck_turn_park_clock_singleton",
+            "singleton",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "turn_park_events",
+            "ck_turn_park_events_kind",
+            "kind IN ('parked', 'unparked', 'cancelled')",
+        ),
+        rendered(
+            "lash_turn_park_events",
+            "ck_turn_park_events_kind",
+            "kind IN ('parked', 'unparked', 'cancelled')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "turn_park_events",
+            "ck_turn_park_events_parked_reason",
+            "(kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL)",
+        ),
+        rendered(
+            "lash_turn_park_events",
+            "ck_turn_park_events_parked_reason",
+            "(kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL)",
+        ),
+    ),
 ];
 
 /// One required named `CHECK` that did not match the published definition.

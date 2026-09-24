@@ -382,7 +382,7 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
                     .await
                     .expect("read the park")
                     .expect("the refused turn is parked");
-                let crate::store::TurnParkReason::BindingDrift { message } = &park.reason else {
+                let crate::store::ParkReason::BindingDrift { message } = &park.reason else {
                     panic!("{case}: the park names the binding drift: {park:?}");
                 };
                 assert!(

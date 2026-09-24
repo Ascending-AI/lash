@@ -152,6 +152,8 @@ const TABLE_REGISTRY: &[TablePair] = &[
         "lash_turn_cancel_retired_scopes",
     ),
     pair("turn_parks", "lash_turn_parks"),
+    pair("turn_park_clock", "lash_turn_park_clock"),
+    pair("turn_park_events", "lash_turn_park_events"),
     TablePair {
         sqlite_table: Some("turn_cancel_requests"),
         postgres_table: Some("lash_turn_cancel_requests"),

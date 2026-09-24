@@ -582,15 +582,32 @@ lash_store_sql::statements! {
     /// `runtime_turn_commits` statements only PostgreSQL issues.
     pub(crate) struct TurnCommitPostgresStatements @ "turn_commit" {
         /// The receipt session `?1` recorded for operation key `?2`, read in
-        /// the round trip that settles turn `?3`'s park (FIG-3586): a turn's
+        /// the round trip that settles turn `?3`'s park (FIG-3586) and logs
+        /// the `Unparked{TurnCommitted}` event at `?4` (FIG-3659): a turn's
         /// commit clears its own park row inside the commit's transaction,
         /// and another turn's commit leaves it. A `NULL` `?3`, an operation
-        /// that is no turn's, matches no park.
+        /// that is no turn's, matches no park — and the `EXISTS` guard on the
+        /// clock bump means no event, no sequence burned.
         ///
         /// A data-modifying `WITH` runs whether or not the outer query reads
-        /// it, so the clear costs the commit no round trip of its own.
+        /// it, so the clear and the feed append cost the commit no round trip
+        /// of their own.
         select_receipt_settling_turn_park = "WITH settled_park AS (
                  DELETE FROM turn_parks WHERE session_id = ?1 AND turn_id = ?3
+                 RETURNING session_id, turn_id, park_id
+             ), settled_park_clock AS (
+                 UPDATE turn_park_clock SET current_seq = current_seq + 1
+                 WHERE singleton = TRUE
+                   AND EXISTS (SELECT 1 FROM settled_park)
+                 RETURNING current_seq
+             ), settled_park_event AS (
+                 INSERT INTO turn_park_events
+                     (seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms)
+                 SELECT clock.current_seq, park.session_id, park.turn_id, park.park_id,
+                        'unparked', 'turn_committed', NULL,
+                        floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+                 FROM settled_park AS park
+                 CROSS JOIN settled_park_clock AS clock
              )
              SELECT turn_commit_hash, result_json,
                         request_identity_hash, identity_encoding_version,
@@ -830,7 +847,32 @@ lash_store_sql::statements! {
          deleted_turn_parks AS (
              DELETE FROM turn_parks
              WHERE session_id = ANY(?1)
-             RETURNING session_id
+             RETURNING session_id, turn_id, park_id
+         ),
+         -- Every deleted park gets a Cancelled{SessionDeleted} event at the
+         -- transaction's own instant: the ledger is the only place the park
+         -- transition stays durable once the session rows are gone
+         -- (FIG-3659). The batch bump allocates the block's sequences in one
+         -- update — and only when a park was actually deleted, so a batch
+         -- with no parks neither locks nor bumps the clock nor costs a
+         -- clock-probe round trip; each event takes
+         -- first_seq + row_number - 1.
+         deleted_turn_park_clock AS (
+             UPDATE turn_park_clock
+             SET current_seq = current_seq + (SELECT count(*) FROM deleted_turn_parks)
+             WHERE singleton = TRUE
+               AND EXISTS (SELECT 1 FROM deleted_turn_parks)
+             RETURNING current_seq - (SELECT count(*) FROM deleted_turn_parks) + 1 AS first_seq
+         ),
+         deleted_turn_park_events AS (
+             INSERT INTO turn_park_events
+                 (seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms)
+             SELECT clock.first_seq + row_number() OVER (ORDER BY park.session_id) - 1,
+                    park.session_id, park.turn_id, park.park_id,
+                    'cancelled', 'session_deleted', NULL,
+                    floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             FROM deleted_turn_parks AS park
+             CROSS JOIN deleted_turn_park_clock AS clock
          ),
          deleted_session_ingress AS (
              DELETE FROM session_ingress

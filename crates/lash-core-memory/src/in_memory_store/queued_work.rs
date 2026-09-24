@@ -630,8 +630,19 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             _ => return Err(conflict()),
         }
         let settled = run.advance(&settlement, &[])?;
-        // Settling the run settles the turn it had parked (FIG-3586).
-        self.turn_park.lock_recover().take();
+        // Settling the run settles the turn it had parked (FIG-3586); the
+        // close appends its feed event under the park's lock (FIG-3659).
+        if let Some(closed) = self.turn_park.lock_recover().take() {
+            self.turn_park_feed.lock_recover().log(
+                closed.session_id.clone(),
+                closed.turn_id.clone(),
+                closed.park_id,
+                crate::store::TurnParkEventKind::Unparked {
+                    cause: crate::store::UnparkCause::RunSettled,
+                },
+                self.clock.timestamp_ms(),
+            );
+        }
         if run.terminal.is_some() {
             return Ok(settled);
         }

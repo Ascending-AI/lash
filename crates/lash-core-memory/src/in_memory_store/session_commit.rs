@@ -927,11 +927,20 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         drop(runtime_turn_commits);
         turn_cancel_closure::consume(self, commit);
         // A turn's commit settles its park (FIG-3586); another turn's commit
-        // leaves it.
+        // leaves it. The clear appends its feed event under the same lock
+        // (FIG-3659).
         if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
             let mut park = self.turn_park.lock_recover();
-            if park.as_ref().is_some_and(|park| park.turn_id == *turn_id) {
-                park.take();
+            if let Some(closed) = park.take_if(|park| park.turn_id == *turn_id) {
+                self.turn_park_feed.lock_recover().log(
+                    closed.session_id.clone(),
+                    closed.turn_id.clone(),
+                    closed.park_id,
+                    crate::store::TurnParkEventKind::Unparked {
+                        cause: crate::store::UnparkCause::TurnCommitted,
+                    },
+                    self.clock.timestamp_ms(),
+                );
             }
         }
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
@@ -979,12 +988,54 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
 
     async fn record_turn_park(
         &self,
-        park: &crate::store::TurnPark,
-    ) -> Result<(), crate::store::StoreError> {
+        write: &crate::store::TurnParkWrite,
+    ) -> Result<crate::store::TurnPark, crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
-        self.ensure_session_not_deleted(&park.session_id)?;
-        *self.turn_park.lock_recover() = Some(park.clone());
-        Ok(())
+        self.ensure_session_not_deleted(&write.session_id)?;
+        let mut park_slot = self.turn_park.lock_recover();
+        let mut feed = self.turn_park_feed.lock_recover();
+        if let Some(existing) = park_slot.as_ref() {
+            if existing.turn_id == write.turn_id {
+                // A same-turn re-park keeps the park's identity and first-park
+                // age; it counts the refusal and carries the newest reason.
+                let updated = crate::store::TurnPark {
+                    reason: write.reason.clone(),
+                    last_refused_ms: write.at_ms,
+                    attempts: existing.attempts.saturating_add(1),
+                    ..existing.clone()
+                };
+                *park_slot = Some(updated.clone());
+                return Ok(updated);
+            }
+            // A different turn supersedes the park: close it, then open the
+            // new one — both events in this critical section.
+            feed.log(
+                write.session_id.clone(),
+                existing.turn_id.clone(),
+                existing.park_id,
+                crate::store::TurnParkEventKind::Unparked {
+                    cause: crate::store::UnparkCause::Superseded,
+                },
+                write.at_ms,
+            );
+        }
+        let park_id = feed.log_opening(
+            write.session_id.clone(),
+            write.turn_id.clone(),
+            write.reason.clone(),
+            write.at_ms,
+        );
+        let stored = crate::store::TurnPark {
+            session_id: write.session_id.clone(),
+            turn_id: write.turn_id.clone(),
+            reason: write.reason.clone(),
+            park_id,
+            since_ms: write.at_ms,
+            last_refused_ms: write.at_ms,
+            attempts: 1,
+        };
+        *park_slot = Some(stored.clone());
+        Ok(stored)
     }
 
     async fn load_turn_park(
