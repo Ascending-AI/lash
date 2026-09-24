@@ -271,9 +271,16 @@ pub use usage_activity::*;
 // Window 97: FIG-3586 stamps `RemoteProcessStarted.replay_grammar`, the
 // replay-key grammar a lashlang process began its journal under, and adds the
 // lashlang replay refusal codes; an earlier peer drops the stamp, so peers
-// must adopt 97. (Windows 95 and 96 are claimed by FIG-3588 and FIG-3571
-// phase 2a.)
-pub const REMOTE_PROTOCOL_VERSION: u32 = 97;
+// must adopt 97.
+// Window 98: FIG-3571 phase 2a gives processes one cursor across durable
+// history and the live hub. `RemoteProcessEventsRequest` trades its page
+// `continuation` token for a `lashpc2` `cursor` and the response answers with
+// the next cursor; `ProcessEventPageMore::More` names its `after_sequence`.
+// Observation items carry typed cursors, a `Committed` item, and snapshots with
+// separate durable and live halves, and gaps gain `sequence_unbridged` and
+// `history_unavailable`. An earlier peer sends a `continuation` and a
+// `lashpc1` cursor this decoder refuses, so peers must adopt 98.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 98;
 
 /// One versioned remote-protocol message.
 ///

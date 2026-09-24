@@ -1,9 +1,5 @@
 {
-<<<<<<<< HEAD:schemas/host/remote-session-observation-event/v97.schema.json
-  "$id": "https://lash.dev/schemas/remote-session-observation-event/v97",
-========
-  "$id": "https://lash.dev/schemas/remote-session-observation-event/v95",
->>>>>>>> 1cccb333b (Take remote protocol window 95 for the one process cursor):schemas/host/remote-session-observation-event/v95.schema.json
+  "$id": "https://lash.dev/schemas/remote-session-observation-event/v98",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "EffectAddress": {
@@ -2813,10 +2809,6 @@
   ],
   "title": "RemoteSessionObservationEvent",
   "type": "object",
-<<<<<<<< HEAD:schemas/host/remote-session-observation-event/v97.schema.json
-  "x-lash-schema-version": 97,
-========
-  "x-lash-schema-version": 95,
->>>>>>>> 1cccb333b (Take remote protocol window 95 for the one process cursor):schemas/host/remote-session-observation-event/v95.schema.json
+  "x-lash-schema-version": 98,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

@@ -1,0 +1,41 @@
+{
+  "$id": "https://lash.dev/schemas/remote-process-observation-request/v98",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "ProcessCursor": {
+      "description": "Opaque process cursor: `lashpc2:<epoch>:<process-reference>:<position>:<sequence>`.",
+      "pattern": "^lashpc2:[^:]+:r[0-9]+\\.[0-9a-f]+:[0-9]+:[0-9]+$",
+      "type": "string"
+    }
+  },
+  "description": "Start a process-scoped observation subscription for one exact process lifetime, optionally resuming from a process cursor.\n\nThe cursor is typed: a malformed cursor, or one from a retired version, is refused at decode, naming the version it found.",
+  "properties": {
+    "cursor": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ProcessCursor"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "incarnation": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "process_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "incarnation",
+    "process_id"
+  ],
+  "title": "RemoteProcessObservationRequest",
+  "type": "object",
+  "x-lash-schema-version": 98,
+  "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
+}

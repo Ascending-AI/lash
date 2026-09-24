@@ -21,22 +21,22 @@ const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 mod version_refusal_tests;
 use version_refusal_tests::decode_empty_envelope;
 
-/// Refusal witness (FIG-3586): the generation-97 decoder rejects its immediate
+/// Refusal witness (FIG-3571 phase 2a): the generation-98 decoder rejects its immediate
 /// predecessor before attempting to decode the envelope body.
 ///
 /// The predecessor is a literal, not `REMOTE_PROTOCOL_VERSION - 1`: a derived
 /// one makes the adjacency assertion below tautological and stops recording
 /// which window was actually witnessed.
 #[test]
-fn immediate_predecessor_remote_protocol_generation_96_is_refused() {
-    const PREDECESSOR: u32 = 96;
+fn immediate_predecessor_remote_protocol_generation_97_is_refused() {
+    const PREDECESSOR: u32 = 97;
     assert_eq!(
         PREDECESSOR + 1,
         REMOTE_PROTOCOL_VERSION,
         "remote-protocol generation adjacency pin"
     );
     let error = decode_empty_envelope(PREDECESSOR)
-        .expect_err("generation-96 remote envelope must be refused");
+        .expect_err("generation-97 remote envelope must be refused");
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
@@ -774,7 +774,7 @@ fn remote_trigger_dtos_json_round_trip() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 57,
-            expected: 97,
+            expected: 98,
         }
     ));
 
@@ -840,7 +840,7 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 62,
-            expected: 97,
+            expected: 98,
         }
     ));
 
@@ -848,9 +848,9 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
         serde_json::to_value(Envelope::new(RemoteTriggerSubscriptionFilter::for_session(
             "session-blue",
         )))
-        .expect("serialize canonical version-97 filter"),
+        .expect("serialize canonical version-98 filter"),
         serde_json::json!({
-            "protocol_version": 97,
+            "protocol_version": 98,
             "registrant_scope_id": "session:session-blue",
         })
     );
@@ -858,9 +858,9 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
 
 #[test]
 fn remote_protocol_92_session_filter_refuses_retired_session_id() {
-    let wire = br#"{"protocol_version":97,"session_id":"session-blue"}"#;
+    let wire = br#"{"protocol_version":98,"session_id":"session-blue"}"#;
     let error = Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(wire)
-        .expect_err("version-97 filter must reject the retired session_id field");
+        .expect_err("version-98 filter must reject the retired session_id field");
     assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
     assert!(error.to_string().contains("session_id"), "{error}");
 }
@@ -872,9 +872,9 @@ fn remote_protocol_92_session_filter_refuses_nested_duplicate_fields() {
     // duplicate key. The property being pinned — nested duplicate-field
     // rejection inside a typed DTO — is pinned on the process-list filter's
     // typed originator selector instead.
-    let wire = br#"{"protocol_version":97,"originator":{"type":"host","scope":"a","scope":"b"}}"#;
+    let wire = br#"{"protocol_version":98,"originator":{"type":"host","scope":"a","scope":"b"}}"#;
     let error = Envelope::<RemoteProcessListFilter>::decode_json(wire)
-        .expect_err("version-97 envelope must preserve nested duplicate-field rejection");
+        .expect_err("version-98 envelope must preserve nested duplicate-field rejection");
     assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
     assert!(
         error.to_string().contains("duplicate field `scope`"),
@@ -1072,7 +1072,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 97,
+            "protocol_version": 98,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1087,7 +1087,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 97,
+            actual: 98,
             expected: 41,
         }
     ));
@@ -1133,7 +1133,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 97,
+            expected: 98,
         }
     ));
 
@@ -1150,7 +1150,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 97, "remote DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 98, "remote DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {
@@ -1619,7 +1619,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 97,
+            expected: 98,
         })
     ));
 }
@@ -1658,7 +1658,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 97,
+                expected: 98,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1694,7 +1694,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 97,
+                expected: 98,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1749,7 +1749,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 97,
+                expected: 98,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1781,7 +1781,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 97,
+                expected: 98,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
