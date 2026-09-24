@@ -408,6 +408,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         let mut staged_batches = batches.clone();
         let mut already_satisfied = admission.already_satisfied_batch_ids();
         let mut refusal = None;
+        let mut reacquired_inputs = Vec::new();
+        let mut reacquired_queued = Vec::new();
         let (inputs, queued) = if let Some(members) = &admission.members {
             let input_ids: Vec<_> = members
                 .iter()
@@ -443,6 +445,52 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 self.reclaim_run_inputs(&mut staged_inputs, &input_ids, fence, owner, now)?;
             let queued =
                 self.reclaim_run_batches(&mut staged_batches, &batch_ids, fence, owner, now)?;
+            // FIG-3552: the checkpoint-assigned rows still open and held by
+            // a claim are retaken under this generation beside the members.
+            // A row whose claim was released went back to the queue.
+            let assigned_input_ids: Vec<_> = admission
+                .assigned_non_members()
+                .filter_map(|member| match member {
+                    QueuedRunMember::Input(id) => Some(id),
+                    QueuedRunMember::Batch(_) => None,
+                })
+                .filter(|id| {
+                    staged_inputs.iter().any(|row| {
+                        row.input.session_id == fence.session_id
+                            && row.input.input_id == **id
+                            && !row.input.state.is_terminal()
+                            && row.claim.token().is_some()
+                    })
+                })
+                .collect();
+            let assigned_batch_ids: Vec<_> = admission
+                .assigned_non_members()
+                .filter_map(|member| match member {
+                    QueuedRunMember::Batch(id) => Some(id),
+                    QueuedRunMember::Input(_) => None,
+                })
+                .filter(|id| {
+                    staged_batches.iter().any(|row| {
+                        row.batch.session_id == fence.session_id
+                            && row.batch.batch_id == **id
+                            && row.claim.token().is_some()
+                    })
+                })
+                .collect();
+            reacquired_inputs = self.reclaim_run_inputs(
+                &mut staged_inputs,
+                &assigned_input_ids,
+                fence,
+                owner,
+                now,
+            )?;
+            reacquired_queued = self.reclaim_run_batches(
+                &mut staged_batches,
+                &assigned_batch_ids,
+                fence,
+                owner,
+                now,
+            )?;
             (inputs, queued)
         } else {
             let inputs = if matches!(admission.request, QueuedRunRequest::Automatic) {
@@ -541,6 +589,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             queued,
             already_satisfied,
             refusal,
+            reacquired_inputs,
+            reacquired_queued,
         })
     }
 

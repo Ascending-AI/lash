@@ -32,6 +32,16 @@ section 1's `run` / `stream_to` sugar, section 3's caller future as first
 driver, the direct-turn `Queued { ahead }` outcome in section 6, and section 7
 entirely. The text below still describes current code.
 
+Amended 2026-09-24 (FIG-3552): section 6's cede rule covers every claim a
+redrive restores, not only its journaled drive. A checkpoint claim of turn input
+or queued work, and work withheld at a terminal checkpoint, all carry the first
+execution's authority. A resumed queued run first retakes the open rows its
+checkpoints were assigned under its own generation (ADR 0029), so a restored
+claim that is still superseded at commit was taken by another driver: the
+redrive cedes with `accepted_turn_input_ceded` and commits nothing. ADR 0029's
+recovered-settlement drop, which section 5(d) and section 6 refer to, is
+deleted.
+
 ## Context
 
 Lash has two ways to start a turn, and they disagree about what durably exists.

@@ -303,3 +303,139 @@ pub async fn queued_run_checkpoint_assignment_survives_lane_rotation(
         .unwrap();
     assert_eq!(receipt.terminal, settled.terminal);
 }
+
+/// A resumed run retakes the open rows its checkpoints were assigned under
+/// the resuming generation, even from a peer that took one in between
+/// (FIG-3552). Ownership moves only through the claim CAS: the retaken rows
+/// come back beside the members, never as run input.
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance fixtures fail at the violated durable invariant"
+)]
+pub async fn queued_run_resume_retakes_its_open_checkpoint_assignments(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = SessionId::from("queued-run-resume-retakes-assignments");
+    let state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let member = store
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "member"))
+        .await
+        .unwrap();
+    let lease = claim_session_execution_lease_for_test(&store, &session_id, "first").await;
+    let request = BeginQueuedRun {
+        session_id: session_id.clone(),
+        identity: Some(crate::ExecutionScope::queue_drain(&session_id, "retakes")),
+        request: QueuedRunRequest::Automatic,
+        configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
+        expected_head_revision: 0,
+        initial_turn_index: 1,
+    };
+    let admission = store
+        .begin_or_resume_queued_run(&lease.authority(), request.clone())
+        .await
+        .unwrap();
+    let selected = store
+        .select_queued_run(
+            &lease.authority(),
+            &admission.scope,
+            &lease.owner,
+            1,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .unwrap();
+    assert!(selected.reacquired_inputs.is_empty() && selected.reacquired_queued.is_empty());
+    let checkpoint_input = store
+        .enqueue_pending_turn_input(checkpoint_claims::pending_active_turn_input_draft(
+            &session_id,
+            &selected.admission.position.turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "checkpoint assigned",
+        ))
+        .await
+        .unwrap();
+    let checkpoint_batch = store
+        .enqueue_queued_work(checkpoint_claims::queued_draft(
+            &session_id,
+            "checkpoint assigned",
+            DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .unwrap();
+    let (checkpoint_inputs, checkpoint_batches) = store
+        .claim_checkpoint_work(
+            &session_id,
+            &lease.authority(),
+            &lease.owner,
+            &selected.admission.position.turn_id,
+            crate::CheckpointKind::AfterWork,
+            1,
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .unwrap();
+    let checkpoint_inputs = checkpoint_inputs.unwrap();
+    let checkpoint_batches = checkpoint_batches.unwrap();
+    store
+        .release_session_execution_lease(&lease.authority())
+        .await
+        .unwrap();
+
+    // A peer takes the assigned batch under its own generation and dies.
+    let peer = claim_session_execution_lease_for_test(&store, &session_id, "peer").await;
+    let peer_claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            &session_id,
+            &peer.authority(),
+            &peer.owner,
+            crate::QueuedWorkClaimBoundary::Idle,
+            std::slice::from_ref(&checkpoint_batch.batch_id),
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .unwrap()
+        .claim
+        .unwrap();
+    store
+        .release_session_execution_lease(&peer.authority())
+        .await
+        .unwrap();
+
+    let successor = claim_session_execution_lease_for_test(&store, &session_id, "successor").await;
+    let resumed = store
+        .select_queued_run(
+            &successor.authority(),
+            &admission.scope,
+            &successor.owner,
+            1,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .unwrap();
+    let generation = successor.authority().fencing_token;
+    assert_eq!(
+        resumed
+            .inputs
+            .iter()
+            .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.clone()))
+            .collect::<Vec<_>>(),
+        vec![member.input_id],
+        "the retaken assignments are not run input"
+    );
+    assert_eq!(resumed.reacquired_inputs.len(), 1);
+    let retaken_input = &resumed.reacquired_inputs[0];
+    assert_eq!(retaken_input.session_lease_generation, generation);
+    assert_ne!(retaken_input.claim_id, checkpoint_inputs.claim_id);
+    assert_eq!(retaken_input.inputs[0].input_id, checkpoint_input.input_id);
+    assert_eq!(resumed.reacquired_queued.len(), 1);
+    let retaken_batch = &resumed.reacquired_queued[0];
+    assert_eq!(retaken_batch.session_lease_generation, generation);
+    assert_ne!(retaken_batch.claim_id, checkpoint_batches.claim_id);
+    assert_ne!(retaken_batch.claim_id, peer_claim.claim_id);
+    assert_eq!(retaken_batch.batches[0].batch_id, checkpoint_batch.batch_id);
+}

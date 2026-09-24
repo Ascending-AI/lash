@@ -527,6 +527,7 @@ impl LashRuntime {
                 ))
             });
         }
+        self.queued_run_reacquired = Default::default();
         let (mut input, claims) = self.queued_run_input(selection, true)?;
         if selected.is_some() {
             input.turn_context.mark_selected_queued_work_drain();
@@ -557,6 +558,7 @@ impl LashRuntime {
             });
         }
         self.queued_run = None;
+        self.queued_run_reacquired = Default::default();
         if result.is_ok()
             && let Some(held) = lease.as_ref()
         {
@@ -675,6 +677,12 @@ impl LashRuntime {
             }
         }
         input.trace_turn_id = Some(selected.admission.position.turn_id.clone());
+        self.queued_run_reacquired
+            .queued
+            .extend(selected.reacquired_queued);
+        self.queued_run_reacquired
+            .turn_inputs
+            .extend(selected.reacquired_inputs);
         self.queued_run = Some(Box::new(selected.admission));
         Ok((
             input,

@@ -1,9 +1,9 @@
-use crate::SessionId;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub(super) struct ClaimSettlement<C> {
     pub(super) completions: Vec<C>,
-    pub(super) generations: HashMap<String, u64>,
+    /// The session-lease generation each claim was taken under, by claim id.
+    generations: HashMap<String, u64>,
     #[cfg(test)]
     originating_override: Option<Vec<C>>,
 }
@@ -24,6 +24,17 @@ impl<C> ClaimSettlement<C> {
             return originating;
         }
         &self.completions
+    }
+
+    /// Whether `claim_id` was taken under a session-lease generation older
+    /// than `current`: it was restored from an earlier execution, not claimed
+    /// by this one.
+    fn is_restored(&self, claim_id: &str, current: Option<u64>) -> bool {
+        current.is_some_and(|current| {
+            self.generations
+                .get(claim_id)
+                .is_some_and(|generation| *generation < current)
+        })
     }
 
     #[cfg(test)]
@@ -47,11 +58,11 @@ pub(super) struct TurnClaimSettlement {
     /// is released for the cancellation's undelivered disposition, never
     /// completed (FIG-3531).
     pub(super) undelivered_turn_inputs: Vec<crate::TurnInputClaim>,
-    /// Turn-input claims whose supersession cedes the turn instead of being
-    /// dropped and retried: the replayed journaled initial drive set
-    /// (ADR 0069 §6). Its rows being reclaimed means another driver answered
-    /// them, and committing the same words again would answer them twice.
-    ceding_turn_input_claims: std::collections::BTreeSet<String>,
+    /// The claims of the journaled initial drive set (ADR 0069 §6). They cede
+    /// on supersession whatever generation the turn commits under: a first
+    /// execution holds them under its own generation, and a redrive restores
+    /// them from the journal.
+    journaled_drive_claims: BTreeSet<String>,
 }
 
 impl TurnClaimSettlement {
@@ -65,7 +76,7 @@ impl TurnClaimSettlement {
             queued: ClaimSettlement::new(queued, queue_generations),
             turn_inputs: ClaimSettlement::new(turn_inputs, input_generations),
             undelivered_turn_inputs: Vec::new(),
-            ceding_turn_input_claims: std::collections::BTreeSet::new(),
+            journaled_drive_claims: BTreeSet::new(),
         }
     }
 
@@ -77,41 +88,36 @@ impl TurnClaimSettlement {
         self
     }
 
-    pub(super) fn ceding_on_supersession(
-        mut self,
-        claims: std::collections::BTreeSet<String>,
-    ) -> Self {
-        self.ceding_turn_input_claims = claims;
+    pub(super) fn with_journaled_drive_claims(mut self, claims: BTreeSet<String>) -> Self {
+        self.journaled_drive_claims = claims;
         self
     }
 
-    /// Whether `error` supersedes a claim that cedes the turn rather than
-    /// being dropped from the settlement.
-    pub(super) fn cedes(&self, error: &crate::StoreError) -> bool {
-        matches!(
-            error,
-            crate::StoreError::TurnInputClaimSuperseded { claim_id, .. }
-                if self.ceding_turn_input_claims.contains(claim_id.as_str())
-        )
-    }
-
-    pub(super) fn has_recovered(&self, current: Option<u64>) -> bool {
-        current.is_some_and(|current| {
-            self.queued
-                .generations
-                .values()
-                .chain(self.turn_inputs.generations.values())
-                .any(|generation| *generation < current)
-        })
-    }
-
-    pub(super) fn drop_superseded(
-        &mut self,
-        error: &crate::StoreError,
-        current: Option<u64>,
-    ) -> bool {
-        self.queued.drop_superseded(error, current)
-            || self.turn_inputs.drop_superseded(error, current)
+    /// Whether `error` supersedes a claim whose loss cedes the turn.
+    ///
+    /// A claim the turn restored from an earlier execution (its generation
+    /// predates `current`, the generation the turn commits under) or a
+    /// journaled drive claim carries authority the turn already spent: the
+    /// journal holds the words it answered them with. A resumed queued run
+    /// retakes its own assigned rows under the committing generation before
+    /// the replay and settles them under those claims, so supersession here
+    /// proves another driver took the rows through the claim CAS: committing
+    /// the turn would answer them a second time. The turn cedes and commits
+    /// nothing (FIG-3552).
+    ///
+    /// A claim taken under `current` cannot be superseded while the turn holds
+    /// the lane; if it is, the error stands as it is.
+    pub(super) fn cedes(&self, error: &crate::StoreError, current: Option<u64>) -> bool {
+        match error {
+            crate::StoreError::TurnInputClaimSuperseded { claim_id, .. } => {
+                self.journaled_drive_claims.contains(claim_id.as_str())
+                    || self.turn_inputs.is_restored(claim_id, current)
+            }
+            crate::StoreError::QueuedWorkClaimSuperseded { claim_id, .. } => {
+                self.queued.is_restored(claim_id, current)
+            }
+            _ => false,
+        }
     }
 
     #[cfg(test)]
@@ -135,153 +141,7 @@ impl TurnClaimSettlement {
                 input_generations,
             ),
             undelivered_turn_inputs: Vec::new(),
-            ceding_turn_input_claims: std::collections::BTreeSet::new(),
-        }
-    }
-}
-
-pub(super) struct Supersession<'a> {
-    session_id: &'a SessionId,
-    claim_id: &'a str,
-    row_id: &'a str,
-    superseding_claim_id: &'a Option<Box<str>>,
-    superseding_generation: &'a Option<Box<u64>>,
-}
-
-pub(super) trait SettlementRows {
-    const ROW_KIND: &'static str;
-    const MESSAGE: &'static str;
-    fn claim_id(&self) -> Option<&str>;
-    fn rows(&self) -> impl Iterator<Item = &str>;
-    fn remove_row(&mut self, row_id: &str);
-    fn supersession(error: &crate::StoreError) -> Option<Supersession<'_>>;
-}
-
-fn drop_row<C: SettlementRows>(claims: &mut Vec<C>, claim_id: &str, row_id: &str) {
-    for claim in claims
-        .iter_mut()
-        .filter(|claim| claim.claim_id() == Some(claim_id))
-    {
-        claim.remove_row(row_id);
-    }
-    claims.retain(|claim| claim.rows().next().is_some());
-}
-
-impl<C: SettlementRows> ClaimSettlement<C> {
-    fn drop_superseded(
-        &mut self,
-        error: &crate::StoreError,
-        current_session_lease_generation: Option<u64>,
-    ) -> bool {
-        let Some(Supersession {
-            session_id,
-            claim_id,
-            row_id,
-            superseding_claim_id,
-            superseding_generation: superseding_session_lease_generation,
-        }) = C::supersession(error)
-        else {
-            return false;
-        };
-        let Some(&stale_generation) = self.generations.get(claim_id) else {
-            return false;
-        };
-        let holds_row =
-            |claim: &C| claim.claim_id() == Some(claim_id) && claim.rows().any(|id| id == row_id);
-        if !current_session_lease_generation.is_some_and(|current| stale_generation < current)
-            || !self.completions.iter().any(holds_row)
-            || !self.originating().iter().any(holds_row)
-        {
-            return false;
-        }
-        drop_row(&mut self.completions, claim_id, row_id);
-        #[cfg(test)]
-        if let Some(originating) = &mut self.originating_override {
-            drop_row(originating, claim_id, row_id);
-        }
-        tracing::warn!(
-            target: "lash_core::claim_settlement",
-            event = "claim_settlement.recovered_row_dropped",
-            decision_basis = "superseded_recovered_claim",
-            session_id = session_id.as_str(),
-            row_kind = C::ROW_KIND,
-            row_id,
-            stale_claim_id = claim_id,
-            stale_session_lease_generation = stale_generation,
-            current_session_lease_generation,
-            superseding_claim_id,
-            superseding_session_lease_generation,
-            outcome = "drop_stale_settlement",
-            "{}", C::MESSAGE
-        );
-        true
-    }
-}
-
-impl SettlementRows for crate::QueuedWorkCompletion {
-    const ROW_KIND: &'static str = "queued_work";
-    const MESSAGE: &'static str =
-        "recovered final commit dropped a queued-work row no longer owned by its restored claim";
-    fn claim_id(&self) -> Option<&str> {
-        Some(&self.claim_id)
-    }
-    fn rows(&self) -> impl Iterator<Item = &str> {
-        self.batch_ids.iter().map(crate::BatchId::as_str)
-    }
-    fn remove_row(&mut self, row_id: &str) {
-        self.batch_ids.retain(|id| id != row_id);
-    }
-    fn supersession(error: &crate::StoreError) -> Option<Supersession<'_>> {
-        match error {
-            crate::StoreError::QueuedWorkClaimSuperseded {
-                session_id,
-                claim_id,
-                row_id: Some(row_id),
-                superseding_claim_id,
-                superseding_session_lease_generation,
-            } => Some(Supersession {
-                session_id,
-                claim_id,
-                row_id,
-                superseding_claim_id,
-                superseding_generation: superseding_session_lease_generation,
-            }),
-            _ => None,
-        }
-    }
-}
-
-impl SettlementRows for crate::TurnInputCompletion {
-    const ROW_KIND: &'static str = "turn_input";
-    const MESSAGE: &'static str =
-        "recovered final commit dropped a turn-input row no longer owned by its restored claim";
-    fn claim_id(&self) -> Option<&str> {
-        self.claim_id()
-    }
-    fn rows(&self) -> impl Iterator<Item = &str> {
-        self.input_ids.iter().map(crate::InputId::as_str)
-    }
-    fn remove_row(&mut self, row_id: &str) {
-        self.input_ids.retain(|id| id != row_id);
-        self.applications
-            .retain(|application| application.input_id != row_id);
-    }
-    fn supersession(error: &crate::StoreError) -> Option<Supersession<'_>> {
-        match error {
-            crate::StoreError::TurnInputClaimSuperseded {
-                session_id,
-                claim_id,
-                row_id: Some(row_id),
-                superseding_claim_id,
-                superseding_session_lease_generation,
-            } => Some(Supersession {
-                session_id,
-                claim_id,
-                row_id,
-                superseding_claim_id,
-                superseding_generation: superseding_session_lease_generation,
-            }),
-            _ => None,
+            journaled_drive_claims: BTreeSet::new(),
         }
     }
 }
@@ -289,279 +149,88 @@ impl SettlementRows for crate::TurnInputCompletion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn drop_for_test<C: SettlementRows + Clone>(
-        error: &crate::StoreError,
-        generations: &HashMap<String, u64>,
-        current: Option<u64>,
-        completed: &mut Vec<C>,
-        originating: &mut Vec<C>,
-    ) -> bool {
-        let mut settlement = ClaimSettlement::divergent_for_test(
-            originating.clone(),
-            completed.clone(),
-            generations.clone(),
-        );
-        let removed = settlement.drop_superseded(error, current);
-        *originating = settlement.originating().to_vec();
-        *completed = settlement.completions;
-        removed
-    }
-    use crate::runtime::tests::trace_capture::{CapturedFieldKind, EventCapture, capturing_sync};
+    use crate::SessionId;
 
-    fn completion() -> crate::QueuedWorkCompletion {
-        crate::QueuedWorkCompletion {
-            session_id: SessionId::from("fig905"),
-            claim_id: "stale-claim".to_string(),
-            lease_token: "stale-token".to_string(),
-            data: crate::QueuedWorkCompletionData {
-                batch_ids: vec!["fig905-row".into()],
-            },
-        }
-    }
-
-    fn superseded_error(row_id: Option<Box<str>>) -> crate::StoreError {
+    fn queued_superseded(claim_id: &str) -> crate::StoreError {
         crate::StoreError::QueuedWorkClaimSuperseded {
-            session_id: SessionId::from("fig905"),
-            claim_id: "stale-claim".to_string(),
-            row_id,
-            superseding_claim_id: Some("live-claim".into()),
-            superseding_session_lease_generation: Some(Box::new(2)),
+            session_id: SessionId::from("fig3552"),
+            claim_id: claim_id.to_string(),
+            row_id: Some("fig3552-row".into()),
+            superseding_claim_id: Some("successor-claim".into()),
+            superseding_session_lease_generation: Some(Box::new(3)),
         }
     }
 
-    fn turn_input_completion() -> crate::TurnInputCompletion {
-        crate::TurnInputCompletion {
-            session_id: SessionId::from("fig905"),
-            claim: Some(crate::TurnInputSettlementClaim {
-                claim_id: "stale-claim".to_string(),
-                lease_token: "stale-token".to_string(),
-            }),
-            data: crate::TurnInputCompletionData {
-                input_ids: vec!["fig905-row".into()],
-                applications: Vec::new(),
-            },
-        }
-    }
-
-    fn turn_input_superseded_error() -> crate::StoreError {
+    fn turn_input_superseded(claim_id: &str) -> crate::StoreError {
         crate::StoreError::TurnInputClaimSuperseded {
-            session_id: SessionId::from("fig905"),
-            claim_id: "stale-claim".to_string(),
-            row_id: Some("fig905-row".into()),
-            superseding_claim_id: Some("live-claim".into()),
-            superseding_session_lease_generation: Some(Box::new(2)),
+            session_id: SessionId::from("fig3552"),
+            claim_id: claim_id.to_string(),
+            row_id: Some("fig3552-row".into()),
+            superseding_claim_id: Some("successor-claim".into()),
+            superseding_session_lease_generation: Some(Box::new(3)),
         }
     }
 
-    #[test]
-    fn recovered_settlement_escape_rejects_a_current_generation_conflict() {
-        let mut completed = vec![completion()];
-        let mut originating = vec![completion()];
-        let generations = std::iter::once(("stale-claim".to_string(), 2)).collect();
-
-        assert!(!drop_for_test(
-            &superseded_error(Some("fig905-row".into())),
-            &generations,
-            Some(2),
-            &mut completed,
-            &mut originating,
-        ));
-        assert_eq!(completed, vec![completion()]);
-        assert_eq!(originating, vec![completion()]);
-    }
-
-    fn foreign_row_completion() -> crate::QueuedWorkCompletion {
-        crate::QueuedWorkCompletion {
-            session_id: SessionId::from("fig905"),
-            claim_id: "stale-claim".to_string(),
-            lease_token: "stale-token".to_string(),
-            data: crate::QueuedWorkCompletionData {
-                batch_ids: vec!["fig905-other-row".into()],
-            },
-        }
-    }
-
-    fn foreign_row_turn_input_completion() -> crate::TurnInputCompletion {
-        crate::TurnInputCompletion {
-            session_id: SessionId::from("fig905"),
-            claim: Some(crate::TurnInputSettlementClaim {
-                claim_id: "stale-claim".to_string(),
-                lease_token: "stale-token".to_string(),
-            }),
-            data: crate::TurnInputCompletionData {
-                input_ids: vec!["fig905-other-row".into()],
-                applications: Vec::new(),
-            },
-        }
+    /// One queued-work and one turn-input claim of each age: `restored-*`
+    /// under generation 1 and `live-*` under the commit's generation 4.
+    fn settlement() -> TurnClaimSettlement {
+        let generations = |kind: &str| {
+            [(format!("restored-{kind}"), 1), (format!("live-{kind}"), 4)]
+                .into_iter()
+                .collect()
+        };
+        TurnClaimSettlement::new(
+            Vec::new(),
+            Vec::new(),
+            generations("queued"),
+            generations("input"),
+        )
     }
 
     #[test]
-    fn recovered_queue_settlement_escape_mutates_nothing_when_only_one_side_holds_the_row() {
-        let mut completed = vec![completion()];
-        let mut originating = vec![foreign_row_completion()];
-        let generations = std::iter::once(("stale-claim".to_string(), 1)).collect();
-
-        assert!(!drop_for_test(
-            &superseded_error(Some("fig905-row".into())),
-            &generations,
-            Some(2),
-            &mut completed,
-            &mut originating,
-        ));
-        assert_eq!(completed, vec![completion()]);
-        assert_eq!(originating, vec![foreign_row_completion()]);
+    fn a_superseded_restored_claim_cedes_for_both_row_kinds() {
+        let settlement = settlement();
+        assert!(settlement.cedes(&queued_superseded("restored-queued"), Some(4)));
+        assert!(settlement.cedes(&turn_input_superseded("restored-input"), Some(4)));
     }
 
     #[test]
-    fn recovered_turn_input_settlement_escape_mutates_nothing_when_only_one_side_holds_the_row() {
-        let mut completed = vec![turn_input_completion()];
-        let mut originating = vec![foreign_row_turn_input_completion()];
-        let generations = std::iter::once(("stale-claim".to_string(), 1)).collect();
-
-        assert!(!drop_for_test(
-            &turn_input_superseded_error(),
-            &generations,
-            Some(2),
-            &mut completed,
-            &mut originating,
-        ));
-        assert_eq!(completed, vec![turn_input_completion()]);
-        assert_eq!(originating, vec![foreign_row_turn_input_completion()]);
+    fn a_superseded_claim_of_the_committing_generation_does_not_cede() {
+        let settlement = settlement();
+        assert!(!settlement.cedes(&queued_superseded("live-queued"), Some(4)));
+        assert!(!settlement.cedes(&turn_input_superseded("live-input"), Some(4)));
     }
 
     #[test]
-    fn recovered_settlement_escape_rejects_an_error_without_a_row_id() {
-        let mut completed = vec![completion()];
-        let mut originating = vec![completion()];
-        let generations = std::iter::once(("stale-claim".to_string(), 1)).collect();
-
-        assert!(!drop_for_test(
-            &superseded_error(None),
-            &generations,
-            Some(2),
-            &mut completed,
-            &mut originating,
-        ));
-        assert_eq!(completed, vec![completion()]);
-        assert_eq!(originating, vec![completion()]);
-    }
-
-    fn assert_recovered_drop_event(capture: &EventCapture, row_kind: &str, message: &str) {
-        let event = capture.exactly_one("claim_settlement.recovered_row_dropped");
-        assert_eq!(event.level, "WARN");
-        assert_eq!(event.target, "lash_core::claim_settlement");
-        let expected = [
-            (
-                "event",
-                "claim_settlement.recovered_row_dropped",
-                CapturedFieldKind::Str,
-            ),
-            (
-                "decision_basis",
-                "superseded_recovered_claim",
-                CapturedFieldKind::Str,
-            ),
-            ("session_id", "fig905", CapturedFieldKind::Str),
-            ("row_kind", row_kind, CapturedFieldKind::Str),
-            ("row_id", "fig905-row", CapturedFieldKind::Str),
-            ("stale_claim_id", "stale-claim", CapturedFieldKind::Str),
-            (
-                "stale_session_lease_generation",
-                "1",
-                CapturedFieldKind::U64,
-            ),
-            (
-                "current_session_lease_generation",
-                "2",
-                CapturedFieldKind::U64,
-            ),
-            ("superseding_claim_id", "live-claim", CapturedFieldKind::Str),
-            (
-                "superseding_session_lease_generation",
-                "2",
-                CapturedFieldKind::U64,
-            ),
-            ("outcome", "drop_stale_settlement", CapturedFieldKind::Str),
-            ("message", message, CapturedFieldKind::Debug),
-        ];
-        assert_eq!(
-            event.field_count(),
-            expected.len(),
-            "event field set changed: {event:?}"
-        );
-        for (field, value, kind) in expected {
-            assert_eq!(
-                event.field_kind(field),
-                kind,
-                "settlement event field `{field}` encoding changed: {event:?}"
-            );
-            assert_eq!(
-                event.field(field),
-                value,
-                "settlement event field `{field}` changed: {event:?}"
-            );
-        }
+    fn without_a_committing_generation_no_claim_counts_as_restored() {
+        let settlement = settlement();
+        assert!(!settlement.cedes(&queued_superseded("restored-queued"), None));
+        assert!(!settlement.cedes(&turn_input_superseded("restored-input"), None));
     }
 
     #[test]
-    fn recovered_queue_settlement_drop_warns_with_typed_decision_basis() {
-        let mut completed = vec![completion()];
-        let mut originating = vec![completion()];
-        let generations = std::iter::once(("stale-claim".to_string(), 1)).collect();
-
-        let (removed, capture) = capturing_sync(|| {
-            drop_for_test(
-                &superseded_error(Some("fig905-row".into())),
-                &generations,
-                Some(2),
-                &mut completed,
-                &mut originating,
-            )
-        });
-        assert!(removed);
-        assert!(completed.is_empty());
-        assert_eq!(completed, originating);
-        assert_recovered_drop_event(
-            &capture,
-            "queued_work",
-            "recovered final commit dropped a queued-work row no longer owned by its restored claim",
-        );
+    fn claim_ids_are_matched_within_their_own_row_kind() {
+        let settlement = settlement();
+        assert!(!settlement.cedes(&queued_superseded("restored-input"), Some(4)));
+        assert!(!settlement.cedes(&turn_input_superseded("restored-queued"), Some(4)));
+        assert!(!settlement.cedes(&turn_input_superseded("unknown"), Some(4)));
     }
 
     #[test]
-    fn recovered_turn_input_settlement_drop_warns_with_typed_decision_basis() {
-        let mut completed = vec![turn_input_completion()];
-        let mut originating = vec![turn_input_completion()];
-        let generations = std::iter::once(("stale-claim".to_string(), 1)).collect();
-
-        let (removed, capture) = capturing_sync(|| {
-            drop_for_test(
-                &turn_input_superseded_error(),
-                &generations,
-                Some(2),
-                &mut completed,
-                &mut originating,
-            )
-        });
-        assert!(removed);
-        assert!(completed.is_empty());
-        assert_eq!(completed, originating);
-        assert_recovered_drop_event(
-            &capture,
-            "turn_input",
-            "recovered final commit dropped a turn-input row no longer owned by its restored claim",
-        );
+    fn a_journaled_drive_claim_cedes_under_any_generation() {
+        let settlement = settlement()
+            .with_journaled_drive_claims(std::iter::once("live-input".to_string()).collect());
+        assert!(settlement.cedes(&turn_input_superseded("live-input"), Some(4)));
+        assert!(settlement.cedes(&turn_input_superseded("live-input"), None));
     }
+
     #[test]
-    fn claim_settlement_derived_views_agree_after_each_kind_drops() {
-        let generations: HashMap<String, u64> = [("stale-claim".into(), 1)].into_iter().collect();
-        let mut queued = ClaimSettlement::new(vec![completion()], generations.clone());
-        assert!(queued.drop_superseded(&superseded_error(Some("fig905-row".into())), Some(2)));
-        assert!(queued.completions.is_empty());
-        assert_eq!(queued.originating(), queued.completions.as_slice());
-        let mut inputs = ClaimSettlement::new(vec![turn_input_completion()], generations);
-        assert!(inputs.drop_superseded(&turn_input_superseded_error(), Some(2)));
-        assert!(inputs.completions.is_empty());
-        assert_eq!(inputs.originating(), inputs.completions.as_slice());
+    fn other_store_errors_never_cede() {
+        let settlement = settlement();
+        let error = crate::StoreError::HeadRevisionConflict {
+            expected: 1,
+            actual: 2,
+        };
+        assert!(!settlement.cedes(&error, Some(4)));
     }
 }

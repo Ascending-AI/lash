@@ -369,6 +369,9 @@ impl Store {
                         }
                         let (inputs, queued) =
                             reclaim_run_members_conn(tx, now, &fence, &owner, members)?;
+                        let assigned = open_assigned_members_conn(tx, &fence, &admission)?;
+                        let (reacquired_inputs, reacquired_queued) =
+                            reclaim_run_members_conn(tx, now, &fence, &owner, &assigned)?;
                         let already_satisfied = admission.already_satisfied_batch_ids();
                         return Ok(SelectedQueuedRun {
                             admission,
@@ -376,6 +379,8 @@ impl Store {
                             queued,
                             already_satisfied,
                             refusal: None,
+                            reacquired_inputs,
+                            reacquired_queued,
                         });
                     }
                     let inputs = if matches!(admission.request, QueuedRunRequest::Automatic) {
@@ -486,6 +491,8 @@ impl Store {
                         queued: queued.into_iter().collect(),
                         already_satisfied,
                         refusal,
+                        reacquired_inputs: Vec::new(),
+                        reacquired_queued: Vec::new(),
                     })
                 })();
                 Ok(match outcome {
@@ -503,6 +510,47 @@ fn require_claim<T>(outcome: TxOutcome<T>, session_id: &SessionId) -> Result<T, 
         TxOutcome::Commit(claim) => Ok(claim),
         TxOutcome::Rollback(_) => Err(conflict(session_id)),
     }
+}
+
+/// The run's checkpoint-assigned rows, beyond its members, that are still
+/// open and held by a claim. Settled rows are gone or terminal; a row whose
+/// claim was released went back to the queue. Neither is retaken.
+fn open_assigned_members_conn(
+    tx: &Connection,
+    fence: &SessionExecutionLeaseAuthority,
+    admission: &QueuedRunAdmission,
+) -> Result<Vec<QueuedRunMember>, StoreError> {
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let mut open = Vec::new();
+    for member in admission.assigned_non_members() {
+        let is_open = match member {
+            QueuedRunMember::Input(id) => tx
+                .query_row(
+                    sql.pending_inputs.select_by_id.sql(),
+                    params![fence.session_id.as_str(), id.as_str()],
+                    pending_turn_input_row_from_sql,
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .filter(|row| row.claim_token.is_some())
+                .map(pending_turn_input_from_row)
+                .transpose()?
+                .is_some_and(|input| !input.state.is_terminal()),
+            QueuedRunMember::Batch(id) => tx
+                .query_row(
+                    sql.queued_batches.select_by_id.sql(),
+                    params![id.as_str()],
+                    queued_batch_row_from_sql,
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .is_some_and(|row| row.session_id == fence.session_id && row.claim_token.is_some()),
+        };
+        if is_open {
+            open.push(member.clone());
+        }
+    }
+    Ok(open)
 }
 
 fn reclaim_run_members_conn(

@@ -35,6 +35,120 @@ impl WithheldTerminalWork {
     }
 }
 
+/// Rows a resumed queued run retook under its resuming generation because
+/// its checkpoints had been assigned them (FIG-3552).
+///
+/// They are not the run's input. A replayed checkpoint restores the first
+/// execution's claim to such a row, and that claim is superseded by this one;
+/// the turn settles the row under this claim instead, so ownership moves only
+/// through the claim CAS and a superseded restored claim can only mean another
+/// driver took the row.
+#[derive(Default)]
+pub(crate) struct ReacquiredClaims {
+    pub(crate) queued: Vec<crate::QueuedWorkClaim>,
+    pub(crate) turn_inputs: Vec<crate::TurnInputClaim>,
+}
+
+fn claim_authority<C>(claim: &crate::WorkClaim<C>) -> (u64, u64) {
+    (claim.session_lease_generation, claim.fencing_token)
+}
+
+/// The reacquired claim that outranks `claim` and holds the row `holds` names.
+fn outranking<C>(
+    reacquired: &[crate::WorkClaim<C>],
+    claim: &crate::WorkClaim<C>,
+    holds: impl Fn(&crate::WorkClaim<C>) -> bool,
+) -> Option<usize> {
+    reacquired.iter().position(|candidate| {
+        claim_authority(candidate) > claim_authority(claim) && holds(candidate)
+    })
+}
+
+/// Settle every queued-work row this turn holds, moving each row a
+/// reacquired claim outranks onto that claim.
+fn queued_work_completions(
+    held: &[crate::QueuedWorkClaim],
+    reacquired: &[crate::QueuedWorkClaim],
+) -> Vec<crate::QueuedWorkCompletion> {
+    let mut moved: Vec<Vec<crate::BatchId>> = vec![Vec::new(); reacquired.len()];
+    let mut completions = Vec::new();
+    for claim in held {
+        let mut completion = claim.completion();
+        completion.batch_ids.retain(|id| {
+            let Some(index) = outranking(reacquired, claim, |candidate| {
+                candidate.batches.iter().any(|batch| batch.batch_id == *id)
+            }) else {
+                return true;
+            };
+            if !moved[index].contains(id) {
+                moved[index].push(id.clone());
+            }
+            false
+        });
+        if !completion.batch_ids.is_empty() {
+            completions.push(completion);
+        }
+    }
+    for (claim, batch_ids) in reacquired.iter().zip(moved) {
+        if !batch_ids.is_empty() {
+            let mut completion = claim.completion();
+            completion.batch_ids = batch_ids;
+            completions.push(completion);
+        }
+    }
+    completions
+}
+
+/// [`queued_work_completions`] for turn input: a moved row carries its
+/// delivery record with it.
+fn turn_input_completions(
+    held: &[crate::TurnInputClaim],
+    reacquired: &[crate::TurnInputClaim],
+) -> Vec<crate::TurnInputCompletion> {
+    let mut moved: Vec<(Vec<crate::InputId>, Vec<crate::TurnInputApplication>)> =
+        vec![(Vec::new(), Vec::new()); reacquired.len()];
+    let mut completions = Vec::new();
+    for claim in held {
+        let mut completion = claim.completion();
+        let mut kept = Vec::new();
+        for id in std::mem::take(&mut completion.input_ids) {
+            let Some(index) = outranking(reacquired, claim, |candidate| {
+                candidate.inputs.iter().any(|input| input.input_id == id)
+            }) else {
+                kept.push(id);
+                continue;
+            };
+            let (ids, applications) = &mut moved[index];
+            if !ids.contains(&id) {
+                applications.extend(
+                    completion
+                        .applications
+                        .iter()
+                        .filter(|application| application.input_id == id)
+                        .cloned(),
+                );
+                ids.push(id);
+            }
+        }
+        completion
+            .applications
+            .retain(|application| kept.contains(&application.input_id));
+        completion.input_ids = kept;
+        if !completion.input_ids.is_empty() {
+            completions.push(completion);
+        }
+    }
+    for (claim, (input_ids, applications)) in reacquired.iter().zip(moved) {
+        if !input_ids.is_empty() {
+            let mut completion = claim.completion();
+            completion.input_ids = input_ids;
+            completion.applications = applications;
+            completions.push(completion);
+        }
+    }
+    completions
+}
+
 pub(super) struct PhysicalTurnExecution {
     pub(super) turn: AssembledTurn,
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
@@ -117,41 +231,36 @@ impl LogicalTurnClaims {
         withheld.take_if_any()
     }
 
-    /// `journaled_drive_claims` names the claims of a replayed journaled
-    /// initial drive set: they never join the recovered-settlement drop, so a
-    /// superseded one cedes the turn (ADR 0069 §6).
+    /// `journaled_drive_claims` names the claims of the journaled initial
+    /// drive set: a superseded one cedes the turn whatever generation it was
+    /// taken under (ADR 0069 §6). Every other claim cedes when it is
+    /// superseded after being restored from an earlier execution (FIG-3552).
+    /// `reacquired` names the rows a resumed queued run retook under its
+    /// resuming generation: they settle under those claims.
     pub(super) fn commit_effects(
         &self,
         outcome: &TurnOutcome,
         journaled_drive_claims: &std::collections::BTreeSet<String>,
+        reacquired: &ReacquiredClaims,
         session_id: &SessionId,
         turn_id: &TurnId,
         protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     ) -> LogicalTurnCommitEffects {
         let claimed = !self.is_empty();
-        let completed_queue_claims: Vec<_> =
-            self.queued.iter().map(|claim| claim.completion()).collect();
-        let completed_turn_input_claims: Vec<_> = self
-            .turn_inputs
-            .iter()
-            .map(|claim| claim.completion())
-            .collect();
+        let completed_queue_claims = queued_work_completions(&self.queued, &reacquired.queued);
+        let completed_turn_input_claims =
+            turn_input_completions(&self.turn_inputs, &reacquired.turn_inputs);
         let queue_claim_generations = self
             .queued
             .iter()
+            .chain(&reacquired.queued)
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
-        let (ceding_turn_input_claims, recoverable_turn_input_claims): (Vec<_>, Vec<_>) = self
+        let turn_input_claim_generations = self
             .turn_inputs
             .iter()
-            .partition(|claim| journaled_drive_claims.contains(&claim.claim_id));
-        let turn_input_claim_generations = recoverable_turn_input_claims
-            .iter()
+            .chain(&reacquired.turn_inputs)
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
-            .collect();
-        let ceding_turn_input_claims = ceding_turn_input_claims
-            .iter()
-            .map(|claim| claim.claim_id.clone())
             .collect();
         let enqueued_queue_batches = match outcome {
             TurnOutcome::AgentFrameSwitch {
@@ -194,7 +303,7 @@ impl LogicalTurnClaims {
                 turn_input_claim_generations,
             )
             .with_undelivered_turn_inputs(undelivered_turn_inputs)
-            .ceding_on_supersession(ceding_turn_input_claims),
+            .with_journaled_drive_claims(journaled_drive_claims.clone()),
             enqueued_queue_batches,
         }
     }

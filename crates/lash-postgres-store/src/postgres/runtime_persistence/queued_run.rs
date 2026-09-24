@@ -349,6 +349,9 @@ impl PostgresSessionStore {
                     }
                     let (inputs, queued) =
                         reclaim_run_members_tx(tx, now, fence, owner, members).await?;
+                    let assigned = open_assigned_members_tx(tx, fence, &admission).await?;
+                    let (reacquired_inputs, reacquired_queued) =
+                        reclaim_run_members_tx(tx, now, fence, owner, &assigned).await?;
                     let already_satisfied = admission.already_satisfied_batch_ids();
                     return Ok(SelectedQueuedRun {
                         admission,
@@ -356,6 +359,8 @@ impl PostgresSessionStore {
                         queued,
                         already_satisfied,
                         refusal: None,
+                        reacquired_inputs,
+                        reacquired_queued,
                     });
                 }
                 let inputs = if matches!(admission.request, QueuedRunRequest::Automatic) {
@@ -467,6 +472,8 @@ impl PostgresSessionStore {
                     queued: queued.into_iter().collect(),
                     already_satisfied,
                     refusal,
+                    reacquired_inputs: Vec::new(),
+                    reacquired_queued: Vec::new(),
                 })
             }
             .await
@@ -484,6 +491,55 @@ fn require_claim<T>(
         ClaimTransactionOutcome::Commit(claim) => Ok(claim),
         ClaimTransactionOutcome::Rollback(_) => Err(conflict(session_id)),
     }
+}
+
+/// The run's checkpoint-assigned rows, beyond its members, that are still
+/// open and held by a claim. Settled rows are gone or terminal; a row whose
+/// claim was released went back to the queue. Neither is retaken.
+async fn open_assigned_members_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    fence: &SessionExecutionLeaseAuthority,
+    admission: &QueuedRunAdmission,
+) -> Result<Vec<QueuedRunMember>, StoreError> {
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let mut open = Vec::new();
+    for member in admission.assigned_non_members() {
+        let is_open = match member {
+            QueuedRunMember::Input(id) => {
+                match sqlx::query(sql.pending_inputs.select_by_id.sql())
+                    .bind(fence.session_id.as_str())
+                    .bind(id.as_str())
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(store_sqlx_error)?
+                {
+                    Some(row) => {
+                        let row = pending_turn_input_row(row)?;
+                        row.is_claimed() && !pending_turn_input_from_row(row)?.state.is_terminal()
+                    }
+                    None => false,
+                }
+            }
+            QueuedRunMember::Batch(id) => {
+                match sqlx::query(sql.queued_batches.select_by_id.sql())
+                    .bind(id.as_str())
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(store_sqlx_error)?
+                {
+                    Some(row) => {
+                        let row = queued_batch_row(row)?;
+                        row.claim_token.is_some()
+                    }
+                    None => false,
+                }
+            }
+        };
+        if is_open {
+            open.push(member.clone());
+        }
+    }
+    Ok(open)
 }
 
 async fn reclaim_run_members_tx(
