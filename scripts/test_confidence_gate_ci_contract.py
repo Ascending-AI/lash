@@ -883,12 +883,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "runtime_persistence_state_machine",
             "session_graph_state_machine",
         ):
-            self.assertIn(f"::tests::{leaf}", scenario_harnesses)
             self.assertIn(
-                f"kiln run //crates/lash-conformance:lash-conformance__unit_test -- {leaf}",
-                justfile,
+                f"--test conformance_memory \\\n      {leaf}", scenario_harnesses
             )
             for package, target in (
+                ("lash-sqlite-store", "conformance_memory__test"),
                 ("lash-sqlite-store", "conformance__test"),
                 ("lash-postgres-store", "conformance__test"),
             ):

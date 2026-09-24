@@ -588,9 +588,10 @@ class RealTreeTests(unittest.TestCase):
         )
         self.assertIn(("reopen_mint_identity", "pending-turn-input-multi-store-mint"), reopenable)
         self.assertNotIn(("reopen_mint_identity", "pending-turn-input-multi-store-mint"), plain)
-        self.assertIn(("fresh_instances", "fresh-instance-probe"), plain)
-        self.assertNotIn(("fresh_instances", "fresh-instance-probe"), reopenable)
-        self.assertTrue(plain - reopenable, "plain must keep its own rows")
+        self.assertTrue(plain, "the shared catalogue keeps its rows")
+        self.assertLessEqual(
+            plain, reopenable, "the reopenable suite registers the whole shared catalogue"
+        )
         self.assertTrue(reopenable - plain, "reopenable must keep its own rows")
 
     def test_process_registry_reopen_law_is_a_catalogue_row(self) -> None:

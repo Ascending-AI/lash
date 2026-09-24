@@ -144,7 +144,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
             );
             eprintln!(
                 "SKIPPED literal coalesced-batch oracles; compared_backends=[]; \
-                 required_backends=[in-memory,sqlite,postgres]; \
+                 required_backends=[sqlite-memory,sqlite,postgres]; \
                  reason=LASH_POSTGRES_DATABASE_URL is not set"
             );
             return;
@@ -157,7 +157,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
             );
             eprintln!(
                 "SKIPPED literal coalesced-batch oracles; compared_backends=[]; \
-                 required_backends=[in-memory,sqlite,postgres]; \
+                 required_backends=[sqlite-memory,sqlite,postgres]; \
                  reason=LASH_POSTGRES_DATABASE_URL is not set"
             );
             return;
@@ -301,7 +301,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
 
     eprintln!(
         "PASSED literal coalesced-batch oracles; \
-         compared_backends=[in-memory,sqlite,postgres]; cases=4"
+         compared_backends=[sqlite-memory,sqlite,postgres]; cases=4"
     );
 }
 
@@ -318,7 +318,7 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             );
             eprintln!(
                 "SKIPPED interrupted-claim ready-gap literal oracle; compared_backends=[]; \
-                 required_backends=[in-memory,sqlite,postgres]"
+                 required_backends=[sqlite-memory,sqlite,postgres]"
             );
             return;
         }
@@ -499,6 +499,6 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
 
     eprintln!(
         "PASSED interrupted-claim ready-gap literal oracle; \
-         compared_backends=[in-memory,sqlite,postgres]"
+         compared_backends=[sqlite-memory,sqlite,postgres]"
     );
 }

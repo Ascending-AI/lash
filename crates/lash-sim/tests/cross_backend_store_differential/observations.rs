@@ -3,15 +3,14 @@ use lash_sansio::SessionId;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct DurableNode {
-    // SQL rows are read by generation; the in-memory vector uses its native index.
-    // Comparing this normalized replay ordinal keeps transcript order
-    // contract-visible without comparing backend-local sequence counters.
+    // SQL rows are read by generation. Comparing this normalized replay
+    // ordinal keeps transcript order contract-visible without comparing
+    // backend-local sequence counters.
     pub(super) ordinal: usize,
     pub(super) node_id: String,
     // Compared as its own field rather than inside `bytes`: SQL keeps parent
-    // topology in an indexed column while the in-memory record carries it in
-    // the struct, so byte comparison alone would report a physical layout
-    // choice as drift while leaving the edge itself uncompared.
+    // topology in an indexed column the node body omits, so byte comparison
+    // alone would leave the edge itself uncompared.
     pub(super) parent_node_id: Option<String>,
     // Both SQL backends currently store node_json as TEXT. A future jsonb
     // migration would reserialize values and make every byte comparison red
@@ -255,7 +254,7 @@ pub(super) struct StepObservation {
     /// and corrupt-input operations; a *successful* write legitimately moves
     /// backend-authoritative columns that are not cross-backend comparable —
     /// PostgreSQL stamps `lease_expires_at_ms` from database wall time on a
-    /// successful lease renewal, where SQLite and the in-memory store read the
+    /// successful lease renewal, where the SQLite backends read the
     /// harness's injected `DifferentialClock` and may write the identical
     /// value back. What a successful step wrote is still compared, in full, by
     /// the normalized `durable_state` digest.
@@ -306,44 +305,6 @@ pub(super) struct QueuedWorkObservation {
     claim_token_present: bool,
     claim_fencing_token: u64,
     claim_session_lease_generation: Option<u64>,
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) fn queued_work_observation(
-    ordinal: usize,
-    batch: QueuedWorkBatch,
-    claim_id: Option<String>,
-    claim_token_present: bool,
-    claim_fencing_token: u64,
-    claim_session_lease_generation: Option<u64>,
-) -> QueuedWorkObservation {
-    assert_claim_id_spelling(
-        claim_id.as_deref(),
-        "recording-qwc",
-        batch.enqueue_seq,
-        claim_fencing_token,
-    );
-    QueuedWorkObservation {
-        ordinal,
-        source_key: batch.source_key,
-        delivery_policy: batch.delivery_policy,
-        kind: batch.kind,
-        authority: batch.authority,
-        merge_key: batch.merge_key,
-        available_at_ms: batch.available_at_ms,
-        payloads: batch
-            .items
-            .into_iter()
-            .map(|item| serde_json::to_value(item.payload).expect("encode queued-work payload"))
-            .collect(),
-        claim_id_present: claim_id.is_some(),
-        claim_token_present,
-        claim_fencing_token,
-        claim_session_lease_generation,
-    }
 }
 
 #[expect(

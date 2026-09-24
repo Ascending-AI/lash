@@ -6,7 +6,6 @@ type PendingTurnInputClaimRow = (String, i64, String, Option<String>, i64, Optio
 impl RawDurableReader {
     pub(super) fn detach_store(&mut self) {
         match self {
-            Self::InMemory { .. } => {}
             Self::Sqlite { store, .. } | Self::Postgres { store, .. } => {
                 store.take();
             }
@@ -16,7 +15,6 @@ impl RawDurableReader {
     /// See `residue.rs` for why this is separate from [`RawDurableReader::observe`].
     pub(super) async fn residue_digest(&self) -> ResidueDigest {
         match self {
-            Self::InMemory { .. } => in_memory_residue_digest(&self.observe().await),
             Self::Sqlite {
                 path, session_id, ..
             } => sqlite_residue_digest(path, session_id),
@@ -32,139 +30,6 @@ impl RawDurableReader {
     )]
     pub(super) async fn observe(&self) -> RawDurableState {
         match self {
-            Self::InMemory { store, factory } => {
-                let durable_nodes = store
-                    .raw_graph_nodes_for_testing()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(ordinal, node)| DurableNode {
-                        ordinal,
-                        node_id: node.node_id.to_string(),
-                        parent_node_id: node.parent_node_id.as_ref().map(ToString::to_string),
-                        bytes: normalized_in_memory_node_json(&node),
-                    })
-                    .collect();
-                let pending_turn_inputs = store
-                    .raw_pending_turn_inputs_for_testing()
-                    .into_iter()
-                    .map(
-                        |(
-                            input_id,
-                            enqueue_seq,
-                            state,
-                            claim_id,
-                            fencing_token,
-                            claim_session_lease_generation,
-                        )| {
-                            assert_claim_id_spelling(
-                                claim_id.as_deref(),
-                                "recording-tic",
-                                enqueue_seq,
-                                fencing_token,
-                            );
-                            PendingTurnInputObservation {
-                                input_id: input_id.to_string(),
-                                state: state.kind(),
-                                claim_session_lease_generation,
-                            }
-                        },
-                    )
-                    .collect();
-                let queued_work = store
-                    .raw_queued_work_for_testing()
-                    .into_iter()
-                    .enumerate()
-                    .map(
-                        |(
-                            ordinal,
-                            (
-                                batch,
-                                claim_id,
-                                _claim_owner,
-                                claim_token_present,
-                                claim_fencing_token,
-                                claim_session_lease_generation,
-                            ),
-                        )| {
-                            queued_work_observation(
-                                ordinal,
-                                batch,
-                                claim_id,
-                                claim_token_present,
-                                claim_fencing_token,
-                                claim_session_lease_generation,
-                            )
-                        },
-                    )
-                    .collect();
-                let checkpoint = store.raw_checkpoint_for_testing().map(|checkpoint| {
-                    checkpoint_observation(store.raw_checkpoint_ref_for_testing(), checkpoint)
-                });
-                let runtime_turn_commits = store
-                    .raw_runtime_turn_commits_for_testing()
-                    .into_iter()
-                    .map(
-                        |(operation, turn_commit_hash, result)| RuntimeTurnCommitObservation {
-                            operation,
-                            turn_commit_hash,
-                            result: serde_json::to_value(result)
-                                .expect("encode in-memory turn-commit result"),
-                        },
-                    )
-                    .collect();
-                let attachment_manifest = store
-                    .raw_attachment_manifest_for_testing()
-                    .into_iter()
-                    .map(attachment_manifest_observation)
-                    .collect();
-                let node_anchors = factory
-                    .raw_node_anchors_for_testing()
-                    .into_iter()
-                    .map(
-                        |(node_id, checkpoint_ref, source_session_id)| NodeAnchorObservation {
-                            node_id: node_id.to_string(),
-                            checkpoint_ref,
-                            source_session_id,
-                        },
-                    )
-                    .collect();
-                let usage_deltas = store
-                    .raw_usage_deltas_for_testing()
-                    .into_iter()
-                    .map(usage_delta_observation)
-                    .collect();
-                let session_meta = store
-                    .raw_session_meta_for_testing()
-                    .map(session_meta_observation);
-                let session_execution_leases = store
-                    .raw_session_execution_leases_for_testing()
-                    .into_iter()
-                    .map(|row| SessionExecutionLeaseObservation {
-                        owner: row.owner,
-                        executor_id: row.executor_id,
-                        lease_token: row.lease_token,
-                        fencing_token: row.fencing_token,
-                        claimed: row.claimed_at_epoch_ms != 0,
-                        lease_term_ms: (row.claimed_at_epoch_ms != 0).then_some(row.lease_term_ms),
-                    })
-                    .collect();
-                RawDurableState {
-                    head_revision: store.raw_head_revision_for_testing(),
-                    leaf_node_id: store
-                        .raw_leaf_node_id_for_testing()
-                        .map(|id| id.to_string()),
-                    checkpoint,
-                    durable_nodes,
-                    runtime_turn_commits,
-                    attachment_manifest,
-                    node_anchors,
-                    usage_deltas,
-                    session_meta,
-                    session_execution_leases,
-                    pending_turn_inputs,
-                    queued_work,
-                }
-            }
             Self::Sqlite {
                 path,
                 session_id,

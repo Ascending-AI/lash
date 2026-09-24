@@ -17,11 +17,8 @@ use lash_core::{
     MediaType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessOriginator,
     Resolution, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    SessionScope, StoreEffectGroupDrain, TestLocalProcessRegistry, TriggerCommand,
-    TriggerInputBinding, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, WakeDeliveryDisposition,
-    facade_support::InMemoryAttachmentStore,
-    facade_support::InMemoryTriggerStore,
+    SessionScope, StoreEffectGroupDrain, TriggerCommand, TriggerInputBinding,
+    TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
     facade_support::LeaseTimings,
     facade_support::SystemClock,
     facade_support::effect_replay_driver::{EffectGroupChildCommitOutcome, GroupChildFinalCommit},
@@ -259,8 +256,8 @@ struct SurfaceRunner {
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     trigger_store: Arc<dyn TriggerStore>,
     effect_host: Arc<dyn EffectHost>,
-    /// `None` on the in-memory runner: it exercises no durable groups, and
-    /// its `book` alone keeps the fixed refusal strings identical.
+    /// `None` on the memory runner: it exercises no durable groups, and its
+    /// `book` alone keeps the fixed refusal strings identical.
     groups: Option<GroupSurface>,
     book: BTreeMap<u8, GroupBook>,
     group_outcomes: Vec<serde_json::Value>,
@@ -1196,7 +1193,7 @@ impl SurfaceRunner {
     }
 
     /// Send one command to the group's opener and record its reply. The
-    /// in-memory runner has no opener, so it answers `Ok` — the gate above
+    /// memory runner has no opener, so it answers `Ok` — the gate above
     /// already filtered every refusal a backend would give.
     #[expect(
         clippy::expect_used,
@@ -1346,6 +1343,10 @@ impl SurfaceRunner {
     /// Poll the durable journal until the child's settlement rank is
     /// allocated, bounded by `GROUP_OP_BOUND`.
     async fn wait_group_row_settled(&self, replay_key: &str) {
+        // A lane without groups opened none, so no row is owed.
+        if self.groups.is_none() {
+            return;
+        }
         let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
         loop {
             if self
@@ -1395,8 +1396,12 @@ impl SurfaceRunner {
     /// token and a `RunToCompletion` close follows the release of every
     /// child — so `settled` is owed. A backend whose finalizer does not get
     /// there within the bound refuses the step, and that refusal diverges
-    /// from the in-memory reference's `Ok`.
+    /// from the memory runner's `Ok`.
     async fn wait_group_lifecycle_settled(&mut self, group: u8) -> Result<(), String> {
+        // A lane without groups opened none, so no finalization is owed.
+        if self.groups.is_none() {
+            return Ok(());
+        }
         let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
         loop {
             if self.reader.group_lifecycle_settled(&group_key(group)).await {
@@ -1601,11 +1606,17 @@ async fn surface_runners(
     database_url: &str,
     clock: Arc<dyn Clock>,
 ) -> Vec<SurfaceRunner> {
-    let memory_runtime = Arc::new(InMemorySessionStore::with_clock(Arc::clone(&clock)));
-    let memory_registry =
-        Arc::new(TestLocalProcessRegistry::default().with_clock(Arc::clone(&clock)));
-    let memory_triggers = Arc::new(InMemoryTriggerStore::with_clock(Arc::clone(&clock)));
-    let memory_effect = Arc::new(lash_core::facade_support::NativeEffectHost::default());
+    // The memory lane's stores are one SQLite memory backend's. Its effect
+    // host stays the in-process one until the Restate test engine replaces it
+    // (FIG-3665); the effect surface is compared SQLite vs PostgreSQL only.
+    let memory = lash_sqlite_store::SqliteBackend::memory_with_clock(Arc::clone(&clock))
+        .await
+        .unwrap();
+    let memory_runtime = Arc::new(memory.open_store().await.unwrap());
+    let memory_registry = memory.process_registry();
+    let memory_triggers = memory.trigger_store();
+    let memory_effect: Arc<dyn EffectHost> =
+        Arc::new(lash_core::facade_support::NativeEffectHost::default());
 
     let sqlite_runtime_path = root.join("runtime.db");
     let sqlite_process_path = root.join("process.db");
@@ -1688,22 +1699,34 @@ async fn surface_runners(
 
     vec![
         SurfaceRunner {
-            name: "in-memory",
+            name: "sqlite-memory",
             scenario: StoreContractScenario::new(StoreContractHandles {
                 registry: memory_registry.clone(),
-                runtime: memory_runtime.clone(),
+                runtime: memory_runtime,
             }),
-            process_registry: memory_registry.clone(),
-            process_env_store: memory_backend_env_store().await,
-            trigger_store: memory_triggers.clone(),
+            process_registry: memory_registry,
+            process_env_store: memory.process_env_store(),
+            trigger_store: memory_triggers,
             effect_host: memory_effect,
             groups: None,
             book: BTreeMap::new(),
             group_outcomes: Vec::new(),
-            reader: SurfaceReader::InMemory {
-                runtime: memory_runtime,
-                registry: memory_registry,
-                triggers: memory_triggers,
+            reader: SurfaceReader::Sqlite {
+                runtime_path: PathBuf::from(
+                    memory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+                ),
+                process_path: PathBuf::from(
+                    memory.database_uri(lash_sqlite_store::SqliteDatabase::ProcessRegistry),
+                ),
+                trigger_path: PathBuf::from(
+                    memory.database_uri(lash_sqlite_store::SqliteDatabase::Triggers),
+                ),
+                effect_path: PathBuf::from(
+                    memory.database_uri(lash_sqlite_store::SqliteDatabase::EffectReplay),
+                ),
+                group_path: PathBuf::from(
+                    memory.database_uri(lash_sqlite_store::SqliteDatabase::EffectReplay),
+                ),
             },
         },
         SurfaceRunner {
@@ -1941,8 +1964,8 @@ async fn generated_cross_backend_surface_differential_agrees() {
     eprintln!(
         "cross-backend generated coverage is bounded: cases={cases} first_seed={runner_seed} \
          operations_per_case={OPS_PER_CASE}; omitted_seeds=all seeds outside the configured \
-         contiguous range; effect_await_backends=sqlite,postgres (the in-memory effect host has \
-         no durable journal)"
+         contiguous range; effect_await_backends=sqlite,postgres (the memory runner's \
+         in-process effect host has no durable journal)"
     );
     for case_index in 0..cases {
         reset_postgres_surface(&storage).await;
@@ -2038,7 +2061,8 @@ async fn attachment_blob_store_differential_agrees() {
         eprintln!("SKIPPED attachment blob-store differential: LASH_REQUIRE_MINIO is not set");
         return;
     }
-    let memory = InMemoryAttachmentStore::new();
+    let memory_backend = lash_sqlite_store::SqliteBackend::memory().await.unwrap();
+    let memory = memory_backend.attachment_store();
     let root = tempfile::tempdir().unwrap();
     let file = lash_core::facade_support::FileAttachmentStore::new(root.path());
     // The MinIO this runs against is not always on port 9000: the
@@ -2075,7 +2099,7 @@ async fn attachment_blob_store_differential_agrees() {
     ];
     eprintln!(
         "attachment blob differential coverage is bounded: operations={operations:?}; \
-         backends=in-memory,file,s3; omitted_operations=all other byte sequences and operation \
+         backends=sqlite-memory,file,s3; omitted_operations=all other byte sequences and operation \
          sequences"
     );
     let mut first_id = None;
@@ -2109,18 +2133,44 @@ async fn attachment_blob_store_differential_agrees() {
                 s3.delete(&id).await.unwrap();
             }
         }
-        let memory_rows = InMemoryAttachmentStore::raw_blobs_for_testing(&memory);
+        let memory_rows = raw_sqlite_blobs(
+            &memory_backend.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+        );
         let file_rows = raw_file_blobs(root.path());
         let s3_rows = s3.raw_blobs_for_testing().await.unwrap();
         assert_eq!(
             memory_rows, file_rows,
-            "in-memory/file attachment blobs diverged after {operation:?}"
+            "SQLite memory/file attachment blobs diverged after {operation:?}"
         );
         assert_eq!(
             file_rows, s3_rows,
             "file/S3 attachment blobs diverged after {operation:?}"
         );
     }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
+fn raw_sqlite_blobs(database_uri: &str) -> Vec<(lash_core::AttachmentId, Vec<u8>)> {
+    let connection = rusqlite::Connection::open(database_uri).expect("open the blob reader");
+    let mut statement = connection
+        .prepare("SELECT attachment_id, content FROM attachment_blobs ORDER BY attachment_id")
+        .expect("prepare the blob read");
+    statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })
+        .expect("read the attachment blobs")
+        .map(|row| {
+            let (id, bytes) = row.expect("decode an attachment blob row");
+            (
+                lash_core::AttachmentId::parse(id).expect("valid attachment id"),
+                bytes,
+            )
+        })
+        .collect()
 }
 
 #[expect(

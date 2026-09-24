@@ -187,6 +187,63 @@ impl EffectHost for RecordingEffectHost {
     }
 }
 
+#[cfg(test)]
+mod recording_effect_host_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[tokio::test]
+    async fn non_enumerable_effect_host_reports_typed_unsupported() {
+        let error = RecordingEffectHost::default()
+            .list_outstanding_await_event_keys(&SessionId::from("unsupported-session"))
+            .await
+            .expect_err("the default host implementation must not claim an empty registry");
+        assert_eq!(error.code, crate::RuntimeErrorCode::AwaitEventUnsupported);
+    }
+
+    #[tokio::test]
+    async fn recording_effect_host_records_selected_scope_and_envelope() {
+        let host = RecordingEffectHost::default();
+        let scope = ExecutionScope::runtime_operation("trigger:button-1");
+        let scoped = host
+            .scoped(admit(scope.clone()))
+            .expect("scoped controller");
+        let envelope = RuntimeEffectEnvelope::new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(scope.clone(), "trigger:button-1:sleep-effect")
+                    .expect("valid recording address"),
+                RuntimeAttribution::for_session("session-1"),
+                "sleep-effect",
+            ),
+            RuntimeEffectCommand::Sleep {
+                spec: lash_core::SleepSpec::For { duration_ms: 0 },
+            },
+        );
+
+        let outcome = scoped
+            .controller()
+            .execute_effect(envelope, RuntimeEffectLocalExecutor::unavailable())
+            .await
+            .expect("execute sleep");
+
+        assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
+        assert_eq!(host.selected_scopes(), vec![scope.clone()]);
+        let records = host.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].execution_scope, scope);
+        assert_eq!(
+            records[0].runtime_attribution,
+            RuntimeAttribution::for_session("session-1")
+        );
+        assert_eq!(records[0].effect_id, "sleep-effect");
+        assert_eq!(records[0].effect_kind, RuntimeEffectKind::Sleep);
+        assert_eq!(
+            records[0].replay_key.as_deref(),
+            Some("trigger:button-1:sleep-effect")
+        );
+    }
+}
+
 /// This suite checks the deployment-level contract: execution scopes must carry
 /// stable semantic identity, empty ids must fail loudly, and hosts that expose
 /// a static scoped controller must preserve the same scope metadata. It does

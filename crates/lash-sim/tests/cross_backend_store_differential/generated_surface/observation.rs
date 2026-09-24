@@ -38,26 +38,20 @@ pub(super) struct SurfaceState {
     pub(super) processes: ProcessRows,
     pub(super) wake_redelivery_fences: Vec<(String, String, u64)>,
     pub(super) triggers: TriggerRows,
-    pub(super) effect_journal: Option<Vec<serde_json::Value>>,
+    pub(super) effect_journal: Vec<serde_json::Value>,
     /// `runtime_effect_group`, normalized: the durable group shape and the
     /// `next_seq`/`next_commit_seq` counters the arbitration ops move.
-    /// `None` on the in-memory runner, which has no durable tables.
-    pub(super) effect_groups: Option<Vec<serde_json::Value>>,
+    pub(super) effect_groups: Vec<serde_json::Value>,
     /// `runtime_effect_group_child`: the retained accepted envelopes a
     /// successor reconstructs the group's children from.
-    pub(super) effect_group_children: Option<Vec<serde_json::Value>>,
+    pub(super) effect_group_children: Vec<serde_json::Value>,
     /// The outcome every grouped op recorded, in operation order. Compared
-    /// SQLite vs PostgreSQL only: the in-memory runner exercises no groups.
+    /// SQLite vs PostgreSQL only: the memory runner exercises no groups.
     pub(super) group_outcomes: Vec<serde_json::Value>,
-    pub(super) await_journal: Option<Vec<serde_json::Value>>,
+    pub(super) await_journal: Vec<serde_json::Value>,
 }
 
 pub(super) enum SurfaceReader {
-    InMemory {
-        runtime: Arc<InMemorySessionStore>,
-        registry: Arc<TestLocalProcessRegistry>,
-        triggers: Arc<InMemoryTriggerStore>,
-    },
     Sqlite {
         runtime_path: PathBuf,
         process_path: PathBuf,
@@ -73,20 +67,6 @@ pub(super) enum SurfaceReader {
 impl SurfaceReader {
     pub(super) async fn observe(&self) -> SurfaceState {
         match self {
-            Self::InMemory {
-                runtime,
-                registry,
-                triggers,
-            } => SurfaceState {
-                processes: process_rows_from_memory(registry).await,
-                wake_redelivery_fences: runtime.raw_wake_redelivery_fences_for_testing(),
-                triggers: trigger_rows_from_memory(triggers),
-                effect_journal: None,
-                effect_groups: None,
-                effect_group_children: None,
-                group_outcomes: Vec::new(),
-                await_journal: None,
-            },
             Self::Sqlite {
                 runtime_path,
                 process_path,
@@ -118,7 +98,6 @@ impl SurfaceReader {
     /// spawned task.
     pub(super) async fn group_lifecycle_settled(&self, group_key: &str) -> bool {
         let phase = match self {
-            Self::InMemory { .. } => return true,
             Self::Sqlite { group_path, .. } => {
                 let Ok(connection) = rusqlite::Connection::open(group_path) else {
                     return false;
@@ -151,7 +130,6 @@ impl SurfaceReader {
     /// prefix ending on a release observes a quiesced row.
     pub(super) async fn group_row_settled(&self, scope_id: &str, replay_key: &str) -> bool {
         match self {
-            Self::InMemory { .. } => true,
             Self::Sqlite { group_path, .. } => {
                 let connection = match rusqlite::Connection::open(group_path) {
                     Ok(connection) => connection,
@@ -190,164 +168,7 @@ impl SurfaceState {
     /// Erase the scheduler-owned rank order of the unordered group from its
     /// replay rows and attach the sorted sequence sets to its group row.
     pub(super) fn normalize_unordered_group(&mut self) {
-        if let (Some(journal), Some(groups)) = (&mut self.effect_journal, &mut self.effect_groups) {
-            normalize_unordered_group(journal, groups);
-        }
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) async fn process_rows_from_memory(registry: &TestLocalProcessRegistry) -> ProcessRows {
-    let raw = registry.raw_state_for_testing().await;
-    ProcessRows {
-        records: raw
-            .records
-            .into_iter()
-            .map(|(record, change_seq)| {
-                normalized_json(serde_json::json!({"change_seq": change_seq, "record": record}))
-            })
-            .collect(),
-        events: raw
-            .events
-            .into_iter()
-            .map(|(process_id, event)| {
-                normalized_json(serde_json::json!({"process_id": process_id, "event": event}))
-            })
-            .collect(),
-        observers: raw.observers,
-        leases: raw
-            .leases
-            .into_iter()
-            .map(|lease| ProcessLeaseObservation {
-                process_id: lease.process_id,
-                lease_token_present: !lease.lease_token.is_empty(),
-                owner: if lease.lease_token.is_empty() {
-                    serde_json::Value::Null
-                } else {
-                    serde_json::to_value(lease.owner).expect("encode process lease owner")
-                },
-                fencing_token: lease.fencing_token,
-                claimed: lease.claimed_at_epoch_ms != 0,
-                ttl_ms: (lease.claimed_at_epoch_ms != 0).then_some(
-                    lease
-                        .expires_at_epoch_ms
-                        .saturating_sub(lease.claimed_at_epoch_ms),
-                ),
-            })
-            .collect(),
-        wake_deliveries: raw
-            .wake_deliveries
-            .into_iter()
-            .map(normalized_memory_wake_delivery)
-            .collect(),
-        wake_allocation_floors: raw.wake_allocation_floors,
-        tombstones: raw
-            .tombstones
-            .into_iter()
-            .map(|row| normalized_json(serde_json::to_value(row).expect("encode tombstone")))
-            .collect(),
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) fn normalized_memory_wake_delivery(
-    delivery: lash_core::WakeDelivery,
-) -> serde_json::Value {
-    let state = delivery.state();
-    let claim_token = match &delivery.disposition {
-        WakeDeliveryDisposition::Enqueuing { claim_token } => Some(claim_token.clone()),
-        _ => None,
-    };
-    let discard_reason = delivery.disposition.discard_reason();
-    let mut value = serde_json::json!({
-        "delivery_id": delivery.delivery_id,
-        "wake": delivery.wake,
-        "state": state,
-        "attempts": delivery.attempts,
-        "first_attempt_ms": delivery.first_attempt_ms,
-        "next_attempt_at_ms": delivery.next_attempt_at_ms,
-        "expires_at_ms": delivery.expires_at_ms,
-        "discard_reason": discard_reason,
-    });
-    if let Some(claim_token) = claim_token {
-        value
-            .as_object_mut()
-            .expect("wake delivery projection is an object")
-            .insert("claim_token".to_string(), serde_json::json!(claim_token));
-    }
-    normalized_json(value)
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {
-    let raw = store.raw_state_for_testing();
-    let mut incarnations = BTreeMap::new();
-    TriggerRows {
-        subscriptions: raw
-            .subscriptions
-            .into_iter()
-            .map(|row| {
-                normalized_trigger_json(serde_json::to_value(row).unwrap(), &mut incarnations)
-            })
-            .collect(),
-        mutation_receipts: raw
-            .mutation_receipts
-            .into_iter()
-            .map(
-                |(
-                    operation_id,
-                    owner_kind,
-                    owner_id,
-                    request_fingerprint,
-                    result,
-                    _created_at_ms,
-                )| {
-                    normalized_trigger_receipt_json(
-                        serde_json::json!({
-                            "operation_id": operation_id,
-                            "owner_kind": owner_kind,
-                            "owner_id": owner_id,
-                            "request_fingerprint": request_fingerprint,
-                            "result": result,
-                        }),
-                        &mut incarnations,
-                    )
-                },
-            )
-            .collect(),
-        occurrences: raw
-            .occurrences
-            .into_iter()
-            .map(|record| {
-                normalized_trigger_json(serde_json::json!({"record": record}), &mut incarnations)
-            })
-            .collect(),
-        deliveries: raw
-            .deliveries
-            .into_iter()
-            .map(
-                |(occurrence_id, subscription_id, process_id, _created_at_ms, snapshot)| {
-                    normalized_trigger_delivery_json(
-                        serde_json::json!({
-                            "occurrence_id": occurrence_id,
-                            "subscription_id": subscription_id,
-                            "process_id": process_id,
-                            "subscription_snapshot": snapshot,
-                        }),
-                        &mut incarnations,
-                    )
-                },
-            )
-            .collect(),
+        normalize_unordered_group(&mut self.effect_journal, &mut self.effect_groups);
     }
 }
 
@@ -848,7 +669,7 @@ pub(super) fn read_sqlite_surface(
         },
         wake_redelivery_fences,
         triggers: read_sqlite_triggers(&trigger),
-        effect_journal: Some({
+        effect_journal: {
             // The ungrouped journal lives in `effect.db`, the grouped
             // children's journal in `groups.db`; the surface reads the union
             // in `(scope_id, replay_key)` order.
@@ -865,11 +686,11 @@ pub(super) fn read_sqlite_surface(
                     ))
             });
             journal
-        }),
-        effect_groups: Some(read_sqlite_effect_groups(&groups)),
-        effect_group_children: Some(read_sqlite_effect_group_children(&groups)),
+        },
+        effect_groups: read_sqlite_effect_groups(&groups),
+        effect_group_children: read_sqlite_effect_group_children(&groups),
         group_outcomes: Vec::new(),
-        await_journal: Some(read_sqlite_await(&effect, &process)),
+        await_journal: read_sqlite_await(&effect, &process),
     }
 }
 
@@ -1137,11 +958,11 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         },
         wake_redelivery_fences,
         triggers: read_postgres_triggers(pool).await,
-        effect_journal: Some(read_postgres_effects(pool).await),
-        effect_groups: Some(read_postgres_effect_groups(pool).await),
-        effect_group_children: Some(read_postgres_effect_group_children(pool).await),
+        effect_journal: read_postgres_effects(pool).await,
+        effect_groups: read_postgres_effect_groups(pool).await,
+        effect_group_children: read_postgres_effect_group_children(pool).await,
         group_outcomes: Vec::new(),
-        await_journal: Some(read_postgres_await(pool).await),
+        await_journal: read_postgres_await(pool).await,
     }
 }
 

@@ -1,11 +1,5 @@
-//! In-memory backend certification entry points.
+//! The engine laws that run only on the in-process effect host. Every store
+//! law and every engine law another leg covers runs on the SQLite, PostgreSQL
+//! or Restate legs; these wait for the Restate test engine (FIG-3665).
 mod effect;
-mod file_attachments;
-mod lineage;
-mod maintenance;
-mod persistence;
-mod process;
 mod registrations;
-mod tool_batch;
-mod tool_child;
-mod turn_runner;

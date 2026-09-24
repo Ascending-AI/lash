@@ -6,15 +6,9 @@
 //! corrupt row on every list path (FIG-2838's class disagreement between
 //! PostgreSQL and SQLite over one undecodable persisted record).
 //!
-//! **Why the in-memory backend is not compared here.** The reference store
-//! holds typed records, never encoded bytes, so an undecodable persisted
-//! record is not a state it can reach — the same reason
-//! `lash-conformance`'s in-memory registrations omit
-//! `append_receipt_identity_corruption_tests!`. Excluding it is a structural
-//! fact about the backend, not a comparison weakened to make it agree: the
-//! two backends that *can* hold the bytes are still held to identical error
-//! classes and identical residue. The refusal cases, which every backend can
-//! reach, are compared across all three.
+//! Every backend can hold the undecodable bytes: the SQLite memory and file
+//! backends and PostgreSQL are each held to identical error classes and
+//! identical residue.
 //!
 //! **Why these cases compare raw residue instead of the decoded digest.**
 //! [`RawDurableState`] decodes every row it reads, so it cannot observe a row
@@ -223,10 +217,6 @@ impl BackendRunner {
         let session_id = self.session_id.clone();
         let mut backup = CorruptBackup::default();
         match &self.raw_reader {
-            RawDurableReader::InMemory { .. } => panic!(
-                "the in-memory reference store holds typed records and cannot carry an \
-                 undecodable persisted record; corrupt-input cases must exclude it"
-            ),
             RawDurableReader::Sqlite { path, .. } => {
                 let connection =
                     rusqlite::Connection::open(path).expect("open SQLite corruption seam");
@@ -480,7 +470,6 @@ pub(super) async fn restore_corrupt_record_raw(
 ) {
     {
         match raw_reader {
-            RawDurableReader::InMemory { .. } => unreachable!("in-memory is not corrupted"),
             RawDurableReader::Sqlite { path, .. } => {
                 let connection =
                     rusqlite::Connection::open(path).expect("open SQLite restoration seam");
