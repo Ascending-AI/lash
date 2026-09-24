@@ -106,7 +106,7 @@ impl<'module> Linker<'module> {
             hidden_args.push(hidden);
         }
         for param in start_params.clone() {
-            process_scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
+            process_scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
         }
         let previous_completion = self.collect_completion.replace(true);
         let previous_signals = self.collect_signals.replace(true);

@@ -2527,7 +2527,7 @@
           "source": "if (true) {\n  let label = 1;\n} else {\n  let label = true;\n}\n{\n  let label = 'x';\n  console.log(label);\n}\n",
           "reject": null,
           "deviation": null,
-          "defect": "sibling-block-binding-types",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
@@ -2537,24 +2537,34 @@
               "label": "unbound"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "rejected",
-              "diagnostic": "TS_LINK_ERROR",
-              "prints": [],
-              "probes": {
-                "label": "unbound"
-              }
+          }
+        }
+      ]
+    },
+    {
+      "id": "rebinding-starts-a-type-over",
+      "about": "a name bound two ways by a branch takes a value of a third type (FIG-3631)",
+      "probe": [
+        "flag",
+        "value"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const flag = [1].length > 0;\nlet value = flag ? 1 : true;\nvalue = 'x';\nconsole.log(value);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "x"
+            ],
+            "probes": {
+              "flag": "boolean true",
+              "value": "string \"x\""
             },
-            "restart": {
-              "outcome": "rejected",
-              "diagnostic": "TS_LINK_ERROR",
-              "prints": [],
-              "probes": {
-                "label": "unbound"
-              }
-            }
+            "closures": []
           }
         }
       ]

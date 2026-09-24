@@ -60,11 +60,6 @@ pub(super) const OPEN_DEFECT_EXCLUSIONS: &[(&str, &str)] = &[
     // A spread argument to a builtin function or method is refused or
     // faults. Spread arguments go to the session's own functions.
     ("builtin-call-spread", "FIG-3627"),
-    // Two blocks of a cell that declare one name with differently typed
-    // values share a slot the linker types as one variable, and a string
-    // literal after a branch that bound it two ways is refused. A
-    // block-level name has one type per cell.
-    ("sibling-block-binding-types", "FIG-3631"),
     // A `for...of` body that appends to its array through an alias made
     // before the loop is not refused, and the loop walks a snapshot: it
     // misses what Node visits. The body touches no alias of its iterable.
@@ -397,8 +392,6 @@ struct Generator {
     /// takes when its value is an alias of another binding's.
     next_identity: usize,
     alias_of: Option<usize>,
-    /// The type of every name a block of this cell declared.
-    block_types: std::collections::BTreeMap<String, Ty>,
 }
 
 impl Generator {
@@ -419,7 +412,6 @@ impl Generator {
             reserved: Vec::new(),
             next_identity: 1,
             alias_of: None,
-            block_types: std::collections::BTreeMap::new(),
         }
     }
 
@@ -461,7 +453,6 @@ impl Generator {
     }
 
     fn cell(&mut self) -> GeneratedCell {
-        self.block_types.clear();
         self.scopes.push(Scope {
             kind: ScopeKind::CellTop,
             bindings: Vec::new(),
@@ -598,9 +589,6 @@ impl Generator {
 
     fn declare(&mut self, name: &str, ty: Ty, decl: Decl) {
         self.binders.insert(name.to_string());
-        if !self.at_cell_top() {
-            self.block_types.insert(name.to_string(), ty.clone());
-        }
         let identity = self.alias_of.take().unwrap_or_else(|| {
             self.next_identity += 1;
             self.next_identity
@@ -641,7 +629,7 @@ impl Generator {
     /// new to the session; in a block it may shadow a visible binding, but
     /// never one its scope's earlier text or its own initializer (`avoid`)
     /// reads: that read would be in the temporal dead zone.
-    fn new_name(&mut self, decl: Decl, avoid: &str, ty: &Ty) -> Option<String> {
+    fn new_name(&mut self, decl: Decl, avoid: &str) -> Option<String> {
         let hoisting = decl == Decl::Var;
         let top = self.at_cell_top() || hoisting && self.var_hoists_to_top();
         let in_scope = self
@@ -681,10 +669,7 @@ impl Generator {
                         && !self.binders.contains(name)
                         && !every_declared.contains(name)
                 } else {
-                    // One type per block-level name in a cell
-                    // (`sibling-block-binding-types`).
                     !mentions(&read, name)
-                        && self.block_types.get(name).is_none_or(|known| known == ty)
                 }
             })
             .collect::<Vec<_>>();
@@ -710,7 +695,7 @@ impl Generator {
             .map(|binding| binding.name)
             .collect::<Vec<_>>()
             .join(" ");
-        self.new_name(Decl::Const, &visible, &Ty::Fun { recursive: false })
+        self.new_name(Decl::Const, &visible)
     }
 
     fn fresh_name(&mut self, stem: &str) -> String {
@@ -766,7 +751,7 @@ impl Generator {
             _ => Decl::Let,
         };
         let (value, ty) = self.any_value(0);
-        let Some(name) = self.new_name(decl, &value, &ty) else {
+        let Some(name) = self.new_name(decl, &value) else {
             self.alias_of = None;
             return self.print();
         };
@@ -1118,7 +1103,7 @@ impl Generator {
     /// dropped at the end of the cell (`closure-boundary`).
     fn closure_declaration(&mut self) {
         let arrow = self.arrow();
-        let Some(name) = self.new_name(Decl::Const, &arrow, &Ty::Fun { recursive: false }) else {
+        let Some(name) = self.new_name(Decl::Const, &arrow) else {
             return self.print();
         };
         self.uses(CONST);
@@ -1264,7 +1249,7 @@ impl Generator {
             ])
             .clone();
         let value = self.exotic(&ty);
-        let Some(name) = self.new_name(Decl::Const, &value, &ty) else {
+        let Some(name) = self.new_name(Decl::Const, &value) else {
             return;
         };
         self.uses(CONST);
@@ -1628,16 +1613,10 @@ impl Generator {
             let b = self.expr(&Ty::Num, 1);
             format!("{{ a: {a}, b: {b} }}")
         };
-        let (first_ty, second_ty) = if array {
-            (Ty::Num, Ty::Arr(Box::new(Ty::Num)))
-        } else {
-            (Ty::Str, Ty::Num)
-        };
-        let Some(first) = self.new_name(Decl::Const, &value, &first_ty) else {
+        let Some(first) = self.new_name(Decl::Const, &value) else {
             return self.print();
         };
-        let Some(second) = self.new_name(Decl::Const, &format!("{value} {first}"), &second_ty)
-        else {
+        let Some(second) = self.new_name(Decl::Const, &format!("{value} {first}")) else {
             return self.print();
         };
         self.uses(DESTRUCTURING_BINDING);

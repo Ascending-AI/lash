@@ -380,10 +380,10 @@ impl<'module> Linker<'module> {
         let mut scope = Scope::new(true, span);
         scope.expected_return = process.return_ty.clone();
         for param in &process.params {
-            scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
+            scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
         }
-        scope.bind("input", Binding::Value(process_input_type(process)));
-        scope.bind("inputs", Binding::Value(process_input_record_type(process)));
+        scope.declare("input", Binding::Value(process_input_type(process)));
+        scope.declare("inputs", Binding::Value(process_input_record_type(process)));
         self.completion_facts.borrow_mut().clear();
         self.collect_completion.set(true);
         // Inference lowers the body only to learn its output. The body is
