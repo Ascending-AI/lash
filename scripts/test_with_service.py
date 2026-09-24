@@ -162,7 +162,7 @@ class WithServiceContract(unittest.TestCase):
                 if recipe.startswith("just "):
                     target = recipe.split()[1]
                     self.assertRegex(justfile, rf"(?m)^{re.escape(target)}[ :]")
-                elif recipe.startswith("bash "):
+                elif recipe.startswith(("bash ", "python3 ")):
                     self.assertTrue((ROOT / recipe.split()[1]).is_file())
                 else:
                     self.assertTrue(recipe.startswith("cargo "))

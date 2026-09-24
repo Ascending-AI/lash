@@ -103,6 +103,17 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual("kill", MODULE.RETRIES_BOUNDED["RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS"])
 
 
+class StageBinariesTests(unittest.TestCase):
+    def test_the_workers_package_stages_every_cargo_binary(self) -> None:
+        import tomllib
+
+        manifest = tomllib.loads((ROOT / "runbooks/restate-postgres-workers/Cargo.toml").read_text(encoding="utf-8"))
+        cargo_bins = {entry["name"] for entry in manifest["bin"]}
+        labels = MODULE.package_binaries("//runbooks/restate-postgres-workers")
+        staged = {label.rpartition(":")[2].removesuffix("__bin") for label in labels}
+        self.assertEqual(cargo_bins, staged)
+
+
 class RunnerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()

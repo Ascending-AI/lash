@@ -36,6 +36,9 @@ Usage:
       RESTATE_ADMIN_URL exported (for drivers that own their test processes).
   restate_suite.py build <label>...
       Build Bazel labels from the shared cache and print each output path.
+  restate_suite.py stage-binaries <package> <dir>
+      Build every Rust binary of a Bazel package from the shared cache and
+      copy each into <dir> under its Cargo name, stripped.
   restate_suite.py server-path
       Print the pinned server binary, fetching and verifying it on first use.
 """
@@ -49,6 +52,7 @@ import lzma
 import os
 import platform
 import queue
+import re
 import shutil
 import signal
 import socket
@@ -315,6 +319,35 @@ def build(labels: Sequence[str]) -> list[Path]:
             raise SystemExit(f"{label} built, but {path} is missing")
         outputs.append(path)
     return outputs
+
+
+def package_binaries(package: str) -> list[str]:
+    """The labels of a package's Rust binaries, from its generated BUILD file."""
+    build_file = ROOT / package.removeprefix("//") / "BUILD.bazel"
+    names = re.findall(r'^lash_rust_binary\(\n    name = "([^"]+)",$', build_file.read_text(), flags=re.MULTILINE)
+    if not names:
+        raise SystemExit(f"{build_file.relative_to(ROOT)} declares no lash_rust_binary")
+    return [f"{package}:{name}" for name in names]
+
+
+def stage_binaries(package: str, destination: Path) -> list[Path]:
+    """Build a package's binaries and stage them under their Cargo names.
+
+    A generated binary label is `<cargo-name>__bin`; consumers (compose files,
+    the E2E drivers) mount the Cargo name. Each is stripped, as Cargo's
+    release profile strips them: the stage is shipped between jobs, and an
+    unstripped fastbuild binary is roughly twice the size.
+    """
+    labels = package_binaries(package)
+    destination.mkdir(parents=True, exist_ok=True)
+    staged = []
+    for built in build(labels):
+        target = destination / built.name.removesuffix("__bin")
+        shutil.copyfile(built, target)
+        target.chmod(0o755)
+        subprocess.run(["strip", str(target)], check=True)
+        staged.append(target)
+    return staged
 
 
 # ---------------------------------------------------------------------------
@@ -632,6 +665,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     build_parser = sub.add_parser("build", help="build labels from the shared cache and print their outputs")
     build_parser.add_argument("labels", nargs="+")
 
+    stage = sub.add_parser("stage-binaries", help="build a package's binaries and stage them under Cargo names")
+    stage.add_argument("package", help="a Bazel package, e.g. //runbooks/restate-postgres-workers")
+    stage.add_argument("destination")
+
     serve = sub.add_parser("serve", help="run a command beside one server")
     serve.add_argument("--leg", choices=sorted(LEGS), default="live")
     serve.add_argument("--server-env", action="append", default=[], help="KEY=VALUE server override")
@@ -660,6 +697,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command_name == "build":
         for path in build(args.labels):
+            print(path)
+        return 0
+    if args.command_name == "stage-binaries":
+        for path in stage_binaries(args.package, Path(args.destination)):
             print(path)
         return 0
     if args.command_name == "serve":

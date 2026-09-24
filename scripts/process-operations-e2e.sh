@@ -3,18 +3,45 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+
+# Every binary this runbook runs comes from the shared build pool's cache, in
+# one build (FIG-3666): the Cargo compiles it used to run one scenario at a
+# time spent 20 of the job's 22 minutes, one of them a release build of the
+# operator-flow binary the worker artifacts already carry.
+build_labels=(
+  //crates/lash-s3-store:lash-s3-store__unit_test
+  //crates/lash-postgres-store:conformance__test
+  //crates/lash-core:runtime_lifecycle__test
+  //crates/lash:lash__unit_test
+)
+mapfile -t built < <(python3 "$repo/scripts/ci/restate_suite.py" build "${build_labels[@]}")
+if [ "${#built[@]}" -ne "${#build_labels[@]}" ]; then
+  echo "expected ${#build_labels[@]} built outputs, got ${#built[@]}" >&2
+  exit 1
+fi
+s3_store_tests="${built[0]}"
+postgres_conformance_tests="${built[1]}"
+core_lifecycle_tests="${built[2]}"
+runtime_unit_tests="${built[3]}"
+
+staged_bin_dir=""
 if [ -n "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
   LASH_PROCESS_OPERATIONS_BIN_DIR="$(cd "$LASH_E2E_PREBUILT_BIN_DIR" && pwd)"
-  export LASH_PROCESS_OPERATIONS_BIN_DIR
-  for binary in lash-e2e-process-operations-worker; do
-    if [ ! -x "$LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" ]; then
-      echo "Missing executable prebuilt worker: $LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" >&2
-      exit 1
-    fi
-  done
 else
-  export LASH_PROCESS_OPERATIONS_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
+  # The same binaries CI's worker-artifacts job stages, under their Cargo
+  # names (the compose file mounts the worker by it).
+  staged_bin_dir="$(mktemp -d "${TMPDIR:-/tmp}/lash-process-operations-bin.XXXXXX")"
+  LASH_PROCESS_OPERATIONS_BIN_DIR="$staged_bin_dir"
+  python3 "$repo/scripts/ci/restate_suite.py" stage-binaries \
+    //runbooks/restate-postgres-workers "$LASH_PROCESS_OPERATIONS_BIN_DIR" >/dev/null
 fi
+export LASH_PROCESS_OPERATIONS_BIN_DIR
+for binary in lash-e2e-process-operations-worker lash-e2e-process-operator-flow; do
+  if [ ! -x "$LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" ]; then
+    echo "Missing executable worker: $LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" >&2
+    exit 1
+  fi
+done
 
 # shellcheck source=scripts/worktree-gate-env.sh
 source "$repo/scripts/worktree-gate-env.sh"
@@ -49,8 +76,8 @@ run_postgres_conformance_test() {
   local test_count
 
   listing="$(
-    cargo test --locked -p lash-internal-postgres-store --test conformance \
-      "$selector" -- --exact --list
+    cd crates/lash-postgres-store &&
+      "$postgres_conformance_tests" "$selector" --exact --list
   )" || return
   test_count="$(awk '/: test$/ { count++ } END { print count + 0 }' <<<"$listing")"
   printf '%s\n' "$listing"
@@ -59,8 +86,8 @@ run_postgres_conformance_test() {
     return 4
   fi
 
-  cargo test --locked -p lash-internal-postgres-store --test conformance \
-    "$selector" -- --exact --nocapture --test-threads=1
+  (cd crates/lash-postgres-store &&
+    "$postgres_conformance_tests" "$selector" --exact --nocapture --test-threads=1)
 }
 
 # FIG-3156. The runbook tells its judge to read a typed outcome out of a named
@@ -85,17 +112,15 @@ cleanup() {
   docker rm -f "$crash_container" >/dev/null 2>&1 || true
   "${compose[@]}" --profile crash down -v --remove-orphans >/dev/null 2>&1 || true
   lash_gate_cleanup
+  if [ -n "$staged_bin_dir" ]; then
+    rm -rf -- "$staged_bin_dir"
+  fi
   if [ "$status" -ne 0 ]; then
     echo "process-operations E2E failed with status $status; artifacts: $artifact_dir" >&2
   fi
   exit "$status"
 }
 trap cleanup EXIT
-
-if [ -z "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
-  cargo build --locked --release -p lash-restate-postgres-workers-e2e \
-    --bin lash-e2e-process-operations-worker
-fi
 
 bash scripts/docker-pull-with-retry.sh ubuntu:24.04
 "${compose[@]}" up -d postgres minio minio-init restate
@@ -164,7 +189,7 @@ LASH_MINIO_ACCESS_KEY="minioadmin" \
 LASH_MINIO_SECRET_KEY="minioadmin" \
 LASH_MINIO_PREFIX="runbooks/process-operations-${LASH_GATE_WORKTREE_SLUG}-$$" \
 LASH_REQUIRE_MINIO=1 \
-  cargo test --locked -p lash-internal-s3-store -- --nocapture \
+  bash -c 'cd crates/lash-s3-store && exec "$1" --nocapture' _ "$s3_store_tests" \
   2>&1 | tee "$artifact_dir/00-minio-conformance.log" | tee -a "$test_output"
 
 postgres_url="postgres://lash:lash@127.0.0.1:${postgres_port}/lash"
@@ -186,11 +211,11 @@ grep -q '"old_target_turn_count":0' "$artifact_dir/02-retarget.jsonl"
 grep -q '"new_target_turn_count":1' "$artifact_dir/02-retarget.jsonl"
 echo "scenario 2 evidence: old pending delivery is Retargeted with an audit event; one next wake reached only the new target" | tee -a "$test_output"
 
-cargo test --locked -p lash-internal-core \
-  process_tool_filter_narrows_only_session_tools_and_never_internal_wakes -- --nocapture \
+(cd crates/lash-core && "$core_lifecycle_tests" \
+  process_tool_filter_narrows_only_session_tools_and_never_internal_wakes --nocapture) \
   2>&1 | tee "$artifact_dir/03-tool-visibility.log" | tee -a "$test_output"
-cargo test --locked -p lash-runtime \
-  process_admin_list_signal_and_cancel_bypass_model_tool_filter -- --nocapture \
+(cd crates/lash && "$runtime_unit_tests" \
+  process_admin_list_signal_and_cancel_bypass_model_tool_filter --nocapture) \
   2>&1 | tee -a "$artifact_dir/03-tool-visibility.log" | tee -a "$test_output"
 require_checkpoints "$artifact_dir/03-tool-visibility.log" \
   model_tool_filter_narrows_without_narrowing_the_host_rail \
@@ -198,17 +223,15 @@ require_checkpoints "$artifact_dir/03-tool-visibility.log" \
 echo "scenario 3 evidence: model process tools were filtered while host list/signal/cancel remained complete" | tee -a "$test_output"
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
-  cargo test --locked -p lash-internal-postgres-store --test conformance \
-  queued_work_join_groups_by_delivery_policy_and_merge_key \
-  -- --nocapture --test-threads=1 \
+  bash -c 'cd crates/lash-postgres-store && exec "$1" "$2" --nocapture --test-threads=1' _ \
+  "$postgres_conformance_tests" queued_work_join_groups_by_delivery_policy_and_merge_key \
   2>&1 | tee "$artifact_dir/04-wake-turn-policy.log" | tee -a "$test_output"
 require_checkpoints "$artifact_dir/04-wake-turn-policy.log" \
   queued_work_claims_join_by_policy_and_merge_key
 echo "scenario 4 evidence: EachWake produced separate claims and Coalesce produced one multi-batch claim on PostgreSQL" | tee -a "$test_output"
 
 DATABASE_URL="$postgres_url" \
-  cargo run --locked --release --quiet -p lash-restate-postgres-workers-e2e \
-    --bin lash-e2e-process-operator-flow -- selected-drain \
+  "$LASH_PROCESS_OPERATIONS_BIN_DIR/lash-e2e-process-operator-flow" selected-drain \
   2>&1 | tee "$artifact_dir/08-selected-drain.jsonl" | tee -a "$test_output"
 python3 - "$artifact_dir/08-selected-drain.jsonl" <<'PY'
 import json

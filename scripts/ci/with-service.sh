@@ -197,10 +197,10 @@ NOT covered by scripts/ci/with-service.sh -- run each of these yourself:
       why: the fault-matrix chunks fork real cargo test invocations of their own,
            so neither Bazel nor a container owns them
       run: cargo nextest run --profile ci-heavy --workspace --locked --no-fail-fast
-  * Build worker release artifacts
-      why: --release is a Cargo-owned artifact contract (thin LTO, stripping)
-           outside the generated development graph
-      run: cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+  * Build worker E2E binaries
+      why: staged between jobs rather than run against a service; trusted
+           events take them from the shared build cache
+      run: python3 scripts/ci/restate_suite.py stage-binaries //runbooks/restate-postgres-workers <dir>
   * Restate + Postgres + MinIO Workers
       why: shell E2E drivers over release binaries rather than any Cargo or Bazel
            test label
