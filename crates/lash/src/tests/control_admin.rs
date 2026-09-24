@@ -684,7 +684,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         incarnation: current.incarnation.registration_sequence(),
         limit: std::num::NonZeroUsize::new(128).expect("nonzero"),
         mode: lash_core::ProcessEventQueryMode::Lite,
-        continuation: None,
+        cursor: None,
     };
     assert!(matches!(
         core.processes().events_remote(&page_request).await?.outcome,
@@ -744,7 +744,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         incarnation: old.incarnation.registration_sequence(),
         limit: std::num::NonZeroUsize::MIN,
         mode: lash_core::ProcessEventQueryMode::Full,
-        continuation: None,
+        cursor: None,
     };
     assert!(matches!(
         core.processes().events_remote(&old_request).await?.outcome,
@@ -1096,12 +1096,12 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
         complete_full_page(
             core.processes()
                 .events(
-                    &ProcessId::from("host-process"),
+                    crate::process::ProcessEventsFrom::Start(ProcessId::from("host-process")),
                     std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
                     lash_core::ProcessEventQueryMode::Full,
-                    None,
                 )
                 .await?
+                .outcome
         )
         .iter()
         .any(|event| event.event_type == "process.cancel_requested"),
@@ -1175,12 +1175,12 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                 .admin()
                 .processes()
                 .events(
-                    &ProcessId::from("host-filter-signal"),
+                    crate::process::ProcessEventsFrom::Start(ProcessId::from("host-filter-signal")),
                     std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
                     lash_core::ProcessEventQueryMode::Full,
-                    None,
                 )
-                .await?,
+                .await?
+                .outcome,
         )
         .iter()
         .any(|event| event.event_type == "signal.ready"),
@@ -1200,12 +1200,12 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                 .admin()
                 .processes()
                 .events(
-                    &ProcessId::from("host-filter-cancel"),
+                    crate::process::ProcessEventsFrom::Start(ProcessId::from("host-filter-cancel")),
                     std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
                     lash_core::ProcessEventQueryMode::Full,
-                    None,
                 )
                 .await?
+                .outcome
         )
         .iter()
         .any(|event| event.event_type == "process.cancel_requested"),

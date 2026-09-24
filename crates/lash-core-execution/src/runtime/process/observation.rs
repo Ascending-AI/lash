@@ -356,18 +356,38 @@ impl ProcessWorkObserver {
             .collect())
     }
 
+    /// Read a page of one exact process lifetime strictly after
+    /// `after_sequence`.
     pub async fn event_page(
+        &self,
+        process_ref: &super::ProcessRef,
+        after_sequence: u64,
+        limit: std::num::NonZeroUsize,
+        mode: super::ProcessEventQueryMode,
+    ) -> Result<ObservedProcessEventReadOutcome, PluginError> {
+        let outcome = self
+            .registry
+            .event_page_ref(process_ref, after_sequence, limit, mode)
+            .await?;
+        Ok(Self::observed_page(outcome))
+    }
+
+    /// Read the first page of the lifetime `process_id` currently names; a
+    /// pruned process is a typed no-longer-retained outcome.
+    pub async fn first_event_page(
         &self,
         process_id: &ProcessId,
         limit: std::num::NonZeroUsize,
         mode: super::ProcessEventQueryMode,
-        continuation: Option<super::ProcessEventPageToken>,
     ) -> Result<ObservedProcessEventReadOutcome, PluginError> {
-        let outcome = self
-            .registry
-            .event_page(process_id, limit, mode, continuation)
-            .await?;
-        Ok(match outcome {
+        let outcome = self.registry.event_page(process_id, limit, mode).await?;
+        Ok(Self::observed_page(outcome))
+    }
+
+    fn observed_page(
+        outcome: super::ProcessEventReadOutcome<super::ProcessEventPage>,
+    ) -> ObservedProcessEventReadOutcome {
+        match outcome {
             super::ProcessEventReadOutcome::NoLongerRetained(retention) => {
                 super::ProcessEventReadOutcome::NoLongerRetained(retention)
             }
@@ -395,7 +415,7 @@ impl ProcessWorkObserver {
                     more: page.more,
                 })
             }
-        })
+        }
     }
 }
 

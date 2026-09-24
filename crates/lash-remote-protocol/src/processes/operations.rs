@@ -1,6 +1,5 @@
 use super::*;
 #[cfg(any(feature = "core-conversions", test))]
-use lash_core::ProcessEventPageTokenStoreExt;
 use lash_sansio::ProcessId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -145,9 +144,9 @@ pub struct RemoteProcessEventsRequest {
     pub incarnation: u64,
     pub limit: std::num::NonZeroUsize,
     pub mode: lash_core::ProcessEventQueryMode,
+    /// The process cursor to read after; absent reads from the start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<String>")]
-    pub continuation: Option<lash_core::ProcessEventPageToken>,
+    pub cursor: Option<lash_sansio::ProcessCursor>,
 }
 
 #[cfg(any(feature = "core-conversions", test))]
@@ -168,14 +167,12 @@ impl RemoteProcessEventsRequest {
             incarnation: self.incarnation,
         }
         .validate("RemoteProcessEventsRequest")?;
-        if let Some(token) = &self.continuation
-            && (token.process_id() != self.process_id
-                || token.process_incarnation().registration_sequence() != self.incarnation
-                || token.mode() != self.mode)
+        if let Some(cursor) = &self.cursor
+            && !cursor.reference().names(&self.process_id, self.incarnation)
         {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessEventsRequest",
-                message: "continuation belongs to another process incarnation or mode".to_string(),
+                message: "cursor names another process lifetime".to_string(),
             });
         }
         Ok(())
@@ -191,6 +188,9 @@ pub struct RemoteProcessEventsResponse {
     pub outcome: lash_core::ProcessEventReadOutcome<
         lash_core::ProcessEventPage<RemoteProcessEvent, lash_core::ProcessEventLite>,
     >,
+    /// The cursor after this page: its sequence is the last event returned,
+    /// or the request's when the page returned none.
+    pub cursor: lash_sansio::ProcessCursor,
 }
 
 #[cfg(any(feature = "core-conversions", test))]
@@ -216,25 +216,23 @@ impl RemoteProcessEventsResponse {
             incarnation: self.incarnation,
         }
         .validate("RemoteProcessEventsResponse")?;
+        if !self
+            .cursor
+            .reference()
+            .names(&self.process_id, self.incarnation)
+        {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessEventsResponse",
+                message: "cursor names another process lifetime".to_string(),
+            });
+        }
         if let lash_core::ProcessEventReadOutcome::Retained(page) = &self.outcome {
-            let mode = match &page.events {
-                lash_core::ProcessEventPageEvents::Full(_) => {
-                    lash_core::ProcessEventQueryMode::Full
-                }
-                lash_core::ProcessEventPageEvents::Lite(_) => {
-                    lash_core::ProcessEventQueryMode::Lite
-                }
-            };
-            if let lash_core::ProcessEventPageMore::More { continuation } = &page.more
-                && (continuation.process_id() != self.process_id
-                    || continuation.process_incarnation().registration_sequence()
-                        != self.incarnation
-                    || continuation.mode() != mode)
+            if let Some(last) = page.last_sequence(|event| event.sequence, |event| event.sequence)
+                && last != self.cursor.sequence()
             {
                 return Err(RemoteProtocolError::InvalidEnvelope {
                     type_name: "RemoteProcessEventsResponse",
-                    message: "page continuation belongs to another process incarnation or mode"
-                        .to_string(),
+                    message: "cursor sequence is not the page's last event".to_string(),
                 });
             }
             if let lash_core::ProcessEventPageEvents::Full(events) = &page.events {

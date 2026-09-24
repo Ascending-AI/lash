@@ -1171,11 +1171,10 @@ finish(await handle);
         harness
             .state
             .process_observer
-            .event_page(
+            .first_event_page(
                 &process_id.clone(),
                 std::num::NonZeroUsize::new(4_096).expect("non-zero test page size"),
                 lash::process::ProcessEventQueryMode::Full,
-                None,
             )
             .await
             .expect("read process events immediately after session revocation"),
@@ -1234,11 +1233,10 @@ finish(await handle);
         harness
             .state
             .process_observer
-            .event_page(
+            .first_event_page(
                 &process_id,
                 std::num::NonZeroUsize::new(4_096).expect("non-zero test page size"),
                 lash::process::ProcessEventQueryMode::Full,
-                None,
             )
             .await
             .expect("read surviving process events"),
@@ -1515,11 +1513,10 @@ async fn wait_for_process_event(
         let events = complete_full_process_event_page(
             state
                 .process_observer
-                .event_page(
+                .first_event_page(
                     process_id,
                     std::num::NonZeroUsize::new(4_096).expect("non-zero test page size"),
                     lash::process::ProcessEventQueryMode::Full,
-                    None,
                 )
                 .await
                 .expect("read process events"),

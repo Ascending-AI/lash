@@ -35,8 +35,8 @@ impl SignalWaitProcesses for RetainingSignalWaitProcesses {
 
     async fn event_page(
         &self,
+        _after_sequence: u64,
         _limit: std::num::NonZeroUsize,
-        _continuation: Option<lash_core::ProcessEventPageToken>,
     ) -> Result<
         lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
         lash_core::PluginError,
@@ -160,8 +160,6 @@ async fn retention_after_an_earlier_wait_match_discards_the_timestamp_and_writes
     let first_page = lash_core::ProcessEventPage::from_full_rows(
         rows,
         std::num::NonZeroUsize::new(128).expect("non-zero page size"),
-        &process_id,
-        requested,
     );
     assert!(matches!(
         first_page.more,

@@ -1358,7 +1358,7 @@ fn remote_process_dtos_json_round_trip() {
         incarnation: 1,
         limit: std::num::NonZeroUsize::new(32).expect("nonzero limit"),
         mode: lash_core::ProcessEventQueryMode::Full,
-        continuation: None,
+        cursor: None,
     };
     events_request.validate().expect("valid events request");
     let events_response = RemoteProcessEventsResponse {
@@ -1368,6 +1368,13 @@ fn remote_process_dtos_json_round_trip() {
             events: lash_core::ProcessEventPageEvents::Full(vec![remote_process_event()]),
             more: lash_core::ProcessEventPageMore::Complete,
         }),
+        cursor: lash_sansio::ProcessCursor::new(
+            "epoch",
+            lash_sansio::ProcessCursorReference::for_lifetime(&ProcessId::from("process:1"), 1),
+            0,
+            1,
+        )
+        .expect("cursor"),
     };
     events_response.validate().expect("valid events response");
 }

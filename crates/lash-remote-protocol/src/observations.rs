@@ -213,14 +213,18 @@ pub enum RemoteLiveReplayGapReason {
     Unavailable,
 }
 
-/// Start a process-scoped observation subscription at one publisher position.
+/// Start a process-scoped observation subscription for one exact process
+/// lifetime, optionally resuming from a process cursor.
+///
+/// The cursor is typed: a malformed cursor, or one from a retired version, is
+/// refused at decode, naming the version it found.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessObservationRequest {
     pub process_id: ProcessId,
     pub incarnation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
+    pub cursor: Option<lash_sansio::ProcessCursor>,
 }
 
 impl RemoteProcessObservationRequest {
@@ -246,9 +250,6 @@ impl RemoteProcessObservationRequest {
                 message: "incarnation must be greater than zero".to_string(),
             });
         }
-        if let Some(cursor) = &self.cursor {
-            require_non_empty("RemoteProcessObservationRequest", "cursor", cursor)?;
-        }
         Ok(())
     }
 }
@@ -267,8 +268,14 @@ pub enum RemoteProcessObservationGapReason {
     PublisherJoinedMidRun,
     IncompleteGraph,
     ProjectionTruncated,
+    /// Retained live evidence cannot bridge the cursor's durable sequence to
+    /// the durable high-water mark.
+    SequenceUnbridged,
+    /// The requested process lifetime is unknown or no longer retained.
+    HistoryUnavailable,
 }
 
+/// Live-graph completeness, reported apart from durable-summary completeness.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteProcessObservationCompleteness {
@@ -278,11 +285,114 @@ pub enum RemoteProcessObservationCompleteness {
     },
 }
 
+/// The live half of a snapshot: the publisher's graph, when this core routes
+/// the process.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessObservationProjection {
     pub graph: Option<lash_trace::TraceLashlangGraph>,
     pub completeness: RemoteProcessObservationCompleteness,
+}
+
+/// Why a durable summary fold is not the whole history through its boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProcessDurableGapReason {
+    /// Bounded acquisition stopped before the high-water mark.
+    AcquisitionBudgetExhausted,
+    /// A summary event in the history did not decode.
+    SummaryUndecodable,
+}
+
+/// Durable-summary completeness, reported apart from live-graph completeness.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteProcessDurableCompleteness {
+    Complete,
+    Incomplete {
+        reason: RemoteProcessDurableGapReason,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProcessEffectOutcomeClass {
+    Success,
+    Failure,
+    Cancelled,
+}
+
+/// One recorded effect occurrence in a durable summary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteProcessEffectOccurrence {
+    pub occurrence: u64,
+    pub operation: String,
+    pub outcome_class: RemoteProcessEffectOutcomeClass,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<lash_sansio::FailureCode>,
+    pub replay_key: String,
+}
+
+/// Omitted occurrences of one node, by outcome class.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteProcessEffectOmittedCounts {
+    pub success: u64,
+    pub failure: u64,
+    pub cancelled: u64,
+}
+
+/// One effect node's recorded occurrences and omitted counts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteProcessEffectNodeSummary {
+    pub node_id: String,
+    pub occurrences: Vec<RemoteProcessEffectOccurrence>,
+    pub omitted: RemoteProcessEffectOmittedCounts,
+}
+
+/// Why the exact lifetime a snapshot names has no durable history to read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteProcessHistoryRetention {
+    /// The process was pruned and its payload-free tombstone remains.
+    Pruned {
+        terminal_label: String,
+        pruned_at_ms: u64,
+    },
+    /// The process id now names a later lifetime.
+    Retired {
+        requested_incarnation: u64,
+        current_incarnation: u64,
+    },
+    /// No retained process or tombstone has this id.
+    Unknown,
+}
+
+/// The durable half of a snapshot: status and the effect-summary fold
+/// through one exact high-water sequence, or why there is none.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteProcessDurableSnapshot {
+    Retained {
+        sequence: u64,
+        status: crate::RemoteProcessStatus,
+        summary: Vec<RemoteProcessEffectNodeSummary>,
+        completeness: RemoteProcessDurableCompleteness,
+    },
+    NoLongerRetained {
+        retention: RemoteProcessHistoryRetention,
+    },
+}
+
+/// A snapshot at one exact process lifetime and durable high-water sequence,
+/// with the live graph at the cursor's live position.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteProcessObservationSnapshot {
+    pub durable: RemoteProcessDurableSnapshot,
+    pub live: RemoteProcessObservationProjection,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -291,24 +401,31 @@ pub enum RemoteProcessObservationItem {
     Snapshot {
         process_id: ProcessId,
         incarnation: u64,
-        cursor: String,
-        projection: RemoteProcessObservationProjection,
+        cursor: lash_sansio::ProcessCursor,
+        snapshot: RemoteProcessObservationSnapshot,
     },
     Event {
         process_id: ProcessId,
         incarnation: u64,
-        cursor: String,
+        cursor: lash_sansio::ProcessCursor,
         record: Box<lash_trace::TraceRecord>,
+    },
+    /// A durable event committed; read it through the events operation.
+    Committed {
+        process_id: ProcessId,
+        incarnation: u64,
+        cursor: lash_sansio::ProcessCursor,
+        sequence: u64,
+        event_type: String,
     },
     Gap {
         process_id: ProcessId,
         incarnation: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        requested_cursor: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        latest_cursor: Option<String>,
-        projection: RemoteProcessObservationProjection,
+        requested_cursor: Option<lash_sansio::ProcessCursor>,
+        cursor: lash_sansio::ProcessCursor,
         reason: RemoteProcessObservationGapReason,
+        snapshot: RemoteProcessObservationSnapshot,
     },
 }
 
@@ -324,35 +441,43 @@ impl RemoteProcessObservationItem {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        let (process_id, incarnation, cursor) = match self {
+        let invalid = |message: &str| RemoteProtocolError::InvalidEnvelope {
+            type_name: "RemoteProcessObservationItem",
+            message: message.to_string(),
+        };
+        let (process_id, incarnation, cursor, snapshot) = match self {
             Self::Snapshot {
+                process_id,
+                incarnation,
+                cursor,
+                snapshot,
+            } => (process_id, *incarnation, cursor, Some(snapshot)),
+            Self::Event {
                 process_id,
                 incarnation,
                 cursor,
                 ..
             }
-            | Self::Event {
+            | Self::Committed {
                 process_id,
                 incarnation,
                 cursor,
                 ..
-            } => (process_id, incarnation, Some(cursor.as_str())),
+            } => (process_id, *incarnation, cursor, None),
             Self::Gap {
                 process_id,
                 incarnation,
-                latest_cursor,
+                cursor,
+                snapshot,
                 ..
-            } => (process_id, incarnation, latest_cursor.as_deref()),
+            } => (process_id, *incarnation, cursor, Some(snapshot)),
         };
         require_non_empty("RemoteProcessObservationItem", "process_id", process_id)?;
-        if *incarnation == 0 {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteProcessObservationItem",
-                message: "incarnation must be greater than zero".to_string(),
-            });
+        if incarnation == 0 {
+            return Err(invalid("incarnation must be greater than zero"));
         }
-        if let Some(cursor) = cursor {
-            require_non_empty("RemoteProcessObservationItem", "cursor", cursor)?;
+        if !cursor.reference().names(process_id, incarnation) {
+            return Err(invalid("cursor names another process lifetime"));
         }
         match self {
             Self::Event { record, .. }
@@ -363,48 +488,34 @@ impl RemoteProcessObservationItem {
                             &event.identity.subject,
                             lash_trace::TraceRuntimeSubject::Process { process_id: observed }
                                 if observed == process_id
-                        ) && event.identity.incarnation() == Some(*incarnation)
+                        ) && event.identity.incarnation() == Some(incarnation)
                 ) =>
             {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name: "RemoteProcessObservationItem",
-                    message: "node event belongs to another process incarnation".to_string(),
-                });
+                return Err(invalid("node event belongs to another process incarnation"));
             }
-            Self::Snapshot { projection, .. } if projection.graph.is_none() => {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name: "RemoteProcessObservationItem",
-                    message: "snapshot requires a graph".to_string(),
-                });
+            Self::Committed { sequence, .. } if *sequence != cursor.sequence() => {
+                return Err(invalid("committed item cursor must carry its sequence"));
             }
-            Self::Gap {
-                projection, reason, ..
-            } if projection.completeness
-                != (RemoteProcessObservationCompleteness::Incomplete { reason: *reason }) =>
-            {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name: "RemoteProcessObservationItem",
-                    message: "gap projection must name the same incompleteness reason".to_string(),
-                });
+            Self::Snapshot { snapshot, .. } | Self::Gap { snapshot, .. } => {
+                if let RemoteProcessDurableSnapshot::Retained { sequence, .. } = &snapshot.durable
+                    && *sequence != cursor.sequence()
+                {
+                    return Err(invalid(
+                        "snapshot cursor must carry the snapshot's durable high-water sequence",
+                    ));
+                }
             }
             _ => {}
         }
-        let projection = match self {
-            Self::Snapshot { projection, .. } | Self::Gap { projection, .. } => Some(projection),
-            Self::Event { .. } => None,
-        };
-        if projection
-            .and_then(|projection| projection.graph.as_ref())
+        if snapshot
+            .and_then(|snapshot| snapshot.live.graph.as_ref())
             .is_some_and(|graph| {
                 !matches!(&graph.subject,
                 lash_trace::TraceRuntimeSubject::Process { process_id: observed }
                     if observed == process_id)
             })
         {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteProcessObservationItem",
-                message: "graph belongs to another process".to_string(),
-            });
+            return Err(invalid("graph belongs to another process"));
         }
         Ok(())
     }

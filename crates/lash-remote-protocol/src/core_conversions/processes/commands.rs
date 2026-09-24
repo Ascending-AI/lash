@@ -396,14 +396,16 @@ impl
     TryFrom<(
         lash_core::ProcessRef,
         lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+        lash_sansio::ProcessCursor,
     )> for RemoteProcessEventsResponse
 {
     type Error = RemoteProtocolError;
 
     fn try_from(
-        (process_ref, outcome): (
+        (process_ref, outcome, cursor): (
             lash_core::ProcessRef,
             lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+            lash_sansio::ProcessCursor,
         ),
     ) -> Result<Self, Self::Error> {
         let outcome = match outcome {
@@ -430,11 +432,14 @@ impl
                 })
             }
         };
-        Ok(Self {
+        let response = Self {
             process_id: process_ref.process_id,
             incarnation: process_ref.incarnation.registration_sequence(),
             outcome,
-        })
+            cursor,
+        };
+        response.validate()?;
+        Ok(response)
     }
 }
 
@@ -442,6 +447,7 @@ impl TryFrom<RemoteProcessEventsResponse>
     for (
         lash_core::ProcessRef,
         lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+        lash_sansio::ProcessCursor,
     )
 {
     type Error = RemoteProtocolError;
@@ -452,6 +458,7 @@ impl TryFrom<RemoteProcessEventsResponse>
             process_id,
             incarnation,
             outcome,
+            cursor,
         } = value;
         let outcome = match outcome {
             lash_core::ProcessEventReadOutcome::NoLongerRetained(retention) => {
@@ -483,6 +490,7 @@ impl TryFrom<RemoteProcessEventsResponse>
                 lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
             ),
             outcome,
+            cursor,
         ))
     }
 }

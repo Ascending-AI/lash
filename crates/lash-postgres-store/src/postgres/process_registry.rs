@@ -1,5 +1,4 @@
 use crate::*;
-use lash_core_execution::ProcessEventPageTokenStoreExt as _;
 use lash_core_execution::ProcessQuery as _;
 use lash_core_execution::facade_support::{
     self, registry_transitions::ProcessLeaseReclaimDecision,
@@ -794,41 +793,19 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         Ok(result)
     }
 
-    async fn event_page(
+    async fn event_page_ref(
         &self,
-        process_id: &ProcessId,
+        process_ref: &ProcessRef,
+        after_sequence: u64,
         limit: std::num::NonZeroUsize,
         mode: lash_core_execution::ProcessEventQueryMode,
-        continuation: Option<lash_core_execution::ProcessEventPageToken>,
     ) -> Result<
         lash_core_execution::ProcessEventReadOutcome<lash_core_execution::ProcessEventPage>,
         PluginError,
     > {
-        if let Some(token) = continuation.as_ref() {
-            if token.process_id() != process_id {
-                return Err(PluginError::Session(format!(
-                    "process event page token belongs to `{}`, not `{process_id}`",
-                    token.process_id()
-                )));
-            }
-            if token.mode() != mode {
-                return Err(PluginError::Session(
-                    "process event page token projection does not match the requested mode"
-                        .to_string(),
-                ));
-            }
-        }
+        let process_id = &process_ref.process_id;
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let record_result = match continuation.as_ref() {
-            Some(token) => {
-                require_process_ref_tx(
-                    &mut tx,
-                    &ProcessRef::new(process_id.clone(), token.process_incarnation()),
-                )
-                .await
-            }
-            None => require_process_tx(&mut tx, process_id).await,
-        };
+        let record_result = require_process_ref_tx(&mut tx, process_ref).await;
         let record = match record_result {
             Ok(record) => record,
             Err(PluginError::ProcessNoLongerRetained {
@@ -865,14 +842,8 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                 return Err(error);
             }
         };
-        let after_sequence = continuation.as_ref().map_or(
-            0,
-            lash_core_execution::ProcessEventPageToken::after_sequence,
-        );
         let after_sequence = i64::try_from(after_sequence).map_err(|_| {
-            PluginError::Session(
-                "process event page token sequence exceeds the SQL cursor range".into(),
-            )
+            PluginError::Session("process event page sequence exceeds the SQL cursor range".into())
         })?;
         let fetch_limit = limit
             .get()
@@ -895,12 +866,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                         serde_json::from_str(&row.get::<String, _>(0)).map_err(process_decode_error)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                lash_core_execution::ProcessEventPage::from_full_rows(
-                    events,
-                    limit,
-                    process_id,
-                    record.incarnation,
-                )
+                lash_core_execution::ProcessEventPage::from_full_rows(events, limit)
             }
             lash_core_execution::ProcessEventQueryMode::Lite => {
                 let rows = sqlx::query(process_sql().event.page_lite.sql())
@@ -924,12 +890,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                         })
                     })
                     .collect::<Result<Vec<_>, PluginError>>()?;
-                lash_core_execution::ProcessEventPage::from_lite_rows(
-                    events,
-                    limit,
-                    process_id,
-                    record.incarnation,
-                )
+                lash_core_execution::ProcessEventPage::from_lite_rows(events, limit)
             }
         };
         tx.commit().await.map_err(plugin_sqlx_error)?;

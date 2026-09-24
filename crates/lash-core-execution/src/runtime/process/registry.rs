@@ -559,14 +559,9 @@ pub trait ProcessEventLogTestSupport: ProcessEventLog {
         let outcome = self
             .event_page_ref(
                 process_ref,
+                after_sequence,
                 limit,
                 super::events::ProcessEventQueryMode::Full,
-                Some(super::events::ProcessEventPageToken::new(
-                    process_ref.process_id.clone(),
-                    process_ref.incarnation,
-                    after_sequence,
-                    super::events::ProcessEventQueryMode::Full,
-                )),
             )
             .await?;
         match outcome {

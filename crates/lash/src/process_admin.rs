@@ -229,37 +229,35 @@ pub struct Processes {
 }
 
 impl Processes {
-    /// Subscribe to this core's live observations for one exact process incarnation.
-    pub fn subscribe_observation(
+    /// Observe one exact process lifetime through its process cursor.
+    ///
+    /// Without a cursor the first item is a snapshot. With one, the
+    /// subscription resumes after it when this core's live route still bridges
+    /// it; otherwise the first item is a gap with a snapshot and a new cursor.
+    pub async fn subscribe_observation(
         &self,
         process_ref: &lash_core::ProcessRef,
-        cursor: Option<&crate::process_observation::ProcessObservationCursor>,
-    ) -> crate::process_observation::ProcessObservationSubscription {
-        self.core.process_observation_hub.subscribe(
-            &process_ref.process_id,
-            process_ref.incarnation.registration_sequence(),
-            cursor,
-        )
+        cursor: Option<&crate::process_observation::ProcessCursor>,
+    ) -> Result<crate::process_observation::ProcessObservationSubscription> {
+        Ok(self
+            .core
+            .process_observation_hub
+            .subscribe(self.registry()?, process_ref, cursor)
+            .await?)
     }
 
     /// Decode an exact-version remote request into this core's local route.
-    pub fn subscribe_observation_remote(
+    pub async fn subscribe_observation_remote(
         &self,
         request: &lash_remote_protocol::RemoteProcessObservationRequest,
-    ) -> std::result::Result<
-        crate::process_observation::ProcessObservationSubscription,
-        lash_remote_protocol::RemoteProtocolError,
-    > {
+    ) -> Result<crate::process_observation::ProcessObservationSubscription> {
         request.validate()?;
-        let cursor = request
-            .cursor
-            .as_ref()
-            .map(crate::process_observation::ProcessObservationCursor::from_token);
-        Ok(self.core.process_observation_hub.subscribe(
-            &request.process_id,
-            request.incarnation,
-            cursor.as_ref(),
-        ))
+        let process_ref = lash_core::ProcessRef::new(
+            request.process_id.clone(),
+            lash_core::ProcessIncarnation::from_registration_sequence(request.incarnation),
+        );
+        self.subscribe_observation(&process_ref, request.cursor.as_ref())
+            .await
     }
 
     fn registry(&self) -> Result<Arc<dyn lash_core::ProcessRegistry>> {
@@ -468,17 +466,24 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// Read one durable event page from a process cursor, or from the start of
+    /// the lifetime a process id currently names. Full/Lite is a request
+    /// parameter; the returned cursor continues the history and resumes live
+    /// observation.
     pub async fn events(
         &self,
-        process_id: &ProcessId,
+        from: crate::process_observation::ProcessEventsFrom,
         limit: std::num::NonZeroUsize,
         mode: lash_core::ProcessEventQueryMode,
-        continuation: Option<lash_core::ProcessEventPageToken>,
-    ) -> Result<lash_core::facade_support::ObservedProcessEventReadOutcome> {
-        self.make_observer()?
-            .event_page(process_id, limit, mode, continuation)
-            .await
-            .map_err(Into::into)
+    ) -> Result<crate::process_observation::ProcessEventsRead> {
+        Ok(crate::process_observation::read_events(
+            &self.registry()?,
+            Some(self.core.process_observation_hub.as_ref()),
+            from,
+            limit,
+            mode,
+        )
+        .await?)
     }
 
     /// Read a page for the exact lifetime named by a remote request.
@@ -491,16 +496,35 @@ impl Processes {
             request.process_id.clone(),
             lash_core::ProcessIncarnation::from_registration_sequence(request.incarnation),
         );
-        let outcome = self
-            .registry()?
-            .event_page_ref(
-                &process_ref,
-                request.limit,
-                request.mode,
-                request.continuation.clone(),
-            )
+        let registry = self.registry()?;
+        let cursor = match request.cursor.clone() {
+            Some(cursor) => cursor,
+            None => {
+                let (epoch, position) = self.core.process_observation_hub.route(&process_ref);
+                crate::process_observation::ProcessCursor::new(
+                    epoch,
+                    lash_sansio::ProcessCursorReference::for_lifetime(
+                        &request.process_id,
+                        request.incarnation,
+                    ),
+                    position,
+                    0,
+                )
+                .map_err(|error| {
+                    EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
+                })?
+            }
+        };
+        let outcome = registry
+            .event_page_ref(&process_ref, cursor.sequence(), request.limit, request.mode)
             .await?;
-        Ok((process_ref, outcome).try_into()?)
+        let cursor = match &outcome {
+            lash_core::ProcessEventReadOutcome::Retained(page) => page
+                .last_sequence(|event| event.sequence, |event| event.sequence)
+                .map_or_else(|| cursor.clone(), |sequence| cursor.with_sequence(sequence)),
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(_) => cursor,
+        };
+        Ok((process_ref, outcome, cursor).try_into()?)
     }
 
     pub async fn await_output(

@@ -835,6 +835,7 @@ pub struct LashCoreBuilder {
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     queued_work_source: QueuedWorkSource,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
+    process_observation_config: crate::process_observation::ProcessObservationConfig,
 }
 
 impl LashCoreBuilder {
@@ -872,6 +873,7 @@ impl LashCoreBuilder {
             process_tool_visibility_filter: None,
             queued_work_source: QueuedWorkSource::Unset,
             live_replay_store: None,
+            process_observation_config: Default::default(),
         }
     }
 
@@ -1153,8 +1155,9 @@ impl LashCoreBuilder {
         let policy = self.session_spec.resolve_against(&base_policy);
 
         let core = self.resolve_runtime_host_config()?;
-        let process_observation_hub =
-            Arc::new(crate::process_observation::ProcessObservationHub::default());
+        let process_observation_hub = Arc::new(
+            crate::process_observation::ProcessObservationHub::new(self.process_observation_config),
+        );
         let observation_sink: Arc<dyn lash_trace::TraceSink> = process_observation_hub.clone();
         let core = core.with_process_observation_sink(observation_sink);
         let live_replay_clock = Arc::clone(&core.clock);
@@ -1168,6 +1171,7 @@ impl LashCoreBuilder {
             matches!(&self.process_work_source, ProcessWorkSelection::External(_));
         let process_lifecycle_feed = Arc::new(crate::process_lifecycle::ProcessLifecycleFeed::new(
             Arc::clone(&live_replay_store),
+            Arc::clone(&process_observation_hub),
             self.process_event_sink.clone(),
             !external_process_work,
         ));
@@ -1469,6 +1473,16 @@ impl LashCoreBuilder {
     /// [`ProcessEventSink`]: facade_support::ProcessEventSink
     pub fn process_event_sink(mut self, sink: Arc<dyn facade_support::ProcessEventSink>) -> Self {
         self.process_event_sink = Some(sink);
+        self
+    }
+
+    /// Bounds of the process observation hub: its per-process ring capacity
+    /// and idle TTL, and the durable read budget of one snapshot.
+    pub fn process_observation_config(
+        mut self,
+        config: crate::process_observation::ProcessObservationConfig,
+    ) -> Self {
+        self.process_observation_config = config;
         self
     }
 

@@ -878,15 +878,27 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
             lash_core::ProcessIncarnation::from_registration_sequence(1),
         ),
         lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
-            events: lash_core::ProcessEventPageEvents::Full(vec![event]),
+            events: lash_core::ProcessEventPageEvents::Full(vec![event.clone()]),
             more: lash_core::ProcessEventPageMore::Complete,
         }),
+        lash_sansio::ProcessCursor::new(
+            "epoch",
+            lash_sansio::ProcessCursorReference::for_lifetime(
+                &ProcessId::from("process:record"),
+                1,
+            ),
+            0,
+            event.sequence,
+        )
+        .expect("cursor"),
     ))
     .expect("remote process events");
-    let (process_ref, events): (
+    let (process_ref, events, cursor): (
         _,
         lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+        lash_sansio::ProcessCursor,
     ) = events_response.try_into().expect("events response");
+    assert_eq!(cursor.sequence(), event.sequence);
     assert_eq!(process_ref.process_id, "process:record");
     assert!(
         matches!(events, lash_core::ProcessEventReadOutcome::Retained(page) if page.events.len() == 1)

@@ -27,10 +27,7 @@ pub use crate::runtime::{
 };
 pub use crate::session::{RuntimeExecutionTracing, Session};
 
-use crate::runtime::process::{
-    ObservedWorkItem, ProcessEventPageToken, ProcessEventQueryMode, ProcessIncarnation,
-    ProcessRecord, ProcessWorkObserver,
-};
+use crate::runtime::process::{ObservedWorkItem, ProcessRecord, ProcessWorkObserver};
 use crate::{PluginError, ProcessId};
 
 /// `ProcessWorkObserver::work_item_from_record`: the bounded record/event-tail
@@ -41,18 +38,6 @@ pub async fn work_item_from_record(
     record: ProcessRecord,
 ) -> Result<ObservedWorkItem, PluginError> {
     observer.work_item_from_record(record).await
-}
-
-/// `ProcessEventPageToken::new`: registry implementations mint page tokens;
-/// the token-binding law mints foreign ones to prove the registry refuses
-/// them.
-pub fn process_event_page_token(
-    process_id: ProcessId,
-    process_incarnation: ProcessIncarnation,
-    after_sequence: u64,
-    mode: ProcessEventQueryMode,
-) -> ProcessEventPageToken {
-    ProcessEventPageToken::new(process_id, process_incarnation, after_sequence, mode)
 }
 
 /// `process_terminal_resolution`: the resolution a process terminal delivers

@@ -1,41 +1,10 @@
 use super::*;
 
 #[expect(
-    clippy::chunks_exact_to_as_chunks,
-    clippy::expect_used,
-    reason = "conformance-law fixture: the helper mutates a token produced by the implementation"
-)]
-fn token_with_sequence(token: &crate::ProcessEventPageToken, after_sequence: u64) -> String {
-    let encoded = serde_json::to_string(token).expect("encode valid process-event page token");
-    let encoded: String = serde_json::from_str(&encoded).expect("decode token string envelope");
-    let hex = encoded
-        .strip_prefix("process-event-page:v1:")
-        .expect("known process-event page token version");
-    let bytes = hex
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let pair = std::str::from_utf8(pair).expect("ASCII token hex");
-            u8::from_str_radix(pair, 16).expect("valid token hex")
-        })
-        .collect::<Vec<_>>();
-    let mut wire: serde_json::Value =
-        serde_json::from_slice(&bytes).expect("decode token wire payload");
-    wire["after_sequence"] = serde_json::json!(after_sequence);
-    let bytes = serde_json::to_vec(&wire).expect("encode forged token wire payload");
-    let hex = bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    serde_json::to_string(&format!("process-event-page:v1:{hex}"))
-        .expect("encode forged token string envelope")
-}
-
-#[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn assert_out_of_range_tokens_are_rejected(registry: Arc<dyn ProcessRegistry>) {
+pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("process-event-page-sql-cursor-range");
     registry
         .register_process(
@@ -60,29 +29,29 @@ pub(super) async fn assert_out_of_range_tokens_are_rejected(registry: Arc<dyn Pr
             &process_id,
             std::num::NonZeroUsize::MIN,
             crate::ProcessEventQueryMode::Full,
-            None,
         )
         .await
         .expect("read first cursor-range page");
     let crate::ProcessEventReadOutcome::Retained(first) = first else {
         panic!("new cursor-range history must be retained");
     };
-    let crate::ProcessEventPageMore::More { continuation } = first.more else {
-        panic!("cursor-range fixture must issue a continuation");
+    let crate::ProcessEventPageMore::More { .. } = first.more else {
+        panic!("cursor-range fixture must page");
     };
+    let process_ref = registry
+        .resolve_process_ref(&process_id)
+        .await
+        .expect("resolve cursor-range process");
 
     for after_sequence in [i64::MAX as u64 + 1, u64::MAX] {
-        let encoded = token_with_sequence(&continuation, after_sequence);
         let mut returned_events = Vec::new();
         let result: Result<(), String> = async {
-            let token: crate::ProcessEventPageToken =
-                serde_json::from_str(&encoded).map_err(|error| error.to_string())?;
             let outcome = registry
-                .event_page(
-                    &process_id,
+                .event_page_ref(
+                    &process_ref,
+                    after_sequence,
                     std::num::NonZeroUsize::MIN,
                     crate::ProcessEventQueryMode::Full,
-                    Some(token),
                 )
                 .await
                 .map_err(|error| error.to_string())?;
@@ -120,9 +89,9 @@ pub(super) async fn assert_retired_history(
     let retired_page = registry
         .event_page_ref(
             first_ref,
+            0,
             std::num::NonZeroUsize::new(8).expect("non-zero page size"),
             crate::ProcessEventQueryMode::Lite,
-            None,
         )
         .await
         .expect("a retired history is a typed page outcome");
@@ -137,7 +106,7 @@ pub(super) async fn assert_retired_history(
             ) if requested_incarnation == first.incarnation
                 && current_incarnation == second.incarnation
         ),
-        "a page token for an old incarnation must report retired history: {retired_page:?}"
+        "a page read for an old incarnation must report retired history: {retired_page:?}"
     );
 }
 
@@ -155,7 +124,6 @@ pub(super) async fn assert_pruned_history(
             process_id,
             std::num::NonZeroUsize::new(8).expect("non-zero page size"),
             crate::ProcessEventQueryMode::Lite,
-            None,
         )
         .await
         .expect("a pruned history is a typed page outcome");

@@ -1204,20 +1204,19 @@ pub(crate) async fn await_work(
         }
     };
     let mut events = Vec::new();
-    let mut continuation = None;
+    let mut from = lash::process::ProcessEventsFrom::Start(process_id.clone());
     loop {
-        let event_outcome = state
+        let read = state
             .core
             .processes()
             .events(
-                &process_id,
+                from,
                 std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN),
                 lash::process::ProcessEventQueryMode::Lite,
-                continuation,
             )
             .await
             .map_err(AppError::internal)?;
-        let page = match event_outcome {
+        let page = match read.outcome {
             lash::process::ProcessEventReadOutcome::Retained(page) => page,
             lash::process::ProcessEventReadOutcome::NoLongerRetained(retention) => {
                 return Err(AppError::internal(format!(
@@ -1232,9 +1231,11 @@ pub(crate) async fn await_work(
             sequence: event.sequence,
             event_type: event.event_type,
         }));
-        continuation = match page.more {
-            lash::process::ProcessEventPageMore::Complete => break,
-            lash::process::ProcessEventPageMore::More { continuation } => Some(continuation),
+        from = match (page.more, read.cursor) {
+            (lash::process::ProcessEventPageMore::More { .. }, Some(cursor)) => {
+                lash::process::ProcessEventsFrom::After(cursor)
+            }
+            _ => break,
         };
     }
     state.trace(

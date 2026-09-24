@@ -558,184 +558,6 @@ pub enum ProcessEventQueryMode {
     Lite,
 }
 
-/// Opaque continuation for one process incarnation and event projection.
-///
-/// Hosts pass this value back unchanged. Its fields bind the continuation to
-/// the process lifetime and query mode that issued it, preventing a token from
-/// being replayed against a successor incarnation or a different projection.
-#[derive(Clone, PartialEq, Eq)]
-pub struct ProcessEventPageToken {
-    process_id: ProcessId,
-    process_incarnation: ProcessIncarnation,
-    after_sequence: u64,
-    mode: ProcessEventQueryMode,
-}
-
-impl std::fmt::Debug for ProcessEventPageToken {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("ProcessEventPageToken(..)")
-    }
-}
-
-impl Serialize for ProcessEventPageToken {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(Serialize)]
-        struct Wire<'a> {
-            process_id: &'a ProcessId,
-            process_incarnation: ProcessIncarnation,
-            after_sequence: u64,
-            mode: ProcessEventQueryMode,
-        }
-
-        let bytes = serde_json::to_vec(&Wire {
-            process_id: &self.process_id,
-            process_incarnation: self.process_incarnation,
-            after_sequence: self.after_sequence,
-            mode: self.mode,
-        })
-        .map_err(serde::ser::Error::custom)?;
-        let mut encoded = String::with_capacity(22 + bytes.len() * 2);
-        encoded.push_str("process-event-page:v1:");
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        for byte in bytes {
-            encoded.push(HEX[usize::from(byte >> 4)] as char);
-            encoded.push(HEX[usize::from(byte & 0x0f)] as char);
-        }
-        serializer.serialize_str(&encoded)
-    }
-}
-
-impl<'de> Deserialize<'de> for ProcessEventPageToken {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Wire {
-            process_id: ProcessId,
-            process_incarnation: ProcessIncarnation,
-            after_sequence: u64,
-            mode: ProcessEventQueryMode,
-        }
-
-        let encoded = String::deserialize(deserializer)?;
-        let hex = encoded
-            .strip_prefix("process-event-page:v1:")
-            .ok_or_else(|| serde::de::Error::custom("unsupported process event page token"))?;
-        let hex = hex.as_bytes();
-        if hex.len() % 2 != 0 {
-            return Err(serde::de::Error::custom(
-                "malformed process event page token",
-            ));
-        }
-        let (pairs, _) = hex.as_chunks::<2>();
-        let bytes = pairs
-            .iter()
-            .map(|pair| {
-                let high = decode_hex_digit(pair[0]).ok_or_else(|| {
-                    serde::de::Error::custom("malformed process event page token")
-                })?;
-                let low = decode_hex_digit(pair[1]).ok_or_else(|| {
-                    serde::de::Error::custom("malformed process event page token")
-                })?;
-                Ok((high << 4) | low)
-            })
-            .collect::<Result<Vec<_>, D::Error>>()?;
-        let wire: Wire = serde_json::from_slice(&bytes).map_err(serde::de::Error::custom)?;
-        i64::try_from(wire.after_sequence).map_err(|_| {
-            serde::de::Error::custom(
-                "process event page token sequence exceeds the SQL cursor range",
-            )
-        })?;
-        Ok(Self {
-            process_id: wire.process_id,
-            process_incarnation: wire.process_incarnation,
-            after_sequence: wire.after_sequence,
-            mode: wire.mode,
-        })
-    }
-}
-
-const fn decode_hex_digit(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
-impl ProcessEventPageToken {
-    /// Constructs a continuation at an exclusive event-sequence boundary.
-    ///
-    /// This constructor exists for registry implementations. Host code should
-    /// use only tokens returned by a page read.
-    pub(crate) fn new(
-        process_id: ProcessId,
-        process_incarnation: ProcessIncarnation,
-        after_sequence: u64,
-        mode: ProcessEventQueryMode,
-    ) -> Self {
-        Self {
-            process_id,
-            process_incarnation,
-            after_sequence,
-            mode,
-        }
-    }
-
-    pub(crate) fn process_id(&self) -> &ProcessId {
-        &self.process_id
-    }
-
-    pub(crate) fn process_incarnation(&self) -> ProcessIncarnation {
-        self.process_incarnation
-    }
-
-    pub(crate) fn after_sequence(&self) -> u64 {
-        self.after_sequence
-    }
-
-    pub(crate) fn mode(&self) -> ProcessEventQueryMode {
-        self.mode
-    }
-}
-
-/// Store-side access to a page token's bound cursor.
-///
-/// The facade does not re-export this trait, so hosts can carry and serialize
-/// page tokens without depending on their fields. Store implementations import
-/// the trait from `lash_core` to bind SQL parameters and validate the request.
-#[doc(hidden)]
-pub trait ProcessEventPageTokenStoreExt {
-    fn process_id(&self) -> &ProcessId;
-    fn process_incarnation(&self) -> ProcessIncarnation;
-    fn after_sequence(&self) -> u64;
-    fn mode(&self) -> ProcessEventQueryMode;
-}
-
-impl ProcessEventPageTokenStoreExt for ProcessEventPageToken {
-    fn process_id(&self) -> &ProcessId {
-        &self.process_id
-    }
-
-    fn process_incarnation(&self) -> ProcessIncarnation {
-        self.process_incarnation
-    }
-
-    fn after_sequence(&self) -> u64 {
-        self.after_sequence
-    }
-
-    fn mode(&self) -> ProcessEventQueryMode {
-        self.mode
-    }
-}
-
 /// Event metadata returned by the payload-free SQL projection.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -771,13 +593,16 @@ impl<Full, Lite> ProcessEventPageEvents<Full, Lite> {
 }
 
 /// Whether a bounded event page completed the retained history.
+///
+/// A host continues through the process cursor the facade returns with the
+/// page; the registry-level boundary is the last returned sequence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProcessEventPageMore {
     Complete,
     More {
-        #[schemars(with = "String")]
-        continuation: ProcessEventPageToken,
+        /// The exclusive sequence boundary the next page starts after.
+        after_sequence: u64,
     },
 }
 
@@ -790,20 +615,8 @@ pub struct ProcessEventPage<Full = ProcessEvent, Lite = ProcessEventLite> {
 }
 
 impl ProcessEventPage {
-    pub fn from_full_rows(
-        mut events: Vec<ProcessEvent>,
-        limit: std::num::NonZeroUsize,
-        process_id: &ProcessId,
-        incarnation: ProcessIncarnation,
-    ) -> Self {
-        let more = page_more(
-            &mut events,
-            limit,
-            process_id,
-            incarnation,
-            ProcessEventQueryMode::Full,
-            |event| event.sequence,
-        );
+    pub fn from_full_rows(mut events: Vec<ProcessEvent>, limit: std::num::NonZeroUsize) -> Self {
+        let more = page_more(&mut events, limit, |event| event.sequence);
         Self {
             events: ProcessEventPageEvents::Full(events),
             more,
@@ -813,17 +626,8 @@ impl ProcessEventPage {
     pub fn from_lite_rows(
         mut events: Vec<ProcessEventLite>,
         limit: std::num::NonZeroUsize,
-        process_id: &ProcessId,
-        incarnation: ProcessIncarnation,
     ) -> Self {
-        let more = page_more(
-            &mut events,
-            limit,
-            process_id,
-            incarnation,
-            ProcessEventQueryMode::Lite,
-            |event| event.sequence,
-        );
+        let more = page_more(&mut events, limit, |event| event.sequence);
         Self {
             events: ProcessEventPageEvents::Lite(events),
             more,
@@ -831,12 +635,23 @@ impl ProcessEventPage {
     }
 }
 
+impl<Full, Lite> ProcessEventPage<Full, Lite> {
+    /// The highest sequence this page returned, if it returned any event.
+    pub fn last_sequence(
+        &self,
+        full_sequence: impl Fn(&Full) -> u64,
+        lite_sequence: impl Fn(&Lite) -> u64,
+    ) -> Option<u64> {
+        match &self.events {
+            ProcessEventPageEvents::Full(events) => events.last().map(full_sequence),
+            ProcessEventPageEvents::Lite(events) => events.last().map(lite_sequence),
+        }
+    }
+}
+
 fn page_more<T>(
     rows: &mut Vec<T>,
     limit: std::num::NonZeroUsize,
-    process_id: &ProcessId,
-    incarnation: ProcessIncarnation,
-    mode: ProcessEventQueryMode,
     sequence: impl Fn(&T) -> u64,
 ) -> ProcessEventPageMore {
     if rows.len() <= limit.get() {
@@ -846,14 +661,8 @@ fn page_more<T>(
     let Some(last) = rows.last() else {
         return ProcessEventPageMore::Complete;
     };
-    let after_sequence = sequence(last);
     ProcessEventPageMore::More {
-        continuation: ProcessEventPageToken::new(
-            process_id.clone(),
-            incarnation,
-            after_sequence,
-            mode,
-        ),
+        after_sequence: sequence(last),
     }
 }
 
