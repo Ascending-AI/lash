@@ -764,6 +764,10 @@ const FIG1293_MIGRATED_SESSION_ROWS: &[(&str, &str)] = &[
     ),
     ("llm_call", "2"),
     ("llm_call", "6"),
+    // Each tool child's recorded environment read (FIG-3683).
+    ("load_execution_env", "fig1293-batch:env"),
+    ("load_execution_env", "fig1293-process-cancel:env"),
+    ("load_execution_env", "fig1293-spawn-agent:env"),
     ("peek_await_event", "turn_cancel.after_llm.0"),
     ("peek_await_event", "turn_cancel.after_llm.1"),
     ("peek_await_event", "turn_cancel.after_step.0"),
