@@ -136,10 +136,25 @@ pub(crate) struct CompiledFunction {
     pub(crate) parameter_count: usize,
     pub(crate) parameter_model: ClosureParameterModel,
     pub(crate) capture_count: usize,
+    /// The ECMA-262 `name` own property every closure of this function
+    /// materializes — the declared or `SetFunctionName`-inferred name, empty
+    /// when no naming context reached the function.
+    pub(crate) js_name: Arc<str>,
     pub(crate) self_slot: Option<usize>,
     pub(crate) parameter_slots: Box<[usize]>,
     pub(crate) capture_slots: Box<[usize]>,
     pub(crate) slot_names: Box<[Name]>,
+}
+
+impl CompiledFunction {
+    /// ECMA-262's ExpectedArgumentCount: the parameters before the first
+    /// default or rest parameter — the `length` own property's value.
+    pub(crate) fn expected_argument_count(&self) -> usize {
+        match self.parameter_model {
+            ClosureParameterModel::Exact => self.parameter_count,
+            ClosureParameterModel::TypeScript { required_count, .. } => required_count,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

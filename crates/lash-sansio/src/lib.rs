@@ -41,7 +41,11 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// v19 (FIG-3627): the standard-library dispatch gains `Lash.Apply`, which a
 /// call with a spread argument to a builtin lowers to, so a module that spreads
 /// into a builtin means nothing to a runtime without it.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v19";
+///
+/// v20 (FIG-3655): a function expression's canonical identity carries its
+/// inferred ECMA `name`, so two programs identical but for a naming context
+/// hash differently — exactly what the observable `f.name` difference means.
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v20";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,

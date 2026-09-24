@@ -46,7 +46,9 @@ pub use projection::{
 /// (FIG-3571) projects the carrier IR: compound state updates carry their
 /// operator, node ids come from canonical carrier paths, and non-finite
 /// numbers use the IR number encoding; v15 graph documents are refused.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 16;
+/// Version 17 (FIG-3655) adds `js_name` to `FunctionExpr` for the function's
+/// ECMAScript-inferred name; v16 graph documents are refused.
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 17;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(

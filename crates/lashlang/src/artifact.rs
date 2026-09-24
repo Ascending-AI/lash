@@ -1383,6 +1383,12 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
                 Some(name) => write_name(writer, name.as_str()),
                 None => writer.atom("anonymous"),
             }
+            // The ECMA `name` own property is observable state — two programs
+            // identical but for an inferred name answer `f.name` differently.
+            match &function.js_name {
+                Some(name) => write_name(writer, name.as_str()),
+                None => writer.atom("unnamed"),
+            }
             writer.usize(function.params.len());
             for param in &function.params {
                 write_name(writer, param.as_str());

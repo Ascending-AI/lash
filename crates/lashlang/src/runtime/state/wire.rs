@@ -1,6 +1,59 @@
 use super::*;
 use crate::runtime::RegExpMatchObject;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(super) enum CanonicalHeapObject {
+    Tuple {
+        items: Vec<CanonicalValue>,
+    },
+    List {
+        items: Vec<CanonicalValue>,
+    },
+    Record {
+        fields: Vec<CanonicalBinding>,
+    },
+    Closure {
+        function: u32,
+        captures: Vec<CanonicalValue>,
+        name: Option<CanonicalValue>,
+        length: Option<CanonicalValue>,
+    },
+    RegExp {
+        pattern: String,
+        flags: String,
+        last_index: u64,
+    },
+    RegExpMatch {
+        items: Vec<CanonicalValue>,
+        index: CanonicalValue,
+        input: CanonicalValue,
+        groups: CanonicalValue,
+    },
+    Map {
+        entries: Vec<CanonicalMapEntry>,
+    },
+    Set {
+        values: Vec<CanonicalValue>,
+    },
+    Date {
+        milliseconds: f64,
+    },
+    Error {
+        error_kind: ErrorKind,
+        message: Option<String>,
+        cause: Option<CanonicalValue>,
+        errors: Option<CanonicalValue>,
+    },
+    Url {
+        href: String,
+        search_params: CanonicalValue,
+    },
+    UrlSearchParams {
+        entries: Vec<CanonicalUrlSearchParamsEntry>,
+    },
+}
+
 impl CanonicalHeapObject {
     pub(super) fn from_runtime(object: &HeapObject, id: HeapId) -> Result<Self, ContinuationError> {
         let location = format!("heap.objects[{}]", id.get());
@@ -28,9 +81,26 @@ impl CanonicalHeapObject {
                     })
                     .collect::<Result<_, ContinuationError>>()?,
             },
-            HeapObject::Closure { function, captures } => Self::Closure {
+            HeapObject::Closure {
+                function,
+                captures,
+                name,
+                length,
+            } => Self::Closure {
                 function: *function,
                 captures: canonical_items(captures, &location, 0)?,
+                name: name
+                    .as_ref()
+                    .map(|value| {
+                        CanonicalValue::from_runtime(value, &format!("{location}.name"), 0)
+                    })
+                    .transpose()?,
+                length: length
+                    .as_ref()
+                    .map(|value| {
+                        CanonicalValue::from_runtime(value, &format!("{location}.length"), 0)
+                    })
+                    .transpose()?,
             },
             HeapObject::RegExp(regexp) => Self::RegExp {
                 pattern: regexp.pattern.clone(),
@@ -144,12 +214,19 @@ impl CanonicalHeapObject {
                     })
                     .collect::<Result<_, _>>()?,
             )),
-            Self::Closure { function, captures } => HeapObject::Closure {
+            Self::Closure {
+                function,
+                captures,
+                name,
+                length,
+            } => HeapObject::Closure {
                 function,
                 captures: captures
                     .into_iter()
                     .map(CanonicalValue::into_runtime)
                     .collect::<Result<_, _>>()?,
+                name: name.map(CanonicalValue::into_runtime).transpose()?,
+                length: length.map(CanonicalValue::into_runtime).transpose()?,
             },
             Self::RegExp {
                 pattern,

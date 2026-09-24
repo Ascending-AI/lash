@@ -26,6 +26,7 @@ pub(crate) fn call(function: Expr, args: Vec<Expr>) -> Expr {
 pub(crate) fn function(name: Option<&str>, params: &[&str], captures: &[&str], body: Expr) -> Expr {
     Expr::Function(Box::new(FunctionExpr {
         name: name.map(Into::into),
+        js_name: None,
         params: params.iter().map(|name| (*name).into()).collect(),
         captures: captures.iter().map(|name| (*name).into()).collect(),
         body: Box::new(body),

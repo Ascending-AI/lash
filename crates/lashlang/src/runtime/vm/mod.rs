@@ -433,7 +433,19 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::MakeClosure { function, captures } => {
                 let captures = self.pop_n(captures)?;
-                let closure = self.heap.allocate_closure(function, captures)?;
+                let definition =
+                    self.chunk
+                        .functions
+                        .get(function)
+                        .ok_or(RuntimeError::UnknownFunction {
+                            index: function as u32,
+                        })?;
+                let closure = self.heap.allocate_closure(
+                    function,
+                    captures,
+                    &definition.js_name,
+                    definition.expected_argument_count(),
+                )?;
                 self.stack.push(closure);
             }
             Instruction::Call { argc } => {

@@ -12,6 +12,7 @@ use super::*;
 async fn a_throw_escapes_a_builtin_map_callback() {
     let callback = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
+        js_name: None,
         params: vec!["item".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Throw(Box::new(Expr::String("from map".into())))),
@@ -136,6 +137,7 @@ async fn memory_exhaustion_while_importing_the_error_record_stays_terminal() {
 async fn frame_depth_exhaustion_inside_a_catch_body_is_terminal() {
     let recursive = Expr::Function(Box::new(crate::FunctionExpr {
         name: Some("f".into()),
+        js_name: None,
         params: Vec::new(),
         captures: Vec::new(),
         body: Box::new(Expr::Call {

@@ -350,6 +350,13 @@ pub(crate) fn read_javascript_heap_field(
         HeapObject::Set(set) if field.text.as_ref() == "size" => {
             Value::Number(set.values.len() as f64)
         }
+        // A deleted `name`/`length` reads through `Function.prototype`, whose
+        // own non-writable data values are `""` and `0`.
+        HeapObject::Closure { name, length, .. } => match field.text.as_ref() {
+            "name" => name.clone().unwrap_or_else(|| Value::String("".into())),
+            "length" => length.clone().unwrap_or(Value::Number(0.0)),
+            _ => Value::Undefined,
+        },
         HeapObject::Error(error) => match field.text.as_ref() {
             "name" => Value::String(error.kind.name().into()),
             // An absent own `message` reads `""`, `Error.prototype.message`'s
@@ -411,6 +418,11 @@ pub(crate) fn read_javascript_heap_index(
         },
         HeapObject::Map(map) if key == "size" => Value::Number(map.entries.len() as f64),
         HeapObject::Set(set) if key == "size" => Value::Number(set.values.len() as f64),
+        HeapObject::Closure { name, length, .. } => match key.as_str() {
+            "name" => name.clone().unwrap_or_else(|| Value::String("".into())),
+            "length" => length.clone().unwrap_or(Value::Number(0.0)),
+            _ => Value::Undefined,
+        },
         HeapObject::Error(error) => match key.as_str() {
             "name" => Value::String(error.kind.name().into()),
             "message" => error

@@ -73,9 +73,14 @@ use super::exceptions::PendingErrorOrigin;
 /// error's `new Error('')` with no own `message`, so it is refused rather than
 /// resumed.
 ///
+/// v22 (FIG-3655) writes a closure's ECMA `name`/`length` own-property slots.
+/// A v21 wire's closures would decode under the old shape and restore without
+/// them — `f.name` answering `undefined` where the live run reported a name —
+/// so the boundary is a version rather than a decode failure.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 21;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 22;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
@@ -404,6 +409,8 @@ mod continuation_serde {
         Closure {
             function: u32,
             captures: Vec<ValueWire>,
+            name: Option<ValueWire>,
+            length: Option<ValueWire>,
         },
         RegExp {
             pattern: String,
@@ -528,12 +535,19 @@ mod continuation_serde {
             HeapObject::Record(record) => HeapObjectWire::Record {
                 fields: record_to_wire(record)?,
             },
-            HeapObject::Closure { function, captures } => HeapObjectWire::Closure {
+            HeapObject::Closure {
+                function,
+                captures,
+                name,
+                length,
+            } => HeapObjectWire::Closure {
                 function: *function,
                 captures: captures
                     .iter()
                     .map(value_to_wire)
                     .collect::<Result<_, _>>()?,
+                name: name.as_ref().map(value_to_wire).transpose()?,
+                length: length.as_ref().map(value_to_wire).transpose()?,
             },
             HeapObject::RegExp(regexp) => HeapObjectWire::RegExp {
                 pattern: regexp.pattern.clone(),
@@ -600,12 +614,19 @@ mod continuation_serde {
             HeapObjectWire::Record { fields } => {
                 HeapObject::Record(Box::new(record_from_wire(fields)?))
             }
-            HeapObjectWire::Closure { function, captures } => HeapObject::Closure {
+            HeapObjectWire::Closure {
+                function,
+                captures,
+                name,
+                length,
+            } => HeapObject::Closure {
                 function,
                 captures: captures
                     .into_iter()
                     .map(value_from_wire)
                     .collect::<Result<_, _>>()?,
+                name: name.map(value_from_wire).transpose()?,
+                length: length.map(value_from_wire).transpose()?,
             },
             HeapObjectWire::RegExp {
                 pattern,

@@ -25,6 +25,7 @@ fn every_expr_variant() -> Vec<Expr> {
     let function = || {
         Box::new(FunctionExpr {
             name: None,
+            js_name: None,
             params: vec!["p".into()],
             captures: Vec::new(),
             body: Box::new(var("fn_body")),
