@@ -581,6 +581,23 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `runtime_turn_commits` statements only PostgreSQL issues.
     pub(crate) struct TurnCommitPostgresStatements @ "turn_commit" {
+        /// The receipt session `?1` recorded for operation key `?2`, read in
+        /// the round trip that settles turn `?3`'s park (FIG-3586): a turn's
+        /// commit clears its own park row inside the commit's transaction,
+        /// and another turn's commit leaves it. A `NULL` `?3`, an operation
+        /// that is no turn's, matches no park.
+        ///
+        /// A data-modifying `WITH` runs whether or not the outer query reads
+        /// it, so the clear costs the commit no round trip of its own.
+        select_receipt_settling_turn_park = "WITH settled_park AS (
+                 DELETE FROM turn_parks WHERE session_id = ?1 AND turn_id = ?3
+             )
+             SELECT turn_commit_hash, result_json,
+                        request_identity_hash, identity_encoding_version,
+                        requested_node_count
+                 FROM runtime_turn_commits
+                 WHERE session_id = ?1 AND turn_id = ?2";
+
         /// Drop every receipt of a deleted session older than `?1` except the
         /// operation keys in `?2`.
         ///

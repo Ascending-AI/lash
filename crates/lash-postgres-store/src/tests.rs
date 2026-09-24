@@ -1598,7 +1598,13 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("SELECT head_revision") => "head-lock",
         q if q.starts_with("SELECT node_id FROM lash_graph_nodes") => "graph-nodes-exist",
         q if q.starts_with("SELECT hash FROM lash_blobs") => "blob-lock",
-        q if q.starts_with("SELECT turn_commit_hash, result_json") => "turn-commit-load",
+        // The receipt read carries the committing turn's park clear as a
+        // data-modifying `WITH` (FIG-3586): one round trip, not two.
+        q if q.starts_with("WITH settled_park AS ( DELETE FROM lash_turn_parks")
+            && q.contains("SELECT turn_commit_hash, result_json") =>
+        {
+            "turn-commit-load"
+        }
         q if q.starts_with("INSERT INTO lash_blobs") => "blob-insert",
         q if q.starts_with("INSERT INTO lash_checkpoint_blob_refs") => {
             "checkpoint-blob-refs-insert"
