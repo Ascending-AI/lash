@@ -676,8 +676,7 @@ compose with the callback methods, so accumulating into an array inside
 data is host-dependent. Rewrite comparisons as
 `a < b ? -1 : a > b ? 1 : 0`; format numbers with `toFixed(digits)`.
 `String.normalize` also remains rejected because the pinned VM has no Unicode
-normalization database; normalize in a deterministic host tool. JSON parse
-revivers remain rejected: parse first and walk the result explicitly. Missing
+normalization database; normalize in a deterministic host tool. Missing
 methods reject with `TS_METHOD_UNSUPPORTED`.
 
 ## Source nesting budget
