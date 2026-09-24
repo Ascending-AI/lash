@@ -672,3 +672,5 @@ findings	383	accept	"[0,/x/,3].indexOf(/x/)"	"-1"	-
 findings	384	accept	"(() => { const r=/x/; return [[r],r].includes(r); })()"	"true"	-
 findings	385	runtime-reject	"'AB'.match({ toString: function() { return 'AB'; } })"	"AB"	TS_OBJECT_STRING_COERCION
 findings	386	runtime-reject	"[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	"2"	TS_OBJECT_STRING_COERCION
+findings	387	accept	"parseFloat('infinity')"	"NaN"	-
+findings	388	accept	"parseFloat('5.e3')"	"5000"	-

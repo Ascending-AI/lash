@@ -1385,3 +1385,40 @@ fn error_own_properties_are_writable_configurable_and_non_enumerable() {
         Value::Bool(true)
     );
 }
+
+// FIG-3662 self-contained fixes: five divergences that needed no new value
+// shape, no `this` channel, and no prototype chain — each one is a wrong answer
+// produced by a code path that already had the right inputs.
+
+#[test]
+fn fig3662_parse_float_uses_the_ecma_decimal_grammar() {
+    for source in [
+        "finish(parseFloat('infinity'));",
+        "finish(parseFloat('INFINITY'));",
+        "finish(parseFloat('.x'));",
+        "finish(parseFloat(''));",
+        "finish(parseFloat('e3'));",
+        "finish(parseFloat('+'));",
+    ] {
+        assert!(
+            matches!(finished(source), Value::Number(number) if number.is_nan()),
+            "{source}"
+        );
+    }
+    assert_eq!(
+        finished("finish(parseFloat('Infinity'));"),
+        Value::Number(f64::INFINITY)
+    );
+    assert_eq!(
+        finished("finish(parseFloat(' -Infinity '));"),
+        Value::Number(f64::NEG_INFINITY)
+    );
+    assert_eq!(
+        finished("finish(parseFloat('5.e3'));"),
+        Value::Number(5000.0)
+    );
+    assert_eq!(
+        finished("finish(parseFloat('1.5xyz'));"),
+        Value::Number(1.5)
+    );
+}

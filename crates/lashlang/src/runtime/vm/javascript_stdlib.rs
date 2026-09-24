@@ -720,14 +720,62 @@ pub(super) fn pad_string(
 
 pub(super) fn parse_float_prefix(value: &str) -> f64 {
     let value = value.trim_start_matches(super::super::javascript::is_ecma_string_whitespace);
-    for end in (1..=value.len()).rev() {
-        if let Some(prefix) = value.get(..end)
-            && let Ok(number) = prefix.parse::<f64>()
-        {
-            return number;
+    let bytes = value.as_bytes();
+    let mut cursor = 0usize;
+    if matches!(bytes.first(), Some(b'+' | b'-')) {
+        cursor = 1;
+    }
+    let negative = bytes.first() == Some(&b'-');
+    if value[cursor..].starts_with("Infinity") {
+        return if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        };
+    }
+    let integer_start = cursor;
+    while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+        cursor += 1;
+    }
+    let integer_digits = cursor - integer_start;
+    let mut fraction_digits = 0usize;
+    if bytes.get(cursor) == Some(&b'.') {
+        cursor += 1;
+        let fraction_start = cursor;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+        }
+        fraction_digits = cursor - fraction_start;
+        if integer_digits == 0 && fraction_digits == 0 {
+            cursor -= 1 + fraction_digits;
         }
     }
-    f64::NAN
+    if integer_digits + fraction_digits == 0 {
+        return f64::NAN;
+    }
+    let mantissa_end = cursor;
+    if matches!(bytes.get(cursor), Some(b'e' | b'E')) {
+        let mut probe = cursor + 1;
+        if matches!(bytes.get(probe), Some(b'+' | b'-')) {
+            probe += 1;
+        }
+        let exponent_start = probe;
+        while bytes.get(probe).is_some_and(u8::is_ascii_digit) {
+            probe += 1;
+        }
+        if probe > exponent_start {
+            cursor = probe;
+        }
+    }
+    // `5.e3` matched the grammar with a bare fraction point; Rust's parser
+    // wants a digit after it, so supply the implied zero.
+    let mut literal = String::with_capacity(cursor + 1);
+    literal.push_str(&value[..mantissa_end]);
+    if literal.ends_with('.') {
+        literal.push('0');
+    }
+    literal.push_str(&value[mantissa_end..cursor]);
+    literal.parse::<f64>().unwrap_or(f64::NAN)
 }
 
 pub(super) fn parse_int_prefix(value: &str, radix: Option<f64>) -> f64 {
