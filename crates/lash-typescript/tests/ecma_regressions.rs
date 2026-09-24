@@ -1422,3 +1422,22 @@ fn fig3662_parse_float_uses_the_ecma_decimal_grammar() {
         Value::Number(1.5)
     );
 }
+
+#[test]
+fn fig3662_to_exponential_rounds_exactly() {
+    // ECMA rounds the exact binary value and takes the larger magnitude on a
+    // tie — `25` is a halfway case that must render `3e+1`, not Rust's
+    // round-half-even `2e+1`.
+    for (source, expected) in [
+        ("finish((25).toExponential(0));", "3e+1"),
+        ("finish((-25).toExponential(0));", "-3e+1"),
+        ("finish((12345).toExponential(3));", "1.235e+4"),
+        ("finish((0).toExponential(2));", "0.00e+0"),
+        (
+            "finish((123.456).toExponential(20));",
+            "1.23456000000000003070e+2",
+        ),
+    ] {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+}

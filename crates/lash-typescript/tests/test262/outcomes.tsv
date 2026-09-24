@@ -4304,7 +4304,7 @@ test/built-ins/Number/prototype/toExponential/nan.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/Number/prototype/toExponential/prop-desc.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Number/prototype/toExponential/range.js	fail	FIG-3653
 test/built-ins/Number/prototype/toExponential/return-abrupt-tointeger-fractiondigits.js	fail	FIG-3656
-test/built-ins/Number/prototype/toExponential/return-values.js	fail	FIG-3662
+test/built-ins/Number/prototype/toExponential/return-values.js	pass	-
 test/built-ins/Number/prototype/toExponential/this-is-0-fractiondigits-is-0.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Number/prototype/toExponential/this-is-0-fractiondigits-is-not-0.js	pass	-
 test/built-ins/Number/prototype/toExponential/tointeger-fractiondigits.js	pass	-

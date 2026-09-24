@@ -674,3 +674,6 @@ findings	385	runtime-reject	"'AB'.match({ toString: function() { return 'AB'; } 
 findings	386	runtime-reject	"[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	"2"	TS_OBJECT_STRING_COERCION
 findings	387	accept	"parseFloat('infinity')"	"NaN"	-
 findings	388	accept	"parseFloat('5.e3')"	"5000"	-
+findings	389	accept	"(25).toExponential(0)"	"3e+1"	-
+findings	390	accept	"(12345).toExponential(3)"	"1.235e+4"	-
+findings	391	accept	"(123.456).toExponential(20)"	"1.23456000000000003070e+2"	-

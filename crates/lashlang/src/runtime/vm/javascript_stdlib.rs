@@ -2,6 +2,7 @@ use super::super::{
     ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
 };
 use super::*;
+use num_traits::Float;
 
 pub(super) fn js_stdlib_error(reason: impl Into<String>) -> RuntimeError {
     RuntimeError::ValidationFailed {
@@ -716,6 +717,82 @@ pub(super) fn pad_string(
         }
         .into(),
     ))
+}
+
+/// `toExponential(f)` with ECMA rounding: the absolute value's exact decimal
+/// expansion is rounded to `f + 1` significant digits, halves up.
+pub(super) fn exact_exponential(value: f64, fraction: usize) -> String {
+    if value == 0.0 {
+        return if fraction == 0 {
+            "0e+0".to_string()
+        } else {
+            format!("0.{}e+0", "0".repeat(fraction))
+        };
+    }
+    // `value = mantissa * 2^exponent` exactly.
+    let (mantissa, exponent, sign) = value.integer_decode();
+    let (digits, shift) = if exponent >= 0 {
+        (
+            num_bigint::BigUint::from(mantissa) << exponent as usize,
+            0i64,
+        )
+    } else {
+        let halvings = (-exponent) as u32;
+        (
+            num_bigint::BigUint::from(mantissa) * num_bigint::BigUint::from(5u64).pow(halvings),
+            -i64::from(halvings),
+        )
+    };
+    // `|value| = digits * 10^shift`; `digits` is the full exact expansion.
+    let digits = digits.to_string();
+    let scientific_exponent = digits.len() as i64 + shift - 1;
+    let kept = fraction + 1;
+    let mut rounded: Vec<u8> = digits
+        .bytes()
+        .take(kept)
+        .chain(std::iter::repeat(b'0'))
+        .take(kept)
+        .collect();
+    let mut overflowed = false;
+    if digits
+        .as_bytes()
+        .get(kept)
+        .copied()
+        .is_some_and(|digit| digit >= b'5')
+    {
+        // Round half up: an exact tie takes the larger mantissa, and anything
+        // past the first dropped digit can only widen the gap upward.
+        let mut position = kept;
+        loop {
+            position -= 1;
+            if rounded[position] == b'9' {
+                rounded[position] = b'0';
+                if position == 0 {
+                    rounded.insert(0, b'1');
+                    rounded.truncate(kept);
+                    overflowed = true;
+                    break;
+                }
+            } else {
+                rounded[position] += 1;
+                break;
+            }
+        }
+    }
+    let mut mantissa_text = String::with_capacity(kept + 1);
+    mantissa_text.push(rounded[0] as char);
+    if fraction > 0 {
+        mantissa_text.push('.');
+        mantissa_text.extend(rounded[1..].iter().map(|digit| *digit as char));
+    }
+    // A carry out of the leading digit (`9.99` rounding to `10`) lifts the
+    // scientific exponent one place.
+    let exponent_text = scientific_exponent + i64::from(overflowed);
+    format!(
+        "{}{mantissa_text}e{}{exponent_text}",
+        if sign < 0 { "-" } else { "" },
+        if exponent_text >= 0 { "+" } else { "" },
+    )
 }
 
 pub(super) fn parse_float_prefix(value: &str) -> f64 {
