@@ -94,15 +94,6 @@ async fn run(mode: &str) -> Result<()> {
         )
         .into_components(),
     );
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build(),
-        Arc::new(storage.lashlang_artifact_store()),
-    );
     let lease_timings = LeaseTimings::new(RECOVERY_LEASE_TTL, RECOVERY_LEASE_RENEW_INTERVAL)
         .context("validate frame-crash recovery lease timings")?;
     let owner = LeaseOwnerIdentity::opaque("frame-crash-worker", uuid::Uuid::new_v4().to_string());
@@ -110,6 +101,15 @@ async fn run(mode: &str) -> Result<()> {
         &storage,
         Arc::new(s3_store_from_env()?),
     ));
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        backend.as_ref(),
+    );
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(

@@ -48,7 +48,7 @@ async fn run_in(
             language: "typescript".to_string(),
             code: code.to_string(),
         },
-        lashlang::global_in_memory_lashlang_artifact_store(),
+        crate::testing::memory_artifact_store().await,
         LashlangSurface::default(),
         Some(Arc::new(BindingDeferredResolver {
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -87,7 +87,7 @@ fn assert_exact_globals(state: &RlmExecutionState, names: &[&str], after: &str) 
 /// A cell context whose tool surface can start a process.
 async fn process_context() -> lash_core::RuntimeExecutionContext<'static> {
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
-        lashlang::global_in_memory_lashlang_artifact_store();
+        crate::testing::memory_artifact_store().await;
     let backend = memory_backend().await;
     let process_env_store = backend.process_env_store();
     let effect_host = backend.effect_host();

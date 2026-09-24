@@ -974,17 +974,13 @@ async fn standard_compaction_threshold_continue_as_extends_the_pre_switch_durabl
         ),
         response_with_usage(&typescript_block(r#"finish("continued");"#), 1),
     ]);
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(provider)
-    .model(model_spec("standard-compaction-rlm-model", None, 40_000))
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .provider(provider)
+        .model(model_spec("standard-compaction-rlm-model", None, 40_000))
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
     let primed = session

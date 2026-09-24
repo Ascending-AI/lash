@@ -1415,7 +1415,7 @@ finish("done through route");
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.process_env_store(),
+            backend.as_ref(),
         );
         let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .provider(provider)

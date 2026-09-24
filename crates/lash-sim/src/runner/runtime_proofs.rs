@@ -487,6 +487,7 @@ impl lash::TurnActivitySink for RuntimeProofRecordingEvents {
 pub(super) async fn prove_final_value_semantic_channel()
 -> Result<FinalValueSemanticProof, FixedScriptRunnerError> {
     let events = Arc::new(RuntimeProofRecordingEvents::default());
+    let backend = crate::backend::memory_backend().await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -494,9 +495,8 @@ pub(super) async fn prove_final_value_semantic_channel()
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+        backend.as_ref(),
     );
-    let backend = crate::backend::memory_backend().await?;
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

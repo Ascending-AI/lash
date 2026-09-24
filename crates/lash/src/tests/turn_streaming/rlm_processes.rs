@@ -9,15 +9,11 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
         let source = format!(
             "const retained = [{{ payload: {retained_payload:?} }}];\nfinish(\"committed\");"
         );
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-            memory_backend().await,
-            crate::TurnBudget::Unbounded,
-            rlm_factory(),
-        ))
-        .provider(queued_text_provider(vec![typescript_block(&source)]))
-        .model(mock_model_spec())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+            .provider(queued_text_provider(vec![typescript_block(&source)]))
+            .model(mock_model_spec())
+            .without_queued_work()
+            .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-leaf-append-stale-rollback")
             .open()
@@ -162,7 +158,7 @@ pub(super) async fn frame_switch_state_after_cold_reopen(
         lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
     let observed_writes = checkpoint_writes.clone();
     let backend = Arc::new(
-        DecoratedBackend::over(sqlite_backend).session_store_factory(move |inner| {
+        DecoratedBackend::over_sqlite(sqlite_backend).session_store_factory(move |inner| {
             Arc::new(
                 lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
                     inner,
@@ -179,8 +175,8 @@ pub(super) async fn frame_switch_state_after_cold_reopen(
 const probe_result = await fixture.probe({{}});
 await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_seed: "seed:survives" }} }});"#
     );
-    let first_factory =
-        rlm_factory().with_deferred_tool_resolver(Arc::new(FrameStateDeferredResolver));
+    let first_factory = rlm_factory(backend.as_ref())
+        .with_deferred_tool_resolver(Arc::new(FrameStateDeferredResolver));
     let first_core = explicit_ephemeral_facets(LashCore::rlm_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
@@ -299,15 +295,11 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         })
         .build()
         .into_handle();
-    let reopened_core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(follow_on_provider)
-    .model(mock_model_spec())
-    .without_queued_work()
-    .build(crate::testing::runtime_lease_owner())?;
+    let reopened_core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .provider(follow_on_provider)
+        .model(mock_model_spec())
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core.session(session_id).open().await?;
     let execution_state = reopened_session
         .admin()
@@ -419,23 +411,19 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
             .expect("open the SQLite backend"),
     );
     let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(queued_text_provider(vec![
-        typescript_block(r#"await control.continue_as({ task: "switch again" });"#),
-        typescript_block(r#"await control.continue_as({ task: "finish chain" });"#),
-        typescript_block(r#"finish("done after chained handoffs");"#),
-    ]))
-    .model(mock_model_spec())
-    .plugin(Arc::new(TurnPersistedGraphAppendFactory {
-        append_count: Arc::clone(&append_count),
-        max_appends: 2,
-    }))
-    .without_queued_work()
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .provider(queued_text_provider(vec![
+            typescript_block(r#"await control.continue_as({ task: "switch again" });"#),
+            typescript_block(r#"await control.continue_as({ task: "finish chain" });"#),
+            typescript_block(r#"finish("done after chained handoffs");"#),
+        ]))
+        .model(mock_model_spec())
+        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
+            append_count: Arc::clone(&append_count),
+            max_appends: 2,
+        }))
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
         .durable()
@@ -600,11 +588,7 @@ pub(super) fn processes_lists_started_lashlang_process_until_awaited() -> Result
 pub(super) async fn processes_lists_started_lashlang_process_until_awaited_inner() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        memory_backend().await,
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
     .provider(queued_text_provider(vec![typescript_block(
         r#"
 const lookup = async () => {
@@ -682,10 +666,11 @@ pub(super) async fn lashlang_execution_graph_store_observes_lashlang_process_fro
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let graph_store = Arc::new(crate::tracing::TraceLashlangGraphStore::default());
+    let backend = memory_backend().await;
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        memory_backend().await,
+        backend.clone(),
         crate::TurnBudget::Unbounded,
-        rlm_factory().with_lashlang_execution_sink(
+        rlm_factory(backend.as_ref()).with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         ),
     ))
@@ -782,14 +767,10 @@ finish(value);"#,
 #[cfg(feature = "rlm")]
 #[tokio::test]
 pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        memory_backend().await,
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(queued_text_provider(vec!["done in prose"]))
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        .provider(queued_text_provider(vec!["done in prose"]))
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-prose-completion").open().await?;
     let events = Arc::new(RecordingEvents::default());
 
@@ -826,16 +807,12 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
 #[cfg(feature = "rlm")]
 #[tokio::test]
 pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        memory_backend().await,
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(queued_text_provider(vec![typescript_block(
-        r#"finish("done via finish");"#,
-    )]))
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        .provider(queued_text_provider(vec![typescript_block(
+            r#"finish("done via finish");"#,
+        )]))
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("rlm-finish-required-completion")
         .open()
@@ -872,18 +849,14 @@ pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Re
 #[tokio::test]
 pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_tools() -> Result<()>
 {
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        memory_backend().await,
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(queued_text_provider(vec![
-        typescript_block("this is not valid typescript"),
-        typescript_block(r#"finish("recovered");"#),
-    ]))
-    .model(mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        .provider(queued_text_provider(vec![
+            typescript_block("this is not valid typescript"),
+            typescript_block(r#"finish("recovered");"#),
+        ]))
+        .model(mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-failed-code-event").open().await?;
     let events = RecordingEvents::default();
 
@@ -1368,21 +1341,17 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
 async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Value> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        memory_backend().await,
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(queued_text_provider(vec![format!(
-        "<typescript>\n{}\n</typescript>",
-        cell.trim()
-    )]))
-    .model(mock_model_spec())
-    .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
-    .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        .provider(queued_text_provider(vec![format!(
+            "<typescript>\n{}\n</typescript>",
+            cell.trim()
+        )]))
+        .model(mock_model_spec())
+        .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-definition-filter").open().await?;
     let turn_session = session.clone();
     let scoped_effect_controller = turn_scope(&core, &turn_session.session_id());

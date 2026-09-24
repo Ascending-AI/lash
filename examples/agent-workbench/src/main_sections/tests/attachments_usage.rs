@@ -45,14 +45,8 @@ fn attachment_usage_gate_sqlite() {
 
         Box::pin(run_attachment_usage_gate(
             &data_dir,
-            GateBackend {
-                artifact_store: first.process_env_store(),
-                backend: first,
-            },
-            GateBackend {
-                artifact_store: resumed.process_env_store(),
-                backend: resumed,
-            },
+            GateBackend { backend: first },
+            GateBackend { backend: resumed },
         ))
         .await;
         std::fs::remove_dir_all(&data_dir).expect("remove SQLite gate data dir");
@@ -86,10 +80,7 @@ fn attachment_usage_gate_postgres() {
                         data_dir.join("attachments"),
                     )),
                 ));
-                GateBackend {
-                    artifact_store: backend.process_env_store(),
-                    backend,
-                }
+                GateBackend { backend }
             };
 
             Box::pin(run_attachment_usage_gate(
@@ -103,11 +94,10 @@ fn attachment_usage_gate_postgres() {
     );
 }
 
-/// One handle on the gate's backend: the backend a core runs on, and the
-/// Lashlang artifact store its RLM factory reads.
+/// One handle on the gate's backend: the backend a core and its RLM
+/// factory's Lashlang artifacts run on.
 struct GateBackend {
-    backend: Arc<dyn lash::Backend>,
-    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
+    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
 }
 
 async fn run_attachment_usage_gate(
@@ -372,7 +362,7 @@ fn attachment_usage_gate_core(
             .build()
             .expect("gate model spec"),
     );
-    let mut builder = explicit_durable_test_facets_on(backend.backend, backend.artifact_store)
+    let mut builder = explicit_durable_test_facets_on(backend.backend)
         .provider(provider)
         .model(model)
         .without_queued_work();

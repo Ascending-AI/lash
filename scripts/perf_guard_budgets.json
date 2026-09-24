@@ -3519,10 +3519,6 @@
           "allocated_bytes_per_iter_max": 171028,
           "allocations_per_iter_max": 1286
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 13497,
-          "allocations_per_iter_max": 109
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 314,
           "allocations_per_iter_max": 4
@@ -3556,10 +3552,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 730104,
           "allocations_per_iter_max": 3579
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 34617,
-          "allocations_per_iter_max": 275
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 509,
@@ -3595,10 +3587,6 @@
           "allocated_bytes_per_iter_max": 104980,
           "allocations_per_iter_max": 1050
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 6332,
-          "allocations_per_iter_max": 52
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 251,
           "allocations_per_iter_max": 3
@@ -3632,10 +3620,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 49204,
           "allocations_per_iter_max": 928
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 11367,
-          "allocations_per_iter_max": 76
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 255,
@@ -3671,10 +3655,6 @@
           "allocated_bytes_per_iter_max": 89313,
           "allocations_per_iter_max": 966
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 6862,
-          "allocations_per_iter_max": 57
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 256,
           "allocations_per_iter_max": 4
@@ -3708,10 +3688,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 137170,
           "allocations_per_iter_max": 3657
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 8173,
-          "allocations_per_iter_max": 74
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 269,
@@ -3747,10 +3723,6 @@
           "allocated_bytes_per_iter_max": 144182,
           "allocations_per_iter_max": 1229
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 10106,
-          "allocations_per_iter_max": 84
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 295,
           "allocations_per_iter_max": 4
@@ -3784,10 +3756,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 106585,
           "allocations_per_iter_max": 1011
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 9923,
-          "allocations_per_iter_max": 81
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 274,
@@ -3823,10 +3791,6 @@
           "allocated_bytes_per_iter_max": 2276614,
           "allocations_per_iter_max": 10397
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 11336,
-          "allocations_per_iter_max": 96
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 302,
           "allocations_per_iter_max": 4
@@ -3860,10 +3824,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 151828,
           "allocations_per_iter_max": 1146
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 17653,
-          "allocations_per_iter_max": 136
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 344,
@@ -3899,10 +3859,6 @@
           "allocated_bytes_per_iter_max": 118081,
           "allocations_per_iter_max": 984
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 10673,
-          "allocations_per_iter_max": 82
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 287,
           "allocations_per_iter_max": 4
@@ -3936,10 +3892,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 2118808,
           "allocations_per_iter_max": 8238
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 11526,
-          "allocations_per_iter_max": 95
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 295,
@@ -3975,10 +3927,6 @@
           "allocated_bytes_per_iter_max": 95696,
           "allocations_per_iter_max": 1117
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 15553,
-          "allocations_per_iter_max": 110
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 264,
           "allocations_per_iter_max": 4
@@ -4012,10 +3960,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 176232,
           "allocations_per_iter_max": 1446
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 13308,
-          "allocations_per_iter_max": 85
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 276,
@@ -4051,10 +3995,6 @@
           "allocated_bytes_per_iter_max": 140707,
           "allocations_per_iter_max": 2556
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 8187,
-          "allocations_per_iter_max": 68
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 260,
           "allocations_per_iter_max": 4
@@ -4088,10 +4028,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 139893,
           "allocations_per_iter_max": 1297
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 15918,
-          "allocations_per_iter_max": 102
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 269,
@@ -4127,10 +4063,6 @@
           "allocated_bytes_per_iter_max": 184394,
           "allocations_per_iter_max": 1538
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 23397,
-          "allocations_per_iter_max": 181
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 313,
           "allocations_per_iter_max": 4
@@ -4164,10 +4096,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 57552,
           "allocations_per_iter_max": 856
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 8000,
-          "allocations_per_iter_max": 57
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 261,
@@ -4203,10 +4131,6 @@
           "allocated_bytes_per_iter_max": 124522,
           "allocations_per_iter_max": 1098
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 12717,
-          "allocations_per_iter_max": 92
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 299,
           "allocations_per_iter_max": 4
@@ -4241,10 +4165,6 @@
           "allocated_bytes_per_iter_max": 122162,
           "allocations_per_iter_max": 1189
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 14284,
-          "allocations_per_iter_max": 97
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 272,
           "allocations_per_iter_max": 4
@@ -4278,10 +4198,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 75385,
           "allocations_per_iter_max": 1183
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 7795,
-          "allocations_per_iter_max": 58
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 256,
@@ -4318,10 +4234,6 @@
           "allocated_bytes_per_iter_max": 3535295,
           "allocations_per_iter_max": 3094
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 6556,
-          "allocations_per_iter_max": 55
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 254,
           "allocations_per_iter_max": 3
@@ -4356,10 +4268,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 4017552,
           "allocations_per_iter_max": 21655
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 6641,
-          "allocations_per_iter_max": 57
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 256,
@@ -4396,10 +4304,6 @@
           "allocated_bytes_per_iter_max": 2183442,
           "allocations_per_iter_max": 17085
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 6949,
-          "allocations_per_iter_max": 60
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 260,
           "allocations_per_iter_max": 3
@@ -4434,10 +4338,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 4158835,
           "allocations_per_iter_max": 29474
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 8067,
-          "allocations_per_iter_max": 71
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 274,
@@ -4474,10 +4374,6 @@
           "allocated_bytes_per_iter_max": 2147017,
           "allocations_per_iter_max": 6068
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 7419,
-          "allocations_per_iter_max": 65
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 261,
           "allocations_per_iter_max": 3
@@ -4512,10 +4408,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 316055,
           "allocations_per_iter_max": 1490
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 5886,
-          "allocations_per_iter_max": 49
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 247,
@@ -4552,10 +4444,6 @@
           "allocated_bytes_per_iter_max": 2299286,
           "allocations_per_iter_max": 16700
         },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 7160,
-          "allocations_per_iter_max": 61
-        },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 278,
           "allocations_per_iter_max": 3
@@ -4590,10 +4478,6 @@
         "snapshot": {
           "allocated_bytes_per_iter_max": 5899276,
           "allocations_per_iter_max": 45220
-        },
-        "artifact_roundtrip": {
-          "allocated_bytes_per_iter_max": 12357,
-          "allocations_per_iter_max": 105
         },
         "compiled_process_cache": {
           "allocated_bytes_per_iter_max": 504,

@@ -70,16 +70,17 @@ pub(crate) async fn sim_memory_backend(
 /// A checkpoint-write observer over the session factory forwards every
 /// binding to the factory it wraps, and an effect layer over the host keeps
 /// the host's binding identity, so the backend's ports still meet each
-/// other exactly as the undecorated backend's do.
-pub struct DecoratedBackend {
-    inner: Arc<dyn Backend>,
+/// other exactly as the undecorated backend's do. Over a backend that keeps
+/// Lashlang artifacts, the decorated backend keeps the same ones.
+pub struct DecoratedBackend<B: ?Sized + Backend = dyn Backend> {
+    inner: Arc<B>,
     factory: Arc<dyn SessionStoreFactory>,
     effect_host: Arc<dyn lash_core::EffectHost>,
 }
 
-impl DecoratedBackend {
+impl<B: ?Sized + Backend> DecoratedBackend<B> {
     /// `inner`, undecorated.
-    pub fn over(inner: Arc<dyn Backend>) -> Self {
+    pub fn over(inner: Arc<B>) -> Self {
         Self {
             factory: inner.session_store_factory(),
             effect_host: inner.effect_host(),
@@ -104,7 +105,7 @@ impl DecoratedBackend {
     }
 }
 
-impl Backend for DecoratedBackend {
+impl<B: ?Sized + Backend> Backend for DecoratedBackend<B> {
     fn binding_identity(&self) -> &str {
         self.inner.binding_identity()
     }
@@ -147,5 +148,13 @@ impl Backend for DecoratedBackend {
 
     fn queued_work(&self) -> lash_core::BackendQueuedWork {
         self.inner.queued_work()
+    }
+}
+
+impl<B: ?Sized + lash_lashlang_runtime::LashlangArtifactBackend>
+    lash_lashlang_runtime::LashlangArtifactBackend for DecoratedBackend<B>
+{
+    fn lashlang_artifact_store(&self) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> {
+        self.inner.lashlang_artifact_store()
     }
 }

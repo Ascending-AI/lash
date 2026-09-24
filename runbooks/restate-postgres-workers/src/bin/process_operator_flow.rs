@@ -485,6 +485,12 @@ fn core(
     attachments: &tempfile::TempDir,
     trace_path: &std::path::Path,
 ) -> Result<lash::LashCore> {
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            attachments.path().to_path_buf(),
+        )),
+    ));
     let protocol = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -492,14 +498,8 @@ fn core(
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(storage.lashlang_artifact_store()),
+        backend.as_ref(),
     );
-    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
-        storage,
-        Arc::new(lash::persistence::FileAttachmentStore::new(
-            attachments.path().to_path_buf(),
-        )),
-    ));
     lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, protocol)
         .provider(provider)
         .model(

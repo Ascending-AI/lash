@@ -119,7 +119,11 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
 
     let (mut fixture, store, mut runtime_state) = run
         .build(async {
+            // The fixture's cells keep their Lashlang artifacts in a memory
+            // backend of their own; the state they capture is what is measured.
+            let artifacts = lash_sqlite_store::SqliteBackend::memory().await?;
             let fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
+                &artifacts,
                 CHECKPOINT_STATE_BINDINGS,
                 CHECKPOINT_STATE_BODY_BYTES,
             )?;

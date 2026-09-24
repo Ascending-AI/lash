@@ -300,19 +300,20 @@ impl AgentScenarioSetup {
             self.scripted_provider_usage,
             Arc::clone(&prompt_captures),
         );
-        let factory = rlm_factory().with_lashlang_execution_sink(
-            Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
-        );
         let observed_writes = checkpoint_writes.clone();
-        let backend =
-            DecoratedBackend::over(memory_backend().await).session_store_factory(move |inner| {
+        let backend = DecoratedBackend::over_sqlite(memory_backend().await).session_store_factory(
+            move |inner| {
                 Arc::new(
                     lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
                         inner,
                         observed_writes,
                     ),
                 )
-            });
+            },
+        );
+        let factory = rlm_factory(&backend).with_lashlang_execution_sink(
+            Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
+        );
         let store_factory = lash_core::Backend::session_store_factory(&backend);
         let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(
             Arc::new(backend),

@@ -381,7 +381,7 @@ pub(crate) mod test_support {
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.process_env_store(),
+            backend.as_ref(),
         );
         let mut builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .tool_source_policy(tool_source_policy)

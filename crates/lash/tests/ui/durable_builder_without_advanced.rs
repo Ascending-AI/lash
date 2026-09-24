@@ -13,29 +13,26 @@ async fn durable_core_without_advanced(
     let backend = lash_sqlite_store::SqliteBackend::open(data_dir)
         .await
         .expect("sqlite backend");
-    let artifact_store = backend.process_env_store();
-    lash::LashCore::rlm_builder(
-        Arc::new(backend),
-        lash::TurnBudget::Unbounded,
-        lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash_protocol_rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            artifact_store,
-        ),
-    )
-    .provider(provider)
-    .model(model)
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .termination(lash::durability::TerminationPolicy::default())
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "durable-builder-test-worker",
-        "durable-builder-test-boot",
-    ))
+    // The RLM factory keeps its Lashlang artifacts in that same backend.
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        &backend,
+    );
+    lash::LashCore::rlm_builder(Arc::new(backend), lash::TurnBudget::Unbounded, factory)
+        .provider(provider)
+        .model(model)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .termination(lash::durability::TerminationPolicy::default())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "durable-builder-test-worker",
+            "durable-builder-test-boot",
+        ))
 }
 
 fn main() {

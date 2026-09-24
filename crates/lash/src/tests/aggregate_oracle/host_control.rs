@@ -50,7 +50,7 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell(tier: &JournaledTi
             aggregate.trim_start_matches("Promise.").to_lowercase()
         );
         let theatre = Arc::new(OracleTheatre::default());
-        let backend = DecoratedBackend::over(tier.backend().await).effect_host(|inner| {
+        let backend = DecoratedBackend::over_sqlite(tier.backend().await).effect_host(|inner| {
             Arc::new(lash_core::testing::LayeredEffectHost::new(
                 inner,
                 Arc::new(SettlementFaultLayer {

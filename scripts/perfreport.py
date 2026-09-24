@@ -374,11 +374,8 @@ def summarize_lashlang(report: dict[str, Any]) -> str:
                 "process_cache_hits" in row
                 or "program_cache_hits" in row
                 or "linked_cache_hits" in row
-                or "artifact_bytes" in row
             ):
                 extras = []
-                if "artifact_bytes" in row:
-                    extras.append(f"artifact={fmt_bytes(row.get('artifact_bytes', 0))}")
                 if "process_cache_hits" in row:
                     extras.append(
                         "process_cache="

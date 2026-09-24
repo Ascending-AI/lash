@@ -55,7 +55,7 @@ impl lash_core::facade_support::ProcessToolVisibilityFilter for HideAllProcessTo
 /// the backend's own registry: a test worker completes them by hand.
 async fn noop_process_work_backend() -> Arc<DecoratedBackend> {
     Arc::new(
-        DecoratedBackend::over(memory_backend().await).process_work(|registry| {
+        DecoratedBackend::over_sqlite(memory_backend().await).process_work(|registry| {
             lash_core::ProcessWorkWiring::new(
                 lash_core::facade_support::watch_process_registry(registry),
                 Arc::new(NoopProcessWork),

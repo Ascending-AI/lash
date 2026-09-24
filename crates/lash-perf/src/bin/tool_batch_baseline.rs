@@ -170,7 +170,9 @@ fn load_average() -> LoadAverage {
 /// The RLM bridge's plugin factory, spelled the way the conformance
 /// registrations spell it: `Promise.all` is the cell-bridge surface, so the
 /// factory does not advertise the process lifecycle.
-fn rlm_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
+fn rlm_factory(
+    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -179,18 +181,21 @@ fn rlm_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
+            backend,
         )
         .with_process_lifecycle(false),
     )
 }
 
-fn producers(names: &[String]) -> Vec<lash_conformance::ToolBatchProducer> {
+fn producers(
+    names: &[String],
+    artifacts: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+) -> Vec<lash_conformance::ToolBatchProducer> {
     names
         .iter()
         .map(|name| match name.as_str() {
             "standard" => lash_conformance::parallel_model_tool_calls_producer(),
-            "rlm" => lash_conformance::rlm_promise_all_producer(vec![rlm_factory()]),
+            "rlm" => lash_conformance::rlm_promise_all_producer(vec![rlm_factory(artifacts)]),
             other => panic!("unknown producer `{other}`"),
         })
         .collect()
@@ -690,7 +695,10 @@ async fn run_restate(
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let producers = producers(&args.producers);
+    // The RLM producer's Lashlang artifacts live in a memory backend of their
+    // own: the batch is measured over each lane's bare effect host.
+    let artifacts = lash_sqlite_store::SqliteBackend::memory().await?;
+    let producers = producers(&args.producers, &artifacts);
     match args.backend.as_str() {
         "sqlite" => run_sqlite(&args, &producers).await?,
         "postgres" => run_postgres(&args, &producers).await?,

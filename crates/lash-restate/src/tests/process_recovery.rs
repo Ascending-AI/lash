@@ -273,7 +273,7 @@ pub(super) async fn trigger_lashlang_registration(
     )
     .expect("link lashlang trigger module");
     lashlang::LashlangArtifactStore::publish_module_artifact(
-        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        recovery_artifact_store().as_ref(),
         &lash_core::ArtifactOwner::host("restate-recovery-test"),
         &linked_module.artifact,
     )
@@ -351,7 +351,7 @@ pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> P
     )
     .expect("link TypeScript process");
     lashlang::LashlangArtifactStore::publish_module_artifact(
-        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        recovery_artifact_store().as_ref(),
         &lash_core::ArtifactOwner::host("restate-recovery-test"),
         &linked.artifact,
     )
@@ -408,7 +408,7 @@ pub(super) async fn sleeping_process_registration(process_id: &ProcessId) -> Pro
     )
     .expect("link sleeping TypeScript process");
     lashlang::LashlangArtifactStore::publish_module_artifact(
-        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        recovery_artifact_store().as_ref(),
         &lash_core::ArtifactOwner::host("restate-recovery-test"),
         &linked.artifact,
     )
@@ -490,7 +490,7 @@ pub(super) async fn sleeping_then_tool_process_registration(
     )
     .expect("link sleeping post-wake-effect process");
     lashlang::LashlangArtifactStore::publish_module_artifact(
-        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        recovery_artifact_store().as_ref(),
         &lash_core::ArtifactOwner::host("restate-recovery-test"),
         &linked.artifact,
     )

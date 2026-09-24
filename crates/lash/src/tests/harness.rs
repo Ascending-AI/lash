@@ -110,6 +110,10 @@ pub(crate) struct DecoratedBackend {
     process_registry: Option<Arc<dyn lash_core::ProcessRegistry>>,
     process_env_store: Option<Arc<dyn lash_core::ProcessExecutionEnvStore>>,
     process_work: Option<lash_core::ProcessWorkWiring>,
+    /// The inner backend's Lashlang artifact store, or its decoration, when
+    /// the inner backend keeps artifacts ([`Self::over_lashlang`]).
+    #[cfg(feature = "rlm")]
+    lashlang_artifacts: Option<Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>>,
 }
 
 impl DecoratedBackend {
@@ -123,7 +127,49 @@ impl DecoratedBackend {
             process_registry: None,
             process_env_store: None,
             process_work: None,
+            #[cfg(feature = "rlm")]
+            lashlang_artifacts: None,
         }
+    }
+
+    /// [`Self::over`] a SQLite backend, which also keeps Lashlang artifacts
+    /// when the facade is built with `rlm`.
+    pub(crate) fn over_sqlite(inner: Arc<lash_sqlite_store::SqliteBackend>) -> Self {
+        #[cfg(feature = "rlm")]
+        {
+            Self::over_lashlang(inner)
+        }
+        #[cfg(not(feature = "rlm"))]
+        {
+            Self::over(inner)
+        }
+    }
+
+    /// [`Self::over`] a backend that keeps Lashlang artifacts, so the
+    /// decorated backend keeps them too and an RLM factory can be built
+    /// over it.
+    #[cfg(feature = "rlm")]
+    pub(crate) fn over_lashlang(
+        inner: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
+    ) -> Self {
+        let lashlang_artifacts = Some(inner.lashlang_artifact_store());
+        Self {
+            lashlang_artifacts,
+            ..Self::over(inner as Arc<dyn lash_core::Backend>)
+        }
+    }
+
+    /// Decorate the inner backend's Lashlang artifact store.
+    #[cfg(feature = "rlm")]
+    pub(crate) fn lashlang_artifact_store(
+        mut self,
+        decorate: impl FnOnce(
+            Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
+        ) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
+    ) -> Self {
+        let inner = lash_lashlang_runtime::LashlangArtifactBackend::lashlang_artifact_store(&self);
+        self.lashlang_artifacts = Some(decorate(inner));
+        self
     }
 
     /// Run the runtime on `clock` while the stores keep the inner
@@ -241,6 +287,15 @@ impl lash_core::Backend for DecoratedBackend {
 
     fn queued_work(&self) -> lash_core::BackendQueuedWork {
         self.inner.queued_work()
+    }
+}
+
+#[cfg(feature = "rlm")]
+impl lash_lashlang_runtime::LashlangArtifactBackend for DecoratedBackend {
+    fn lashlang_artifact_store(&self) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> {
+        self.lashlang_artifacts.clone().expect(
+            "a decorated backend keeps Lashlang artifacts only when built with `over_lashlang`",
+        )
     }
 }
 

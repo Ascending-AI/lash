@@ -212,8 +212,9 @@ async fn durable_globals(store: &FaultStore, name: &str) -> (Vec<String>, Option
     snapshot_globals(&state, name)
 }
 
-/// The RLM plugin plus any extra plugin factories.
-fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> PluginHost {
+/// The RLM plugin, its artifacts in a fresh memory backend, plus any extra
+/// plugin factories.
+async fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> PluginHost {
     let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(
         RlmProtocolPluginFactory::new(
             RlmProtocolPluginConfig::builder()
@@ -222,7 +223,7 @@ fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> PluginH
                 .wall_clock(WallClockBound::secs(30))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new()),
+            crate::tests::memory_backend().await.as_ref(),
         )
         .with_process_lifecycle(false),
     )];
@@ -284,7 +285,7 @@ async fn open_with_plugins(
     state: RuntimeSessionState,
     extra_plugins: &[Arc<dyn PluginFactory>],
 ) -> (LashRuntime, Arc<PluginSession>) {
-    let host = plugin_host_with_plugins(extra_plugins);
+    let host = plugin_host_with_plugins(extra_plugins).await;
     let plugins = if let Some(snapshot) = state.plugin_state() {
         host.rematerialize_session(
             &state.session_id,
@@ -1166,7 +1167,7 @@ async fn storeless_runtime(
                 .wall_clock(WallClockBound::secs(30))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new()),
+            crate::tests::memory_backend().await.as_ref(),
         )
         .with_process_lifecycle(false),
     )];

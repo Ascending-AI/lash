@@ -13,6 +13,7 @@ use crate::support::{
     SessionError, SessionObservation, SessionObservationSubscription, SessionPolicy,
     SessionReadView, SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest,
     SessionUsageReport, ToolManifest, ToolState, TurnBuilder, TurnInput, build_plugin_host,
+    refuse_foreign_backend_factories,
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
@@ -344,6 +345,7 @@ impl SessionBuilder {
                 lash_core::facade_support::SingleProviderResolver::new(provider),
             );
         }
+        refuse_foreign_backend_factories(self.core.backend.as_ref(), &self.plugin_factories)?;
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),

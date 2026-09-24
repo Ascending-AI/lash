@@ -1715,6 +1715,28 @@ impl lash_core::ProcessExecutionEnvStore for DurableMemoryProcessEnvStore {
 pub(super) static RECOVERY_PROCESS_ENV_STORE: LazyLock<Arc<DurableMemoryProcessEnvStore>> =
     LazyLock::new(|| Arc::new(DurableMemoryProcessEnvStore::default()));
 
+/// The SQLite memory backend whose Lashlang artifact store the recovery laws
+/// share: their registration helpers publish modules into it and their
+/// workers' engines read them back, as one host's backend would.
+pub(super) static RECOVERY_ARTIFACT_BACKEND: LazyLock<lash_sqlite_store::SqliteBackend> =
+    LazyLock::new(|| {
+        std::thread::spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build the artifact backend runtime")
+                .block_on(lash_sqlite_store::SqliteBackend::memory())
+                .expect("open the recovery artifact backend")
+        })
+        .join()
+        .expect("open the recovery artifact backend on its own thread")
+    });
+
+/// [`RECOVERY_ARTIFACT_BACKEND`]'s Lashlang artifact store.
+pub(super) fn recovery_artifact_store() -> Arc<dyn lashlang::LashlangArtifactStore> {
+    lashlang::LashlangArtifactBackend::lashlang_artifact_store(&*RECOVERY_ARTIFACT_BACKEND)
+}
+
 pub(super) struct CommitRetryStore {
     pub(super) inner: Arc<dyn lash_core::RuntimePersistence>,
     pub(super) lease_claim_count: Arc<AtomicUsize>,

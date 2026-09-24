@@ -222,7 +222,7 @@ mod rlm_testing_inventory {
     // The runtime rebuild certification the host runs, reached through the
     // facade's own `testing` module. The durable-store laws are not facade
     // surface: a host depends on `lash-internal-conformance` directly.
-    use lash::testing::{RuntimeRebuildBackend as _, runtime_rebuild_and_worker_recovery as _};
+    use lash::testing::runtime_rebuild_and_worker_recovery as _;
 
     use lash::rlm::lang::testing::conformance::ReopenableLashlangArtifactStore as _;
     use lash::testing::deferred_resolution_link_key as _;

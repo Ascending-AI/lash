@@ -426,7 +426,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             &mut state,
             first_ctx.clone(),
             deferred_matrix_request(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
@@ -463,7 +463,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             &mut restored,
             first_ctx.clone(),
             deferred_matrix_request(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
@@ -492,7 +492,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             &mut restored,
             second_ctx.clone(),
             deferred_matrix_request(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
@@ -522,7 +522,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             &mut restored,
             next_turn_ctx.clone(),
             deferred_matrix_request(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -580,7 +580,7 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
                     "#
                 .to_string(),
             },
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -667,7 +667,7 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
                 language: "typescript".into(),
                 code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
             },
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -734,7 +734,7 @@ async fn run_sqlite_deferred_fault_boundary(
         &mut RlmExecutionState::new(),
         first_ctx,
         request.clone(),
-        lashlang::global_in_memory_lashlang_artifact_store(),
+        crate::testing::memory_artifact_store().await,
         LashlangSurface::default(),
         Some(resolver.clone()),
         RlmProjectedBindings::default(),
@@ -762,7 +762,7 @@ async fn run_sqlite_deferred_fault_boundary(
         &mut RlmExecutionState::new(),
         replay_ctx,
         request,
-        lashlang::global_in_memory_lashlang_artifact_store(),
+        crate::testing::memory_artifact_store().await,
         LashlangSurface::default(),
         Some(resolver),
         RlmProjectedBindings::default(),
@@ -834,7 +834,7 @@ pub(super) fn sqlite_fault_before_registration_reinstalls_recorded_route_after_r
             &mut RlmExecutionState::new(),
             first_ctx,
             request.clone(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
@@ -858,7 +858,7 @@ pub(super) fn sqlite_fault_before_registration_reinstalls_recorded_route_after_r
             &mut RlmExecutionState::new(),
             replay_ctx,
             request,
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -1016,7 +1016,7 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
             &mut RlmExecutionState::new(),
             first_ctx,
             request.clone(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -1063,7 +1063,7 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
                 "#
                 .into(),
             },
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -1107,7 +1107,7 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
             &mut RlmExecutionState::new(),
             replay_ctx,
             request,
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -1160,7 +1160,7 @@ pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_reso
             &mut RlmExecutionState::new(),
             first_ctx,
             request.clone(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -1192,7 +1192,7 @@ pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_reso
             &mut RlmExecutionState::new(),
             replay_ctx,
             request,
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -1247,7 +1247,7 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
                     language: "typescript".to_string(),
                     code: "const result = await web.fetch({ url: 'https://example.test' }); finish(result);".to_string(),
                 },
-                lashlang::global_in_memory_lashlang_artifact_store(),
+                crate::testing::memory_artifact_store().await,
                 LashlangSurface::default(),
                 Some(resolver),
                 RlmProjectedBindings::default(),
@@ -1330,7 +1330,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
                     "#
                 .to_string(),
             },
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
@@ -1431,7 +1431,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             &mut state,
             context().await,
             request(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             surface(),
             None,
             RlmProjectedBindings::default(),
@@ -1446,7 +1446,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             &mut state,
             context().await,
             request(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             surface(),
             None,
             RlmProjectedBindings::default(),
@@ -1465,7 +1465,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
 #[test]
 pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
     block_on(async {
-        let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let artifact_store = crate::testing::fresh_memory_artifact_store().await;
         let mut state = RlmExecutionState::for_engine("typescript");
         let response = execute_code_with_channel_and_bounds(
             &mut state,
@@ -2040,7 +2040,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 #[tokio::test]
 pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_engine() {
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let process_env_store = backend.process_env_store();
@@ -2184,7 +2184,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
 #[tokio::test]
 pub(super) async fn typescript_restored_process_handle_await_crosses_turn_boundary() {
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let process_env_store = backend.process_env_store();
@@ -2322,7 +2322,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
 #[tokio::test]
 pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subsequent_operation() {
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let process_env_store = backend.process_env_store();

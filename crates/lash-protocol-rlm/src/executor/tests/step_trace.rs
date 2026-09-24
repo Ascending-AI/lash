@@ -94,7 +94,7 @@ async fn run_step_with_sink(
             language: "typescript".into(),
             code: code.into(),
         },
-        lashlang::global_in_memory_lashlang_artifact_store(),
+        crate::testing::memory_artifact_store().await,
         LashlangSurface::default(),
         Some(Arc::new(InboxResolver)),
         RlmProjectedBindings::default(),

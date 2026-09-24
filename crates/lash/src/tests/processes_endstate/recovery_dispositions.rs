@@ -63,10 +63,8 @@ fn owner_bound_external_registration(id: &str) -> lash_core::ProcessRegistration
 #[tokio::test]
 async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
 
     let drain_owner = recovery_local_owner("drain-host", "host-a", "drain-start");
     let worker = recovery_process_worker(&backend, drain_owner.clone());
@@ -197,10 +195,8 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
 #[tokio::test]
 async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
 
     // The sweep runs on host-a; the started owner is on host-b, so it is never
     // available for a claimant — a silent, foreign, expired holder.
@@ -329,10 +325,8 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
 #[tokio::test]
 async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
 
     let departed = "facade-caller-departed";
     let live = "facade-caller-live";

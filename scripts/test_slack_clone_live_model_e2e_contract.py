@@ -33,7 +33,11 @@ class SlackCloneLiveModelE2eContractTest(unittest.TestCase):
         manifest = tomllib.loads(
             (ROOT / "examples/slack-clone/Cargo.toml").read_text(encoding="utf-8")
         )
-        self.assertEqual(manifest["features"]["live-e2e"], ["lash/rlm"])
+        # The live binary's RLM factory keeps its Lashlang artifacts in the
+        # SQLite backend it runs on, so the feature arms the store's lashlang.
+        self.assertEqual(
+            manifest["features"]["live-e2e"], ["lash/rlm", "lash-sqlite-store/lashlang"]
+        )
         live_binary = next(
             binary for binary in manifest["bin"] if binary["name"] == "slack-clone-live-e2e"
         )

@@ -18,7 +18,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
             .wall_clock(crate::WallClockBound::secs(1))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
-        lashlang::global_in_memory_lashlang_artifact_store(),
+        &crate::testing::memory_backend_blocking(),
     )
     .with_process_lifecycle(false);
     let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
@@ -70,7 +70,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
                 .wall_clock(crate::WallClockBound::secs(1))
                 .memory_limit(crate::MemoryBound::mebibytes(1))
                 .build(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            &crate::testing::memory_backend_blocking(),
         )
         .with_process_lifecycle(false);
         lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)])
@@ -669,7 +669,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             .wall_clock(crate::WallClockBound::secs(1))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
-        lashlang::global_in_memory_lashlang_artifact_store(),
+        &crate::testing::memory_backend().await,
     )
     .with_process_lifecycle(false);
     let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);

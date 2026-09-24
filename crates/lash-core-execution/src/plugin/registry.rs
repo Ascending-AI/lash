@@ -549,6 +549,18 @@ pub trait PluginFactory: Send + Sync {
         Vec::new()
     }
 
+    /// The [`Backend::binding_identity`](crate::Backend::binding_identity) of
+    /// the backend whose stores this factory keeps state in, when it keeps
+    /// any: the RLM protocol keeps its Lashlang module artifacts there.
+    ///
+    /// A runtime built over one backend refuses a factory bound to another,
+    /// so no plugin writes state into a substrate the runtime does not reopen
+    /// or sweep (ADR 0102, D2). The default binds to none. A factory that
+    /// wraps another forwards the inner factory's answer.
+    fn bound_backend(&self) -> Option<&str> {
+        None
+    }
+
     /// Host-level contribution of [`ProcessEngine`](crate::ProcessEngine)s,
     /// mirroring [`extension_contributions`](Self::extension_contributions).
     ///

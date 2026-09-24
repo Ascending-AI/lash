@@ -856,7 +856,7 @@ mod restate_tests {
     struct LiveRestateTestHarness {
         state: AppStateData,
         process_worker: lash::durability::DurableProcessWorker,
-        backend: Arc<lash_restate::RestateBackend>,
+        backend: Arc<lash_restate::RestateBackend<lash_sqlite_store::SqliteStoreSet>>,
     }
 
     async fn live_restate_test_state(
@@ -896,7 +896,6 @@ finish("done via Restate E2E");
         let stores = lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash-sessions"))
             .await
             .expect("open the SQLite store set");
-        let artifact_store = stores.process_env_store();
         let backend = Arc::new(lash_restate::RestateBackend::new(
             ingress_url,
             lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
@@ -919,7 +918,7 @@ finish("done via Restate E2E");
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            artifact_store,
+            backend.as_ref(),
         );
         let core = LashCore::rlm_builder(
             Arc::clone(&backend) as Arc<dyn lash::Backend>,

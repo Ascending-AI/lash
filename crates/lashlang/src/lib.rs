@@ -1,3 +1,4 @@
+#[cfg(test)]
 mod namespace;
 
 mod artifact;
@@ -21,12 +22,14 @@ mod workflow_graph;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+#[cfg(test)]
+pub(crate) use artifact::InMemoryLashlangArtifactStore;
 pub use artifact::{
     ArtifactPublicationPause, ArtifactStoreError, ContentHash, DurabilityTier, HostRequirements,
-    HostRequirementsRef, InMemoryLashlangArtifactStore, LASHLANG_COMPILER_VERSION,
-    LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, LashlangArtifactStore, ModuleArtifact,
-    ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef,
-    global_in_memory_lashlang_artifact_store, host_requirements_for_program,
+    HostRequirementsRef, LASHLANG_COMPILER_VERSION, LASHLANG_SEMANTIC_HASH_VERSION,
+    LASHLANG_VM_ABI_VERSION, LashlangArtifactBackend, LashlangArtifactStore,
+    LashlangArtifactStoreSet, ModuleArtifact, ModuleArtifactError, ModuleExports, ModuleRef,
+    ProcessRef, host_requirements_for_program,
 };
 pub use ast::{
     AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BinaryOp, BindingVisibility,

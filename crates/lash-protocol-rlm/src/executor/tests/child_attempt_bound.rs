@@ -88,7 +88,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
     const CHANGED: u32 = 10;
 
     let published: Arc<dyn lashlang::LashlangArtifactStore> =
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let process_env_store = backend.process_env_store();
@@ -225,7 +225,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
     const MAX_ATTEMPTS: u32 = 2;
 
     let published: Arc<dyn lashlang::LashlangArtifactStore> =
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        crate::testing::fresh_memory_artifact_store().await;
     let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let worker_store: Arc<dyn lashlang::LashlangArtifactStore> =
         Arc::new(UnreadableArtifactStore {

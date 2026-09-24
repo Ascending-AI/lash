@@ -401,8 +401,11 @@ pub mod persistence {
         facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,
         facade_support::ChronologicalProjection,
     };
+    /// The Lashlang artifact port a backend supplies to an RLM host.
     #[cfg(feature = "rlm")]
-    pub use lash_lashlang_runtime::{InMemoryLashlangArtifactStore, LashlangArtifactStore};
+    pub use lash_lashlang_runtime::{
+        LashlangArtifactBackend, LashlangArtifactStore, LashlangArtifactStoreSet,
+    };
 }
 
 /// Plugin contracts, manifests, and operation types.

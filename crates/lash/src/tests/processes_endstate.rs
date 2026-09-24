@@ -385,32 +385,31 @@ impl crate::plugins::SessionPlugin for EngineSessionPlugin {
 }
 
 fn process_test_core(
-    backend: Arc<dyn lash_core::Backend>,
-    artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
+    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
 ) -> Result<LashCore> {
-    process_test_builder(backend, artifact_store)
+    process_test_builder(backend)
         .without_queued_work()
         .build(crate::testing::runtime_lease_owner())
 }
 
 fn process_test_builder(
-    backend: Arc<dyn lash_core::Backend>,
-    artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
+    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
 ) -> crate::core::LashCoreBuilder {
     let provider = mock_provider();
     let provider_id = provider.kind().to_string();
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        backend.as_ref(),
+    );
     LashCore::rlm_builder(
-        backend,
+        backend as Arc<dyn lash_core::Backend>,
         crate::TurnBudget::Unbounded,
-        lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash_protocol_rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            artifact_store,
-        ),
+        factory,
     )
     .session_spec(
         crate::SessionSpec::new()
@@ -606,7 +605,7 @@ async fn process_prune_retries_each_artifact_release_after_registry_reopen() -> 
 async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<()> {
     let backend = memory_backend().await;
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone(), backend.process_env_store())?;
+    let core = process_test_core(backend.clone())?;
     let process_id = ProcessId::from("process-prune-turn-cancel-closure-pin");
     registry
         .register_process(
@@ -846,7 +845,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
     );
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone(), backend.process_env_store())?;
+    let core = process_test_core(backend.clone())?;
 
     let session_id = "sqlite-facade-prune-session";
     let source_key = "sqlite-facade-prune-source";
@@ -1062,7 +1061,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let process_env_store = backend.process_env_store();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
         // process main() signals { ready: any } {
@@ -1190,7 +1189,7 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
         backend.process_env_store();
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
     let env_ref =
         persist_process_env_ref(core.env.core.durability.process_env_store.as_ref()).await;
     let session_id = "session-trigger-visibility";
@@ -1301,7 +1300,7 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     let backend = memory_backend().await;
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         backend.process_env_store();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
         // process main() signals { ready: string } {
@@ -1404,7 +1403,7 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     let backend = memory_backend().await;
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         backend.process_env_store();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
         // process main() signals { ready: any } {
@@ -1532,7 +1531,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         backend.process_env_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
         // process child() { finish { from: "child" } }
@@ -1620,7 +1619,7 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     let backend = memory_backend().await;
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         backend.process_env_store();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
     let session_id = "chain-session";
     let process_id = "chain-parent";
     let process = LinkedTestProcess::new(
@@ -1709,7 +1708,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         backend.process_env_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
+    let core = process_test_core(backend.clone())?;
     let session_id = "process-outlives-session";
     let process_id = "outliving-process";
     let process = LinkedTestProcess::new(
@@ -1967,38 +1966,38 @@ async fn durable_admission_core(
 ) -> Result<LashCore> {
     let provider = mock_provider();
     let provider_id = provider.kind().to_string();
-    let artifact: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> = artifact_store;
-    LashCore::rlm_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash_protocol_rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            artifact,
-        ),
-    )
-    .session_spec(
-        crate::SessionSpec::new()
-            .provider_id(provider_id)
-            .turn_budget(crate::TurnBudget::Unbounded),
-    )
-    .provider(provider)
-    .model(mock_model_spec())
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
-    ))
-    .process_event_sink(Arc::new(sink))
-    .without_queued_work()
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        owner,
-        format!("{owner}:incarnation"),
-    ))
+    // The switchable store decorates the backend's own, so the core and its
+    // RLM factory still share one substrate.
+    let backend =
+        DecoratedBackend::over_lashlang(backend).lashlang_artifact_store(move |_| artifact_store);
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        &backend,
+    );
+    LashCore::rlm_builder(Arc::new(backend), crate::TurnBudget::Unbounded, factory)
+        .session_spec(
+            crate::SessionSpec::new()
+                .provider_id(provider_id)
+                .turn_budget(crate::TurnBudget::Unbounded),
+        )
+        .provider(provider)
+        .model(mock_model_spec())
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        ))
+        .process_event_sink(Arc::new(sink))
+        .without_queued_work()
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            owner,
+            format!("{owner}:incarnation"),
+        ))
 }
 
 async fn wait_for_worker_fault(
@@ -2026,11 +2025,10 @@ async fn wait_for_worker_fault(
 }
 
 fn process_test_core_with_sink(
-    backend: Arc<dyn lash_core::Backend>,
-    artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
+    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
     sink: Arc<dyn lash_core::facade_support::ProcessEventSink>,
 ) -> Result<LashCore> {
-    process_test_builder(backend, artifact_store)
+    process_test_builder(backend)
         .process_event_sink(sink)
         .without_queued_work()
         .build(crate::testing::runtime_lease_owner())
@@ -2348,3 +2346,4 @@ mod lifecycle_observation;
 mod native_process_await;
 mod programs;
 mod recovery_dispositions;
+mod rlm_artifacts_restart;

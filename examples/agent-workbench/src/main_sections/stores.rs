@@ -1,10 +1,14 @@
 use super::*;
 
+/// The workbench's Restate backend: the Restate engine host over a store set
+/// that also keeps the RLM factory's Lashlang artifacts.
+pub(crate) type WorkbenchRestateBackend =
+    lash_restate::RestateBackend<dyn lash::persistence::LashlangArtifactStoreSet>;
+
 /// The SQL store set the workbench runs its Restate backend over: SQLite
 /// under the data directory, or PostgreSQL when a database URL is configured.
 pub(crate) struct WorkbenchStores {
-    pub(crate) stores: Arc<dyn lash::durability::StoreSet>,
-    pub(crate) artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
+    pub(crate) stores: Arc<dyn lash::persistence::LashlangArtifactStoreSet>,
     pub(crate) backend: &'static str,
 }
 
@@ -28,7 +32,6 @@ impl WorkbenchStores {
             .await
             .context("open the SQLite store set")?;
         Ok(Self {
-            artifact_store: stores.process_env_store(),
             stores: Arc::new(stores),
             backend: "sqlite",
         })
@@ -52,7 +55,6 @@ impl WorkbenchStores {
             )),
         );
         Ok(Self {
-            artifact_store: stores.process_env_store(),
             stores: Arc::new(stores),
             backend: "postgres",
         })

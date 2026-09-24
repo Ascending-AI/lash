@@ -483,7 +483,7 @@ async fn main() -> Result<()> {
             .wall_clock(lash::rlm::WallClockBound::secs(45))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.process_env_store(),
+        backend.as_ref(),
     );
     let trace_path = args.artifact_dir.join("trace.jsonl");
     let mut trace_context = lash::tracing::TraceContext {

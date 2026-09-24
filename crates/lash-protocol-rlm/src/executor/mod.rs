@@ -201,13 +201,19 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
 #[cfg(feature = "testing")]
 pub struct RlmCheckpointPerfFixture {
     state: RlmExecutionState,
+    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
     binding_count: usize,
     payload_bytes: usize,
 }
 
 #[cfg(feature = "testing")]
 impl RlmCheckpointPerfFixture {
-    pub fn new(binding_count: usize, payload_bytes: usize) -> Result<Self, SessionError> {
+    /// A fixture whose cells keep their Lashlang artifacts in `backend`.
+    pub fn new(
+        backend: &dyn lashlang::LashlangArtifactBackend,
+        binding_count: usize,
+        payload_bytes: usize,
+    ) -> Result<Self, SessionError> {
         let mut state = RlmExecutionState::for_engine("typescript");
         // The snapshot's globals became a read-only projection when the heap
         // took ownership of them, so seed through the state's own insert.
@@ -225,6 +231,7 @@ impl RlmCheckpointPerfFixture {
         }
         Ok(Self {
             state,
+            artifact_store: backend.lashlang_artifact_store(),
             binding_count,
             payload_bytes,
         })
@@ -264,7 +271,7 @@ impl RlmCheckpointPerfFixture {
                 language: "typescript".to_string(),
                 code,
             },
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            Arc::clone(&self.artifact_store),
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),

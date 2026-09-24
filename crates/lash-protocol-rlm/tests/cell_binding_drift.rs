@@ -10,7 +10,12 @@ use std::sync::Arc;
 
 use lash_core::EffectHost;
 
-fn rlm_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
+/// The RLM factory, its Lashlang artifacts in `artifacts`: the law's host is a
+/// bare effect host with no backend, so the artifacts get a memory backend of
+/// their own.
+fn rlm_factory(
+    artifacts: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -19,7 +24,7 @@ fn rlm_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
+        artifacts,
         )
         // The law's turn starts no process: there is no process substrate.
         .with_process_lifecycle(false),
@@ -35,13 +40,16 @@ lash_conformance::cell_binding_drift_tests!({
     );
     let faults = host.effect_journal_faults();
     let host = host as Arc<dyn EffectHost>;
+    let artifacts = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .unwrap_or_else(|error| panic!("open the artifact backend: {error}"));
     (
         dir,
         "sqlite",
         Arc::clone(&host),
         faults,
         lash_conformance::HostTurnRunner::shared(host),
-        vec![rlm_factory()],
+        vec![rlm_factory(&artifacts)],
     )
 });
 
@@ -52,11 +60,14 @@ lash_conformance::model_call_drift_park_tests!({
             .await
             .unwrap_or_else(|error| panic!("open the SQLite model-drift effect host: {error}")),
     ) as Arc<dyn EffectHost>;
+    let artifacts = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .unwrap_or_else(|error| panic!("open the artifact backend: {error}"));
     (
         dir,
         "sqlite",
         Arc::clone(&host),
         lash_conformance::HostTurnRunner::shared(host),
-        vec![rlm_factory()],
+        vec![rlm_factory(&artifacts)],
     )
 });

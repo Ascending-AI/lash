@@ -113,7 +113,7 @@ async fn execute_with_deferred_trigger(
             language: language.to_string(),
             code: code.to_string(),
         },
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
+        crate::testing::fresh_memory_artifact_store().await,
         LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
@@ -320,7 +320,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
                 "#
                 .to_string(),
             },
-            Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
+            crate::testing::fresh_memory_artifact_store().await,
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
@@ -491,7 +491,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
             language: "typescript".to_string(),
             code: code.to_string(),
         },
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
+        crate::testing::fresh_memory_artifact_store().await,
         surface,
         None,
         RlmProjectedBindings::default(),
@@ -680,7 +680,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
                     "#
                 .to_string(),
             },
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            crate::testing::memory_artifact_store().await,
             surface,
             None,
             RlmProjectedBindings::default(),
@@ -841,7 +841,7 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
 pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregister() {
     block_on(async {
         let trigger_store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-        let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let artifact_store = crate::testing::fresh_memory_artifact_store().await;
         let surface = LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
@@ -987,7 +987,7 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
                 language: "typescript".to_string(),
                 code: "finish(42);".to_string(),
             },
-            Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
+            crate::testing::fresh_memory_artifact_store().await,
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
@@ -1030,7 +1030,7 @@ async fn execute_trigger_process_with_originator(
     expect_success: bool,
 ) -> TriggerProcessResult {
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        crate::testing::fresh_memory_artifact_store().await;
     let capture = TriggerEffectCapture::default();
     let backend = capture.backend().await;
     let registry = backend.process_registry();
@@ -1702,7 +1702,7 @@ fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
 
     block_on(async {
         let capture = TriggerEffectCapture::default();
-        let store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let store = crate::testing::fresh_memory_artifact_store().await;
         let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
             TRIGGER_INPUTS_ARROW_SOURCE,
             capture.clone(),
@@ -1790,7 +1790,7 @@ fn repin_trigger_inputs_retired_record_form() {
 
     block_on(async {
         let capture = TriggerEffectCapture::default();
-        let store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let store = crate::testing::fresh_memory_artifact_store().await;
         let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
             TRIGGER_INPUTS_ARROW_SOURCE,
             capture.clone(),
@@ -1843,7 +1843,7 @@ fn repin_trigger_inputs_retired_record_form() {
 async fn execute_typescript_with_capturing_trigger_effects(
     code: &str,
     capture: TriggerEffectCapture,
-    store: Arc<lashlang::InMemoryLashlangArtifactStore>,
+    store: Arc<dyn lashlang::LashlangArtifactStore>,
 ) -> ExecResponse {
     let mut state = RlmExecutionState::for_engine("typescript");
     execute_code_with_channel_and_bounds(

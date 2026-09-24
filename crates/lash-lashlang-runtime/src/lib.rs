@@ -50,8 +50,9 @@ pub use lash_trace::{
     TraceNodeWaitResolution,
 };
 pub use lashlang::{
-    CompiledProcessCache, InMemoryLashlangArtifactStore, LASH_TYPE_KEY, LashlangAbilities,
-    LashlangArtifactStore, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
+    CompiledProcessCache, LASH_TYPE_KEY, LashlangAbilities, LashlangArtifactBackend,
+    LashlangArtifactStore, LashlangArtifactStoreSet, LashlangHostCatalog, LashlangHostEnvironment,
+    LashlangLanguageFeatures,
 };
 
 pub const LASHLANG_ENGINE_KIND: &str = "lashlang";
@@ -1140,13 +1141,6 @@ impl LashlangProcessEngine {
             trace_context: lash_trace::TraceContext::default(),
             execution_bounds: lashlang::ExecutionBounds::unbounded(),
         }
-    }
-
-    pub fn in_memory(surface: LashlangSurface) -> Self {
-        Self::new(
-            lashlang::global_in_memory_lashlang_artifact_store(),
-            surface,
-        )
     }
 
     pub fn with_execution_trace(

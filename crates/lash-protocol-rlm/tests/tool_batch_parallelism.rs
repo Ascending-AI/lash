@@ -33,7 +33,10 @@ use lash_core::EffectHost;
 /// at all, while the process-bridge registration stands one up. Declaring it
 /// wrongly either advertises an ability the engine does not offer or hides one
 /// it does.
-fn rlm_factory(process_lifecycle: bool) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+fn rlm_factory(
+    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+    process_lifecycle: bool,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -42,15 +45,17 @@ fn rlm_factory(process_lifecycle: bool) -> Arc<dyn lash_core::facade_support::Pl
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
+            backend,
         )
         .with_process_lifecycle(process_lifecycle),
     )
 }
 
 /// The cell-bridge producer's factories: the RLM protocol and nothing else.
-fn cell_bridge_factories() -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
-    vec![rlm_factory(false)]
+fn cell_bridge_factories(
+    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+) -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
+    vec![rlm_factory(backend, false)]
 }
 
 /// The process-bridge producer's factories.
@@ -58,9 +63,11 @@ fn cell_bridge_factories() -> Vec<Arc<dyn lash_core::facade_support::PluginFacto
 /// `processes.*` is rendered from the tool catalogue, so a cell that starts a
 /// process needs the plugin that supplies that surface; without it the cell
 /// dies on an unknown `processes` module long before any batch is issued.
-fn process_bridge_factories() -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
+fn process_bridge_factories(
+    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+) -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
     vec![
-        rlm_factory(true),
+        rlm_factory(backend, true),
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
     ]
 }
@@ -89,16 +96,18 @@ mod sqlite_memory {
             .await
             .expect("open the memory tool-batch parallelism backend");
         let host = backend.effect_host() as Arc<dyn EffectHost>;
+        let cell_factories = cell_bridge_factories(&backend);
+        let process_factories = process_bridge_factories(&backend);
         (
             backend,
             "sqlite-memory",
             Arc::clone(&host),
             vec![
-                lash_conformance::rlm_promise_all_producer(cell_bridge_factories()),
+                lash_conformance::rlm_promise_all_producer(cell_factories),
                 // Each scenario opens its own session, so it also opens its
                 // own registry, on a memory backend of its own.
                 lash_conformance::lashlang_process_aggregate_producer(
-                    process_bridge_factories(),
+                    process_factories,
                     Arc::new(|| {
                         sync_await(async {
                             lash_sqlite_store::SqliteBackend::memory()
@@ -131,14 +140,19 @@ mod sqlite {
         // scenario's rows decide the next one's admission.
         let registry_root = dir.path().to_path_buf();
         let opened = Arc::new(AtomicUsize::new(0));
+        // The law's host is a bare effect host with no backend; the RLM
+        // factories keep their artifacts in a memory backend of their own.
+        let artifacts = lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open the artifact backend");
         (
             dir,
             "sqlite",
             Arc::clone(&host),
             vec![
-                lash_conformance::rlm_promise_all_producer(cell_bridge_factories()),
+                lash_conformance::rlm_promise_all_producer(cell_bridge_factories(&artifacts)),
                 lash_conformance::lashlang_process_aggregate_producer(
-                    process_bridge_factories(),
+                    process_bridge_factories(&artifacts),
                     Arc::new(move || {
                         let ordinal = opened.fetch_add(1, Ordering::SeqCst);
                         let path = registry_root.join(format!("processes-{ordinal}.db"));

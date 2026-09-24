@@ -101,11 +101,7 @@ async fn usage_durability_core_with_store(
 ) -> Result<(LashCore, Arc<lash_sqlite_store::SqliteSessionStoreFactory>)> {
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        backend.clone(),
-        lash_core::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
     .provider(provider)
     .model(mock_model_spec())
     // The default 2000 ms drain would make every witness below wait on a

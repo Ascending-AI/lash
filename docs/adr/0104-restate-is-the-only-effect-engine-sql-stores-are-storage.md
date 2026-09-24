@@ -123,8 +123,12 @@ StoreSet::lashlang_artifacts(&self) -> Arc<dyn LashlangArtifactStore>;
   compared at runtime. No API accepts a second, independently assembled binding.
 - **Ports above the kernel belong to the store set.** The Lashlang artifact
   port is `StoreSet::lashlang_artifacts`, and its trait lives in a layer both
-  the store sets and lashlang can depend on (FIG-3633 supplies artifacts from
-  the backend today).
+  the store sets and lashlang can depend on. Today (FIG-3633) lashlang adds
+  it as extension traits, `LashlangArtifactBackend: Backend` and
+  `LashlangArtifactStoreSet: StoreSet`. The RLM protocol factory takes the
+  backend, never a store, and names it through `PluginFactory::bound_backend`.
+  A core over any other backend refuses the factory with
+  `EmbedError::PluginBackendMismatch`.
 - **Fixtures move through one constructor.** Tests build an engine through a
   single `lash-restate-test` constructor (FIG-3665, FIG-3668), never by
   assembling ports.

@@ -25,7 +25,7 @@ impl TypescriptDialect {
                 projection_resolver: std::sync::Arc::new(
                     crate::projection::ProjectionRegistry::new(),
                 ),
-                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                artifact_store: std::sync::Arc::new(PromptOnlyArtifactStore),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -33,6 +33,71 @@ impl TypescriptDialect {
                 channel: crate::plugin::RlmChannel::Cell,
             },
         }
+    }
+}
+
+/// The artifact port of a [`TypescriptDialect::prompt_only`] dialect: it
+/// runs no cell, so it has no backend, and every artifact operation is
+/// refused rather than answered from a store no session reopens.
+struct PromptOnlyArtifactStore;
+
+impl PromptOnlyArtifactStore {
+    fn refusal() -> lashlang::ArtifactStoreError {
+        lashlang::ArtifactStoreError::Backend(
+            "a prompt-only RLM dialect executes no cell and stores no Lashlang artifact"
+                .to_string(),
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl lashlang::LashlangArtifactStore for PromptOnlyArtifactStore {
+    async fn publish_module_artifact(
+        &self,
+        _owner: &lash_core::ArtifactOwner,
+        _artifact: &lashlang::ModuleArtifact,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(Self::refusal())
+    }
+
+    async fn retain_module_artifact(
+        &self,
+        _owner: &lash_core::ArtifactOwner,
+        _module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(Self::refusal())
+    }
+
+    async fn transfer_module_artifact(
+        &self,
+        _from: &lash_core::ArtifactOwner,
+        _to: &lash_core::ArtifactOwner,
+        _module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(Self::refusal())
+    }
+
+    async fn release_module_artifact(
+        &self,
+        _owner: &lash_core::ArtifactOwner,
+        _module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(Self::refusal())
+    }
+
+    async fn retire_module_artifact_owner(
+        &self,
+        _owner: &lash_core::ArtifactOwner,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(Self::refusal())
+    }
+
+    async fn get_module_artifact(
+        &self,
+        _module_ref: &lashlang::ModuleRef,
+    ) -> Result<Option<std::sync::Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError>
+    {
+        Err(Self::refusal())
     }
 }
 
@@ -639,7 +704,7 @@ mod tests {
             LashlangSurface::default(),
             RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -697,7 +762,7 @@ mod tests {
             },
             RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -777,7 +842,7 @@ mod tests {
             LashlangSurface::default(),
             RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -838,7 +903,7 @@ mod tests {
             LashlangSurface::default(),
             RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -922,7 +987,7 @@ mod tests {
             LashlangSurface::default(),
             RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -1082,7 +1147,7 @@ mod tests {
                     LashlangSurface::default(),
                     RlmDialectServices {
                         projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-                        artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                        artifact_store: crate::testing::memory_artifact_store().await,
                         deferred_tool_resolver: None,
                         deferred_trigger_resolver: None,
                         execution_trace_config:

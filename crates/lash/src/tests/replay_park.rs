@@ -128,17 +128,15 @@ impl Backend {
             })
             .build()
             .into_handle();
-        explicit_ephemeral_facets(rlm_core_builder_over(
-            Arc::clone(&self.backend) as Arc<dyn lash_core::Backend>
-        ))
-        .provider(provider)
-        .model(mock_model_spec())
-        .tools(Arc::new(ProbeTool {
-            probe,
-            executions: Arc::clone(&self.executions),
-        }))
-        .build(crate::testing::runtime_lease_owner())
-        .expect("file-backed SQLite RLM backend")
+        explicit_ephemeral_facets(rlm_core_builder_over(self.backend.clone()))
+            .provider(provider)
+            .model(mock_model_spec())
+            .tools(Arc::new(ProbeTool {
+                probe,
+                executions: Arc::clone(&self.executions),
+            }))
+            .build(crate::testing::runtime_lease_owner())
+            .expect("file-backed SQLite RLM backend")
     }
 
     fn journal(&self) -> rusqlite::Connection {
@@ -517,16 +515,14 @@ impl Backend {
                 )))
             },
         );
-        explicit_ephemeral_facets(rlm_core_builder_over(
-            Arc::clone(&self.backend) as Arc<dyn lash_core::Backend>
-        ))
-        .provider(provider)
-        .model(mock_model_spec())
-        .plugin(Arc::new(lash_subagents::SubagentsPluginFactory::new(
-            Arc::new(registry),
-        )))
-        .build(crate::testing::runtime_lease_owner())
-        .expect("file-backed SQLite RLM backend with subagents")
+        explicit_ephemeral_facets(rlm_core_builder_over(self.backend.clone()))
+            .provider(provider)
+            .model(mock_model_spec())
+            .plugin(Arc::new(lash_subagents::SubagentsPluginFactory::new(
+                Arc::new(registry),
+            )))
+            .build(crate::testing::runtime_lease_owner())
+            .expect("file-backed SQLite RLM backend with subagents")
     }
 }
 

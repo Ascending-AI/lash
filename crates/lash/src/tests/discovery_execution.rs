@@ -88,8 +88,9 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             .build()
             .into_handle();
         let builder = if mode == "rlm" {
+            let backend = memory_backend().await;
             LashCore::rlm_builder(
-                memory_backend().await,
+                backend.clone(),
                 crate::TurnBudget::Unbounded,
                 lash_protocol_rlm::RlmProtocolPluginFactory::new(
                     lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -103,7 +104,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                         .with_discovery(lash_core::ToolDiscovery {
                             operation: "tools.search".into(),
                         }),
-                    inmem_artifact_store(),
+                    backend.as_ref(),
                 ),
             )
         } else {

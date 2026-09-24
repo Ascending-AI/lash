@@ -805,7 +805,10 @@ struct ReusableStoreFactory {
 pub(crate) async fn backend_with_catalog(
     catalog: Arc<dyn lash_core::SessionStoreFactory>,
 ) -> Arc<DecoratedBackend> {
-    Arc::new(DecoratedBackend::over(memory_backend().await).session_store_factory(move |_| catalog))
+    Arc::new(
+        DecoratedBackend::over_sqlite(memory_backend().await)
+            .session_store_factory(move |_| catalog),
+    )
 }
 
 /// A memory backend whose catalog serves `store` for every session id:
@@ -815,7 +818,7 @@ pub(crate) async fn backend_serving(
     store: Arc<dyn lash_core::RuntimePersistence>,
 ) -> Arc<DecoratedBackend> {
     Arc::new(
-        DecoratedBackend::over(memory_backend().await)
+        DecoratedBackend::over_sqlite(memory_backend().await)
             .session_store_factory(move |_| Arc::new(ReusableStoreFactory { store })),
     )
 }
@@ -2280,15 +2283,12 @@ pub(crate) fn standard_core_over(backend: Arc<dyn lash_core::Backend>) -> LashCo
     .expect("standard core")
 }
 
-/// In-memory Lashlang artifact store for RLM test factories.
+/// Default RLM protocol factory for tests, over `backend`, the substrate its
+/// Lashlang artifacts live in.
 #[cfg(feature = "rlm")]
-fn inmem_artifact_store() -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> {
-    Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new())
-}
-
-/// Default RLM protocol factory for tests (in-memory artifact store).
-#[cfg(feature = "rlm")]
-fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
+fn rlm_factory(
+    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+) -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -2296,7 +2296,7 @@ fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        inmem_artifact_store(),
+        backend,
     )
 }
 
@@ -2306,10 +2306,18 @@ async fn rlm_core_builder() -> crate::core::LashCoreBuilder {
     rlm_core_builder_over(memory_backend().await)
 }
 
-/// [`rlm_core_builder`] over `backend`.
+/// [`rlm_core_builder`] over `backend`: the core and its RLM factory share
+/// the one backend.
 #[cfg(feature = "rlm")]
-fn rlm_core_builder_over(backend: Arc<dyn lash_core::Backend>) -> crate::core::LashCoreBuilder {
-    LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, rlm_factory())
+fn rlm_core_builder_over(
+    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
+) -> crate::core::LashCoreBuilder {
+    let factory = rlm_factory(backend.as_ref());
+    LashCore::rlm_builder(
+        backend as Arc<dyn lash_core::Backend>,
+        crate::TurnBudget::Unbounded,
+        factory,
+    )
 }
 
 mod scope_support;

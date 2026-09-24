@@ -55,22 +55,50 @@ impl From<RestateQueuedWork> for BackendQueuedWork {
 ///
 /// Its binding identity is the Restate authority's, the one the effect host's
 /// turn-control binding and await-event keys derive from.
-#[derive(Clone)]
-pub struct RestateBackend {
-    stores: Arc<dyn StoreSet>,
+///
+/// `S` is the store set's type. A backend over a store set that also keeps
+/// Lashlang module artifacts (feature `lashlang`) is a
+/// `LashlangArtifactBackend` and hands out that store set's artifact store, so
+/// an RLM host reads its artifacts from the substrate it journals beside.
+pub struct RestateBackend<S: ?Sized + StoreSet = dyn StoreSet> {
+    stores: Arc<S>,
     effect_host: Arc<RestateEffectHost>,
     process: Arc<RestateProcessDeployment>,
     queued_work: BackendQueuedWork,
     identity: Arc<str>,
 }
 
+impl<S: ?Sized + StoreSet> Clone for RestateBackend<S> {
+    fn clone(&self) -> Self {
+        Self {
+            stores: Arc::clone(&self.stores),
+            effect_host: Arc::clone(&self.effect_host),
+            process: Arc::clone(&self.process),
+            queued_work: self.queued_work.clone(),
+            identity: Arc::clone(&self.identity),
+        }
+    }
+}
+
 impl RestateBackend {
+    /// Every service name this backend's wiring addresses on the endpoint:
+    /// the durable-wait pair that carries turn terminal promises, await-event
+    /// waits and cancellation gates, and the process workflow and attach
+    /// services. Assert the set at wiring time with
+    /// [`crate::assert_services_bound`] or
+    /// [`assert_endpoint_bound`](Self::assert_endpoint_bound).
+    pub fn required_service_names() -> Vec<&'static str> {
+        RestateProcessDeployment::required_service_names()
+    }
+}
+
+impl<S: ?Sized + StoreSet> RestateBackend<S> {
     /// The backend reaching Restate at `connection` under `authority_id`,
     /// over `stores`, with `queued_work` running its queued session work.
     pub fn new(
         connection: impl Into<RestateConnection>,
         authority_id: RestateAuthorityId,
-        stores: Arc<dyn StoreSet>,
+        stores: Arc<S>,
         queued_work: RestateQueuedWork,
     ) -> Self {
         Self::with_process_event_sink(connection, authority_id, stores, queued_work, None)
@@ -83,7 +111,7 @@ impl RestateBackend {
     pub fn with_process_event_sink(
         connection: impl Into<RestateConnection>,
         authority_id: RestateAuthorityId,
-        stores: Arc<dyn StoreSet>,
+        stores: Arc<S>,
         queued_work: RestateQueuedWork,
         sink: Option<Arc<dyn ProcessEventSink>>,
     ) -> Self {
@@ -109,23 +137,17 @@ impl RestateBackend {
         }
     }
 
-    /// Every service name this backend's wiring addresses on the endpoint:
-    /// the durable-wait pair that carries turn terminal promises, await-event
-    /// waits and cancellation gates, and the process workflow and attach
-    /// services. Assert the set at wiring time with
-    /// [`crate::assert_services_bound`] or
-    /// [`assert_endpoint_bound`](Self::assert_endpoint_bound).
-    pub fn required_service_names() -> Vec<&'static str> {
-        RestateProcessDeployment::required_service_names()
-    }
-
     /// Fail at wiring time when `endpoint` does not bind every service in
     /// [`required_service_names`](Self::required_service_names).
     pub async fn assert_endpoint_bound(
         &self,
         endpoint: &restate_sdk::endpoint::Endpoint,
     ) -> Result<(), crate::RestateBindingCheckError> {
-        crate::assert_services_bound(endpoint, Self::required_service_names().as_slice()).await
+        crate::assert_services_bound(
+            endpoint,
+            RestateBackend::required_service_names().as_slice(),
+        )
+        .await
     }
 
     /// The Restate effect host every runtime of this backend runs on.
@@ -141,7 +163,7 @@ impl RestateBackend {
     }
 
     /// The store set this backend journals its effects beside.
-    pub fn stores(&self) -> &Arc<dyn StoreSet> {
+    pub fn stores(&self) -> &Arc<S> {
         &self.stores
     }
 
@@ -160,7 +182,7 @@ impl RestateBackend {
     }
 }
 
-impl lash_core::Backend for RestateBackend {
+impl<S: ?Sized + StoreSet> lash_core::Backend for RestateBackend<S> {
     fn binding_identity(&self) -> &str {
         &self.identity
     }
@@ -206,7 +228,18 @@ impl lash_core::Backend for RestateBackend {
     }
 }
 
-impl std::fmt::Debug for RestateBackend {
+/// The store set this backend journals beside keeps its Lashlang module
+/// artifacts.
+#[cfg(feature = "lashlang")]
+impl<S: ?Sized + lashlang::LashlangArtifactStoreSet> lashlang::LashlangArtifactBackend
+    for RestateBackend<S>
+{
+    fn lashlang_artifact_store(&self) -> Arc<dyn lashlang::LashlangArtifactStore> {
+        self.stores.lashlang_artifact_store()
+    }
+}
+
+impl<S: ?Sized + StoreSet> std::fmt::Debug for RestateBackend<S> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RestateBackend")

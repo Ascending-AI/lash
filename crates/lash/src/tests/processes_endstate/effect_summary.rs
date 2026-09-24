@@ -70,30 +70,23 @@ impl SummaryBackend {
     async fn backend(
         &self,
         owner: &str,
-    ) -> (
-        Arc<dyn lash_core::Backend>,
-        Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
-    ) {
+    ) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend> {
         match self {
-            Self::Sqlite(root) => {
-                let backend = lash_sqlite_store::SqliteBackend::open(root)
+            Self::Sqlite(root) => Arc::new(
+                lash_sqlite_store::SqliteBackend::open(root)
                     .await
-                    .expect("open the SQLite backend");
-                let artifact = backend.process_env_store();
-                (Arc::new(backend), artifact)
-            }
+                    .expect("open the SQLite backend"),
+            ),
             Self::Postgres(url, attachments) => {
                 let storage = lash_postgres_store::PostgresStorage::connect(url)
                     .await
                     .expect("connect PostgreSQL storage");
-                let artifact = Arc::new(storage.lashlang_artifact_store());
-                let backend = lash_postgres_store::PostgresBackend::new(
+                Arc::new(lash_postgres_store::PostgresBackend::new(
                     &storage,
                     Arc::new(crate::persistence::FileAttachmentStore::new(
                         attachments.join(owner),
                     )),
-                );
-                (Arc::new(backend), artifact)
+                ))
             }
         }
     }
@@ -104,34 +97,39 @@ impl SummaryBackend {
         let sink = CollectingProcessEventSink::default();
         let provider = mock_provider();
         let provider_id = provider.kind().to_string();
-        let (backend, artifact) = self.backend(owner).await;
-        let (backend, faults): (Arc<dyn lash_core::Backend>, _) = match fault {
-            Some((event_type, count)) => {
-                let faults = Arc::new(lash_core::EffectSummaryAppendFaults::new(
-                    backend.process_registry(),
-                    event_type,
-                    count,
-                ));
-                let registry = Arc::clone(&faults) as Arc<dyn lash_core::ProcessRegistry>;
-                (
-                    Arc::new(DecoratedBackend::over(backend).process_registry(move |_| registry)),
-                    Some(faults),
-                )
-            }
-            None => (backend, None),
-        };
+        let backend = self.backend(owner).await;
+        let (backend, faults): (Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>, _) =
+            match fault {
+                Some((event_type, count)) => {
+                    let faults = Arc::new(lash_core::EffectSummaryAppendFaults::new(
+                        backend.process_registry(),
+                        event_type,
+                        count,
+                    ));
+                    let registry = Arc::clone(&faults) as Arc<dyn lash_core::ProcessRegistry>;
+                    (
+                        Arc::new(
+                            DecoratedBackend::over_lashlang(backend)
+                                .process_registry(move |_| registry),
+                        ),
+                        Some(faults),
+                    )
+                }
+                None => (backend, None),
+            };
+        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash_protocol_rlm::RlmChannel::Cell)
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
+            backend.as_ref(),
+        );
         let core = LashCore::rlm_builder(
-            backend,
+            backend as Arc<dyn lash_core::Backend>,
             crate::TurnBudget::Unbounded,
-            lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash_protocol_rlm::RlmChannel::Cell)
-                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                    .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                    .build(),
-                artifact,
-            ),
+            factory,
         )
         .session_spec(
             crate::SessionSpec::new()
@@ -255,7 +253,10 @@ async fn start_process(
     process_id: &ProcessId,
     program: lashlang::Program,
 ) {
-    let (_backend, artifact) = backend.backend("effect-summary-linker").await;
+    let artifact = backend
+        .backend("effect-summary-linker")
+        .await
+        .lashlang_artifact_store();
     let process =
         LinkedTestProcess::new_with_catalog(artifact.as_ref(), program, "main", summary_catalog())
             .await;

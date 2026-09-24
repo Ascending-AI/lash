@@ -308,8 +308,8 @@ async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
 
 /// A sleep process the current build published, for the handover cases: were
 /// it resumed, its first act would be a sleep effect.
-async fn published_sleep_process() -> (Arc<InMemoryLashlangArtifactStore>, LashlangProcessInput) {
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+async fn published_sleep_process() -> (Arc<dyn LashlangArtifactStore>, LashlangProcessInput) {
+    let store = crate::lib_tests::memory_artifact_store().await;
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         LashlangAbilities::default().with_sleep(),

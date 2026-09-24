@@ -184,6 +184,7 @@ pub(super) async fn rlm_core(
     tools: Arc<dyn ToolProvider>,
     trace_path: PathBuf,
 ) -> Result<LashCore> {
+    let backend = memory_backend().await?;
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -191,10 +192,10 @@ pub(super) async fn rlm_core(
             .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+        backend.as_ref(),
     );
     let mut builder = LashCore::rlm_builder(
-        memory_backend().await?,
+        backend,
         lash::TurnBudget::bounded(MAX_MODEL_TURNS_PER_SESSION_TURN),
         factory,
     )

@@ -20,6 +20,11 @@ pub(crate) async fn memory_backend() -> lash_sqlite_store::SqliteBackend {
     backend
 }
 
+/// A fresh memory backend's Lashlang artifact store.
+pub(crate) async fn memory_artifact_store() -> Arc<dyn LashlangArtifactStore> {
+    LashlangArtifactBackend::lashlang_artifact_store(&memory_backend().await)
+}
+
 #[test]
 fn effect_group_wait_identity_uses_the_durable_group_contract() {
     let invocation = |replay_key: &str| {
@@ -172,7 +177,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         }
     }
 
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let store = crate::lib_tests::memory_artifact_store().await;
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process listen() signals { ready: any } { await wait_signal(ready); finish null }",
         program: b::module(
@@ -392,7 +397,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
             vec![b::record(vec![("value", b::string(value))])],
         ))
     };
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let store = crate::lib_tests::memory_artifact_store().await;
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process batch() -> null { let values = await (tools.echo({value: 'a'})?, tools.echo({value: 'b'})?); finish null }",
         program: b::module(
@@ -922,7 +927,7 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
         environment: &environment,
     })
     .expect("process module compiles");
-    let store = InMemoryLashlangArtifactStore::new();
+    let store = crate::lib_tests::memory_artifact_store().await;
     store
         .publish_module_artifact(
             &lash_core::ArtifactOwner::host("trace-map-test"),
@@ -943,7 +948,7 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
     };
 
     let direct = trace_lashlang_process_map(&output.artifact, "scan").expect("direct map");
-    let snapshot = trace_lashlang_process_map_snapshot(&store, &input)
+    let snapshot = trace_lashlang_process_map_snapshot(store.as_ref(), &input)
         .await
         .expect("stored map snapshot");
     assert_eq!(snapshot, direct);
@@ -952,7 +957,7 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
     let mut missing_process = input.clone();
     missing_process.process_name = "missing".to_string();
     assert!(matches!(
-        trace_lashlang_process_map_snapshot(&store, &missing_process).await,
+        trace_lashlang_process_map_snapshot(store.as_ref(), &missing_process).await,
         Err(TraceLanguageExecutionMapError::ProcessMissing { process_name, .. })
             if process_name == "missing"
     ));
@@ -961,7 +966,7 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
     let mut missing_artifact = input;
     missing_artifact.module_ref = lashlang::ModuleRef::new(&missing_hash);
     assert!(matches!(
-        trace_lashlang_process_map_snapshot(&store, &missing_artifact).await,
+        trace_lashlang_process_map_snapshot(store.as_ref(), &missing_artifact).await,
         Err(TraceLanguageExecutionMapError::ArtifactMissing(_))
     ));
 }
@@ -1466,7 +1471,7 @@ fn deterministic_process_id_separates_parallel_sites_ordinals_and_parents() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn prepared_start_replays_same_registration_id_without_duplicate_child_identity() {
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let store = crate::lib_tests::memory_artifact_store().await;
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         LashlangAbilities::default(),
@@ -1534,7 +1539,7 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
 
 #[tokio::test(flavor = "current_thread")]
 async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission() {
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let store = crate::lib_tests::memory_artifact_store().await;
     let required_environment =
         LashlangHostEnvironment::new(process_start_catalog(), LashlangAbilities::default());
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
@@ -1731,7 +1736,7 @@ process scan(root: str) -> str {
 
 #[tokio::test(flavor = "current_thread")]
 async fn prepared_start_checks_indirect_process_identity_against_named_signature() {
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let store = crate::lib_tests::memory_artifact_store().await;
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         LashlangAbilities::default(),
@@ -1949,7 +1954,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
 
 #[tokio::test(flavor = "current_thread")]
 async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let store = crate::lib_tests::memory_artifact_store().await;
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         LashlangAbilities::default(),
@@ -2164,7 +2169,7 @@ fn test_process_start(
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_prepared_start_records_the_resolved_attempt_bound_and_the_fingerprint_hashes_it() {
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let store = crate::lib_tests::memory_artifact_store().await;
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         LashlangAbilities::default(),

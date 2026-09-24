@@ -786,16 +786,12 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        memory_backend().await,
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(provider)
-    .model(mock_model_spec())
-    .tools(Arc::new(StopQueuedTool))
-    .without_queued_work()
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        .provider(provider)
+        .model(mock_model_spec())
+        .tools(Arc::new(StopQueuedTool))
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("stopped-withheld").open().await?;
     *durable.lock_recover() = Some(session.durable());
     session

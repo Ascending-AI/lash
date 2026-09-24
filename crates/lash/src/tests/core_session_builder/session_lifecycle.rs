@@ -859,17 +859,14 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()>
         "lashlang_abilities": { "sleep": true }
     }))
     .expect("rlm config");
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, inmem_artifact_store());
-    let core = LashCore::rlm_builder(
-        memory_backend().await,
-        crate::TurnBudget::Unbounded,
-        factory,
-    )
-    .provider(provider)
-    .model(mock_model_spec())
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, backend.as_ref());
+    let core = LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, factory)
+        .provider(provider)
+        .model(mock_model_spec())
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-abilities-prompt").open().await?;
 
     session
@@ -1066,7 +1063,9 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     // the caller builds. The plugin host carries the core tool plugin plus any
     // extra tool plugins; the request's execution env plugin options configure
     // them (here `compile-extra-tool` resolves to `lookup`).
-    let artifact_store = Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new());
+    let backend = memory_backend().await;
+    let artifact_store =
+        lash_lashlang_runtime::LashlangArtifactBackend::lashlang_artifact_store(backend.as_ref());
     let factory = Arc::new(lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -1074,7 +1073,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        artifact_store.clone(),
+        backend.as_ref(),
     ));
     let plugin_host = lash_core::facade_support::PluginHost::new(vec![
         Arc::clone(&factory) as Arc<dyn PluginFactory>,
@@ -1904,7 +1903,7 @@ impl lash_core::EffectHost for RetirementRecordingHost {
 async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Result<()> {
     let retirements = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = Arc::clone(&retirements);
-    let backend = DecoratedBackend::over(memory_backend().await).effect_host(move |inner| {
+    let backend = DecoratedBackend::over_sqlite(memory_backend().await).effect_host(move |inner| {
         Arc::new(RetirementRecordingHost {
             inner,
             retirements: recorded,

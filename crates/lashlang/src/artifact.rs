@@ -1,5 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(test)]
+use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
@@ -702,12 +704,43 @@ impl ArtifactPublicationPause {
     }
 }
 
+/// A backend (ADR 0102) whose store set also keeps Lashlang module
+/// artifacts.
+///
+/// [`lash_core_execution::Backend`] sits below lashlang, so it cannot name
+/// [`LashlangArtifactStore`]. This extension trait adds that one port, and
+/// each backend answers it from the same store set its other ports come
+/// from: SQLite and PostgreSQL from their durable-core store, Restate from
+/// its SQL store set. A Lashlang host never takes an artifact store beside a
+/// backend; it takes the backend and reads the store from here, so the
+/// artifacts a session writes live in the substrate that reopens it, and the
+/// artifact cleanup sweep reaches the store the sessions wrote.
+pub trait LashlangArtifactBackend: lash_core_execution::Backend {
+    /// This backend's Lashlang module-artifact store. Every call hands out a
+    /// handle on the one store, like every other backend port.
+    fn lashlang_artifact_store(&self) -> Arc<dyn LashlangArtifactStore>;
+}
+
+/// A SQL [`lash_core_execution::StoreSet`] that also keeps Lashlang module
+/// artifacts: the store set an engine-backed [`LashlangArtifactBackend`]
+/// (Restate) takes its artifact store from.
+pub trait LashlangArtifactStoreSet: lash_core_execution::StoreSet {
+    /// This store set's Lashlang module-artifact store.
+    fn lashlang_artifact_store(&self) -> Arc<dyn LashlangArtifactStore>;
+}
+
+/// Reference model of [`LashlangArtifactStore`] for lashlang's own unit
+/// tests. Hosts take their artifact store from their backend
+/// ([`LashlangArtifactBackend`]); nothing outside this crate's tests can
+/// name this type.
+#[cfg(test)]
 #[derive(Clone, Default)]
-pub struct InMemoryLashlangArtifactStore {
+pub(crate) struct InMemoryLashlangArtifactStore {
     state: Arc<Mutex<InMemoryArtifactState>>,
     publication_pause: Arc<Mutex<Option<ArtifactPublicationPause>>>,
 }
 
+#[cfg(test)]
 #[derive(Default)]
 struct InMemoryArtifactState {
     modules: BTreeMap<ModuleRef, Arc<ModuleArtifact>>,
@@ -715,19 +748,14 @@ struct InMemoryArtifactState {
     retired_owners: HashSet<lash_core_execution::ArtifactOwner>,
 }
 
+#[cfg(test)]
 impl InMemoryLashlangArtifactStore {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 }
 
-pub fn global_in_memory_lashlang_artifact_store() -> Arc<InMemoryLashlangArtifactStore> {
-    static STORE: OnceLock<Arc<InMemoryLashlangArtifactStore>> = OnceLock::new();
-    STORE
-        .get_or_init(|| Arc::new(InMemoryLashlangArtifactStore::new()))
-        .clone()
-}
-
+#[cfg(test)]
 #[async_trait::async_trait]
 impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
     fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {

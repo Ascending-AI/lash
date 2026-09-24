@@ -51,9 +51,8 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
     let (sink_tx, mut sink_rx) = mpsc::channel::<lash::process::ProcessEvent>(16);
     let (fault_tx, _fault_rx) = mpsc::channel::<WorkerFaultNotice>(16);
     let (watched, wiring) = watched_process_work(Arc::clone(&process_registry), sink_tx, fault_tx);
-    let artifact_store = sqlite.process_env_store();
     let backend = Arc::new(DecoratedBackend::over(sqlite).with_process_work(wiring));
-    let core = explicit_durable_test_facets_on(backend, artifact_store)
+    let core = explicit_durable_test_facets_on(backend)
         .provider(provider)
         .model(model)
         .build(crate::test_core_owner())

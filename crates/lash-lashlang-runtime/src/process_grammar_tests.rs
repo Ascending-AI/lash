@@ -13,7 +13,7 @@ use lashlang::testing::ast_builders as b;
 pub(crate) async fn run_sleep_process_started_under(
     replay_grammar: Option<u32>,
 ) -> (lash_core::ProcessRunOutcome, Arc<TraceLashlangGraphStore>) {
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let store = crate::lib_tests::memory_artifact_store().await;
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         LashlangAbilities::default().with_sleep(),

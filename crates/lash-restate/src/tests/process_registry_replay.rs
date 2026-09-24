@@ -2,7 +2,6 @@ use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::TurnFailureCode;
 
-use lashlang::LashlangArtifactStore as _;
 use lashlang::testing::ast_builders as b;
 
 #[tokio::test]
@@ -72,7 +71,11 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all()),
     )
     .expect("link lashlang module");
-    let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+    let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open the artifact backend");
+    let artifact_store =
+        lashlang::LashlangArtifactBackend::lashlang_artifact_store(&artifact_backend);
     artifact_store
         .publish_module_artifact(
             &lash_core::ArtifactOwner::host("restate-serializable-input"),
