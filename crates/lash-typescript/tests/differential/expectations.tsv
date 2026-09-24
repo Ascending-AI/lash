@@ -603,3 +603,23 @@ findings	314	accept	"'x-x'.replaceAll('x', '|$1|')"	"|$1|-|$1|"	-
 findings	315	accept	"'foo-x-bar'.replace(/(x)|(y)/, '|$2|')"	"foo-||-bar"	-
 findings	316	accept	"'foo-x-bar'.replace(/(?<n>x)/, '|$<n>|$<miss>|')"	"foo-|x||-bar"	-
 findings	317	accept	"'foo-x-bar'.replace(/(x)/, \"|$$|$&|$`|$'|\")"	"foo-|$|x|foo-|-bar|-bar"	-
+findings	318	accept	"(() => { const e = new Error('x'); return Object.hasOwn(e, 'message'); })()"	"true"	-
+findings	319	accept	"(() => { const e = new Error(); return Object.hasOwn(e, 'message'); })()"	"false"	-
+findings	320	accept	"(() => { const e = new Error(undefined); return Object.hasOwn(e, 'message'); })()"	"false"	-
+findings	321	accept	"(() => { const e = new Error(''); return Object.hasOwn(e, 'message'); })()"	"true"	-
+findings	322	accept	"(() => { const e = new Error('m', { cause: 7 }); return `${Object.hasOwn(e, 'cause')}|${e.cause}`; })()"	"true|7"	-
+findings	323	accept	"(() => { const e = new Error('m', { cause: undefined }); return `${Object.hasOwn(e, 'cause')}|${e.cause}`; })()"	"true|undefined"	-
+findings	324	accept	"(() => { const e = new Error('m'); return `${Object.hasOwn(e, 'cause')}|${e.cause}`; })()"	"false|undefined"	-
+findings	325	accept	"(() => { const e = new Error('m', {}); return Object.hasOwn(e, 'cause'); })()"	"false"	-
+findings	326	accept	"(() => { const c = { t: 1 }; return new Error('m', { cause: c }).cause === c; })()"	"true"	-
+findings	327	accept	"(() => { const e = new Error('x'); e.message = 'y'; return e.message; })()"	"y"	-
+findings	328	accept	"(() => { const e = new Error('x'); delete e.message; return `${Object.hasOwn(e, 'message')}|${e.message}`; })()"	"false|"	-
+findings	329	accept	"(() => { const e = new Error('x', { cause: 1 }); delete e.cause; return `${Object.hasOwn(e, 'cause')}|${e.cause}`; })()"	"false|undefined"	-
+findings	330	accept	"(() => Object.keys(new Error('x', { cause: 1 })).length)()"	"0"	-
+findings	331	accept	"(() => { const e = new AggregateError([1], 'm', { cause: 2 }); return `${Object.hasOwn(e, 'errors')}|${Object.hasOwn(e, 'message')}|${Object.hasOwn(e, 'cause')}|${e.errors.length}`; })()"	"true|true|true|1"	-
+findings	332	accept	"(() => { const e = new AggregateError([]); return `${Object.hasOwn(e, 'message')}|${Object.hasOwn(e, 'cause')}|${e.errors.length}`; })()"	"false|false|0"	-
+findings	333	accept	"('message' in new Error('x'))"	"true"	-
+findings	334	accept	"('cause' in new Error('m'))"	"false"	-
+findings	335	accept	"(() => { let n = 0; for (const k in new Error('x', { cause: 1 })) { n++; } return n; })()"	"0"	-
+findings	336	accept	"(() => { const e = new Error(42); return e.message; })()"	"42"	-
+findings	337	accept	"(() => { const e = new Error(null); return e.message; })()"	"null"	-

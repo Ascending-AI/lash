@@ -81,7 +81,7 @@ fn a_continuation_one_format_version_behind_is_refused() {
 fn a_continuation_one_format_version_ahead_with_unknown_variant_is_refused_as_version_mismatch() {
     let mut heap = Heap::default();
     let error = heap
-        .allocate_error(ErrorKind::EffectError, "boom".to_string(), None, None)
+        .allocate_error(ErrorKind::EffectError, Some("boom".to_string()), None, None)
         .expect("EffectError");
     let mut continuation = empty_continuation(heap);
     continuation.slots = vec![Some(error)];

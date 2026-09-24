@@ -566,7 +566,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let errors = self.heap.allocate_list(items)?;
         let value = self.heap.allocate_error(
             ErrorKind::AggregateError,
-            "All promises were rejected".to_string(),
+            Some("All promises were rejected".to_string()),
             None,
             Some(errors),
         )?;

@@ -455,7 +455,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let Some(value) = to_iso_string(milliseconds) else {
                     let error = self.heap.allocate_error(
                         ErrorKind::RangeError,
-                        "Invalid time value".to_string(),
+                        Some("Invalid time value".to_string()),
                         None,
                         None,
                     )?;

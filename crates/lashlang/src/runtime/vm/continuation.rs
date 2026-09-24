@@ -563,7 +563,9 @@ mod continuation_serde {
             },
             HeapObject::Error(error) => HeapObjectWire::Error {
                 error_kind: error.kind,
-                message: error.message.clone(),
+                // Same wire rule as the canonical snapshot: an absent own
+                // `message` encodes as `""`, and `""` decodes as absent.
+                message: error.message.clone().unwrap_or_default(),
                 cause: error.cause.as_ref().map(value_to_wire).transpose()?,
                 errors: error.errors.as_ref().map(value_to_wire).transpose()?,
             },
@@ -654,7 +656,7 @@ mod continuation_serde {
                 errors,
             } => HeapObject::Error(ErrorObject {
                 kind: error_kind,
-                message,
+                message: (!message.is_empty()).then_some(message),
                 cause: cause.map(value_from_wire).transpose()?,
                 errors: errors.map(value_from_wire).transpose()?,
             }),

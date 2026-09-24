@@ -774,7 +774,7 @@ fn a_snapshot_one_version_behind_is_refused_by_the_fence() {
 fn a_snapshot_one_version_ahead_with_unknown_variant_is_refused_as_version_mismatch() {
     let mut heap = Heap::default();
     let error = heap
-        .allocate_error(ErrorKind::EffectError, "boom".to_string(), None, None)
+        .allocate_error(ErrorKind::EffectError, Some("boom".to_string()), None, None)
         .expect("EffectError");
     let mut roots = Record::new();
     roots.insert("rejection".to_string(), error);
@@ -841,7 +841,7 @@ fn a_minted_error_brand_ships_by_name_and_round_trips_at_the_current_version() {
     let error = heap
         .allocate_error(
             ErrorKind::EffectError,
-            "boom".to_string(),
+            Some("boom".to_string()),
             Some(cause),
             None,
         )
@@ -1285,7 +1285,7 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     let error = heap
         .allocate_error(
             ErrorKind::TypeError,
-            "bad".to_string(),
+            Some("bad".to_string()),
             Some(shared.clone()),
             None,
         )
@@ -1415,7 +1415,7 @@ fn lashlang_forest_validation_rejects_every_typescript_exotic_kind() {
         HeapObject::Date(DateObject { milliseconds: 0.0 }),
         HeapObject::Error(ErrorObject {
             kind: ErrorKind::Error,
-            message: String::new(),
+            message: None,
             cause: None,
             errors: None,
         }),

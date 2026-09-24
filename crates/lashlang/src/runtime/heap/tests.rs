@@ -312,7 +312,7 @@ fn exotic_kinds_have_deterministic_logical_byte_charges() {
     let date = HeapObject::Date(DateObject { milliseconds: 1.0 });
     let error = HeapObject::Error(ErrorObject {
         kind: ErrorKind::TypeError,
-        message: "bad".to_string(),
+        message: Some("bad".to_string()),
         cause: Some(Value::Number(1.0)),
         errors: None,
     });
@@ -374,7 +374,7 @@ fn an_error_detaches_into_the_record_the_guest_reads() {
     let error = heap
         .allocate_error(
             ErrorKind::EffectError,
-            "boom".to_string(),
+            Some("boom".to_string()),
             Some(cause.clone()),
             None,
         )

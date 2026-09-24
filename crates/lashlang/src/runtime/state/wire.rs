@@ -81,7 +81,11 @@ impl CanonicalHeapObject {
             },
             HeapObject::Error(error) => Self::Error {
                 error_kind: error.kind,
-                message: error.message.clone(),
+                // The wire predates own-property presence: an absent `message`
+                // and an empty one both encode as `""`. Decoding `""` as
+                // absent restores `new Error()` faithfully and only flattens
+                // an explicitly empty own `message`.
+                message: error.message.clone().unwrap_or_default(),
                 cause: error
                     .cause
                     .as_ref()
@@ -210,7 +214,7 @@ impl CanonicalHeapObject {
                 errors,
             } => HeapObject::Error(ErrorObject {
                 kind: error_kind,
-                message,
+                message: (!message.is_empty()).then_some(message),
                 cause: cause.map(CanonicalValue::into_runtime).transpose()?,
                 errors: errors.map(CanonicalValue::into_runtime).transpose()?,
             }),
