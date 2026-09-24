@@ -16,6 +16,7 @@ enum GlobalBuiltin {
     RejectedDom(RejectedDomBuiltin),
     StructuredClone,
     ErrorConstructor(ErrorConstructor),
+    RegExpConstructor,
     AgentPrimitive(AgentPrimitive),
 }
 
@@ -44,6 +45,7 @@ impl GlobalBuiltin {
             "URIError" => Some(Self::ErrorConstructor(ErrorConstructor::Uri)),
             "EvalError" => Some(Self::ErrorConstructor(ErrorConstructor::Eval)),
             "AggregateError" => Some(Self::ErrorConstructor(ErrorConstructor::Aggregate)),
+            "RegExp" => Some(Self::RegExpConstructor),
             "finish" => Some(Self::AgentPrimitive(AgentPrimitive::Finish)),
             "print" => Some(Self::AgentPrimitive(AgentPrimitive::Print)),
             "sleep" => Some(Self::AgentPrimitive(AgentPrimitive::Sleep)),
@@ -323,6 +325,7 @@ impl Lowerer {
                 let args = args.iter().cloned().map(CallArg::Value).collect::<Vec<_>>();
                 self.lower_constructor(constructor.name(), &args)
             }
+            GlobalBuiltin::RegExpConstructor => self.lower_regexp_call(args),
             GlobalBuiltin::AgentPrimitive(primitive) => self.lower_agent_primitive(primitive, args),
         }
     }
@@ -429,6 +432,50 @@ impl Lowerer {
         Ok(LashExpr::BuiltinCall {
             name: builtin.intrinsic().into(),
             args: vec![self.lower_expr(value)?],
+        })
+    }
+
+    /// `RegExp(pattern, flags)` called as a function: ECMA-262's `RegExp`
+    /// with NewTarget `undefined` — a RegExp `pattern` and `undefined`
+    /// `flags` return `pattern` itself, anything else constructs as
+    /// `new RegExp` would. The VM's `construct` operation applies both
+    /// halves; the constructor's own argument checks stay on `new`.
+    fn lower_regexp_call(&mut self, args: &[Expr]) -> Result<LashExpr, Diagnostic> {
+        if args.len() > 2 {
+            return Err(Diagnostic::defect(
+                DiagnosticCode::UnsupportedExpression,
+                "RegExp expects at most two arguments".to_string(),
+                None,
+            ));
+        }
+        for (index, argument) in args.iter().enumerate() {
+            if matches!(
+                argument,
+                Expr::Null
+                    | Expr::Bool(_)
+                    | Expr::Number(_)
+                    | Expr::Array(_)
+                    | Expr::Object(_)
+                    | Expr::Function(_)
+            ) {
+                let label = if index == 0 { "pattern" } else { "flags" };
+                return Err(Diagnostic::with_repair(
+                    DiagnosticCode::MethodUnsupported,
+                    format!("RegExp {label} must be a string, a RegExp, or undefined"),
+                    "pass an explicit string",
+                    None,
+                ));
+            }
+        }
+        let mut values = vec![LashExpr::String("construct".into())];
+        values.extend(
+            args.iter()
+                .map(|arg| self.lower_expr(arg))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        Ok(LashExpr::BuiltinCall {
+            name: "__typescript_regexp".into(),
+            args: values,
         })
     }
 

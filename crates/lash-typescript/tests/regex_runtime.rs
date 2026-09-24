@@ -784,3 +784,51 @@ fn match_and_search_coerce_non_regexp_arguments() {
         "the refusal is the named one: {error}"
     );
 }
+
+/// FIG-3704: `RegExp(pattern, flags)` called as a function constructs as
+/// `new RegExp` would, and returns `pattern` itself when it is a RegExp and
+/// `flags` is `undefined` (ECMA-262 `RegExp()` — no subclassing exists, so a
+/// RegExp's constructor is always `RegExp`).
+#[test]
+fn regexp_called_without_new_constructs_or_returns_the_pattern() {
+    assert_eq!(
+        finished("const r=RegExp('a+','i'); finish([r.source,r.flags,r.ignoreCase]);"),
+        Value::List(
+            vec![
+                Value::String("a+".into()),
+                Value::String("i".into()),
+                Value::Bool(true),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished("finish([RegExp().source,RegExp(undefined,'g').source]);"),
+        Value::List(vec![Value::String("(?:)".into()), Value::String("(?:)".into())].into())
+    );
+    assert_eq!(
+        finished("const re=/x/i; finish([RegExp(re)===re,RegExp(re,undefined)===re]);"),
+        Value::List(vec![Value::Bool(true), Value::Bool(true)].into())
+    );
+    assert_eq!(
+        finished("const re=/x/i; const r=RegExp(re,'g'); finish([r===re,r.source,r.flags]);"),
+        Value::List(
+            vec![
+                Value::Bool(false),
+                Value::String("x".into()),
+                Value::String("g".into()),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished("finish(RegExp(/y+/m).flags);"),
+        Value::String("m".into())
+    );
+    assert_eq!(
+        finished(
+            "let verdict='uncaught'; try { RegExp('\\\\'); } catch (e) { verdict = e instanceof SyntaxError; } finish(verdict);"
+        ),
+        Value::Bool(true)
+    );
+}

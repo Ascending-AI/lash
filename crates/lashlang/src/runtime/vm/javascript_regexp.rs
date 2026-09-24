@@ -636,6 +636,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         let args = &values[1..];
         let result = match (operation.as_str(), args) {
+            // `RegExp(pattern, flags)` called without `new`: ECMA-262's call
+            // arm returns `pattern` itself when it is a RegExp and `flags` is
+            // `undefined` — no subclassing exists, so its constructor is
+            // always `RegExp` — and constructs as `new RegExp` otherwise.
+            ("construct", args) => match args {
+                [Value::Ref(id), ..]
+                    if args.len() <= 2
+                        && matches!(args.get(1), None | Some(Value::Undefined))
+                        && matches!(self.heap.get(*id), Ok(HeapObject::RegExp(_))) =>
+                {
+                    Value::Ref(*id)
+                }
+                _ => self.construct_regexp(args)?,
+            },
             ("exec", [Value::Ref(receiver), input]) => {
                 let input = self.heap.javascript_to_string(input)?;
                 self.exec_regexp(*receiver, &input)?
