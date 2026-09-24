@@ -186,11 +186,11 @@ finish(`tool batch settled: ${found.length}`);
         1,
         "one model call issues the whole batch"
     );
-    // Not a drained stop: each settled group child leaves its cancellation
-    // watch (a `LashDurableWaitWorkflow/await_resolution` ingress call the
-    // dispatcher dropped) open on the deployment until the group's CANCEL
-    // waits resolve, so the deployment does not drain after the turn.
-    endpoint.stop().await;
+    // A settled group child's cancellation watch ends with its settlement
+    // (FIG-3709), so the deployment drains once the turn is done.
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 

@@ -382,6 +382,10 @@ pub enum EffectGroupWaitResolution {
     /// The child at this position seated its settlement: the wake a §5
     /// barrier parks on while a lower-commit sibling finishes its drain.
     Drained,
+    /// The child at this position seated its settlement, so no cancel can
+    /// reach it: its cancel wait ends without cancelling it, and the watch
+    /// its dispatch invocation held on the wait ends with it (FIG-3709).
+    Settled,
     Refused {
         reason: EffectGroupRefusal,
     },
@@ -455,6 +459,20 @@ pub(crate) fn admit_wait_request(
             deadline: None,
         })
         .map_err(|error| group_shape_error(error.to_string()))
+}
+
+#[cfg(test)]
+pub(crate) fn cancel_wait_request(
+    scope: &ExecutionScope,
+    group_key: &str,
+    replay_key: &str,
+) -> Result<RestateDurableWaitAwaitRequest, TerminalError> {
+    group_wait_key(scope, group_key, EffectGroupWaitKind::Cancel(replay_key)).map(|key| {
+        RestateDurableWaitAwaitRequest {
+            key,
+            deadline: None,
+        }
+    })
 }
 
 #[cfg(test)]
@@ -1079,6 +1097,7 @@ impl EffectGroupIndex {
         live.settlements.insert(rank, settlement);
         live.settled_positions.insert(request.position, rank);
         let wait_scope = live.shape.wait_scope.clone();
+        let replay_key = live.shape.replay_key(request.position)?.to_string();
         store_index(&ctx, record.clone());
         resolve_group_wait(
             &ctx,
@@ -1096,6 +1115,17 @@ impl EffectGroupIndex {
             &group_key,
             EffectGroupWaitKind::Drained(request.position),
             EffectGroupWaitResolution::Drained,
+        )
+        .await?;
+        // A seated child is past every cancel: its cancel wait ends here, so
+        // the dispatch invocation's watch on it does not stay open on the
+        // deployment until the group closes or retires.
+        resolve_group_wait(
+            &ctx,
+            &wait_scope,
+            &group_key,
+            EffectGroupWaitKind::Cancel(&replay_key),
+            EffectGroupWaitResolution::Settled,
         )
         .await?;
         Ok(Json(EffectGroupRecordSettlementResponse::Recorded { rank }))
