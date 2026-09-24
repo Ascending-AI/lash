@@ -21,63 +21,6 @@ pub(crate) struct RuntimePerfPhaseProbe {
     state: Mutex<RuntimePerfPhaseProbeState>,
 }
 
-struct ScopedPerfEffectController;
-
-impl lash::runtime::AwaitEventResolver for ScopedPerfEffectController {}
-
-#[async_trait::async_trait]
-impl lash::runtime::RuntimeEffectController for ScopedPerfEffectController {
-    async fn execute_effect(
-        &self,
-        envelope: lash::runtime::RuntimeEffectEnvelope,
-        local_executor: lash::runtime::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash::runtime::RuntimeEffectOutcome, lash::runtime::RuntimeEffectControllerError>
-    {
-        local_executor.execute(envelope).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        _group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "ScopedPerfEffectController",
-        ))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "ScopedPerfEffectController",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "ScopedPerfEffectController",
-        ))
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        _commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        Ok(
-            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped,
-        )
-    }
-}
-
 impl RuntimePerfPhaseProbe {
     fn catalog_observation_stage(&self, warm: bool) -> u8 {
         let state = self.state.lock_recover();
@@ -483,7 +426,7 @@ async fn run_once_inner(
             } else if let Some(root) = sqlite_root.as_ref() {
                 build_runtime_with_sqlite_store(scenario, root.clone()).await?
             } else {
-                build_runtime_with_store(scenario, None, trace_config).await?
+                build_runtime(scenario, trace_config).await?
             };
             Ok((sqlite_root, runtime))
         })
@@ -653,24 +596,13 @@ async fn run_once_inner(
                 let phase_probe = probe_ref;
                 let cancel = CancellationToken::new();
                 let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffectController) {
-                    let effect_controller = ScopedPerfEffectController;
                     let turn_id = TurnId::from(format!("runtime-perf-scoped-{}", turn_index + 1));
-                    let scoped_effect_controller = lash::runtime::ScopedEffectController::borrowed(
-                        &effect_controller,
-                        lash_core::AdmittedScope::unpinned(runtime.turn_scope(&turn_id))
-                            .map_err(anyhow::Error::from)?,
-                    )
-                    .map_err(anyhow::Error::from)?;
                     runtime_perf_timed(
                         scenario,
                         turn_index,
                         "run_turn",
                         Some(cancel.clone()),
-                        runtime.run_turn_with_execution_scope(
-                            turn_input,
-                            cancel,
-                            scoped_effect_controller,
-                        ),
+                        runtime.run_turn_with_execution_scope(turn_input, &turn_id, cancel),
                     )
                     .await
                 } else if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {

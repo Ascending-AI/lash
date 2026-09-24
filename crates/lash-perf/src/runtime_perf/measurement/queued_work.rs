@@ -20,9 +20,8 @@ pub(super) async fn run_once_queued_work_claim_stress(
 
     let (store, _runtime, mut commit_state) = run
         .build(async {
-            let store = Arc::new(RuntimePerfStore::default());
-            let runtime =
-                build_runtime_with_store(scenario, Some(Arc::clone(&store)), None).await?;
+            let runtime = build_runtime(scenario, None).await?;
+            let store = runtime.store();
             let commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
             Ok((store, runtime, commit_state))
         })
@@ -423,7 +422,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
 
     let (store, mut commit_state) = run
         .build(async {
-            let store = Arc::new(RuntimePerfStore::default());
+            let store = memory_perf_store(&session_id).await?;
             let commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
             Ok((store, commit_state))
         })

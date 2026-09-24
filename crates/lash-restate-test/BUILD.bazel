@@ -120,3 +120,28 @@ filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUILD", "BUILD.bazel"]),
 )
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/bazel/feature_variants.py.
+load(
+    "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_library",
+)
+
+lash_rust_feature_library(
+    name = "lash-restate-test__fv_374c44af",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_restate_test",
+    declared_features = [],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_f61f60ac", "//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_da741789", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_b996a40b", "//crates/lash-perf": "//crates/lash-perf:lash-perf__fv_1c8dd6e9", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1f971cdc", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_8a0a43ef", "//crates/lash-restate": "//crates/lash-restate:lash-restate__fv_71bc1f72", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_2883cf2a", "//crates/lash-subagents": "//crates/lash-subagents:lash-subagents__fv_e499cede", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_649f54f3"},
+    version = "0.0.0-dev",
+)

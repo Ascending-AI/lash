@@ -11,34 +11,34 @@
       "checkpoint_state_hot_paths": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 297865000,
-          "steady_state_turn_alloc_bytes_max": 15294000
+          "alloc_bytes_max": 739721000,
+          "steady_state_turn_alloc_bytes_max": 25321000
         },
         "advisory_duration": {
-          "ms_max": 338.198,
+          "ms_max": 410.053,
           "phases": {
-            "checkpoint_state.initial_capture": {
-              "budget_ms": 5.96,
-              "required": true
-            },
-            "checkpoint_state.incremental_capture": {
-              "budget_ms": 21.998,
-              "required": true
-            },
-            "checkpoint_state.measure_budget": {
-              "budget_ms": 4.15,
-              "required": true
-            },
             "checkpoint_state.component_commit": {
-              "budget_ms": 52.844,
+              "budget_ms": 85.324,
               "required": true
             },
             "checkpoint_state.component_load": {
-              "budget_ms": 16.326,
+              "budget_ms": 251.872,
               "required": true
             },
             "checkpoint_state.execution_restore": {
-              "budget_ms": 209.331,
+              "budget_ms": 195.381,
+              "required": true
+            },
+            "checkpoint_state.incremental_capture": {
+              "budget_ms": 20.452,
+              "required": true
+            },
+            "checkpoint_state.initial_capture": {
+              "budget_ms": 5.75,
+              "required": true
+            },
+            "checkpoint_state.measure_budget": {
+              "budget_ms": 3.956,
               "required": true
             }
           }
@@ -47,30 +47,26 @@
       "deep_turn_composition": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 282861000,
-          "steady_state_turn_alloc_bytes_max": 20262000
+          "alloc_bytes_max": 394068000,
+          "steady_state_turn_alloc_bytes_max": 29032000
         },
         "advisory_duration": {
-          "ms_max": 1242.768,
+          "ms_max": 957.272,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 11.904,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 24.242,
+              "budget_ms": 10.378,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 13.87,
+              "budget_ms": 13.294,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.972,
+              "budget_ms": 3.889,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 913.968,
+              "budget_ms": 603.338,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -78,43 +74,47 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 17.9,
+              "budget_ms": 29.243,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 103.332,
+              "budget_ms": 128.565,
               "required": true
             },
             "process.await_handle": {
-              "budget_ms": 198.698,
+              "budget_ms": 194.71,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 24.01,
+              "budget_ms": 19.555,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 1.233,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 11.906,
+              "budget_ms": 11.578,
               "required": true
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 13.697,
+              "budget_ms": 11.382,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.066,
+              "budget_ms": 0.056,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 0.124,
+              "budget_ms": 0.11,
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.095,
+              "budget_ms": 0.094,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 211.516,
+              "budget_ms": 202.915,
               "required": true
             },
             "rlm_lashlang.print_project": {
@@ -122,43 +122,47 @@
               "required": false
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 3.758,
+              "budget_ms": 3.382,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 6.22,
+              "budget_ms": 5.235,
               "required": false
             },
             "rlm_lashlang.store_module_artifact": {
-              "budget_ms": 0.25,
+              "budget_ms": 0.293,
               "required": false
             },
             "rlm_process.await_handle": {
-              "budget_ms": 198.894,
+              "budget_ms": 194.872,
               "required": true
             },
             "rlm_process.build_context": {
-              "budget_ms": 0.652,
+              "budget_ms": 0.736,
               "required": false
             },
+            "rlm_process.close_groups": {
+              "budget_ms": 0.136,
+              "required": true
+            },
             "rlm_process.compile": {
-              "budget_ms": 0.41,
+              "budget_ms": 0.415,
               "required": false
             },
             "rlm_process.execute": {
-              "budget_ms": 181.652,
+              "budget_ms": 170.041,
               "required": false
             },
             "rlm_process.load_artifact": {
-              "budget_ms": 0.25,
+              "budget_ms": 0.253,
               "required": false
             },
             "rlm_process.resolve_environment": {
-              "budget_ms": 2.174,
+              "budget_ms": 1.514,
               "required": false
             },
             "rlm_process.shutdown": {
-              "budget_ms": 0.778,
+              "budget_ms": 0.478,
               "required": false
             },
             "tool_intent.parent_end": {
@@ -166,11 +170,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 1.516,
+              "budget_ms": 1.338,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.398,
+              "budget_ms": 2.123,
               "required": false
             }
           }
@@ -575,52 +579,48 @@
       "embed_rlm": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 54156000,
-          "steady_state_turn_alloc_bytes_max": 4181000
+          "alloc_bytes_max": 93493000,
+          "steady_state_turn_alloc_bytes_max": 7587000
         },
         "advisory_duration": {
-          "ms_max": 384.844,
+          "ms_max": 309.726,
           "phases": {}
         }
       },
       "embed_standard": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 20315000,
-          "steady_state_turn_alloc_bytes_max": 1621000
+          "alloc_bytes_max": 45092000,
+          "steady_state_turn_alloc_bytes_max": 3647000
         },
         "advisory_duration": {
-          "ms_max": 114.874,
+          "ms_max": 107.149,
           "phases": {}
         }
       },
       "ingress_claim_projection": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 186530000,
-          "steady_state_turn_alloc_bytes_max": 14956000
+          "alloc_bytes_max": 225299000,
+          "steady_state_turn_alloc_bytes_max": 18391000
         },
         "advisory_duration": {
-          "ms_max": 622.085,
+          "ms_max": 493.148,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 15.442,
+              "budget_ms": 14.831,
               "required": false
             },
-            "commit_admission.product_attempt": {
-              "budget_ms": 23.036,
-              "required": true
-            },
             "committed_turn": {
-              "budget_ms": 15.294,
+              "budget_ms": 13.61,
               "required": false
             },
             "context_transform": {
-              "budget_ms": 9.774,
+              "budget_ms": 10.493,
               "required": false
             },
             "effect_loop": {
-              "budget_ms": 394.462,
+              "budget_ms": 272.849,
               "required": false
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -628,39 +628,39 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 18.654,
+              "budget_ms": 26.927,
               "required": false
             },
             "prepared_turn": {
-              "budget_ms": 75.44,
+              "budget_ms": 107.002,
               "required": false
             },
             "prompt_build": {
-              "budget_ms": 5.728,
+              "budget_ms": 4.106,
               "required": false
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 5.894,
+              "budget_ms": 4.811,
               "required": false
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 11.005,
+              "budget_ms": 8.383,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 7.024,
+              "budget_ms": 6.213,
               "required": true
             },
             "rlm_lashlang.print_project": {
-              "budget_ms": 2.392,
+              "budget_ms": 2.21,
               "required": false
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 6.106,
+              "budget_ms": 5.229,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 8.798,
+              "budget_ms": 6.639,
               "required": false
             },
             "tool_intent.parent_end": {
@@ -668,15 +668,15 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.813,
+              "budget_ms": 0.708,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.346,
+              "budget_ms": 1.852,
               "required": true
             },
             "turn_input_ingress.enqueue_to_claim_to_projection": {
-              "budget_ms": 396.048,
+              "budget_ms": 365.589,
               "required": true
             }
           }
@@ -721,50 +721,46 @@
       "openai_compat_stream": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 142362000,
-          "steady_state_turn_alloc_bytes_max": 11223000
+          "alloc_bytes_max": 268841000,
+          "steady_state_turn_alloc_bytes_max": 22440000
         },
         "advisory_duration": {
-          "ms_max": 443.28,
+          "ms_max": 485.525,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 4.426,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 15.59,
+              "budget_ms": 4.295,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 5.798,
+              "budget_ms": 5.497,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.642,
+              "budget_ms": 3.871,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 229.974,
+              "budget_ms": 201.24,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.783,
+              "budget_ms": 0.79,
               "required": true
             },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.66,
+              "budget_ms": 1.748,
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 4.95,
+              "budget_ms": 12.375,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 39.642,
+              "budget_ms": 77.647,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 3.304,
+              "budget_ms": 3.083,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -772,11 +768,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.864,
+              "budget_ms": 0.891,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 3.268,
+              "budget_ms": 3.091,
               "required": false
             }
           }
@@ -805,42 +801,42 @@
       "process_list_stress": {
         "guarded_span": "run_turn",
         "enforced_allocation": {
-          "alloc_bytes_max": 270544000,
-          "steady_state_turn_alloc_bytes_max": 22542000
+          "alloc_bytes_max": 637241000,
+          "steady_state_turn_alloc_bytes_max": 53107000
         },
         "advisory_duration": {
-          "ms_max": 2696.358,
+          "ms_max": 1956.264,
           "phases": {
             "process_list_stress.env_spec_hash": {
-              "budget_ms": 4.764,
+              "budget_ms": 4.68,
               "required": true
             },
             "process_list_stress.list_all": {
-              "budget_ms": 774.914,
+              "budget_ms": 1294.02,
               "required": true
             },
             "process_list_stress.list_global": {
-              "budget_ms": 810.952,
+              "budget_ms": 1153.026,
               "required": true
             },
             "process_list_stress.list_live": {
-              "budget_ms": 1019.548,
+              "budget_ms": 1564.33,
               "required": true
             },
             "process_list_stress.render_all_json": {
-              "budget_ms": 507.184,
+              "budget_ms": 486.548,
               "required": true
             },
             "process_list_stress.render_live_json": {
-              "budget_ms": 268.39,
+              "budget_ms": 340.799,
               "required": true
             },
             "process_list_stress.signal_append": {
-              "budget_ms": 18.58,
+              "budget_ms": 3.261,
               "required": true
             },
             "process_list_stress.wait_roundtrip": {
-              "budget_ms": 14.488,
+              "budget_ms": 2.456,
               "required": true
             }
           }
@@ -849,54 +845,54 @@
       "queued_work_claim_stress": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 37867000,
-          "steady_state_turn_alloc_bytes_max": 2465000
+          "alloc_bytes_max": 40675000,
+          "steady_state_turn_alloc_bytes_max": 3007000
         },
         "advisory_duration": {
-          "ms_max": 44.025,
+          "ms_max": 151.366,
           "phases": {
             "queued_work.abandon_join_claim": {
-              "budget_ms": 0.962,
+              "budget_ms": 3.041,
               "required": true
             },
             "queued_work.claim_exclusive_turn_work": {
-              "budget_ms": 1.184,
+              "budget_ms": 7.343,
               "required": true
             },
             "queued_work.claim_join_turn_work": {
-              "budget_ms": 4.726,
+              "budget_ms": 17.148,
               "required": true
             },
             "queued_work.claim_session_command": {
-              "budget_ms": 1.194,
+              "budget_ms": 9.978,
               "required": true
             },
             "queued_work.claim_session_lease": {
-              "budget_ms": 0.922,
+              "budget_ms": 2.372,
               "required": true
             },
             "queued_work.complete_exclusive_turn_work": {
-              "budget_ms": 1.716,
+              "budget_ms": 4.009,
               "required": true
             },
             "queued_work.complete_join_turn_work": {
-              "budget_ms": 3.286,
+              "budget_ms": 23.105,
               "required": true
             },
             "queued_work.complete_session_command": {
-              "budget_ms": 2.24,
+              "budget_ms": 4.354,
               "required": true
             },
             "queued_work.enqueue_mixed_batch": {
-              "budget_ms": 4.134,
+              "budget_ms": 74.087,
               "required": true
             },
             "queued_work.list_pending": {
-              "budget_ms": 0.86,
+              "budget_ms": 2.695,
               "required": true
             },
             "queued_work.reclaim_by_batch_ids": {
-              "budget_ms": 2.442,
+              "budget_ms": 11.768,
               "required": true
             }
           }
@@ -1045,507 +1041,59 @@
       "rlm": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 121882000,
-          "steady_state_turn_alloc_bytes_max": 9356000
+          "alloc_bytes_max": 133701000,
+          "steady_state_turn_alloc_bytes_max": 10566000
         },
         "advisory_duration": {
-          "ms_max": 506.07,
+          "ms_max": 506.042,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 31.992,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 19.212,
+              "budget_ms": 32.761,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 10.45,
+              "budget_ms": 9.233,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 7.426,
+              "budget_ms": 9.332,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 255.364,
-              "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 3.862,
+              "budget_ms": 203.716,
               "required": true
             },
             "post_commit_delivery": {
-              "budget_ms": 7.066,
+              "budget_ms": 13.419,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 37.858,
+              "budget_ms": 65.748,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 5.07,
+              "budget_ms": 5.523,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 3.042,
+              "budget_ms": 3.052,
               "required": false
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 5.59,
+              "budget_ms": 5.324,
               "required": true
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 2.352,
+              "budget_ms": 2.601,
               "required": false
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.944,
+              "budget_ms": 1.815,
               "required": true
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 3.27,
+              "budget_ms": 2.837,
               "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "turn.parent_end": {
-              "budget_ms": 0.776,
-              "required": false
-            },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.758,
-              "required": false
-            }
-          }
-        }
-      },
-      "rlm_async_tool_completion": {
-        "guarded_span": "whole_run",
-        "enforced_allocation": {
-          "alloc_bytes_max": 136583000,
-          "steady_state_turn_alloc_bytes_max": 10596000
-        },
-        "advisory_duration": {
-          "ms_max": 368.166,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 5.856,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 20.526,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 2.928,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 5.094,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 218.306,
-              "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 3.18,
-              "required": false
-            },
-            "post_commit_delivery": {
-              "budget_ms": 4.27,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 34.064,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 12.714,
-              "required": true
-            },
-            "rlm_lashlang.compile_link": {
-              "budget_ms": 3.014,
-              "required": true
-            },
-            "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 11.046,
-              "required": false
-            },
-            "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.765,
-              "required": false
-            },
-            "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.239,
-              "required": false
-            },
-            "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 1.048,
-              "required": false
-            },
-            "rlm_lashlang.execute": {
-              "budget_ms": 40.806,
-              "required": true
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.936,
-              "required": false
-            },
-            "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 2.372,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "turn.parent_end": {
-              "budget_ms": 0.813,
-              "required": false
-            },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.05,
-              "required": false
-            }
-          }
-        }
-      },
-      "rlm_globals": {
-        "guarded_span": "whole_run",
-        "enforced_allocation": {
-          "alloc_bytes_max": 171063000,
-          "steady_state_turn_alloc_bytes_max": 12699000
-        },
-        "advisory_duration": {
-          "ms_max": 530.808,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 4.88,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 12.956,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 8.208,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 4.252,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 320.164,
-              "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.696,
-              "required": false
-            },
-            "post_commit_delivery": {
-              "budget_ms": 11.43,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 30.26,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 3.97,
-              "required": true
-            },
-            "rlm_lashlang.compile_link": {
-              "budget_ms": 3.078,
-              "required": false
-            },
-            "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 2.16,
-              "required": false
-            },
-            "rlm_lashlang.execute": {
-              "budget_ms": 64.384,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 4.3,
-              "required": false
-            },
-            "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 9.41,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "turn.parent_end": {
-              "budget_ms": 0.758,
-              "required": false
-            },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.51,
-              "required": false
-            }
-          }
-        }
-      },
-      "rlm_large_print": {
-        "guarded_span": "whole_run",
-        "enforced_allocation": {
-          "alloc_bytes_max": 645178000,
-          "steady_state_turn_alloc_bytes_max": 54370000
-        },
-        "advisory_duration": {
-          "ms_max": 657.999,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 11.63,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 59.906,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 9.404,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 6.912,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 397.904,
-              "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 4.986,
-              "required": false
-            },
-            "post_commit_delivery": {
-              "budget_ms": 9.022,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 112.71,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 3.762,
-              "required": true
-            },
-            "rlm_lashlang.compile_link": {
-              "budget_ms": 4.184,
-              "required": true
-            },
-            "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 11.442,
-              "required": false
-            },
-            "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.794,
-              "required": false
-            },
-            "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.254,
-              "required": false
-            },
-            "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 1.181,
-              "required": false
-            },
-            "rlm_lashlang.execute": {
-              "budget_ms": 64.764,
-              "required": true
-            },
-            "rlm_lashlang.print_project": {
-              "budget_ms": 4.054,
-              "required": true
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 14.772,
-              "required": false
-            },
-            "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 2.678,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "turn.parent_end": {
-              "budget_ms": 0.836,
-              "required": false
-            },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.32,
-              "required": false
-            }
-          }
-        }
-      },
-      "rlm_large_tool_catalog": {
-        "guarded_span": "whole_run",
-        "enforced_allocation": {
-          "alloc_bytes_max": 2598305000,
-          "steady_state_turn_alloc_bytes_max": 198193000
-        },
-        "advisory_duration": {
-          "ms_max": 3569.37,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 5.572,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 26.018,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 12.27,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 3.784,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 2152.658,
-              "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 1.682,
-              "required": false
-            },
-            "post_commit_delivery": {
-              "budget_ms": 5.124,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 38.488,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 10.618,
-              "required": true
-            },
-            "rlm_lashlang.compile_link": {
-              "budget_ms": 7.462,
-              "required": false
-            },
-            "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 164.119,
-              "required": false
-            },
-            "rlm_lashlang.execute": {
-              "budget_ms": 2.398,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.814,
-              "required": false
-            },
-            "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 3.274,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "turn.parent_end": {
-              "budget_ms": 0.813,
-              "required": false
-            },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.332,
-              "required": false
-            }
-          }
-        }
-      },
-      "rlm_llm_query": {
-        "guarded_span": "whole_run",
-        "enforced_allocation": {
-          "alloc_bytes_max": 137679000,
-          "steady_state_turn_alloc_bytes_max": 10663000
-        },
-        "advisory_duration": {
-          "ms_max": 415.388,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 4.352,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 21.02,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 7.538,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 4.334,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 274.396,
-              "required": true
-            },
-            "plugin_hook.context_transform.rlm_protocol": {
-              "budget_ms": 2.406,
-              "required": false
-            },
-            "post_commit_delivery": {
-              "budget_ms": 4.944,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 33.836,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 6.63,
-              "required": true
-            },
-            "rlm_lashlang.compile_link": {
-              "budget_ms": 4.536,
-              "required": false
-            },
-            "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 11.28,
-              "required": false
-            },
-            "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.748,
-              "required": false
-            },
-            "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.22,
-              "required": false
-            },
-            "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 1.051,
-              "required": false
-            },
-            "rlm_lashlang.execute": {
-              "budget_ms": 61.058,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 2.174,
-              "required": false
-            },
-            "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 3.834,
-              "required": false
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
@@ -1556,7 +1104,439 @@
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.592,
+              "budget_ms": 2.945,
+              "required": false
+            }
+          }
+        }
+      },
+      "rlm_async_tool_completion": {
+        "guarded_span": "whole_run",
+        "enforced_allocation": {
+          "alloc_bytes_max": 184623000,
+          "steady_state_turn_alloc_bytes_max": 14889000
+        },
+        "advisory_duration": {
+          "ms_max": 361.855,
+          "phases": {
+            "before_turn_hooks": {
+              "budget_ms": 6.047,
+              "required": true
+            },
+            "committed_turn": {
+              "budget_ms": 3.36,
+              "required": true
+            },
+            "context_transform": {
+              "budget_ms": 6.808,
+              "required": true
+            },
+            "effect_loop": {
+              "budget_ms": 182.377,
+              "required": true
+            },
+            "plugin_hook.context_transform.rlm_protocol": {
+              "budget_ms": 3.18,
+              "required": false
+            },
+            "post_commit_delivery": {
+              "budget_ms": 8.907,
+              "required": true
+            },
+            "prepared_turn": {
+              "budget_ms": 58.977,
+              "required": true
+            },
+            "prompt_build": {
+              "budget_ms": 12.73,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 6.336,
+              "required": true
+            },
+            "rlm_lashlang.compile_link": {
+              "budget_ms": 3.315,
+              "required": true
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 8.58,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.777,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 1.225,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.951,
+              "required": false
+            },
+            "rlm_lashlang.execute": {
+              "budget_ms": 44.348,
+              "required": true
+            },
+            "rlm_lashlang.rehydrate_projected_globals": {
+              "budget_ms": 1.892,
+              "required": false
+            },
+            "rlm_lashlang.resolve_projected_bindings": {
+              "budget_ms": 2.024,
+              "required": false
+            },
+            "tool_intent.parent_end": {
+              "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 1.074,
+              "required": false
+            },
+            "turn_cancel.start_gate": {
+              "budget_ms": 2.287,
+              "required": false
+            }
+          }
+        }
+      },
+      "rlm_globals": {
+        "guarded_span": "whole_run",
+        "enforced_allocation": {
+          "alloc_bytes_max": 192173000,
+          "steady_state_turn_alloc_bytes_max": 14464000
+        },
+        "advisory_duration": {
+          "ms_max": 481.543,
+          "phases": {
+            "before_turn_hooks": {
+              "budget_ms": 5.241,
+              "required": true
+            },
+            "committed_turn": {
+              "budget_ms": 8.037,
+              "required": true
+            },
+            "context_transform": {
+              "budget_ms": 4.737,
+              "required": true
+            },
+            "effect_loop": {
+              "budget_ms": 239.59,
+              "required": true
+            },
+            "plugin_hook.context_transform.rlm_protocol": {
+              "budget_ms": 1.696,
+              "required": false
+            },
+            "post_commit_delivery": {
+              "budget_ms": 22.122,
+              "required": true
+            },
+            "prepared_turn": {
+              "budget_ms": 46.256,
+              "required": true
+            },
+            "prompt_build": {
+              "budget_ms": 4.224,
+              "required": true
+            },
+            "rlm_lashlang.compile_link": {
+              "budget_ms": 3.137,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 2.16,
+              "required": false
+            },
+            "rlm_lashlang.execute": {
+              "budget_ms": 69.435,
+              "required": false
+            },
+            "rlm_lashlang.rehydrate_projected_globals": {
+              "budget_ms": 4.198,
+              "required": false
+            },
+            "rlm_lashlang.resolve_projected_bindings": {
+              "budget_ms": 8.963,
+              "required": false
+            },
+            "tool_intent.parent_end": {
+              "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.815,
+              "required": false
+            },
+            "turn_cancel.start_gate": {
+              "budget_ms": 2.337,
+              "required": false
+            }
+          }
+        }
+      },
+      "rlm_large_print": {
+        "guarded_span": "whole_run",
+        "enforced_allocation": {
+          "alloc_bytes_max": 781900000,
+          "steady_state_turn_alloc_bytes_max": 66543000
+        },
+        "advisory_duration": {
+          "ms_max": 589.501,
+          "phases": {
+            "before_turn_hooks": {
+              "budget_ms": 10.92,
+              "required": true
+            },
+            "committed_turn": {
+              "budget_ms": 8.705,
+              "required": true
+            },
+            "context_transform": {
+              "budget_ms": 7.228,
+              "required": true
+            },
+            "effect_loop": {
+              "budget_ms": 313.112,
+              "required": true
+            },
+            "plugin_hook.context_transform.rlm_protocol": {
+              "budget_ms": 4.986,
+              "required": false
+            },
+            "post_commit_delivery": {
+              "budget_ms": 13.841,
+              "required": true
+            },
+            "prepared_turn": {
+              "budget_ms": 133.435,
+              "required": true
+            },
+            "prompt_build": {
+              "budget_ms": 3.137,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 7.769,
+              "required": true
+            },
+            "rlm_lashlang.compile_link": {
+              "budget_ms": 3.319,
+              "required": true
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 7.862,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.651,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 1.164,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 1.09,
+              "required": false
+            },
+            "rlm_lashlang.execute": {
+              "budget_ms": 70.239,
+              "required": true
+            },
+            "rlm_lashlang.print_project": {
+              "budget_ms": 3.853,
+              "required": true
+            },
+            "rlm_lashlang.rehydrate_projected_globals": {
+              "budget_ms": 13.46,
+              "required": false
+            },
+            "rlm_lashlang.resolve_projected_bindings": {
+              "budget_ms": 2.318,
+              "required": false
+            },
+            "tool_intent.parent_end": {
+              "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.734,
+              "required": false
+            },
+            "turn_cancel.start_gate": {
+              "budget_ms": 2.059,
+              "required": false
+            }
+          }
+        }
+      },
+      "rlm_large_tool_catalog": {
+        "guarded_span": "whole_run",
+        "enforced_allocation": {
+          "alloc_bytes_max": 2228365000,
+          "steady_state_turn_alloc_bytes_max": 178436000
+        },
+        "advisory_duration": {
+          "ms_max": 2447.11,
+          "phases": {
+            "before_turn_hooks": {
+              "budget_ms": 5.766,
+              "required": true
+            },
+            "committed_turn": {
+              "budget_ms": 13.674,
+              "required": true
+            },
+            "context_transform": {
+              "budget_ms": 4.23,
+              "required": true
+            },
+            "effect_loop": {
+              "budget_ms": 1400.912,
+              "required": true
+            },
+            "plugin_hook.context_transform.rlm_protocol": {
+              "budget_ms": 1.682,
+              "required": false
+            },
+            "post_commit_delivery": {
+              "budget_ms": 9.101,
+              "required": true
+            },
+            "prepared_turn": {
+              "budget_ms": 49.029,
+              "required": true
+            },
+            "prompt_build": {
+              "budget_ms": 10.123,
+              "required": true
+            },
+            "rlm_lashlang.compile_link": {
+              "budget_ms": 7.321,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 147.059,
+              "required": false
+            },
+            "rlm_lashlang.execute": {
+              "budget_ms": 2.32,
+              "required": false
+            },
+            "rlm_lashlang.rehydrate_projected_globals": {
+              "budget_ms": 1.79,
+              "required": false
+            },
+            "rlm_lashlang.resolve_projected_bindings": {
+              "budget_ms": 3.277,
+              "required": false
+            },
+            "tool_intent.parent_end": {
+              "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.526,
+              "required": false
+            },
+            "turn_cancel.start_gate": {
+              "budget_ms": 1.905,
+              "required": false
+            }
+          }
+        }
+      },
+      "rlm_llm_query": {
+        "guarded_span": "whole_run",
+        "enforced_allocation": {
+          "alloc_bytes_max": 163800000,
+          "steady_state_turn_alloc_bytes_max": 13056000
+        },
+        "advisory_duration": {
+          "ms_max": 410.828,
+          "phases": {
+            "before_turn_hooks": {
+              "budget_ms": 4.51,
+              "required": true
+            },
+            "committed_turn": {
+              "budget_ms": 7.606,
+              "required": true
+            },
+            "context_transform": {
+              "budget_ms": 4.842,
+              "required": true
+            },
+            "effect_loop": {
+              "budget_ms": 227.723,
+              "required": true
+            },
+            "plugin_hook.context_transform.rlm_protocol": {
+              "budget_ms": 2.406,
+              "required": false
+            },
+            "post_commit_delivery": {
+              "budget_ms": 8.885,
+              "required": true
+            },
+            "prepared_turn": {
+              "budget_ms": 60.007,
+              "required": true
+            },
+            "prompt_build": {
+              "budget_ms": 7.083,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 8.41,
+              "required": true
+            },
+            "rlm_lashlang.compile_link": {
+              "budget_ms": 5.05,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 10.057,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.805,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 1.189,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.978,
+              "required": false
+            },
+            "rlm_lashlang.execute": {
+              "budget_ms": 50.408,
+              "required": false
+            },
+            "rlm_lashlang.rehydrate_projected_globals": {
+              "budget_ms": 1.748,
+              "required": false
+            },
+            "rlm_lashlang.resolve_projected_bindings": {
+              "budget_ms": 4.012,
+              "required": false
+            },
+            "tool_intent.parent_end": {
+              "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.769,
+              "required": false
+            },
+            "turn_cancel.start_gate": {
+              "budget_ms": 2.554,
               "required": false
             }
           }
@@ -1565,30 +1545,26 @@
       "rlm_oblique_stack_mix": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 1870027000,
-          "steady_state_turn_alloc_bytes_max": 159092000
+          "alloc_bytes_max": 2001378000,
+          "steady_state_turn_alloc_bytes_max": 170876000
         },
         "advisory_duration": {
-          "ms_max": 4176.246,
+          "ms_max": 4063.583,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 14.628,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 163.5,
+              "budget_ms": 14.419,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 18.244,
+              "budget_ms": 25.155,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.976,
+              "budget_ms": 4.267,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 4429.29,
+              "budget_ms": 4184.845,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -1596,87 +1572,95 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 16.284,
+              "budget_ms": 27.134,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 360.704,
+              "budget_ms": 403.699,
               "required": true
             },
             "process.await_handle": {
-              "budget_ms": 1787.342,
+              "budget_ms": 1873.683,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 6.446,
+              "budget_ms": 5.863,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 29.114,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 5.072,
+              "budget_ms": 5.395,
               "required": true
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 13.941,
+              "budget_ms": 11.061,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.753,
+              "budget_ms": 0.717,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.343,
+              "budget_ms": 1.179,
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 1.203,
+              "budget_ms": 1.261,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 3119.652,
+              "budget_ms": 3100.198,
               "required": true
             },
             "rlm_lashlang.print_project": {
-              "budget_ms": 10.602,
+              "budget_ms": 11.46,
               "required": true
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 27.27,
+              "budget_ms": 24.894,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 3.108,
+              "budget_ms": 2.954,
               "required": false
             },
             "rlm_lashlang.store_module_artifact": {
-              "budget_ms": 0.25,
+              "budget_ms": 0.204,
               "required": false
             },
             "rlm_process.await_handle": {
-              "budget_ms": 1798.17,
+              "budget_ms": 1884.945,
               "required": true
             },
             "rlm_process.build_context": {
-              "budget_ms": 15.714,
+              "budget_ms": 15.85,
+              "required": true
+            },
+            "rlm_process.close_groups": {
+              "budget_ms": 1.913,
               "required": true
             },
             "rlm_process.compile": {
-              "budget_ms": 3.634,
+              "budget_ms": 3.29,
               "required": true
             },
             "rlm_process.execute": {
-              "budget_ms": 1607.122,
+              "budget_ms": 1708.063,
               "required": true
             },
             "rlm_process.load_artifact": {
-              "budget_ms": 2.494,
+              "budget_ms": 2.565,
               "required": true
             },
             "rlm_process.resolve_environment": {
-              "budget_ms": 83.682,
+              "budget_ms": 72.388,
               "required": true
             },
             "rlm_process.shutdown": {
-              "budget_ms": 12.26,
+              "budget_ms": 9.304,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -1684,11 +1668,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.87,
+              "budget_ms": 0.847,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.336,
+              "budget_ms": 2.307,
               "required": false
             }
           }
@@ -1697,30 +1681,26 @@
       "rlm_process_async_tool_completion": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 273946000,
-          "steady_state_turn_alloc_bytes_max": 22080000
+          "alloc_bytes_max": 372334000,
+          "steady_state_turn_alloc_bytes_max": 30006000
         },
         "advisory_duration": {
-          "ms_max": 646.499,
+          "ms_max": 950.15,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 3.926,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 23.776,
+              "budget_ms": 4.765,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 10.824,
+              "budget_ms": 14.934,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.734,
+              "budget_ms": 5.345,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 593.67,
+              "budget_ms": 796.251,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -1728,83 +1708,91 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 5.862,
+              "budget_ms": 18.691,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 35.256,
+              "budget_ms": 87.412,
               "required": true
             },
             "process.await_handle": {
-              "budget_ms": 177.778,
+              "budget_ms": 274.315,
               "required": false
             },
             "prompt_build": {
-              "budget_ms": 3.57,
+              "budget_ms": 4.728,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 11.392,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 5.876,
+              "budget_ms": 6.299,
               "required": true
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 11.098,
+              "budget_ms": 13.349,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.807,
+              "budget_ms": 0.843,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.222,
+              "budget_ms": 1.365,
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 1.079,
+              "budget_ms": 1.313,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 440.038,
+              "budget_ms": 631.875,
               "required": true
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 2.102,
+              "budget_ms": 2.366,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 2.528,
+              "budget_ms": 2.809,
               "required": false
             },
             "rlm_lashlang.store_module_artifact": {
-              "budget_ms": 0.25,
+              "budget_ms": 0.298,
               "required": true
             },
             "rlm_process.await_handle": {
-              "budget_ms": 182.076,
+              "budget_ms": 279.391,
               "required": true
             },
             "rlm_process.build_context": {
-              "budget_ms": 26.544,
+              "budget_ms": 44.013,
+              "required": true
+            },
+            "rlm_process.close_groups": {
+              "budget_ms": 2.314,
               "required": true
             },
             "rlm_process.compile": {
-              "budget_ms": 7.49,
+              "budget_ms": 7.046,
               "required": true
             },
             "rlm_process.execute": {
-              "budget_ms": 51.226,
+              "budget_ms": 80.633,
               "required": true
             },
             "rlm_process.load_artifact": {
-              "budget_ms": 5.714,
+              "budget_ms": 13.87,
               "required": true
             },
             "rlm_process.resolve_environment": {
-              "budget_ms": 77.348,
+              "budget_ms": 101.282,
               "required": true
             },
             "rlm_process.shutdown": {
-              "budget_ms": 11.532,
+              "budget_ms": 17.243,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -1812,11 +1800,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.824,
+              "budget_ms": 1.359,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.226,
+              "budget_ms": 2.508,
               "required": false
             }
           }
@@ -1825,30 +1813,26 @@
       "rlm_process_handles": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 368661000,
-          "steady_state_turn_alloc_bytes_max": 30102000
+          "alloc_bytes_max": 522293000,
+          "steady_state_turn_alloc_bytes_max": 43384000
         },
         "advisory_duration": {
-          "ms_max": 831.291,
+          "ms_max": 855.992,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 3.97,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 31.75,
+              "budget_ms": 4.394,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 8.024,
+              "budget_ms": 10.852,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 6.272,
+              "budget_ms": 7.914,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 857.076,
+              "budget_ms": 802.787,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -1856,83 +1840,91 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 6.736,
+              "budget_ms": 13.869,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 36.864,
+              "budget_ms": 58.681,
               "required": true
             },
             "process.await_handle": {
-              "budget_ms": 178.538,
+              "budget_ms": 170.4,
               "required": false
             },
             "prompt_build": {
-              "budget_ms": 7.438,
+              "budget_ms": 8.395,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 14.041,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 4.58,
+              "budget_ms": 5.041,
               "required": true
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 11.172,
+              "budget_ms": 9.087,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.774,
+              "budget_ms": 0.721,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.254,
+              "budget_ms": 1.279,
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 1.093,
+              "budget_ms": 1.034,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 671.546,
+              "budget_ms": 644.048,
               "required": true
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 3.366,
+              "budget_ms": 3.491,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 3.24,
+              "budget_ms": 3.243,
               "required": false
             },
             "rlm_lashlang.store_module_artifact": {
-              "budget_ms": 0.25,
+              "budget_ms": 0.289,
               "required": true
             },
             "rlm_process.await_handle": {
-              "budget_ms": 183.652,
+              "budget_ms": 175.078,
               "required": true
             },
             "rlm_process.build_context": {
-              "budget_ms": 96.16,
+              "budget_ms": 151.375,
+              "required": true
+            },
+            "rlm_process.close_groups": {
+              "budget_ms": 2.333,
               "required": true
             },
             "rlm_process.compile": {
-              "budget_ms": 7.96,
+              "budget_ms": 8.526,
               "required": true
             },
             "rlm_process.execute": {
-              "budget_ms": 96.73,
+              "budget_ms": 74.029,
               "required": true
             },
             "rlm_process.load_artifact": {
-              "budget_ms": 10.948,
+              "budget_ms": 15.6,
               "required": true
             },
             "rlm_process.resolve_environment": {
-              "budget_ms": 143.088,
+              "budget_ms": 158.804,
               "required": true
             },
             "rlm_process.shutdown": {
-              "budget_ms": 32.694,
+              "budget_ms": 47.78,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -1940,11 +1932,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.813,
+              "budget_ms": 1.765,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.178,
+              "budget_ms": 2.359,
               "required": false
             }
           }
@@ -1953,30 +1945,26 @@
       "rlm_streamed_paired_lashlang": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 126817000,
-          "steady_state_turn_alloc_bytes_max": 9784000
+          "alloc_bytes_max": 137722000,
+          "steady_state_turn_alloc_bytes_max": 10910000
         },
         "advisory_duration": {
-          "ms_max": 440.478,
+          "ms_max": 400.441,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 6.878,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 19.922,
+              "budget_ms": 6.85,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 33.938,
+              "budget_ms": 32.353,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 8.662,
+              "budget_ms": 9.529,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 201.214,
+              "budget_ms": 143.074,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -1984,35 +1972,35 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 7.162,
+              "budget_ms": 13.186,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 46.138,
+              "budget_ms": 78.256,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 4.066,
+              "budget_ms": 3.881,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 2.992,
+              "budget_ms": 2.884,
               "required": true
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 5.405,
+              "budget_ms": 4.316,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 2.366,
+              "budget_ms": 2.175,
               "required": true
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 5.472,
+              "budget_ms": 3.143,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 2.652,
+              "budget_ms": 2.267,
               "required": false
             },
             "tool_intent.parent_end": {
@@ -2020,11 +2008,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.783,
+              "budget_ms": 0.787,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 10.23,
+              "budget_ms": 10.051,
               "required": false
             }
           }
@@ -2033,30 +2021,26 @@
       "rlm_subagent_spawn": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 500729000,
-          "steady_state_turn_alloc_bytes_max": 41226000
+          "alloc_bytes_max": 541681000,
+          "steady_state_turn_alloc_bytes_max": 44622000
         },
         "advisory_duration": {
-          "ms_max": 1534.032,
+          "ms_max": 2326.786,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 4.558,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 24.284,
+              "budget_ms": 5.377,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 15.144,
+              "budget_ms": 20.436,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.616,
+              "budget_ms": 4.407,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 1697.84,
+              "budget_ms": 2440.397,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -2064,83 +2048,91 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 10.744,
+              "budget_ms": 27.904,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 39.094,
+              "budget_ms": 92.905,
               "required": true
             },
             "process.await_handle": {
-              "budget_ms": 1276.194,
+              "budget_ms": 1991.8,
               "required": false
             },
             "prompt_build": {
-              "budget_ms": 3.864,
+              "budget_ms": 4.672,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 17.235,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 3.542,
+              "budget_ms": 3.75,
               "required": false
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 12.178,
+              "budget_ms": 13.371,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.754,
+              "budget_ms": 0.778,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.305,
+              "budget_ms": 1.383,
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 1.17,
+              "budget_ms": 1.276,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 1504.322,
+              "budget_ms": 2330.295,
               "required": false
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.978,
+              "budget_ms": 2.18,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 2.92,
+              "budget_ms": 3.27,
               "required": false
             },
             "rlm_lashlang.store_module_artifact": {
-              "budget_ms": 0.25,
+              "budget_ms": 0.313,
               "required": false
             },
             "rlm_process.await_handle": {
-              "budget_ms": 1278.99,
+              "budget_ms": 1994.297,
               "required": false
             },
             "rlm_process.build_context": {
-              "budget_ms": 7.488,
+              "budget_ms": 10.947,
               "required": false
             },
+            "rlm_process.close_groups": {
+              "budget_ms": 1.685,
+              "required": true
+            },
             "rlm_process.compile": {
-              "budget_ms": 1.788,
+              "budget_ms": 1.895,
               "required": false
             },
             "rlm_process.execute": {
-              "budget_ms": 1063.872,
+              "budget_ms": 1676.023,
               "required": false
             },
             "rlm_process.load_artifact": {
-              "budget_ms": 2.444,
+              "budget_ms": 3.478,
               "required": false
             },
             "rlm_process.resolve_environment": {
-              "budget_ms": 27.216,
+              "budget_ms": 31.803,
               "required": false
             },
             "rlm_process.shutdown": {
-              "budget_ms": 8.576,
+              "budget_ms": 12.298,
               "required": false
             },
             "tool_intent.parent_end": {
@@ -2148,11 +2140,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.801,
+              "budget_ms": 1.078,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.354,
+              "budget_ms": 3.839,
               "required": false
             }
           }
@@ -2161,30 +2153,26 @@
       "rlm_tool_calls": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 149458000,
-          "steady_state_turn_alloc_bytes_max": 11694000
+          "alloc_bytes_max": 186243000,
+          "steady_state_turn_alloc_bytes_max": 14990000
         },
         "advisory_duration": {
-          "ms_max": 346.032,
+          "ms_max": 411.477,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 3.84,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 21.63,
+              "budget_ms": 4.359,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 10.002,
+              "budget_ms": 13.822,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.562,
+              "budget_ms": 4.615,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 207.53,
+              "budget_ms": 205.502,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -2192,47 +2180,51 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 7.208,
+              "budget_ms": 19.423,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 45.756,
+              "budget_ms": 87.735,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 3.302,
+              "budget_ms": 3.786,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 6.859,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 3.378,
+              "budget_ms": 3.218,
               "required": false
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 11.125,
+              "budget_ms": 9.95,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.752,
+              "budget_ms": 0.895,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.236,
+              "budget_ms": 1.346,
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 1.05,
+              "budget_ms": 1.103,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 44.788,
+              "budget_ms": 33.979,
               "required": false
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 2.254,
+              "budget_ms": 2.291,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 2.59,
+              "budget_ms": 2.484,
               "required": false
             },
             "tool_intent.parent_end": {
@@ -2240,11 +2232,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.816,
+              "budget_ms": 0.993,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.12,
+              "budget_ms": 2.569,
               "required": false
             }
           }
@@ -2253,30 +2245,26 @@
       "rlm_tool_catalog_cold": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 7559010000,
-          "steady_state_turn_alloc_bytes_max": 200107000
+          "alloc_bytes_max": 2260828000,
+          "steady_state_turn_alloc_bytes_max": 178866000
         },
         "advisory_duration": {
-          "ms_max": 2600.0,
+          "ms_max": 938.784,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 5.572,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 13.179,
+              "budget_ms": 4.611,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 12.27,
+              "budget_ms": 12.694,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.784,
+              "budget_ms": 3.867,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 2152.658,
+              "budget_ms": 1205.418,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -2284,35 +2272,35 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 5.124,
+              "budget_ms": 8.984,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 38.488,
+              "budget_ms": 51.355,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 10.618,
+              "budget_ms": 9.024,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 7.462,
+              "budget_ms": 6.578,
               "required": false
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 166.77,
+              "budget_ms": 129.268,
               "required": true
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 2.398,
+              "budget_ms": 2.155,
               "required": false
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.814,
+              "budget_ms": 1.691,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 3.274,
+              "budget_ms": 2.791,
               "required": false
             },
             "tool_intent.parent_end": {
@@ -2320,11 +2308,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.864,
+              "budget_ms": 0.917,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.332,
+              "budget_ms": 1.849,
               "required": false
             }
           }
@@ -2333,30 +2321,26 @@
       "rlm_tool_catalog_warm": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 3074448000,
-          "steady_state_turn_alloc_bytes_max": 200085000
+          "alloc_bytes_max": 2260373000,
+          "steady_state_turn_alloc_bytes_max": 178869000
         },
         "advisory_duration": {
-          "ms_max": 2100.0,
+          "ms_max": 1382.672,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 5.572,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 14.188,
+              "budget_ms": 5.282,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 12.27,
+              "budget_ms": 13.938,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.784,
+              "budget_ms": 4.103,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 2152.658,
+              "budget_ms": 1398.803,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -2364,35 +2348,35 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 5.124,
+              "budget_ms": 9.447,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 38.488,
+              "budget_ms": 55.459,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 10.618,
+              "budget_ms": 10.743,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 7.462,
+              "budget_ms": 7.104,
               "required": false
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 164.494,
+              "budget_ms": 154.351,
               "required": true
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 2.398,
+              "budget_ms": 2.355,
               "required": false
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.814,
+              "budget_ms": 1.948,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 3.274,
+              "budget_ms": 3.382,
               "required": false
             },
             "tool_intent.parent_end": {
@@ -2400,11 +2384,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.813,
+              "budget_ms": 0.648,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.332,
+              "budget_ms": 2.03,
               "required": false
             }
           }
@@ -2413,30 +2397,26 @@
       "rlm_trigger_mail_pipeline": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 359937000,
-          "steady_state_turn_alloc_bytes_max": 50000000
+          "alloc_bytes_max": 450235000,
+          "steady_state_turn_alloc_bytes_max": 36620000
         },
         "advisory_duration": {
-          "ms_max": 680.127,
+          "ms_max": 708.685,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 9.57,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 39.752,
+              "budget_ms": 11.474,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 11.536,
+              "budget_ms": 17.593,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 4.302,
+              "budget_ms": 5.321,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 423.628,
+              "budget_ms": 363.777,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -2444,91 +2424,99 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 13.676,
+              "budget_ms": 33.829,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 85.13,
+              "budget_ms": 162.264,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 4.722,
+              "budget_ms": 5.139,
+              "required": true
+            },
+            "rlm_lashlang.cell_tool_bindings": {
+              "budget_ms": 9.619,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 5.826,
+              "budget_ms": 6.318,
               "required": true
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 14.866,
+              "budget_ms": 12.158,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.801,
+              "budget_ms": 0.808,
               "required": false
             },
             "rlm_lashlang.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.419,
+              "budget_ms": 1.614,
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 1.145,
+              "budget_ms": 1.182,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 154.022,
+              "budget_ms": 125.86,
               "required": true
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 3.266,
+              "budget_ms": 3.806,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 5.374,
+              "budget_ms": 7.355,
               "required": false
             },
             "rlm_lashlang.store_module_artifact": {
-              "budget_ms": 0.25,
+              "budget_ms": 0.229,
               "required": true
             },
             "rlm_process.build_context": {
-              "budget_ms": 15.008,
+              "budget_ms": 21.005,
               "required": false
             },
+            "rlm_process.close_groups": {
+              "budget_ms": 1.028,
+              "required": true
+            },
             "rlm_process.compile": {
-              "budget_ms": 1.576,
+              "budget_ms": 1.924,
               "required": false
             },
             "rlm_process.execute": {
-              "budget_ms": 17.908,
+              "budget_ms": 24.268,
               "required": false
             },
             "rlm_process.load_artifact": {
-              "budget_ms": 2.718,
+              "budget_ms": 5.081,
               "required": false
             },
             "rlm_process.resolve_environment": {
-              "budget_ms": 53.58,
+              "budget_ms": 59.378,
               "required": false
             },
             "rlm_process.shutdown": {
-              "budget_ms": 3.722,
+              "budget_ms": 4.715,
               "required": false
-            },
-            "trigger.occurrence_to_delivery": {
-              "budget_ms": 170.0,
-              "required": true
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
             },
+            "trigger.occurrence_to_delivery": {
+              "budget_ms": 208.005,
+              "required": true
+            },
             "turn.parent_end": {
-              "budget_ms": 0.9,
+              "budget_ms": 1.322,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.484,
+              "budget_ms": 1.431,
               "required": false
             }
           }
@@ -2537,50 +2525,46 @@
       "scoped_effect_controller": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 76832000,
-          "steady_state_turn_alloc_bytes_max": 5621000
+          "alloc_bytes_max": 83972000,
+          "steady_state_turn_alloc_bytes_max": 6427000
         },
         "advisory_duration": {
-          "ms_max": 600.375,
+          "ms_max": 753.968,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 10.836,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 10.262,
+              "budget_ms": 9.684,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 8.874,
+              "budget_ms": 9.514,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.748,
+              "budget_ms": 3.952,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 187.574,
+              "budget_ms": 197.424,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.778,
+              "budget_ms": 0.743,
               "required": true
             },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.64,
+              "budget_ms": 1.679,
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 4.844,
+              "budget_ms": 8.56,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 48.686,
+              "budget_ms": 75.279,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 6.476,
+              "budget_ms": 5.985,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -2588,11 +2572,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.768,
+              "budget_ms": 0.628,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.4,
+              "budget_ms": 1.38,
               "required": false
             }
           }
@@ -2669,50 +2653,46 @@
       "standard": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 76696000,
-          "steady_state_turn_alloc_bytes_max": 5610000
+          "alloc_bytes_max": 83992000,
+          "steady_state_turn_alloc_bytes_max": 6432000
         },
         "advisory_duration": {
-          "ms_max": 632.367,
+          "ms_max": 816.207,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 11.738,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 11.966,
+              "budget_ms": 12.368,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 40.386,
+              "budget_ms": 37.158,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 12.376,
+              "budget_ms": 14.147,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 174.866,
+              "budget_ms": 168.341,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.748,
+              "budget_ms": 0.747,
               "required": true
             },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 9.944,
+              "budget_ms": 11.102,
               "required": true
             },
             "post_commit_delivery": {
-              "budget_ms": 6.274,
+              "budget_ms": 14.121,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 53.554,
+              "budget_ms": 108.842,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 26.962,
+              "budget_ms": 27.062,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -2720,11 +2700,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.765,
+              "budget_ms": 0.855,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.518,
+              "budget_ms": 2.664,
               "required": false
             }
           }
@@ -2733,50 +2713,46 @@
       "standard_async_tool_completion": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 78761000,
-          "steady_state_turn_alloc_bytes_max": 5690000
+          "alloc_bytes_max": 93473000,
+          "steady_state_turn_alloc_bytes_max": 6591000
         },
         "advisory_duration": {
-          "ms_max": 341.883,
+          "ms_max": 593.847,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 4.378,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 11.086,
+              "budget_ms": 5.193,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 14.536,
+              "budget_ms": 18.091,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.936,
+              "budget_ms": 4.698,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 110.264,
+              "budget_ms": 138.992,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.768,
+              "budget_ms": 0.899,
               "required": true
             },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.936,
+              "budget_ms": 2.241,
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 3.874,
+              "budget_ms": 9.297,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 18.08,
+              "budget_ms": 51.337,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 2.666,
+              "budget_ms": 3.134,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -2784,11 +2760,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.813,
+              "budget_ms": 0.887,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.15,
+              "budget_ms": 2.905,
               "required": false
             }
           }
@@ -2797,50 +2773,46 @@
       "standard_tool_calls": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 81332000,
-          "steady_state_turn_alloc_bytes_max": 5689000
+          "alloc_bytes_max": 96560000,
+          "steady_state_turn_alloc_bytes_max": 6565000
         },
         "advisory_duration": {
-          "ms_max": 240.849,
+          "ms_max": 328.644,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 3.448,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 11.656,
+              "budget_ms": 3.647,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 3.86,
+              "budget_ms": 4.615,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 3.444,
+              "budget_ms": 4.251,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 62.266,
+              "budget_ms": 67.178,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.77,
+              "budget_ms": 0.764,
               "required": true
             },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.618,
+              "budget_ms": 1.797,
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 3.566,
+              "budget_ms": 7.029,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 22.25,
+              "budget_ms": 48.852,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 2.53,
+              "budget_ms": 2.78,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -2848,11 +2820,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.771,
+              "budget_ms": 0.917,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.092,
+              "budget_ms": 2.389,
               "required": false
             }
           }
@@ -2861,126 +2833,126 @@
       "store_hardening_hot_paths": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 276258000,
-          "steady_state_turn_alloc_bytes_max": 23010000
+          "alloc_bytes_max": 368015000,
+          "steady_state_turn_alloc_bytes_max": 29677000
         },
         "advisory_duration": {
-          "ms_max": 10918.108,
+          "ms_max": 13094.113,
           "phases": {
             "store_hardening.identity.process_registration": {
-              "budget_ms": 23.56,
+              "budget_ms": 14.916,
               "required": true
             },
             "store_hardening.identity.trigger_occurrence": {
-              "budget_ms": 1.492,
+              "budget_ms": 1.37,
               "required": true
             },
             "store_hardening.identity.usage_delta": {
-              "budget_ms": 6.066,
+              "budget_ms": 5.667,
               "required": true
             },
             "store_hardening.memory.append_receipt_replay": {
-              "budget_ms": 5.564,
+              "budget_ms": 19.322,
               "required": true
             },
             "store_hardening.memory.append_receipt_usage_fresh": {
-              "budget_ms": 6.886,
+              "budget_ms": 28.751,
               "required": true
             },
             "store_hardening.memory.attachment_adopt": {
-              "budget_ms": 4.276,
+              "budget_ms": 18.162,
               "required": true
             },
             "store_hardening.memory.attachment_intent": {
-              "budget_ms": 1.184,
+              "budget_ms": 6.307,
               "required": true
             },
             "store_hardening.memory.claim_queued_work": {
-              "budget_ms": 1.274,
+              "budget_ms": 8.335,
               "required": true
             },
             "store_hardening.memory.claim_session_lease": {
-              "budget_ms": 1.7,
+              "budget_ms": 8.911,
               "required": true
             },
             "store_hardening.memory.complete_queued_work": {
-              "budget_ms": 8.352,
+              "budget_ms": 26.529,
               "required": true
             },
             "store_hardening.memory.prune_terminal_processes": {
-              "budget_ms": 13.596,
+              "budget_ms": 2431.011,
               "required": true
             },
             "store_hardening.postgres.append_receipt_replay": {
-              "budget_ms": 164.178,
+              "budget_ms": 152.308,
               "required": true
             },
             "store_hardening.postgres.append_receipt_usage_fresh": {
-              "budget_ms": 598.53,
+              "budget_ms": 513.112,
               "required": true
             },
             "store_hardening.postgres.attachment_adopt": {
-              "budget_ms": 562.03,
+              "budget_ms": 574.523,
               "required": true
             },
             "store_hardening.postgres.attachment_intent": {
-              "budget_ms": 267.278,
+              "budget_ms": 264.525,
               "required": true
             },
             "store_hardening.postgres.claim_queued_work": {
-              "budget_ms": 331.066,
+              "budget_ms": 320.688,
               "required": true
             },
             "store_hardening.postgres.claim_session_lease": {
-              "budget_ms": 338.176,
+              "budget_ms": 309.862,
               "required": true
             },
             "store_hardening.postgres.complete_queued_work": {
-              "budget_ms": 430.174,
+              "budget_ms": 357.053,
               "required": true
             },
             "store_hardening.postgres.open_enforce": {
-              "budget_ms": 1101.004,
+              "budget_ms": 999.888,
               "required": true
             },
             "store_hardening.postgres.open_preverified": {
-              "budget_ms": 163.84,
+              "budget_ms": 154.441,
               "required": true
             },
             "store_hardening.postgres.prune_terminal_processes": {
-              "budget_ms": 988.28,
+              "budget_ms": 965.995,
               "required": true
             },
             "store_hardening.sqlite.append_receipt_replay": {
-              "budget_ms": 63.49,
+              "budget_ms": 57.313,
               "required": true
             },
             "store_hardening.sqlite.append_receipt_usage_fresh": {
-              "budget_ms": 74.794,
+              "budget_ms": 70.801,
               "required": true
             },
             "store_hardening.sqlite.attachment_adopt": {
-              "budget_ms": 77.18,
+              "budget_ms": 69.276,
               "required": true
             },
             "store_hardening.sqlite.attachment_intent": {
-              "budget_ms": 116.042,
+              "budget_ms": 110.446,
               "required": true
             },
             "store_hardening.sqlite.claim_queued_work": {
-              "budget_ms": 66.818,
+              "budget_ms": 62.32,
               "required": true
             },
             "store_hardening.sqlite.claim_session_lease": {
-              "budget_ms": 66.9,
+              "budget_ms": 44.198,
               "required": true
             },
             "store_hardening.sqlite.complete_queued_work": {
-              "budget_ms": 58.074,
+              "budget_ms": 55.687,
               "required": true
             },
             "store_hardening.sqlite.prune_terminal_processes": {
-              "budget_ms": 119.068,
+              "budget_ms": 109.28,
               "required": true
             }
           }
@@ -2989,62 +2961,58 @@
       "store_reopen": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 133502000,
-          "steady_state_turn_alloc_bytes_max": 5959000
+          "alloc_bytes_max": 123935000,
+          "steady_state_turn_alloc_bytes_max": 6444000
         },
         "advisory_duration": {
-          "ms_max": 880.104,
+          "ms_max": 1158.81,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 4.268,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 10.532,
+              "budget_ms": 4.367,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 13.01,
+              "budget_ms": 14.261,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 6.45,
+              "budget_ms": 7.077,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 160.812,
+              "budget_ms": 132.438,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.789,
+              "budget_ms": 0.718,
               "required": true
             },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 4.56,
+              "budget_ms": 4.618,
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 6.498,
+              "budget_ms": 13.515,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 65.008,
+              "budget_ms": 140.688,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 7.938,
+              "budget_ms": 7.866,
               "required": true
             },
             "store_reopen.persisted_load": {
-              "budget_ms": 8.604,
+              "budget_ms": 37.858,
               "required": true
             },
             "store_reopen.runtime_hydration": {
-              "budget_ms": 437.646,
+              "budget_ms": 674.563,
               "required": true
             },
             "store_reopen.store_factory_create": {
-              "budget_ms": 0.25,
+              "budget_ms": 0.311,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -3052,11 +3020,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.778,
+              "budget_ms": 0.504,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 4.55,
+              "budget_ms": 4.8,
               "required": false
             }
           }
@@ -3065,50 +3033,46 @@
       "tool_discovery_search": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 1231308000,
-          "steady_state_turn_alloc_bytes_max": 87737000
+          "alloc_bytes_max": 842904000,
+          "steady_state_turn_alloc_bytes_max": 63897000
         },
         "advisory_duration": {
-          "ms_max": 3621.198,
+          "ms_max": 6348.459,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 6.136,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 16.972,
+              "budget_ms": 6.959,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 8.3,
+              "budget_ms": 9.242,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 23.2,
+              "budget_ms": 26.502,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 822.078,
+              "budget_ms": 1645.094,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.816,
+              "budget_ms": 0.844,
               "required": true
             },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 5.308,
+              "budget_ms": 5.743,
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 4.008,
+              "budget_ms": 8.879,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 23.712,
+              "budget_ms": 39.127,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 5.662,
+              "budget_ms": 6.403,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -3116,11 +3080,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.84,
+              "budget_ms": 1.015,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.32,
+              "budget_ms": 2.922,
               "required": false
             }
           }
@@ -3129,30 +3093,26 @@
       "trace_jsonl_extended": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 125258000,
-          "steady_state_turn_alloc_bytes_max": 9569000
+          "alloc_bytes_max": 135890000,
+          "steady_state_turn_alloc_bytes_max": 10738000
         },
         "advisory_duration": {
-          "ms_max": 551.116,
+          "ms_max": 476.036,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 5.256,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 18.296,
+              "budget_ms": 4.85,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 6.534,
+              "budget_ms": 5.896,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 4.008,
+              "budget_ms": 4.276,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 333.204,
+              "budget_ms": 220.507,
               "required": true
             },
             "plugin_hook.context_transform.rlm_protocol": {
@@ -3160,51 +3120,51 @@
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 11.34,
+              "budget_ms": 20.004,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 45.612,
+              "budget_ms": 69.15,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 7.726,
+              "budget_ms": 5.736,
               "required": true
             },
             "rlm_lashlang.compile_link": {
-              "budget_ms": 5.706,
+              "budget_ms": 5.452,
               "required": false
             },
             "rlm_lashlang.deferred_resolve": {
-              "budget_ms": 5.516,
+              "budget_ms": 3.997,
               "required": false
             },
             "rlm_lashlang.execute": {
-              "budget_ms": 4.434,
+              "budget_ms": 3.736,
               "required": false
             },
             "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.762,
+              "budget_ms": 1.58,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
-              "budget_ms": 3.096,
+              "budget_ms": 2.449,
               "required": false
-            },
-            "trace_jsonl.inspect_files": {
-              "budget_ms": 1.244,
-              "required": true
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
             },
+            "trace_jsonl.inspect_files": {
+              "budget_ms": 0.906,
+              "required": true
+            },
             "turn.parent_end": {
-              "budget_ms": 0.778,
+              "budget_ms": 0.681,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 8.358,
+              "budget_ms": 8.062,
               "required": false
             }
           }
@@ -3213,67 +3173,63 @@
       "trace_jsonl_standard": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 80074000,
-          "steady_state_turn_alloc_bytes_max": 5858000
+          "alloc_bytes_max": 87164000,
+          "steady_state_turn_alloc_bytes_max": 6682000
         },
         "advisory_duration": {
-          "ms_max": 594.217,
+          "ms_max": 645.803,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 7.518,
-              "required": true
-            },
-            "commit_admission.product_attempt": {
-              "budget_ms": 10.382,
+              "budget_ms": 7.741,
               "required": true
             },
             "committed_turn": {
-              "budget_ms": 23.344,
+              "budget_ms": 23.805,
               "required": true
             },
             "context_transform": {
-              "budget_ms": 4.436,
+              "budget_ms": 4.538,
               "required": true
             },
             "effect_loop": {
-              "budget_ms": 233.922,
+              "budget_ms": 182.125,
+              "required": true
+            },
+            "plugin_hook.after_turn.standard_compaction": {
+              "budget_ms": 0.686,
               "required": true
             },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 2.092,
+              "budget_ms": 2.044,
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 4.626,
+              "budget_ms": 8.842,
               "required": true
             },
             "prepared_turn": {
-              "budget_ms": 28.512,
+              "budget_ms": 51.5,
               "required": true
             },
             "prompt_build": {
-              "budget_ms": 7.118,
+              "budget_ms": 7.193,
               "required": true
-            },
-            "trace_jsonl.inspect_files": {
-              "budget_ms": 4.72,
-              "required": false
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
             },
+            "trace_jsonl.inspect_files": {
+              "budget_ms": 4.72,
+              "required": false
+            },
             "turn.parent_end": {
-              "budget_ms": 0.783,
+              "budget_ms": 0.937,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.36,
+              "budget_ms": 2.032,
               "required": false
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.774,
-              "required": true
             }
           }
         }
@@ -3281,66 +3237,62 @@
       "turn_cancel_round_trip": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 71241000,
-          "steady_state_turn_alloc_bytes_max": 5155000
+          "alloc_bytes_max": 87282000,
+          "steady_state_turn_alloc_bytes_max": 6722000
         },
         "advisory_duration": {
-          "ms_max": 450.278,
+          "ms_max": 542.692,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 4.29,
+              "budget_ms": 3.807,
               "required": false
             },
-            "commit_admission.product_attempt": {
-              "budget_ms": 8.78,
-              "required": true
-            },
             "committed_turn": {
-              "budget_ms": 12.76,
+              "budget_ms": 10.793,
               "required": false
             },
             "context_transform": {
-              "budget_ms": 6.802,
+              "budget_ms": 6.439,
               "required": false
             },
             "effect_loop": {
-              "budget_ms": 107.216,
+              "budget_ms": 120.891,
               "required": false
             },
+            "plugin_hook.after_turn.standard_compaction": {
+              "budget_ms": 0.649,
+              "required": true
+            },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.682,
+              "budget_ms": 1.477,
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 4.152,
+              "budget_ms": 5.605,
               "required": false
             },
             "prepared_turn": {
-              "budget_ms": 32.982,
+              "budget_ms": 53.558,
               "required": false
             },
             "prompt_build": {
-              "budget_ms": 11.4,
+              "budget_ms": 9.47,
               "required": false
-            },
-            "turn.parent_end": {
-              "budget_ms": 0.765,
-              "required": false
-            },
-            "turn_cancel.request_to_token_to_seal": {
-              "budget_ms": 113.948,
-              "required": true
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 5.304,
+            "turn.parent_end": {
+              "budget_ms": 0.674,
+              "required": false
+            },
+            "turn_cancel.request_to_token_to_seal": {
+              "budget_ms": 215.055,
               "required": true
             },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.742,
+            "turn_cancel.start_gate": {
+              "budget_ms": 3.097,
               "required": true
             }
           }
@@ -3349,22 +3301,22 @@
       "turn_checkpoint": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 15224000,
-          "steady_state_turn_alloc_bytes_max": 1256000
+          "alloc_bytes_max": 16480000,
+          "steady_state_turn_alloc_bytes_max": 1354000
         },
         "advisory_duration": {
-          "ms_max": 84.378,
+          "ms_max": 99.541,
           "phases": {
             "rlm_exec_checkpoint": {
-              "budget_ms": 34.432,
+              "budget_ms": 39.768,
               "required": true
             },
             "standard_llm_checkpoint": {
-              "budget_ms": 22.902,
+              "budget_ms": 28.63,
               "required": true
             },
             "standard_parallel_tools_checkpoint": {
-              "budget_ms": 48.52,
+              "budget_ms": 54.799,
               "required": true
             }
           }
@@ -3373,58 +3325,58 @@
       "turn_input_ingress_interrupt": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 101560000,
-          "steady_state_turn_alloc_bytes_max": 8858000
+          "alloc_bytes_max": 17077000,
+          "steady_state_turn_alloc_bytes_max": 1310000
         },
         "advisory_duration": {
-          "ms_max": 42.387,
+          "ms_max": 253.806,
           "phases": {
             "turn_input_ingress.abandon_active_claim": {
-              "budget_ms": 0.932,
+              "budget_ms": 3.892,
               "required": true
             },
             "turn_input_ingress.abandon_next_claim": {
-              "budget_ms": 5.166,
+              "budget_ms": 37.725,
               "required": true
             },
             "turn_input_ingress.claim_active_initial": {
-              "budget_ms": 1.146,
+              "budget_ms": 7.328,
               "required": true
             },
             "turn_input_ingress.claim_next_turn_inputs": {
-              "budget_ms": 1.786,
+              "budget_ms": 31.137,
               "required": true
             },
             "turn_input_ingress.claim_session_lease": {
-              "budget_ms": 1.062,
+              "budget_ms": 3.526,
               "required": true
             },
             "turn_input_ingress.complete_active_and_defer": {
-              "budget_ms": 10.998,
+              "budget_ms": 44.616,
               "required": true
             },
             "turn_input_ingress.complete_next_turn_inputs": {
-              "budget_ms": 2.492,
+              "budget_ms": 6.141,
               "required": true
             },
             "turn_input_ingress.enqueue_active": {
-              "budget_ms": 5.496,
+              "budget_ms": 66.538,
               "required": true
             },
             "turn_input_ingress.enqueue_next": {
-              "budget_ms": 1.942,
+              "budget_ms": 17.117,
               "required": true
             },
             "turn_input_ingress.list_pending": {
-              "budget_ms": 0.914,
+              "budget_ms": 3.133,
               "required": true
             },
             "turn_input_ingress.reclaim_active_inputs": {
-              "budget_ms": 1.608,
+              "budget_ms": 26.056,
               "required": true
             },
             "turn_input_ingress.reclaim_next_turn_inputs": {
-              "budget_ms": 1.834,
+              "budget_ms": 32.642,
               "required": true
             }
           }
@@ -3433,50 +3385,46 @@
       "turn_start_gate": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 76832000,
-          "steady_state_turn_alloc_bytes_max": 5622000
+          "alloc_bytes_max": 84084000,
+          "steady_state_turn_alloc_bytes_max": 6439000
         },
         "advisory_duration": {
-          "ms_max": 585.285,
+          "ms_max": 626.29,
           "phases": {
             "before_turn_hooks": {
-              "budget_ms": 12.158,
+              "budget_ms": 12.328,
               "required": false
             },
-            "commit_admission.product_attempt": {
-              "budget_ms": 10.128,
-              "required": true
-            },
             "committed_turn": {
-              "budget_ms": 21.296,
+              "budget_ms": 21.539,
               "required": false
             },
             "context_transform": {
-              "budget_ms": 4.38,
+              "budget_ms": 4.528,
               "required": false
             },
             "effect_loop": {
-              "budget_ms": 187.596,
+              "budget_ms": 141.054,
               "required": false
             },
             "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.75,
+              "budget_ms": 0.712,
               "required": true
             },
             "plugin_hook.context_transform.standard_compaction": {
-              "budget_ms": 1.804,
+              "budget_ms": 1.888,
               "required": false
             },
             "post_commit_delivery": {
-              "budget_ms": 9.416,
+              "budget_ms": 15.775,
               "required": false
             },
             "prepared_turn": {
-              "budget_ms": 57.29,
+              "budget_ms": 107.964,
               "required": false
             },
             "prompt_build": {
-              "budget_ms": 14.642,
+              "budget_ms": 14.112,
               "required": false
             },
             "tool_intent.parent_end": {
@@ -3484,11 +3432,11 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 0.766,
+              "budget_ms": 0.798,
               "required": false
             },
             "turn_cancel.start_gate": {
-              "budget_ms": 2.706,
+              "budget_ms": 2.285,
               "required": true
             }
           }

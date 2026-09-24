@@ -27,6 +27,7 @@ struct ContentionWave {
 }
 
 async fn run_writer_operation(
+    turn_entry: &TurnEntry,
     session: lash::LashSession,
     scenario: RuntimePerfScenario,
     operation: WriterContentionOperation,
@@ -44,30 +45,36 @@ async fn run_writer_operation(
             session.refresh_background_graph().await?;
         }
         WriterContentionOperation::SecondTurn => {
-            let turn = session
-                .turn(TurnInput::text(format!(
-                    "writer contention operation {ordinal}: reply with exactly: runtime perf benchmark ok"
-                )))
-                .run()
+            let turn = turn_entry
+                .run(
+                    &session,
+                    TurnInput::text(format!(
+                        "writer contention operation {ordinal}: reply with exactly: runtime perf benchmark ok"
+                    )),
+                    None,
+                    CancellationToken::new(),
+                )
                 .await?;
-            validate_runtime_perf_turn(scenario, ordinal, &turn.result)?;
+            validate_runtime_perf_turn(scenario, ordinal, &turn)?;
         }
     }
     Ok(())
 }
 
 async fn measure_writer_operation(
+    turn_entry: &TurnEntry,
     session: lash::LashSession,
     scenario: RuntimePerfScenario,
     operation: WriterContentionOperation,
     ordinal: usize,
 ) -> anyhow::Result<f64> {
     let started = Instant::now();
-    run_writer_operation(session, scenario, operation, ordinal).await?;
+    run_writer_operation(turn_entry, session, scenario, operation, ordinal).await?;
     Ok(elapsed_ms(started))
 }
 
 async fn run_contention_wave(
+    turn_entry: &TurnEntry,
     scenario: RuntimePerfScenario,
     operation: WriterContentionOperation,
     holder_session: lash::LashSession,
@@ -77,20 +84,26 @@ async fn run_contention_wave(
 ) -> anyhow::Result<ContentionWave> {
     let mut execution_ms = Vec::with_capacity(target_sessions.len());
     for (ordinal, session) in target_sessions.iter().enumerate() {
-        execution_ms
-            .push(measure_writer_operation(session.clone(), scenario, operation, ordinal).await?);
+        execution_ms.push(
+            measure_writer_operation(turn_entry, session.clone(), scenario, operation, ordinal)
+                .await?,
+        );
     }
 
     control.arm();
     let provider_started = control.provider_started.notified();
+    let holder_entry = turn_entry.clone();
     let holder = tokio::spawn(async move {
-        holder_session
-            .turn(TurnInput::text(
-                "hold the runtime writer at the provider gate, then reply with exactly: runtime perf benchmark ok",
-            ))
-            .run()
+        holder_entry
+            .run(
+                &holder_session,
+                TurnInput::text(
+                    "hold the runtime writer at the provider gate, then reply with exactly: runtime perf benchmark ok",
+                ),
+                None,
+                CancellationToken::new(),
+            )
             .await
-            .map_err(anyhow::Error::from)
     });
     provider_started.await;
     let release_latency_started = Instant::now();
@@ -101,9 +114,11 @@ async fn run_contention_wave(
     for (ordinal, session) in target_sessions.iter().cloned().enumerate() {
         let waiter_barrier = Arc::clone(&waiter_barrier);
         let completed = Arc::clone(&completed);
+        let turn_entry = turn_entry.clone();
         waiters.spawn(async move {
             waiter_barrier.wait().await;
-            let result = measure_writer_operation(session, scenario, operation, ordinal).await;
+            let result =
+                measure_writer_operation(&turn_entry, session, scenario, operation, ordinal).await;
             completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             result
         });
@@ -200,7 +215,10 @@ mod contention_tests {
     #[tokio::test]
     async fn gate_bypass_second_completer_hits_receipt_conflict_then_rebuilds_after_backoff() {
         let session_id = "commit-admission-bypass";
-        let factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
+        let factory = memory_stores()
+            .await
+            .expect("open a SQLite memory store set")
+            .session_store_factory();
         let store = factory
             .create_store(&runtime_perf_session_create_request(&SessionId::from(
                 session_id,
@@ -383,7 +401,8 @@ pub(crate) async fn run_once_writer_contention(
     let total_before_alloc = allocator_stats();
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
-    let mut runtime = build_runtime_with_store(scenario, None, None).await?;
+    let mut runtime = build_runtime(scenario, None).await?;
+    let turn_entry = runtime.turn_entry();
     let main_session = runtime.session();
     let mut peer_sessions = Vec::with_capacity(workers);
     for worker in 0..workers {
@@ -407,6 +426,7 @@ pub(crate) async fn run_once_writer_contention(
     for operation in WriterContentionOperation::ALL {
         let same_session_targets = vec![main_session.clone(); workers];
         let wave = run_contention_wave(
+            &turn_entry,
             scenario,
             operation,
             main_session.clone(),
@@ -418,6 +438,7 @@ pub(crate) async fn run_once_writer_contention(
         push_contention_wave_metrics(&mut metric_samples_ms, "same_session", operation, wave);
 
         let wave = run_contention_wave(
+            &turn_entry,
             scenario,
             operation,
             main_session.clone(),
@@ -539,7 +560,7 @@ pub(crate) async fn run_once_async_process_settlement(
     let total_before_alloc = allocator_stats();
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
-    let mut runtime = build_runtime_with_store(scenario, None, None).await?;
+    let mut runtime = build_runtime(scenario, None).await?;
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
     let after_build_memory = process_memory_sample();

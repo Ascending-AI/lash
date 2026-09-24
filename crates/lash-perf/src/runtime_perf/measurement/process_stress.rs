@@ -11,7 +11,7 @@ pub(super) async fn run_once_process_list_stress(
     let (registry, session_scope) = run
         .build(async {
             let registry: Arc<dyn lash_core::ProcessRegistry> =
-                Arc::new(lash_core::TestLocalProcessRegistry::default());
+                memory_stores().await?.process_registry();
             let session_scope = lash_core::SessionScope::new("runtime-perf-process-list");
             Ok((registry, session_scope))
         })

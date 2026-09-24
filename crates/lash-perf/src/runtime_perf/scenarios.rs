@@ -135,7 +135,6 @@ pub(crate) enum RuntimePerfScenario {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ScenarioWiring {
     pub(crate) compat_stream_server: bool,
-    pub(crate) turn_start_gate: bool,
     pub(crate) tool_catalog_observer: bool,
     pub(crate) llm_query_plugin: bool,
     pub(crate) subagents_plugin: bool,
@@ -150,7 +149,6 @@ pub(crate) struct ScenarioWiring {
 impl ScenarioWiring {
     pub(crate) const DEFAULT: Self = Self {
         compat_stream_server: false,
-        turn_start_gate: false,
         tool_catalog_observer: false,
         llm_query_plugin: false,
         subagents_plugin: false,
@@ -645,8 +643,8 @@ impl RuntimePerfScenario {
             "turn_start_gate",
             Standard,
             RuntimeScenario,
-            "Measures the native turn-cancel gate peek through the bounded retry wrapper below protocol and facade ownership.",
-            wiring { turn_start_gate = true }
+            "Measures the journaled turn-cancel start-gate peek on the turn's handler-scoped controller below protocol and facade ownership.",
+            wiring {}
         ),
         runtime_perf_metadata!(
             TurnCancelRoundTrip,
@@ -667,7 +665,7 @@ impl RuntimePerfScenario {
             "store_hardening_hot_paths",
             Standard,
             RuntimeScenario,
-            "Measures hardening-era store operations below protocol and facade ownership on the in-memory floor and real SQLite/PostgreSQL backends.",
+            "Measures hardening-era store operations below protocol and facade ownership on the SQLite memory floor and real SQLite file and PostgreSQL backends.",
             false
         ),
         runtime_perf_metadata!(

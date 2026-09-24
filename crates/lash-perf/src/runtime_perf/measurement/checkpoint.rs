@@ -127,13 +127,13 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 CHECKPOINT_STATE_BINDINGS,
                 CHECKPOINT_STATE_BODY_BYTES,
             )?;
-            let store = lash_core::runtime::InMemorySessionStore::new();
             let runtime_state = RuntimeSessionState {
                 session_id: SessionId::from("runtime-perf-checkpoint-state"),
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                 ))
             };
+            let store = memory_perf_store(&runtime_state.session_id).await?;
             store
                 .admit_and_bind_session(&lash_core::SessionBinding::root(
                     runtime_state.session_id.clone(),
@@ -780,15 +780,18 @@ pub(crate) async fn run_once_embed(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let mut run = RunRecorder::start(scenario, chat_turns);
-    let (store, session) = run
+    let (store, session, turn_entry) = run
         .build(async {
-            let store = Arc::new(RuntimePerfStore::default());
-            let core = build_embed_core(scenario, Arc::clone(&store)).await?;
+            let (core, store_factory, turn_entry) = build_embed_core(scenario).await?;
+            let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
             let session = core
-                .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
+                .open_session(session_id.clone())
                 .await
                 .with_context(|| format!("open embed session for {}", scenario.name()))?;
-            Ok((store, session))
+            let store = store_factory
+                .session_store(&session_id)
+                .ok_or_else(|| anyhow::anyhow!("embed session store was not opened"))?;
+            Ok((store, session, turn_entry))
         })
         .await?;
     run.seed(async { Ok(()) }).await?;
@@ -798,35 +801,18 @@ pub(crate) async fn run_once_embed(
             turn_index,
             async {
                 let cancel = CancellationToken::new();
+                let turn_id = TurnId::from(format!("runtime-perf-embed-{}", turn_index + 1));
                 let turn = runtime_perf_timed(
                     scenario,
                     turn_index,
                     "run_turn",
                     Some(cancel.clone()),
-                    async {
-                        let effect_host = session.effect_host();
-                        let scoped_effect_controller =
-                            effect_host
-                                .scoped(
-                                    lash_core::AdmittedScope::unpinned(session.turn_scope(
-                                        format!("runtime-perf-embed-{}", turn_index + 1),
-                                    ))
-                                    .map_err(anyhow::Error::from)?,
-                                )
-                                .map_err(anyhow::Error::from)?;
-                        session
-                            .turn(lash_core::TurnInput::text(benchmark_prompt(
-                                scenario, turn_index,
-                            )))
-                            .cancel(cancel)
-                            .advanced()
-                            .collect_session_events_with_scope(
-                                &lash::runtime::NoopEventSink,
-                                scoped_effect_controller,
-                            )
-                            .await
-                            .map_err(anyhow::Error::from)
-                    },
+                    turn_entry.run(
+                        &session,
+                        lash_core::TurnInput::text(benchmark_prompt(scenario, turn_index)),
+                        Some(&turn_id),
+                        cancel,
+                    ),
                 )
                 .await
                 .with_context(|| {
