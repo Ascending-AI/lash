@@ -117,9 +117,9 @@ pub enum RuntimeError {
     /// way ECMA does — but a durable binding that still holds one when the
     /// cell ends cannot be written down, and that is what this says.
     #[error(
-        "lashlang heap value contains a cycle through object {id}; durable state and host \
-         boundaries carry value trees, so break the cycle before the cell ends (hold a key or \
-         index instead of the parent object)"
+        "TS_CYCLIC_VALUE_UNSUPPORTED: lashlang heap value contains a cycle through object {id}; \
+         durable state and host boundaries carry value trees, so break the cycle before the \
+         cell ends (hold a key or index instead of the parent object)"
     )]
     CyclicHostValue { id: u64 },
     /// A value tree is nested deeper than a durable boundary will ever accept.
@@ -1212,9 +1212,10 @@ mod tests {
                     "lashlang heap reference 7 reached string formatting before it was exported"
                 }
                 RuntimeError::CyclicHostValue { .. } => {
-                    "lashlang heap value contains a cycle through object 7; durable state and \
-                     host boundaries carry value trees, so break the cycle before the cell ends \
-                     (hold a key or index instead of the parent object)"
+                    "TS_CYCLIC_VALUE_UNSUPPORTED: lashlang heap value contains a cycle through \
+                     object 7; durable state and host boundaries carry value trees, so break \
+                     the cycle before the cell ends (hold a key or index instead of the parent \
+                     object)"
                 }
                 RuntimeError::ValueDepthLimitExceeded { .. } => {
                     "lashlang value nesting depth limit of 64 levels exceeded"

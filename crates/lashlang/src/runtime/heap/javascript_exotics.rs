@@ -612,6 +612,9 @@ impl Heap {
         id: HeapId,
         values: Vec<Value>,
     ) -> Result<(), RuntimeError> {
+        // Reordering or truncating mutators call here, and none of them carry
+        // hole positions across — the array answers dense from now on.
+        self.list_holes.remove(&id);
         self.update_object(id, |object| {
             let HeapObject::List(current) = object else {
                 return false;
@@ -619,6 +622,38 @@ impl Heap {
             *current = values;
             true
         })
+    }
+
+    /// HasProperty-style lookup on a sparse list: a hole index reads back as
+    /// `undefined` but is not a property.
+    pub(crate) fn is_list_hole(&self, id: HeapId, index: usize) -> bool {
+        self.list_holes
+            .get(&id)
+            .is_some_and(|holes| holes.contains(&index))
+    }
+
+    pub(crate) fn list_holes(&self, id: HeapId) -> Option<&BTreeSet<usize>> {
+        self.list_holes.get(&id)
+    }
+
+    pub(crate) fn mark_list_holes(&mut self, id: HeapId, holes: BTreeSet<usize>) {
+        if holes.is_empty() {
+            self.list_holes.remove(&id);
+        } else {
+            self.list_holes.insert(id, holes);
+        }
+    }
+
+    /// `array[index] = value` on a hole turns it into a real element.
+    pub(crate) fn clear_list_hole(&mut self, id: HeapId, index: usize) {
+        let Some(holes) = self.list_holes.get_mut(&id) else {
+            return;
+        };
+        holes.remove(&index);
+        let empty = holes.is_empty();
+        if empty {
+            self.list_holes.remove(&id);
+        }
     }
 
     pub(crate) fn replace_javascript_record(

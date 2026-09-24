@@ -1,5 +1,8 @@
 use super::super::javascript::javascript_to_number;
 use super::javascript::js_stdlib_error;
+use super::javascript_stdlib::{
+    clamp_relative_index, last_index_exclusive, normalized_instance_arguments,
+};
 use super::*;
 
 pub(super) fn javascript_array_method_for_value(
@@ -51,6 +54,59 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Ok(true);
         }
         let mut values = current.clone();
+        // A literal elision leaves a hole: `indexOf`/`lastIndexOf` run a
+        // HasProperty check before comparing, so an `undefined`-valued hole
+        // does not match a search for `undefined`. Dense arrays keep the
+        // shared value-path below.
+        if matches!(method, "indexOf" | "lastIndexOf")
+            && let Some(holes) = self.heap.list_holes(receiver)
+        {
+            let holes = holes.clone();
+            let argument_count = args.len();
+            let args = normalized_instance_arguments(method, args);
+            let needle = args.first().cloned().unwrap_or(Value::Undefined);
+            let result = if method == "indexOf" {
+                let start = clamp_relative_index(
+                    javascript_to_number(args.get(1).unwrap_or(&Value::Undefined)),
+                    values.len(),
+                );
+                values
+                    .iter()
+                    .enumerate()
+                    .skip(start)
+                    .find(|(index, item)| {
+                        !holes.contains(index)
+                            && crate::runtime::javascript::javascript_strict_equal(item, &needle)
+                    })
+                    .map_or(-1.0, |(index, _)| index as f64)
+            } else {
+                let end = if argument_count < 2 {
+                    values.len()
+                } else {
+                    match last_index_exclusive(
+                        javascript_to_number(args.get(1).unwrap_or(&Value::Undefined)),
+                        values.len(),
+                    ) {
+                        Some(end) => end,
+                        None => {
+                            self.stack.push(Value::Number(-1.0));
+                            return Ok(true);
+                        }
+                    }
+                };
+                values[..end.min(values.len())]
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(index, item)| {
+                        !holes.contains(index)
+                            && crate::runtime::javascript::javascript_strict_equal(item, &needle)
+                    })
+                    .map_or(-1.0, |(index, _)| index as f64)
+            };
+            self.stack.push(Value::Number(result));
+            return Ok(true);
+        }
         let result = match method {
             "fill" => {
                 let value = args.first().cloned().unwrap_or(Value::Undefined);

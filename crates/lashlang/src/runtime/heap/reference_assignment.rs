@@ -129,7 +129,7 @@ impl Heap {
                 _ => Ok(true),
             };
         };
-        let key = coerce_string(key)?;
+        let key = self.javascript_to_string(key)?;
         let old_object = self
             .entries
             .get(target_id)
@@ -140,12 +140,12 @@ impl Heap {
             .clone();
         let mut new_object = old_object.clone();
         let deleted = match &mut new_object {
-            HeapObject::Record(record) => record.remove(key.as_ref()).is_some(),
+            HeapObject::Record(record) => record.remove(key.as_str()).is_some(),
             HeapObject::List(values) => {
-                if key.as_ref() == "length" {
+                if key == "length" {
                     return Ok(false);
                 }
-                if let Some(index) = javascript_array_index_key(key.as_ref())
+                if let Some(index) = javascript_array_index_key(key.as_str())
                     && index < values.len()
                 {
                     return Err(RuntimeError::ValidationFailed {
@@ -248,13 +248,12 @@ impl Heap {
                     lookup_regexp_match_index(&result, &key)?
                 }
                 (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
-                    let index = Self::assignment_index(indexes, &mut index_cursor)?;
-                    let key = coerce_string(index)?;
-                    record.get(key.as_ref()).cloned().ok_or_else(|| {
-                        RuntimeError::MissingAssignmentField {
-                            field: key.into_owned(),
-                        }
-                    })?
+                    let key =
+                        self.next_javascript_assignment_index_key(indexes, &mut index_cursor)?;
+                    record
+                        .get(key.as_str())
+                        .cloned()
+                        .ok_or_else(|| RuntimeError::MissingAssignmentField { field: key })?
                 }
                 (object, CompiledAssignPathStep::Field(field)) => {
                     return Err(RuntimeError::CannotAssignField {
@@ -364,6 +363,7 @@ impl Heap {
             .object
             .clone();
         let mut new_object = old_object.clone();
+        let mut filled_hole_index = None;
         match (&mut new_object, *leaf) {
             (HeapObject::Record(record), CompiledAssignPathStep::Field(field)) => {
                 record.insert_symbolized(names[field].symbol, names[field].text.clone(), imported);
@@ -419,6 +419,7 @@ impl Heap {
                     values.resize(index + 1, Value::Undefined);
                 }
                 values[index] = imported;
+                filled_hole_index = Some(index);
             }
             (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Index) => {
                 let key = self
@@ -430,11 +431,10 @@ impl Heap {
                 self.assign_regexp_match_field(result, names[field].text.as_ref(), imported)?;
             }
             (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
-                let index = indexes
-                    .get(index_cursor)
+                let key = leaf_key
+                    .as_deref()
                     .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                let key = coerce_string(index)?;
-                record.insert_str(key.as_ref(), imported);
+                record.insert_str(key, imported);
             }
             (HeapObject::Tuple(_), CompiledAssignPathStep::Index) => {
                 return Err(RuntimeError::ImmutableTupleIndexes);
@@ -451,7 +451,13 @@ impl Heap {
                 });
             }
         }
-        self.commit_reference_assignment(target_id, old_object, new_object)
+        let committed = self.commit_reference_assignment(target_id, old_object, new_object);
+        if committed.is_ok()
+            && let Some(index) = filled_hole_index
+        {
+            self.clear_list_hole(target_id, index);
+        }
+        committed
     }
 
     fn commit_reference_assignment(

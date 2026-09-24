@@ -63,7 +63,8 @@ use super::{
     eval_number_binary_values, eval_number_compare_values, eval_number_numeric_binary_value,
     execute_compiled_format, execute_compiled_format_direct,
     execute_compiled_format_one_number_compact_direct, execute_intrinsic,
-    execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values, javascript_join,
+    execute_push_builtin_async, is_array_prototype_key, is_object_prototype_key, is_truthy,
+    is_truthy_async, iterable_values, javascript_heap_has_property, javascript_join,
     javascript_split, materialize_projected_async, materialize_value, range_bounds,
     range_bounds_async, read_javascript_field_direct, read_javascript_heap_field,
     read_javascript_heap_index, read_javascript_index_direct_with_key, regexp_string,
@@ -444,6 +445,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     function,
                     CallArguments::Owned(values),
                     ReturnTarget::Direct,
+                    Value::Undefined,
                 ) {
                     Ok(()) => {
                         if let Some(active) = &active {
@@ -1333,6 +1335,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::JavaScriptStdlib(argc) => self.execute_javascript_stdlib(argc)?,
             IntrinsicOp::JavaScriptHeapNew(argc) => self.execute_javascript_heap_new(argc)?,
             IntrinsicOp::JavaScriptHeapInstanceOf => self.execute_javascript_instanceof()?,
+            IntrinsicOp::JavaScriptCallThis => self.execute_javascript_call_this()?,
             IntrinsicOp::JavaScriptHeapDeleteMember => {
                 self.execute_javascript_heap_delete_member()?
             }

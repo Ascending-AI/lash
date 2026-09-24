@@ -240,6 +240,224 @@ pub(crate) fn prototype_chain_key_error(key: &str) -> Option<RuntimeError> {
     })
 }
 
+/// Own names of `Object.prototype`: the inherited surface every ECMA object
+/// answers `key in object` for. The value model is dense records with no
+/// prototype link, so membership is stated by name rather than walked —
+/// reading these keys still follows the prototype-chain refusal where one is
+/// registered, but `in` only asks whether the property exists.
+const OBJECT_PROTOTYPE_KEYS: &[&str] = &[
+    "__proto__",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    "constructor",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "toString",
+    "valueOf",
+];
+
+pub(crate) fn is_object_prototype_key(key: &str) -> bool {
+    OBJECT_PROTOTYPE_KEYS.contains(&key)
+}
+
+/// Own names of `Array.prototype` beyond `Object.prototype`'s, per ECMA-262.
+const ARRAY_PROTOTYPE_KEYS: &[&str] = &[
+    "at",
+    "concat",
+    "copyWithin",
+    "entries",
+    "every",
+    "fill",
+    "filter",
+    "find",
+    "findIndex",
+    "findLast",
+    "findLastIndex",
+    "flat",
+    "flatMap",
+    "forEach",
+    "includes",
+    "indexOf",
+    "join",
+    "keys",
+    "lastIndexOf",
+    "map",
+    "pop",
+    "push",
+    "reduce",
+    "reduceRight",
+    "reverse",
+    "shift",
+    "slice",
+    "some",
+    "sort",
+    "splice",
+    "toReversed",
+    "toSorted",
+    "toSpliced",
+    "unshift",
+    "values",
+    "with",
+];
+
+pub(crate) fn is_array_prototype_key(key: &str) -> bool {
+    ARRAY_PROTOTYPE_KEYS.contains(&key) || is_object_prototype_key(key)
+}
+
+/// `key in receiver` for a heap object: own properties first, then the
+/// inherited surface the object's kind carries. Sparse holes report absent,
+/// like every other missing index.
+pub(crate) fn javascript_heap_has_property(
+    heap: &Heap,
+    id: HeapId,
+    key: &str,
+) -> Result<bool, RuntimeError> {
+    Ok(match heap.get(id)? {
+        HeapObject::Record(record) => record.get(key).is_some() || is_object_prototype_key(key),
+        HeapObject::List(values) => {
+            key == "length"
+                || javascript_array_index_key(key)
+                    .is_some_and(|index| index < values.len() && !heap.is_list_hole(id, index))
+                || is_array_prototype_key(key)
+        }
+        HeapObject::Tuple(values) => {
+            key == "length"
+                || javascript_array_index_key(key).is_some_and(|index| index < values.len())
+                || is_array_prototype_key(key)
+        }
+        HeapObject::RegExp(_) => {
+            matches!(
+                key,
+                "lastIndex"
+                    | "source"
+                    | "flags"
+                    | "global"
+                    | "ignoreCase"
+                    | "multiline"
+                    | "sticky"
+                    | "unicode"
+                    | "unicodeSets"
+                    | "hasIndices"
+                    | "dotAll"
+                    | "compile"
+                    | "exec"
+                    | "test"
+            ) || is_object_prototype_key(key)
+        }
+        HeapObject::RegExpMatch(result) => {
+            matches!(key, "index" | "input" | "groups" | "length")
+                || javascript_array_index_key(key).is_some_and(|index| index < result.items.len())
+                || is_array_prototype_key(key)
+        }
+        HeapObject::Map(_) => {
+            matches!(
+                key,
+                "size"
+                    | "get"
+                    | "set"
+                    | "has"
+                    | "delete"
+                    | "clear"
+                    | "keys"
+                    | "values"
+                    | "entries"
+                    | "forEach"
+            ) || is_object_prototype_key(key)
+        }
+        HeapObject::Set(_) => {
+            matches!(
+                key,
+                "size"
+                    | "add"
+                    | "has"
+                    | "delete"
+                    | "clear"
+                    | "keys"
+                    | "values"
+                    | "entries"
+                    | "forEach"
+                    | "union"
+                    | "intersection"
+                    | "difference"
+                    | "symmetricDifference"
+                    | "isSubsetOf"
+                    | "isSupersetOf"
+                    | "isDisjointFrom"
+            ) || is_object_prototype_key(key)
+        }
+        HeapObject::Date(_) => {
+            matches!(
+                key,
+                "getTime"
+                    | "getUTCFullYear"
+                    | "getUTCMonth"
+                    | "getUTCDate"
+                    | "getUTCDay"
+                    | "getUTCHours"
+                    | "getUTCMinutes"
+                    | "getUTCSeconds"
+                    | "getUTCMilliseconds"
+                    | "toISOString"
+                    | "toJSON"
+                    | "valueOf"
+                    | "toString"
+            ) || is_object_prototype_key(key)
+        }
+        HeapObject::Error(error) => {
+            matches!(key, "name" | "message" | "cause" | "stack" | "toString")
+                || (error.kind == ErrorKind::AggregateError && key == "errors")
+                || is_object_prototype_key(key)
+        }
+        HeapObject::Url(_) => {
+            matches!(
+                key,
+                "hash"
+                    | "host"
+                    | "hostname"
+                    | "href"
+                    | "origin"
+                    | "password"
+                    | "pathname"
+                    | "port"
+                    | "protocol"
+                    | "search"
+                    | "searchParams"
+                    | "username"
+                    | "toJSON"
+                    | "toString"
+            ) || is_object_prototype_key(key)
+        }
+        HeapObject::UrlSearchParams(_) => {
+            matches!(
+                key,
+                "size"
+                    | "append"
+                    | "delete"
+                    | "entries"
+                    | "forEach"
+                    | "get"
+                    | "getAll"
+                    | "has"
+                    | "keys"
+                    | "set"
+                    | "sort"
+                    | "toString"
+                    | "values"
+            ) || is_object_prototype_key(key)
+        }
+        HeapObject::Closure { .. } => {
+            matches!(
+                key,
+                "length" | "name" | "prototype" | "call" | "apply" | "bind"
+            ) || is_object_prototype_key(key)
+        }
+    })
+}
+
 /// Refuses a prototype-chain name carried as a data key by a value entering the
 /// runtime from outside the guest — parsed JSON, a host or tool result, a
 /// decoded wire heap.
@@ -378,9 +596,15 @@ pub(crate) fn read_javascript_heap_index(
         return Err(error);
     }
     Ok(match heap.get(id)? {
-        HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index_key(&key)
-            .and_then(|index| values.get(index).cloned())
-            .unwrap_or(Value::Undefined),
+        HeapObject::List(values) | HeapObject::Tuple(values) => {
+            if key == "length" {
+                Value::Number(values.len() as f64)
+            } else {
+                javascript_array_index_key(&key)
+                    .and_then(|index| values.get(index).cloned())
+                    .unwrap_or(Value::Undefined)
+            }
+        }
         HeapObject::Record(record) => record.get(&key).cloned().unwrap_or(Value::Undefined),
         HeapObject::RegExp(regexp) => match key.as_str() {
             "lastIndex" => Value::Number(regexp.last_index as f64),

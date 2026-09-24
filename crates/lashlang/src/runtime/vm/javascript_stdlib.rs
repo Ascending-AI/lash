@@ -2,6 +2,7 @@ use super::super::{
     ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
 };
 use super::*;
+use num_traits::Float;
 
 pub(super) fn js_stdlib_error(reason: impl Into<String>) -> RuntimeError {
     RuntimeError::ValidationFailed {
@@ -703,16 +704,70 @@ pub(super) fn pad_string(
     ))
 }
 
+/// `parseFloat` scans the longest prefix conforming to `StrDecimalLiteral`:
+/// an optional sign, then either the exact spelling `Infinity` or decimal
+/// digits with an optional fraction and exponent. Rust's own float parser is
+/// more permissive in places it must not be (`infinity` spelled lowercase) and
+/// less permissive in others (`5.e3`, which ECMA reads as `5.0e3`), so the
+/// grammar is scanned by hand and only the matched prefix is handed to it.
 pub(super) fn parse_float_prefix(value: &str) -> f64 {
     let value = value.trim_start_matches(super::super::javascript::is_ecma_string_whitespace);
-    for end in (1..=value.len()).rev() {
-        if let Some(prefix) = value.get(..end)
-            && let Ok(number) = prefix.parse::<f64>()
-        {
-            return number;
+    let bytes = value.as_bytes();
+    let mut cursor = 0usize;
+    if matches!(bytes.first(), Some(b'+' | b'-')) {
+        cursor = 1;
+    }
+    let negative = bytes.first() == Some(&b'-');
+    if value[cursor..].starts_with("Infinity") {
+        return if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        };
+    }
+    let integer_start = cursor;
+    while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+        cursor += 1;
+    }
+    let integer_digits = cursor - integer_start;
+    let mut fraction_digits = 0usize;
+    if bytes.get(cursor) == Some(&b'.') {
+        cursor += 1;
+        let fraction_start = cursor;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+        }
+        fraction_digits = cursor - fraction_start;
+        if integer_digits == 0 && fraction_digits == 0 {
+            cursor -= 1 + fraction_digits;
         }
     }
-    f64::NAN
+    if integer_digits + fraction_digits == 0 {
+        return f64::NAN;
+    }
+    let mantissa_end = cursor;
+    if matches!(bytes.get(cursor), Some(b'e' | b'E')) {
+        let mut probe = cursor + 1;
+        if matches!(bytes.get(probe), Some(b'+' | b'-')) {
+            probe += 1;
+        }
+        let exponent_start = probe;
+        while bytes.get(probe).is_some_and(u8::is_ascii_digit) {
+            probe += 1;
+        }
+        if probe > exponent_start {
+            cursor = probe;
+        }
+    }
+    // `5.e3` matched the grammar with a bare fraction point; Rust's parser
+    // wants a digit after it, so supply the implied zero.
+    let mut literal = String::with_capacity(cursor + 1);
+    literal.push_str(&value[..mantissa_end]);
+    if literal.ends_with('.') {
+        literal.push('0');
+    }
+    literal.push_str(&value[mantissa_end..cursor]);
+    literal.parse::<f64>().unwrap_or(f64::NAN)
 }
 
 pub(super) fn parse_int_prefix(value: &str, radix: Option<f64>) -> f64 {
@@ -763,6 +818,139 @@ pub(super) fn to_int32(value: f64) -> i64 {
         value - 4_294_967_296
     } else {
         value
+    }
+}
+
+pub(super) fn javascript_exponential(value: f64, fraction: Option<usize>) -> String {
+    if !value.is_finite() {
+        return javascript_to_string(&Value::Number(value));
+    }
+    let value = if value == 0.0 { 0.0 } else { value };
+    match fraction {
+        // ECMA rounds the exact decimal value to `fraction + 1` significant
+        // digits and takes the larger mantissa on an exact tie (`25` with zero
+        // fraction digits is `3e+1`, not `2e+1`). Rust's own formatter rounds
+        // half-to-even, so the digits come from the exact binary expansion
+        // instead.
+        Some(fraction) => exact_exponential(value, fraction),
+        None => {
+            let shortest = javascript_to_string(&Value::Number(value));
+            let parsed = shortest.parse::<f64>().unwrap_or(value);
+            normalize_exponent(format!("{parsed:e}"), fraction)
+        }
+    }
+}
+
+/// `toExponential(f)` with ECMA rounding: the absolute value's exact decimal
+/// expansion is rounded to `f + 1` significant digits, halves up.
+fn exact_exponential(value: f64, fraction: usize) -> String {
+    if value == 0.0 {
+        return if fraction == 0 {
+            "0e+0".to_string()
+        } else {
+            format!("0.{}e+0", "0".repeat(fraction))
+        };
+    }
+    // `value = mantissa * 2^exponent` exactly.
+    let (mantissa, exponent, sign) = value.integer_decode();
+    let (digits, shift) = if exponent >= 0 {
+        (
+            num_bigint::BigUint::from(mantissa) << exponent as usize,
+            0i64,
+        )
+    } else {
+        let halvings = (-exponent) as u32;
+        (
+            num_bigint::BigUint::from(mantissa) * num_bigint::BigUint::from(5u64).pow(halvings),
+            -i64::from(halvings),
+        )
+    };
+    // `|value| = digits * 10^shift`; `digits` is the full exact expansion.
+    let digits = digits.to_string();
+    let scientific_exponent = digits.len() as i64 + shift - 1;
+    let kept = fraction + 1;
+    let mut rounded: Vec<u8> = digits
+        .bytes()
+        .take(kept)
+        .chain(std::iter::repeat(b'0'))
+        .take(kept)
+        .collect();
+    let mut overflowed = false;
+    if digits.bytes().nth(kept).is_some_and(|digit| digit >= b'5') {
+        // Round half up: an exact tie takes the larger mantissa, and anything
+        // past the first dropped digit can only widen the gap upward.
+        let mut position = kept;
+        loop {
+            position -= 1;
+            if rounded[position] == b'9' {
+                rounded[position] = b'0';
+                if position == 0 {
+                    rounded.insert(0, b'1');
+                    rounded.truncate(kept);
+                    overflowed = true;
+                    break;
+                }
+            } else {
+                rounded[position] += 1;
+                break;
+            }
+        }
+    }
+    let mut mantissa_text = String::with_capacity(kept + 1);
+    mantissa_text.push(rounded[0] as char);
+    if fraction > 0 {
+        mantissa_text.push('.');
+        mantissa_text.extend(rounded[1..].iter().map(|digit| *digit as char));
+    }
+    // A carry out of the leading digit (`9.99` rounding to `10`) lifts the
+    // scientific exponent one place.
+    let exponent_text = scientific_exponent + i64::from(overflowed);
+    format!(
+        "{}{mantissa_text}e{}{exponent_text}",
+        if sign < 0 { "-" } else { "" },
+        if exponent_text >= 0 { "+" } else { "" },
+    )
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "the raw string is Rust's own exponent formatting output, split into mantissa and digits, per both messages"
+)]
+fn normalize_exponent(raw: String, fraction: Option<usize>) -> String {
+    let (mantissa, exponent) = raw.split_once('e').expect("Rust exponent formatting");
+    let mut mantissa = mantissa.to_string();
+    if fraction.is_none() {
+        while mantissa.contains('.') && mantissa.ends_with('0') {
+            mantissa.pop();
+        }
+        if mantissa.ends_with('.') {
+            mantissa.pop();
+        }
+    }
+    let exponent = exponent.parse::<i32>().expect("Rust exponent digits");
+    format!(
+        "{mantissa}e{}{exponent}",
+        if exponent >= 0 { "+" } else { "" }
+    )
+}
+
+pub(super) fn javascript_precision(value: f64, precision: usize) -> String {
+    if !value.is_finite() {
+        return javascript_to_string(&Value::Number(value));
+    }
+    let absolute = value.abs();
+    let exponent = if absolute == 0.0 {
+        0
+    } else {
+        absolute.log10().floor() as i32
+    };
+    if exponent >= precision as i32 || exponent < -6 {
+        javascript_exponential(value, Some(precision - 1))
+    } else {
+        let fraction = (precision as i32 - exponent - 1).max(0) as u8;
+        ryu_js::Buffer::new()
+            .format_to_fixed(value, fraction)
+            .to_string()
     }
 }
 

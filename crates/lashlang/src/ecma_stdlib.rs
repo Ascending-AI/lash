@@ -293,6 +293,64 @@ pub(crate) const fn signature_arity(arguments: &str) -> Option<usize> {
     Some(parameters)
 }
 
+/// The ECMA `Function.prototype.length` a signature row implies: the count of
+/// parameters before the first `[optional]` or `...rest` marker.
+pub const fn signature_length(arguments: &str) -> usize {
+    let bytes = arguments.as_bytes();
+    let mut end = bytes.len();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'['
+            || (bytes[i] == b'.'
+                && i + 2 < bytes.len()
+                && bytes[i + 1] == b'.'
+                && bytes[i + 2] == b'.')
+        {
+            end = i;
+            break;
+        }
+        i += 1;
+    }
+    let mut length = 0usize;
+    let mut has_token = false;
+    let mut parens = 0usize;
+    let mut j = 0;
+    while j < end {
+        match bytes[j] {
+            b'(' => parens += 1,
+            b')' => parens = parens.saturating_sub(1),
+            b',' if parens == 0 => {
+                if has_token {
+                    length += 1;
+                }
+                has_token = false;
+            }
+            b' ' | b'\t' => {}
+            _ => has_token = true,
+        }
+        j += 1;
+    }
+    if has_token {
+        length += 1;
+    }
+    length
+}
+
+/// The signature row an instance method name declares, when the dialect
+/// carries one — the lowerer's inventory for built-in method values.
+pub fn instance_method_signature(method: &str) -> Option<&'static StdlibSignature> {
+    INSTANCE_STDLIB_SIGNATURES
+        .iter()
+        .find(|signature| signature.method == method)
+}
+
+/// The fixed positional arity an instance method declares — `None` for
+/// variadic rows, whose `...rest` argument list a generated method value
+/// cannot forward positionally.
+pub fn instance_method_declared_arity(method: &str) -> Option<usize> {
+    instance_method_signature(method).and_then(|signature| signature_arity(signature.arguments))
+}
+
 /// `str` equality usable in `const` contexts, where `==` is not yet
 /// available.
 const fn str_eq(left: &str, right: &str) -> bool {

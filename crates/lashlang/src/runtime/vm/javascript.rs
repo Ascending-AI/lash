@@ -24,6 +24,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
         field: &Name,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
+            // Function values carry ECMA `length` — the declared pre-default
+            // parameter count, which lives on the compiled function rather
+            // than the heap object.
+            if field.text.as_ref() == "length"
+                && let HeapObject::Closure { function, .. } = self.heap.get(id)?
+                && let Some(compiled) = self.chunk.functions.get(*function as usize)
+            {
+                let length = match compiled.parameter_model {
+                    ClosureParameterModel::TypeScript { required_count, .. } => required_count,
+                    ClosureParameterModel::Exact => compiled.parameter_count,
+                };
+                return Ok(Value::Number(length as f64));
+            }
             return read_javascript_heap_field(&self.heap, id, field);
         }
         read_javascript_field_direct(target, field)
@@ -35,6 +48,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
         index: Value,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
+            if let HeapObject::Closure { function, .. } = self.heap.get(id)? {
+                let key = self.heap.javascript_to_string(&index)?;
+                if key == "length"
+                    && let Some(compiled) = self.chunk.functions.get(*function as usize)
+                {
+                    let length = match compiled.parameter_model {
+                        ClosureParameterModel::TypeScript { required_count, .. } => required_count,
+                        ClosureParameterModel::Exact => compiled.parameter_count,
+                    };
+                    return Ok(Value::Number(length as f64));
+                }
+            }
             return read_javascript_heap_index(&self.heap, id, &index);
         }
         let key = self.heap.javascript_to_string(&index)?;
@@ -207,6 +232,103 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 Err(error) => return Err(error),
             }
+            return Ok(());
+        }
+        // `key in receiver` evaluates both operands in source order — the
+        // lowerer emits them that way — then asks ECMA's HasProperty: a
+        // primitive receiver is a catchable `TypeError`, an object answers
+        // own keys plus the built-in surface its kind inherits.
+        if let [Value::String(method), key, receiver] = values.as_slice()
+            && method.as_str() == "Lash.HasProperty"
+        {
+            let key = self.heap.javascript_to_string(key)?;
+            let receiver = match receiver {
+                Value::Projected(_) => materialize_value(receiver.clone())?,
+                receiver => receiver.clone(),
+            };
+            let present = match &receiver {
+                Value::Ref(id) => javascript_heap_has_property(&self.heap, *id, &key)?,
+                Value::Record(record) => {
+                    record.get(key.as_str()).is_some() || is_object_prototype_key(&key)
+                }
+                Value::List(values) | Value::Tuple(values) => {
+                    key == "length"
+                        || array_index_property(&key)
+                            .is_some_and(|index| (index as usize) < values.len())
+                        || is_array_prototype_key(&key)
+                }
+                _ => {
+                    let error = self.heap.allocate_error(
+                        ErrorKind::TypeError,
+                        format!(
+                            "Cannot use 'in' operator to search for '{key}' in {}",
+                            javascript_to_string(&receiver)
+                        ),
+                        None,
+                        None,
+                    )?;
+                    return Err(RuntimeError::UncaughtException { value: error });
+                }
+            };
+            self.stack.push(Value::Bool(present));
+            return Ok(());
+        }
+        // An array literal with elisions arrives as a dense list plus the
+        // hole positions the adapter counted. The elements are already
+        // `Undefined`; this registers the absences beside the heap object so
+        // HasProperty answers can tell a hole from a stored `undefined`.
+        if let [Value::String(method), list, indices] = values.as_slice()
+            && method.as_str() == "Lash.SparseArray"
+        {
+            let indices = match indices {
+                Value::List(values) | Value::Tuple(values) => values.to_vec(),
+                Value::Ref(id) => match self.heap.get(*id)? {
+                    HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                    _ => {
+                        return Err(js_stdlib_error(
+                            "sparse array hole indices must be an array",
+                        ));
+                    }
+                },
+                _ => {
+                    return Err(js_stdlib_error(
+                        "sparse array hole indices must be an array",
+                    ));
+                }
+            }
+            .iter()
+            .map(|value| match value {
+                Value::Number(index) => Ok(*index as usize),
+                _ => Err(js_stdlib_error("sparse array hole index is not a number")),
+            })
+            .collect::<Result<BTreeSet<usize>, RuntimeError>>()?;
+            let id = match list {
+                Value::Ref(id) => *id,
+                Value::List(items) => {
+                    let allocated = self.heap.allocate_list(items.to_vec())?;
+                    let Value::Ref(id) = allocated else {
+                        unreachable!("allocate_list returns a reference")
+                    };
+                    id
+                }
+                _ => return Err(js_stdlib_error("sparse array elements must be an array")),
+            };
+            self.heap.mark_list_holes(id, indices);
+            self.stack.push(Value::Ref(id));
+            return Ok(());
+        }
+        // `Lash.IsCallable` answers whether a value can be invoked: only a
+        // heap closure qualifies. The lowered coercions consult it before
+        // issuing a `__typescript_call_dynamic`, mirroring ECMA's IsCallable
+        // test in OrdinaryToPrimitive.
+        if let [Value::String(method), value] = values.as_slice()
+            && method.as_str() == "Lash.IsCallable"
+        {
+            let callable = match value {
+                Value::Ref(id) => matches!(self.heap.get(*id)?, HeapObject::Closure { .. }),
+                _ => false,
+            };
+            self.stack.push(Value::Bool(callable));
             return Ok(());
         }
         // `Array.isArray` asks what a heap object is, and every kind answers
@@ -640,9 +762,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         }
                     }
                     "intersection" => {
-                        for value in &left {
-                            if self.heap.set_has(*other, value)? {
-                                output.push(value.clone());
+                        // ECMA iterates the smaller set and keeps its order:
+                        // `this` when it is no larger than the argument,
+                        // otherwise the argument's own insertion order.
+                        if left.len() <= right.len() {
+                            for value in &left {
+                                if self.heap.set_has(*other, value)? {
+                                    output.push(value.clone());
+                                }
+                            }
+                        } else {
+                            for value in &right {
+                                if self.heap.set_has(receiver, value)? {
+                                    output.push(value.clone());
+                                }
                             }
                         }
                     }
@@ -1205,13 +1338,8 @@ pub(super) fn javascript_string_method(
         )),
         ("split", [separator, limit]) => {
             let mut values = javascript_split(&Value::String(value.into()), separator)?;
-            let limit = javascript_to_number(limit);
-            let limit = if limit.is_nan() || limit <= 0.0 {
-                0
-            } else {
-                (limit.trunc() as usize).min(u32::MAX as usize)
-            };
-            values.truncate(limit);
+            // ToUint32 wraps negatives and maps NaN to zero.
+            values.truncate(to_uint32(javascript_to_number(limit)) as usize);
             Ok(Value::List(values.into()))
         }
         ("toLowerCase", []) => Ok(Value::String(value.to_lowercase().into())),
@@ -1401,64 +1529,6 @@ fn javascript_number_method(
     Ok(Value::String(rendered.into()))
 }
 
-fn javascript_exponential(value: f64, fraction: Option<usize>) -> String {
-    if !value.is_finite() {
-        return javascript_to_string(&Value::Number(value));
-    }
-    let value = if value == 0.0 { 0.0 } else { value };
-    let raw = match fraction {
-        Some(fraction) => format!("{value:.fraction$e}"),
-        None => {
-            let shortest = javascript_to_string(&Value::Number(value));
-            let parsed = shortest.parse::<f64>().unwrap_or(value);
-            format!("{parsed:e}")
-        }
-    };
-    normalize_exponent(raw, fraction)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the raw string is Rust's own exponent formatting output, split into mantissa and digits, per both messages"
-)]
-fn normalize_exponent(raw: String, fraction: Option<usize>) -> String {
-    let (mantissa, exponent) = raw.split_once('e').expect("Rust exponent formatting");
-    let mut mantissa = mantissa.to_string();
-    if fraction.is_none() {
-        while mantissa.contains('.') && mantissa.ends_with('0') {
-            mantissa.pop();
-        }
-        if mantissa.ends_with('.') {
-            mantissa.pop();
-        }
-    }
-    let exponent = exponent.parse::<i32>().expect("Rust exponent digits");
-    format!(
-        "{mantissa}e{}{exponent}",
-        if exponent >= 0 { "+" } else { "" }
-    )
-}
-
-fn javascript_precision(value: f64, precision: usize) -> String {
-    if !value.is_finite() {
-        return javascript_to_string(&Value::Number(value));
-    }
-    let absolute = value.abs();
-    let exponent = if absolute == 0.0 {
-        0
-    } else {
-        absolute.log10().floor() as i32
-    };
-    if exponent >= precision as i32 || exponent < -6 {
-        javascript_exponential(value, Some(precision - 1))
-    } else {
-        let fraction = (precision as i32 - exponent - 1).max(0) as u8;
-        ryu_js::Buffer::new()
-            .format_to_fixed(value, fraction)
-            .to_string()
-    }
-}
-
 fn flatten_array(items: &[Value], depth: usize, output: &mut Vec<Value>) {
     for item in items {
         if depth > 0 {
@@ -1474,7 +1544,7 @@ fn flatten_array(items: &[Value], depth: usize, output: &mut Vec<Value>) {
     }
 }
 
-fn to_uint32(value: f64) -> u32 {
+pub(super) fn to_uint32(value: f64) -> u32 {
     if !value.is_finite() || value == 0.0 {
         0
     } else {

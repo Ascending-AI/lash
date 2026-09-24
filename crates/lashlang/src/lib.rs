@@ -56,6 +56,7 @@ pub use compile::{
 };
 pub use ecma_stdlib::{
     INSTANCE_STDLIB_SIGNATURES, LiteralReceivers, STATIC_STDLIB_SIGNATURES, StdlibSignature,
+    instance_method_declared_arity, instance_method_signature, signature_length,
 };
 pub use identity::{ProcessDefinitionIdentity, ProcessDefinitionIdentityError};
 pub use introspection::{

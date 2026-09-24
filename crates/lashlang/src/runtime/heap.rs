@@ -112,6 +112,14 @@ pub(crate) struct Heap {
     /// heap is built, so a heap rebuilt from a wire reads as entirely unlike
     /// any capture taken before, rather than as unwritten.
     base_revision: u64,
+    /// Sparse holes inside `HeapObject::List` objects, kept beside the heap
+    /// because the dense `Vec<Value>` has no slot for "absent". A hole's
+    /// element still stores `Undefined`, so reads, iteration and `includes`
+    /// are unchanged; only HasProperty-style operations (`in`, `indexOf`,
+    /// `lastIndexOf`) consult the set. `replace_javascript_list` drops it —
+    /// reordering mutators fall back to dense semantics — and no wire carries
+    /// it, so a restored array is dense like the durable model says.
+    list_holes: FxHashMap<HeapId, BTreeSet<usize>>,
 }
 
 /// The next write stamp; see [`Heap::revisions`].
@@ -146,6 +154,7 @@ impl Default for Heap {
             logical_byte_limit: DEFAULT_HEAP_LOGICAL_BYTE_LIMIT,
             revisions: FxHashMap::default(),
             base_revision: next_revision(),
+            list_holes: FxHashMap::default(),
         }
     }
 }
@@ -1570,6 +1579,7 @@ impl Heap {
         }
         self.entries.retain(|id, _| marked.contains(id));
         self.revisions.retain(|id, _| marked.contains(id));
+        self.list_holes.retain(|id, _| marked.contains(id));
         for (id, children, logical_bytes) in dead {
             self.retarget_parent_edges(id, &children, &[]);
             self.parents.remove(&id);
@@ -1675,6 +1685,7 @@ impl Clone for Heap {
             logical_byte_limit: self.logical_byte_limit,
             revisions: self.revisions.clone(),
             base_revision: self.base_revision,
+            list_holes: self.list_holes.clone(),
         }
     }
 }

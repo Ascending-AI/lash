@@ -1,4 +1,4 @@
-use super::javascript::{js_stdlib_error, utf16_value};
+use super::javascript::{js_stdlib_error, to_uint32, utf16_value};
 use super::javascript_array::javascript_regexp_match_method;
 use super::*;
 use crate::runtime::{
@@ -811,16 +811,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if limit == 0 {
             return Ok(Value::List(Vec::new().into()));
         }
-        let Value::Ref(receiver) = separator else {
+        let is_regexp = matches!(separator, Value::Ref(receiver)
+            if matches!(self.heap.get(*receiver)?, HeapObject::RegExp(_)));
+        if !is_regexp {
+            // A non-RegExp separator is ToString'd and split as a string;
+            // record separators arrive already coerced by the lowerer.
+            let separator = Value::String(self.heap.javascript_to_string(separator)?.into());
             return super::javascript::javascript_string_method(
                 "split",
                 input,
-                &[separator.clone(), Value::Number(limit as f64)],
+                &[separator, Value::Number(limit as f64)],
             );
-        };
-        if !matches!(self.heap.get(*receiver)?, HeapObject::RegExp(_)) {
-            return Err(js_stdlib_error("split separator is not a RegExp"));
         }
+        let Value::Ref(receiver) = separator else {
+            unreachable!("is_regexp implies a heap reference")
+        };
         let units = bounded_utf16_input(&self.heap, input)?;
         if limit == 1 && !units.is_empty() {
             let unicode = matches!(
@@ -1311,13 +1316,6 @@ fn utf16_range(units: &[u16], range: std::ops::Range<usize>) -> Result<Value, Ru
     utf16_value(units[range].to_vec()).map_err(|_| RuntimeError::ValidationFailed {
         reason: "TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED: non-unicode RegExp output contains an unrepresentable lone surrogate".to_string(),
     })
-}
-
-fn to_uint32(number: f64) -> u32 {
-    if !number.is_finite() || number == 0.0 {
-        return 0;
-    }
-    number.trunc().rem_euclid(4_294_967_296.0) as u32
 }
 
 fn advance_string_index(input: &[u16], index: usize, unicode: bool) -> usize {
