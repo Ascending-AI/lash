@@ -424,6 +424,21 @@ no probe that fires it fails that test.
   Negative and other non-index writes would create named object properties and
   reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; neither path mutates an
   element.
+- A write that ECMA would answer by creating an own property the value model
+  has no slot for rejects at runtime as `TS_EXOTIC_PROPERTY_UNSUPPORTED`;
+  keep the value in a plain object beside it. The code covers two cases:
+  - on an `Error`, `Map`, `Set`, `RegExp` or `URLSearchParams`
+    (`error.name = …`, `map.cache = …`) it is TypeScript-faithful: `tsc
+    --strict` rejects the same write as TS2339 (verified on the pinned
+    TypeScript 7.0.2);
+  - on a function (`f.cache = …`) it is an unsupported-feature refusal,
+    stricter than both ECMA and `tsc`, which accept the expando: a function
+    value has no property slots in this value model. Where ECMA makes the property read-only in strict code —
+  a function's `name`, `length`, `caller` and `arguments`, or an accessor
+  with no setter such as `map.size` and `regexp.source` — the write throws
+  ECMA's `TypeError` instead. A write onto a `Date` rejects as
+  `TS_DATE_IMMUTABLE`, and a named property on an array as
+  `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`.
 - Deleting an object field preserves aliases and returns the ECMA boolean.
   Deleting a present dense-array index would create a hole, so it rejects at
   runtime with `TS_DELETE_ARRAY_INDEX_UNSUPPORTED` and directs the author to
@@ -525,12 +540,17 @@ corpus cites:
   from a global object property, so `globalThis.x = 2` beside `let x = 1`
   leaves `x` reading `1` in Node and `2` here. `var` and function declarations
   alias the global object in both.
-- `runtime-fault-brand`: a fault the VM raises — reading a member of `null`,
-  calling a non-function — is an `Error` branded `RuntimeError`, with its
-  typed code on `cause` ([ADR 0062](../../docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md)),
-  not the ECMA class (`TypeError`) Node throws. `instanceof Error` holds;
-  `instanceof TypeError` does not. An error the program or a builtin throws
-  keeps its own class.
+- `runtime-fault-brand`: a failure with no ECMA-262 counterpart — a value
+  that cannot cross the host boundary, a failed tool result unwrapped with
+  `?`, a process control used outside a process — is an `Error` branded
+  `RuntimeError`, with its typed code on `cause` ([ADR 0062](../../docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md)).
+  An operation ECMA-262 specifies to throw throws that class instead, with
+  Node's message: reading or writing a member of `null` or `undefined`,
+  calling a non-function, destructuring `null` or `undefined`, iterating a
+  non-iterable, touching a strict function's `caller` or `arguments`, and each
+  built-in's own `TypeError`, `RangeError` or `SyntaxError`. So
+  `instanceof TypeError` and `error.name` answer as in Node, caught or
+  uncaught.
 - `process-literal-is-a-process-value`: a top-level `const`-bound uncalled
   `async` arrow is a `Process` value
   ([ADR 0095](../../docs/adr/0095-processes-are-values-and-process-controls-are-tools.md)):

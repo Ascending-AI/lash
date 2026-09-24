@@ -707,7 +707,7 @@
         {
           "source": "const value = null;\nconsole.log(value.missing);\n",
           "reject": null,
-          "deviation": "runtime-fault-brand",
+          "deviation": null,
           "defect": null,
           "node": {
             "outcome": "throw",
@@ -717,24 +717,6 @@
               "value": "object null"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "throw",
-              "error": "RuntimeError",
-              "prints": [],
-              "probes": {
-                "value": "object null"
-              }
-            },
-            "restart": {
-              "outcome": "throw",
-              "error": "RuntimeError",
-              "prints": [],
-              "probes": {
-                "value": "object null"
-              }
-            }
           }
         }
       ]
@@ -952,7 +934,7 @@
         {
           "source": "try {\n  const nothing = null;\n  console.log(nothing.field);\n} catch (error) {\n  console.log(error.name, error instanceof Error, error instanceof TypeError);\n}\n",
           "reject": null,
-          "deviation": "runtime-fault-brand",
+          "deviation": null,
           "defect": null,
           "node": {
             "outcome": "normal",
@@ -964,28 +946,6 @@
               "error": "unbound"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "normal",
-              "prints": [
-                "RuntimeError true false"
-              ],
-              "probes": {
-                "error": "unbound",
-                "nothing": "unbound"
-              }
-            },
-            "restart": {
-              "outcome": "normal",
-              "prints": [
-                "RuntimeError true false"
-              ],
-              "probes": {
-                "error": "unbound",
-                "nothing": "unbound"
-              }
-            }
           }
         }
       ]
@@ -1979,7 +1939,7 @@
         {
           "source": "const none = null;\nconsole.log((none?.b).c);\n",
           "reject": null,
-          "deviation": "runtime-fault-brand",
+          "deviation": null,
           "defect": null,
           "node": {
             "outcome": "throw",
@@ -1989,24 +1949,6 @@
               "none": "object null"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "throw",
-              "error": "RuntimeError",
-              "prints": [],
-              "probes": {
-                "none": "object null"
-              }
-            },
-            "restart": {
-              "outcome": "throw",
-              "error": "RuntimeError",
-              "prints": [],
-              "probes": {
-                "none": "object null"
-              }
-            }
           }
         }
       ]

@@ -718,6 +718,7 @@ impl Lowerer {
             Pattern::Object { properties, rest } => {
                 let input = self.temporary("object_pattern");
                 let mut output = vec![Self::temp_assignment(&input, value)];
+                output.push(require_object_coercible(&input));
                 let mut keys = Vec::new();
                 for property in properties {
                     let key_name = self.temporary("object_pattern_key");

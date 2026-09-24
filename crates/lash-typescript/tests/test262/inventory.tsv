@@ -233,6 +233,7 @@ typescript	decorators
 typescript	delete-non-reference
 typescript	direct-eval
 typescript	enum
+typescript	exotic-own-properties
 typescript	function-constructor
 typescript	function-redeclaration
 typescript	generics

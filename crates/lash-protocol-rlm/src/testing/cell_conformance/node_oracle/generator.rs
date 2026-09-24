@@ -25,8 +25,9 @@
 //!   `cross-cell-redeclaration` (a top-level name is declared once per
 //!   session), `global-object-aliases-lexical-bindings` (`globalThis` writes
 //!   only a `var` or a `globalThis`-born name), `runtime-fault-brand` (no VM
-//!   fault; errors are thrown explicitly), `process-literal-is-a-process-value`
-//!   (no top-level uncalled `async` arrow). `closure-boundary` is not
+//!   fault without an ECMA class; errors are thrown explicitly),
+//!   `process-literal-is-a-process-value` (no top-level uncalled `async`
+//!   arrow). `closure-boundary` is not
 //!   excluded: a closure is drawn at the top level freely, the session names
 //!   the rule, and no later cell reads it.
 //! * the dialect's static refusals of JavaScript: an assignment to an earlier

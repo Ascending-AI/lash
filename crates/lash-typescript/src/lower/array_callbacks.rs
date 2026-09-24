@@ -117,10 +117,6 @@ impl Lowerer {
         let index = self.temporary("group_index");
         let key = self.temporary("group_key");
         let group = self.temporary("group_values");
-        let source_value = stdlib(
-            "Lash.ArrayFromIterable",
-            vec![self.lower_iterable_sink(source)?],
-        );
         let output_value = if owner == "Map" {
             LashExpr::BuiltinCall {
                 name: "__typescript_heap_new".into(),
@@ -201,8 +197,16 @@ impl Lowerer {
             LashExpr::Undefined,
         ]);
         Ok(LashExpr::Block(vec![
-            assign(&source_name, source_value),
+            assign(
+                &source_name,
+                stdlib(
+                    "Lash.ArrayFromIterable",
+                    vec![self.lower_iterable_sink(source)?],
+                ),
+            ),
             assign(&callback_name, self.lower_expr(callback)?),
+            // GroupBy refuses a non-callable callback before it calls one.
+            assign(&callback_name, require_callable(variable(&callback_name))),
             assign(&output, output_value),
             assign(
                 &worker,
@@ -290,7 +294,41 @@ impl Lowerer {
             ));
         }
         let initial = initial_name.as_deref().map(variable);
-        let body = callback_body(method, &receiver, &callback_name, initial, self)?;
+        let body = if matches!(method, "sort" | "toSorted") {
+            callback_body(method, &receiver, &callback_name, initial, self)?
+        } else {
+            // Every callback-taking method checks IsCallable after its
+            // arguments are evaluated and before it visits an element, so a
+            // non-callable callback throws a TypeError even on an empty
+            // receiver. `Array.from` reads an `undefined` mapper as no mapping.
+            // The check runs first in the driver, so the role's setup keeps
+            // its receiver-and-callback shape.
+            let callee = self.temporary("callback_callee");
+            let check = if method == "arrayFromMap" {
+                let identity = self.temporary("callback_identity");
+                LashExpr::If {
+                    condition: Box::new(binary(
+                        variable(&callback_name),
+                        JavaScriptBinaryOp::StrictEqual,
+                        LashExpr::Undefined,
+                    )),
+                    then_block: Box::new(LashExpr::Function(Box::new(FunctionExpr {
+                        name: None,
+                        js_name: None,
+                        params: vec![identity.as_str().into()],
+                        captures: Vec::new(),
+                        body: Box::new(variable(&identity)),
+                    }))),
+                    else_block: Box::new(require_callable(variable(&callback_name))),
+                }
+            } else {
+                require_callable(variable(&callback_name))
+            };
+            LashExpr::Block(vec![
+                assign(&callee, check),
+                callback_body(method, &receiver, &callee, initial, self)?,
+            ])
+        };
         let mut captures = vec![receiver.as_str().into(), callback_name.as_str().into()];
         if let Some(name) = initial_name {
             captures.push(name.into());
@@ -638,6 +676,11 @@ fn add(left: LashExpr, right: LashExpr) -> LashExpr {
 
 fn subtract(left: LashExpr, right: LashExpr) -> LashExpr {
     binary(left, JavaScriptBinaryOp::Subtract, right)
+}
+
+/// IsCallable, throwing ECMA's TypeError when the value is not a function.
+fn require_callable(value: LashExpr) -> LashExpr {
+    stdlib("Lash.RequireCallable", vec![value])
 }
 
 fn stdlib(method: &str, mut args: Vec<LashExpr>) -> LashExpr {

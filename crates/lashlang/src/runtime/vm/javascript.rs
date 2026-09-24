@@ -1,6 +1,6 @@
 use super::super::{
     ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_number,
-    javascript_to_string,
+    javascript_to_string, nullish_property_read,
 };
 use super::javascript_array::javascript_array_method_for_value;
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
@@ -36,6 +36,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
             return read_javascript_heap_index(&self.heap, id, &index);
+        }
+        // A `null` or `undefined` base throws before its key is converted, so
+        // an object key's own `toString` never runs.
+        if matches!(target, Value::Null | Value::Undefined) {
+            return Err(nullish_property_read(&target, &index));
         }
         let key = self.heap.javascript_to_string(&index)?;
         read_javascript_index_direct_with_key(target, &key)
@@ -131,12 +136,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let [Value::String(method), value] = values.as_slice()
             && method.as_str() == "__jsonHasOwnToJSON"
         {
+            // SerializeJSONProperty calls `toJSON` only when it is callable;
+            // any other `toJSON` is an ordinary property.
             let has = match value {
                 Value::Ref(id) => match self.heap.get(*id)? {
-                    HeapObject::Record(record) => record.get("toJSON").is_some(),
+                    HeapObject::Record(record) => match record.get("toJSON") {
+                        Some(Value::Ref(hook)) => {
+                            matches!(self.heap.get(*hook)?, HeapObject::Closure { .. })
+                        }
+                        _ => false,
+                    },
                     _ => false,
                 },
-                Value::Record(record) => record.get("toJSON").is_some(),
                 _ => false,
             };
             self.stack.push(Value::Bool(has));
@@ -203,19 +214,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     self.stack.push(Value::String(json.into()));
                 }
                 Ok(None) => self.stack.push(Value::Undefined),
-                Err(RuntimeError::ValidationFailed { reason })
-                    if reason.starts_with("TypeError: ") =>
-                {
-                    let error = self.heap.allocate_error(
-                        ErrorKind::TypeError,
-                        Some(reason.trim_start_matches("TypeError: ").to_string()),
-                        None,
-                        None,
-                    )?;
-                    return Err(RuntimeError::UncaughtException { value: error });
-                }
                 Err(error) => return Err(error),
             }
+            return Ok(());
+        }
+        if self.execute_ecma_guard(&values)? {
             return Ok(());
         }
         // `Array.isArray` asks what a heap object is, and every kind answers
@@ -496,13 +499,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             length.trunc()
         };
         if length > u32::MAX as f64 {
-            let error = self.heap.allocate_error(
-                ErrorKind::RangeError,
-                Some("Invalid array length".to_string()),
-                None,
-                None,
-            )?;
-            return Err(RuntimeError::UncaughtException { value: error });
+            return Err(RuntimeError::range_error("Invalid array length"));
         }
         let length = length as usize;
         self.heap.ensure_list_allocation_len(length)?;
@@ -815,8 +812,8 @@ fn javascript_stdlib(heap: &Heap, values: &[Value]) -> Result<Value, RuntimeErro
     };
     let args = &values[1..];
     if method.as_str() == "__reduceEmpty" {
-        return Err(js_stdlib_error(
-            "TypeError: Reduce of empty array with no initial value",
+        return Err(RuntimeError::type_error(
+            "Reduce of empty array with no initial value",
         ));
     }
     if method.contains('.') {
@@ -837,14 +834,10 @@ fn javascript_stdlib(heap: &Heap, values: &[Value]) -> Result<Value, RuntimeErro
         // readers looking for a missing builtin instead of at the undefined
         // value one step to the left. Named the way ECMA names it, so the
         // diagnostic matches what the guest would have seen in a browser.
-        Value::Null | Value::Undefined => Err(js_stdlib_error(format!(
-            "TypeError: Cannot read properties of {receiver} (reading `{method}`)",
-            receiver = if matches!(target, Value::Null) {
-                "null"
-            } else {
-                "undefined"
-            }
-        ))),
+        Value::Null | Value::Undefined => Err(nullish_property_read(
+            target,
+            &Value::String(method.clone()),
+        )),
         _ if method == "toString" && args.is_empty() => {
             Ok(Value::String(javascript_to_string(target).into()))
         }
@@ -863,6 +856,13 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
     use crate::runtime::javascript::{javascript_strict_equal, javascript_to_number};
     let args = normalized_static_arguments(method, args);
     match (method, args.as_slice()) {
+        // ToObject of the receiver throws before anything is read.
+        (
+            "Object.keys" | "Object.values" | "Object.entries" | "Object.hasOwn",
+            [Value::Null | Value::Undefined, ..],
+        ) => Err(RuntimeError::type_error(
+            "Cannot convert undefined or null to object",
+        )),
         ("Object.keys", [Value::Record(record)]) => Ok(Value::List(
             ecma_record_entries(record)
                 .into_iter()
@@ -942,24 +942,47 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
         ) => Ok(Value::List(Vec::new().into())),
         ("Object.fromEntries", [Value::List(entries) | Value::Tuple(entries)]) => {
             let mut record = record_with_capacity(entries.len());
+            // Each entry is an object read at "0" and "1"; a missing one
+            // reads `undefined`, and a primitive entry is not an object.
             for entry in entries.iter() {
-                let (Value::List(pair) | Value::Tuple(pair)) = entry else {
-                    return Err(js_stdlib_error("Object.fromEntries entry is not iterable"));
+                let (key, value) = match entry {
+                    Value::List(pair) | Value::Tuple(pair) => (pair.first(), pair.get(1)),
+                    Value::Record(pair) => (pair.get("0"), pair.get("1")),
+                    _ => {
+                        return Err(RuntimeError::type_error(format!(
+                            "Iterator value {} is not an entry object",
+                            javascript_to_string(entry)
+                        )));
+                    }
                 };
-                if pair.len() < 2 {
-                    return Err(js_stdlib_error(
-                        "Object.fromEntries entry has fewer than two values",
-                    ));
-                }
-                record.insert(javascript_to_string(&pair[0]), pair[1].clone());
+                record.insert(
+                    javascript_to_string(key.unwrap_or(&Value::Undefined)),
+                    value.cloned().unwrap_or(Value::Undefined),
+                );
             }
             Ok(Value::Record(std::sync::Arc::new(record)))
         }
         ("Object.assign", [target, sources @ ..]) => {
-            let Value::Record(target) = target else {
-                return Err(js_stdlib_error(
-                    "TypeError: Object.assign target must be a prototype-free object",
-                ));
+            let target = match target {
+                Value::Record(target) => target,
+                // ToObject(target) throws on `null` and `undefined`.
+                Value::Null | Value::Undefined => {
+                    return Err(RuntimeError::type_error(
+                        "Cannot convert undefined or null to object",
+                    ));
+                }
+                // ToObject of any other primitive is a wrapper object, which
+                // this value model does not have.
+                Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                    return Err(js_stdlib_error(
+                        "TS_METHOD_UNSUPPORTED: Object.assign on a primitive target would return a wrapper object, which this value model does not have; assign onto a plain object",
+                    ));
+                }
+                _ => {
+                    return Err(js_stdlib_error(
+                        "TS_METHOD_UNSUPPORTED: Object.assign onto an array or a built-in object is unavailable; assign onto a plain object",
+                    ));
+                }
             };
             let mut output = target.as_ref().clone();
             for source in sources {
@@ -1004,6 +1027,10 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
             value,
             Value::List(_) | Value::Tuple(_)
         ))),
+        (
+            "Lash.ArrayFromIterable",
+            [value @ (Value::Null | Value::Undefined | Value::Bool(_) | Value::Number(_))],
+        ) => Err(crate::runtime::not_iterable_error(value)),
         ("Lash.ArrayFromIterable", [Value::List(values) | Value::Tuple(values)]) => {
             Ok(Value::List(values.to_vec().into()))
         }
@@ -1039,9 +1066,10 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
                     || point.fract() != 0.0
                     || !(0.0..=0x10ffff as f64).contains(&point)
                 {
-                    return Err(js_stdlib_error(
-                        "String.fromCodePoint received an invalid code point",
-                    ));
+                    return Err(RuntimeError::range_error(format!(
+                        "Invalid code point {}",
+                        javascript_to_string(value)
+                    )));
                 }
                 // A surrogate code point is a valid argument: ECMA returns a
                 // string holding that lone code unit. The value model cannot
@@ -1241,7 +1269,10 @@ pub(super) fn javascript_string_method(
             let count = javascript_to_number(count);
             let count = if count.is_nan() { 0.0 } else { count };
             if !count.is_finite() || count < 0.0 {
-                return Err(js_stdlib_error("String.repeat count is out of range"));
+                return Err(RuntimeError::range_error(format!(
+                    "Invalid count value: {}",
+                    javascript_to_string(&Value::Number(count))
+                )));
             }
             let count = count.trunc() as usize;
             let output_bytes = value
@@ -1432,9 +1463,11 @@ fn javascript_number_method(
             value.trunc() as i64
         };
         if !(min..=100).contains(&value) {
-            return Err(js_stdlib_error(
-                "RangeError: precision must be between 0 and 100",
-            ));
+            return Err(RuntimeError::range_error(match method {
+                "toFixed" => "toFixed() digits argument must be between 0 and 100",
+                "toExponential" => "toExponential() argument must be between 0 and 100",
+                _ => "toPrecision() argument must be between 1 and 100",
+            }));
         }
         Ok(value)
     };
@@ -1444,6 +1477,11 @@ fn javascript_number_method(
             ryu_js::Buffer::new()
                 .format_to_fixed(value, digits)
                 .to_string()
+        }
+        // Both answer a non-finite receiver before they range-check the
+        // argument; `toFixed` range-checks first.
+        "toExponential" | "toPrecision" if !value.is_finite() => {
+            javascript_to_string(&Value::Number(value))
         }
         "toExponential" => {
             let fraction = if args.is_empty() || matches!(args, [Value::Undefined]) {

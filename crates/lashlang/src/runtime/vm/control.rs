@@ -454,24 +454,28 @@ impl<H: ExecutionHost> Vm<'_, H> {
         instruction_ip: usize,
         span: Option<Span>,
     ) -> Result<(), VmTrap> {
+        let trap = |error| VmTrap {
+            error,
+            instruction_ip,
+            span,
+        };
+        let error = self.ecma_throw(error).map_err(trap)?;
         if !error.is_uncatchable_terminal() && self.has_exception_scope() {
             match self.throw_runtime_error(&error, instruction_ip, span) {
                 Ok(true) => return Ok(()),
                 Ok(false) => {}
-                Err(terminal) => {
-                    return Err(VmTrap {
-                        error: terminal,
-                        instruction_ip,
-                        span,
-                    });
-                }
+                Err(terminal) => return Err(trap(terminal)),
             }
         }
-        Err(VmTrap {
-            error,
-            instruction_ip,
-            span,
-        })
+        // An uncaught thrown value leaves the VM detached, as an explicit
+        // `throw` does: the host never sees a reference into this heap.
+        let error = match error {
+            RuntimeError::UncaughtException { value } => RuntimeError::UncaughtException {
+                value: self.heap.export(&value).map_err(trap)?,
+            },
+            error => error,
+        };
+        Err(trap(error))
     }
 
     /// Exports whatever this instruction's heap plan says it reads.

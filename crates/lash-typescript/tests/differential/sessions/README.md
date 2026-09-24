@@ -30,8 +30,10 @@ A cell is a Script, observed as:
   (arguments joined by a space, a plain object or array as compact JSON,
   anything else as ECMA `ToString`);
 - how it ended: normally, through `finish(value)` (which ends the cell; a cell
-  never catches it), or by an uncaught error of a class — a VM fault's class
-  is its `RuntimeError` brand (`runtime-fault-brand`);
+  never catches it), or by an uncaught error of a class — a fault in an
+  operation ECMA-262 specifies to throw is that ECMA class, and a VM fault
+  with no ECMA counterpart is its `RuntimeError` brand
+  (`runtime-fault-brand`);
 - after the cell, one probe per binder name of its session, run as its own
   Script: `console.log(typeof NAME, JSON.stringify(NAME))`. A
   `ReferenceError` answers `unbound` (`tdz` for an uninitialized binding); the
