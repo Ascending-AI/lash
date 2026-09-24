@@ -476,6 +476,19 @@ async fn live_restate_effect_group_design_witnesses() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+async fn live_restate_close_releases_an_unstarted_wait_child() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    tokio::time::timeout(
+        Duration::from_secs(60),
+        harness.run_unstarted_wait_child_release_witness(),
+    )
+    .await
+    .expect("Restate unstarted-wait-child witness exceeded 60 seconds");
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 async fn live_restate_executing_effect_quiescence_witness() {
     let harness = effect_group_conformance::LiveConformanceHarness::start().await;
     tokio::time::timeout(

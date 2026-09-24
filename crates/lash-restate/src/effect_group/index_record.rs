@@ -281,6 +281,7 @@ pub(crate) fn decide_group_child_admission(
         EffectGroupLifecycle::Closed {
             effective,
             addresses,
+            live,
             ..
         } => match effective {
             EffectGroupCloseDisposition::RunToCompletion => match addresses.get(&position) {
@@ -288,6 +289,14 @@ pub(crate) fn decide_group_child_admission(
                 Some(_) => EffectGroupAdmissionResponse::AttachExpired,
                 None => EffectGroupAdmissionResponse::Refused,
             },
+            EffectGroupCloseDisposition::Cancel
+                if matches!(
+                    live.commit_states.get(&position),
+                    Some(EffectGroupChildCommitState::CancelDecided)
+                ) =>
+            {
+                EffectGroupAdmissionResponse::CancelDecided
+            }
             EffectGroupCloseDisposition::Cancel | EffectGroupCloseDisposition::Refused { .. } => {
                 EffectGroupAdmissionResponse::Refused
             }
@@ -389,6 +398,22 @@ mod admission_tests {
         assert_eq!(
             decide_group_child_admission(&cancelled, 0, "a-fresh-invocation-id"),
             EffectGroupAdmissionResponse::Refused
+        );
+        // A child the close decided is told so: the close already released
+        // its wait, so the child has nothing left to do (FIG-3630).
+        let mut decided = live_record();
+        decided
+            .commit_states
+            .insert(0, EffectGroupChildCommitState::CancelDecided);
+        let decided = EffectGroupLifecycle::Closed {
+            effective: EffectGroupCloseDisposition::Cancel,
+            reopened: false,
+            addresses: [(0, "child-invocation-0".to_owned())].into_iter().collect(),
+            live: decided,
+        };
+        assert_eq!(
+            decide_group_child_admission(&decided, 0, "child-invocation-0"),
+            EffectGroupAdmissionResponse::CancelDecided
         );
         let retired = EffectGroupLifecycle::Retired {
             cleanup: EffectGroupCleanup::Complete,

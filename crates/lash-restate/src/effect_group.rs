@@ -58,7 +58,7 @@ mod reopen;
 mod wire;
 use drain_barrier::blocking_positions;
 pub(crate) use drain_barrier::{drained_wait_lifted, drained_wait_request};
-use group_waits::{fence_cancel_decided_completions, resolve_group_wait, wait_resolution};
+use group_waits::{resolve_group_wait, seal_cancel_decisions, wait_resolution};
 pub use protocol::EFFECT_GROUP_INDEX_PROTOCOL_VERSION;
 pub(crate) use protocol::protocol_refusal_in;
 #[cfg(test)]
@@ -258,6 +258,10 @@ pub enum EffectGroupAdmissionResponse {
     /// exit silently — the rank it would never settle is a caller's wait
     /// (ADR 0099 §8).
     AttachExpired,
+    /// The close decided this child `Cancel` before it was admitted. The
+    /// close owns everything that follows, including releasing a wait
+    /// child's wait (ADR 0099 §12, FIG-3630), so the child just exits.
+    CancelDecided,
     Refused,
     Retired,
 }
@@ -1296,7 +1300,7 @@ impl EffectGroupIndex {
                 live.settled_positions.insert(position, rank);
             }
         }
-        fence_cancel_decided_completions(&ctx, &group_key, &shape, &decided).await?;
+        seal_cancel_decisions(&ctx, &group_key, &shape, &decided).await?;
         let live = record.live()?.clone();
         record.lifecycle = EffectGroupLifecycle::Closed {
             effective: effective.into(),
@@ -1526,7 +1530,7 @@ impl EffectGroupIndex {
                 .collect::<Vec<_>>();
             (facts.clone(), ranks, changed, live.shape.clone())
         };
-        fence_cancel_decided_completions(&ctx, &group_key, &shape, &decided).await?;
+        seal_cancel_decisions(&ctx, &group_key, &shape, &decided).await?;
         store_index(&ctx, record.clone());
         for (position, rank) in ranks.iter().copied() {
             resolve_group_wait(
