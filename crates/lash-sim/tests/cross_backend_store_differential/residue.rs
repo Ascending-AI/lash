@@ -107,6 +107,10 @@ const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
         "SELECT * FROM session_execution_leases WHERE session_id = ?1",
     ),
     (
+        "turn_parks",
+        "SELECT * FROM turn_parks WHERE session_id = ?1",
+    ),
+    (
         "pending_turn_inputs",
         "SELECT * FROM pending_turn_inputs WHERE session_id = ?1",
     ),
@@ -204,6 +208,10 @@ const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
     (
         "session_execution_leases",
         "SELECT to_jsonb(t)::text FROM lash_session_execution_leases t WHERE session_id = $1",
+    ),
+    (
+        "turn_parks",
+        "SELECT to_jsonb(t)::text FROM lash_turn_parks t WHERE session_id = $1",
     ),
     (
         "pending_turn_inputs",

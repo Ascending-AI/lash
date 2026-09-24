@@ -280,11 +280,13 @@ pub enum ChildDrainOutcome {
     Settled,
     /// Another executor owns the child, so the pass moved past it.
     ///
-    /// Two ways to arrive here, and they are the same fact seen at two moments.
+    /// Three ways to arrive here, all the same fact seen at different moments.
     /// Either the claim came back busy — the lease the pass read as expired had
-    /// been taken by the time it reached for it — or the pass attempted the
-    /// child and the journal still held no rank for it when the pass re-read,
-    /// which is what a finalize fenced out mid-flight looks like from here.
+    /// been taken by the time it reached for it — or the pass ran the child to
+    /// its §4 commit and the §5 barrier held its discharge behind a
+    /// lower-commit sibling, or the pass attempted the child and the journal
+    /// still held no rank for it when the pass re-read, which is what a
+    /// finalize fenced out mid-flight looks like from here.
     ///
     /// Distinct from [`LeaseLive`](Self::LeaseLive), which is the same
     /// ownership seen *before* reaching for the claim, and reported separately

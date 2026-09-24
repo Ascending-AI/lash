@@ -1513,11 +1513,17 @@ impl SurfaceRunner {
                         .map(|child| {
                             serde_json::json!({
                                 "replay_key": child.replay_key,
+                                // Whether the last pass ran a child to its rank
+                                // (`Settled`) or only seated a rank an earlier pass
+                                // left held at the commit-order barrier (`Decided`)
+                                // depends on which lease lapsed first, which is a
+                                // scheduler fact. Both end with the child ranked,
+                                // and the rank itself is compared in the group rows.
                                 "outcome": match &child.outcome {
-                                    ChildDrainOutcome::Settled => "settled",
+                                    ChildDrainOutcome::Settled
+                                    | ChildDrainOutcome::Decided => "ranked",
                                     ChildDrainOutcome::Contested => "contested",
                                     ChildDrainOutcome::LeaseLive { .. } => "lease_live",
-                                    ChildDrainOutcome::Decided => "decided",
                                     ChildDrainOutcome::NoExecutor => "no_executor",
                                     ChildDrainOutcome::Interrupted => "interrupted",
                                     ChildDrainOutcome::Corrupt { .. } => "corrupt",
@@ -1968,6 +1974,14 @@ async fn generated_cross_backend_surface_differential_agrees() {
                     operation_results,
                     observations,
                 };
+                // Minimizing replays prefixes on every backend and can outrun
+                // the test timeout, so the divergence is on record before it
+                // starts.
+                eprintln!(
+                    "cross-backend generated case seed={seed} diverged at step={} \
+                     operation={:?}; minimizing the prefix",
+                    observed.step, observed.operation,
+                );
                 let minimal = Box::pin(minimize_diverging_prefix(
                     &storage,
                     &database_url,

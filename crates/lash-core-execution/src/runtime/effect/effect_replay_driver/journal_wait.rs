@@ -201,6 +201,14 @@ pub(super) enum ParkEnd {
     DeadlineReached,
 }
 
+/// Whether a finalize seated the child, or left it to a later pass at the §5
+/// barrier because the caller would not wait there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Finalized {
+    Seated,
+    HeldAtBarrier,
+}
+
 /// A claim queued behind another owner's live lease.
 ///
 /// The first busy answer only subscribes and re-claims at once, so the common
