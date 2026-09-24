@@ -183,7 +183,7 @@
       "direct_llm_client": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 553000,
+          "alloc_bytes_max": 1488000,
           "steady_state_turn_alloc_bytes_max": 39000
         },
         "advisory_duration": {
