@@ -49,6 +49,8 @@ pub(crate) use compiler::*;
 #[cfg(test)]
 pub(crate) use entry_points::compile_ast;
 pub use entry_points::{Entry, compile, execute, prewarm};
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use heap::HEAP_OBJECT_KINDS;
 pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
     HeapId,

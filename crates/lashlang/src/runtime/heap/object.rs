@@ -70,21 +70,50 @@ pub(super) fn compound_identity(value: &Value) -> Option<(u8, usize)> {
     }
 }
 
+/// Every heap object kind, one per variant of [`HeapObject`]: the value
+/// kinds a durable session can hold. The snapshot round-trip law (FIG-3608)
+/// holds each one to a row, or to the stated reason no program builds it, so
+/// a new kind cannot enter the heap without a law row.
+pub(crate) const HEAP_OBJECT_KINDS: [&str; 12] = [
+    "tuple",
+    "list",
+    "record",
+    "function",
+    "RegExp",
+    "RegExp match array",
+    "Map",
+    "Set",
+    "Date",
+    "Error",
+    "URL",
+    "URLSearchParams",
+];
+
 impl HeapObject {
+    /// The object's kind in [`HEAP_OBJECT_KINDS`]. The match is exhaustive,
+    /// so a new variant names its kind there before it compiles.
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::Tuple(_) => HEAP_OBJECT_KINDS[0],
+            Self::List(_) => HEAP_OBJECT_KINDS[1],
+            Self::Record(_) => HEAP_OBJECT_KINDS[2],
+            Self::Closure { .. } => HEAP_OBJECT_KINDS[3],
+            Self::RegExp(_) => HEAP_OBJECT_KINDS[4],
+            Self::RegExpMatch(_) => HEAP_OBJECT_KINDS[5],
+            Self::Map(_) => HEAP_OBJECT_KINDS[6],
+            Self::Set(_) => HEAP_OBJECT_KINDS[7],
+            Self::Date(_) => HEAP_OBJECT_KINDS[8],
+            Self::Error(_) => HEAP_OBJECT_KINDS[9],
+            Self::Url(_) => HEAP_OBJECT_KINDS[10],
+            Self::UrlSearchParams(_) => HEAP_OBJECT_KINDS[11],
+        }
+    }
+
+    /// The kind as a diagnostic names it: an error by its class.
     pub(crate) fn kind_name(&self) -> &'static str {
         match self {
-            Self::Tuple(_) => "tuple",
-            Self::List(_) => "list",
-            Self::Record(_) => "record",
-            Self::Closure { .. } => "function",
-            Self::RegExp(_) => "RegExp",
-            Self::RegExpMatch(_) => "RegExp match array",
-            Self::Map(_) => "Map",
-            Self::Set(_) => "Set",
-            Self::Date(_) => "Date",
             Self::Error(error) => error.kind.name(),
-            Self::Url(_) => "URL",
-            Self::UrlSearchParams(_) => "URLSearchParams",
+            object => object.kind(),
         }
     }
 

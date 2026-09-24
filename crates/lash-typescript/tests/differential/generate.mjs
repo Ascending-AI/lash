@@ -14,7 +14,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 274],
+  ['findings', 'findings-expressions.txt', 296],
 ];
 
 // Every non-accepted expression and the diagnostic it must name, from

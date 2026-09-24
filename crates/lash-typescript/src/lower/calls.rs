@@ -193,6 +193,48 @@ fn normalize_call_args(args: &[CallArg]) -> Option<Vec<Expr>> {
 }
 
 impl Lowerer {
+    /// `receiver.method(args)` where `receiver` is an optional chain's
+    /// current value, held in a generated slot: the slot is bound, for the
+    /// call alone, under its own name, and the call lowers as any member call.
+    pub(super) fn lower_chain_method_call(
+        &mut self,
+        receiver: &LashExpr,
+        method: &str,
+        args: &[CallArg],
+    ) -> Result<LashExpr, Diagnostic> {
+        let LashExpr::Variable(slot) = receiver else {
+            return Err(Diagnostic::defect(
+                DiagnosticCode::UnsupportedExpression,
+                "an optional chain's current value is always a generated slot",
+                None,
+            ));
+        };
+        let slot = slot.to_string();
+        let owner_function = self.current_function();
+        let id = self.declare_in_ledger(&slot, BindingKind::Const);
+        self.scopes.push(Scope::default());
+        #[expect(clippy::unwrap_used, reason = "the scope was pushed on the line above")]
+        self.scopes.last_mut().unwrap().bindings.insert(
+            slot.clone(),
+            Binding {
+                id,
+                internal: slot.clone(),
+                kind: BindingKind::Const,
+                initialized: true,
+                owner_function,
+                role: BindingRole::Plain,
+            },
+        );
+        let callee = Expr::Member {
+            object: Box::new(Expr::Ident(slot, None)),
+            property: MemberProperty::Field(method.to_string()),
+            span: self.current_span.unwrap_or(SourceSpan { start: 0, end: 0 }),
+        };
+        let lowered = self.lower_call(&callee, args);
+        self.scopes.pop();
+        lowered
+    }
+
     pub(super) fn lower_call(
         &mut self,
         callee: &Expr,
@@ -759,12 +801,27 @@ impl Lowerer {
                 }
                 _ => unreachable!(),
             };
+            // A receiver not written as a collection (an alias, a field, a
+            // call's result) is an array or a collection only at run time,
+            // so it takes the array's iteration only if it is one: a `Map`
+            // read as an array answered its `keys()` as `[]` in silence.
+            let iteration = LashExpr::If {
+                condition: Box::new(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![LashExpr::String("Array.isArray".into()), variable()],
+                }),
+                then_block: Box::new(array),
+                else_block: Box::new(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![LashExpr::String(method.into()), variable()],
+                }),
+            };
             return Ok(LashExpr::Block(vec![
                 LashExpr::Assign {
                     target: AssignTarget::variable(receiver.as_str().into()),
                     expr: Box::new(receiver_value),
                 },
-                array,
+                iteration,
             ]));
         }
         if !receiver_is_module_authority

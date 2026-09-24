@@ -789,10 +789,13 @@ impl Lowerer {
             captures: BTreeSet::new(),
             creation,
         });
-        self.scopes.push(Scope::default());
         // ECMA binds a function's own name inside its body. A declaration
         // already owns an outer binding to reuse; a named function expression
         // needs a fresh one, visible only here, which the VM's self-slot fills.
+        // The name lives in a scope of its own around the parameters and the
+        // body (ECMA-262's funcEnv), so a body declaration of the same name
+        // shadows it rather than duplicating it.
+        self.scopes.push(Scope::default());
         let internal_name = match (&function.name, internal_name) {
             (Some(source_name), None) => {
                 if is_reserved_name(source_name) {
@@ -825,6 +828,7 @@ impl Lowerer {
                 },
             );
         }
+        self.scopes.push(Scope::default());
         let required_count = function
             .params
             .iter()
@@ -908,6 +912,8 @@ impl Lowerer {
             prologue.push(tail);
             LashExpr::Block(prologue)
         };
+        // The parameters' and body's scope, then the function name's.
+        self.scopes.pop();
         self.scopes.pop();
         #[expect(
             clippy::expect_used,

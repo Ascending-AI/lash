@@ -161,8 +161,27 @@ differential:findings:266	cannot render a block in expression position as TypeSc
 differential:findings:267	cannot render a block in expression position as TypeScript	the operator lowers to a statement sequence (its operand conversions), which has no expression spelling
 differential:findings:268	generated binding `__typescript_1_assignment_result` has no authored TypeScript spelling	an assignment used as a value lowers through a generated temporary, which has no authored spelling
 differential:findings:27	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:findings:275	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:276	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:277	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:278	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:279	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:findings:28	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:findings:280	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:281	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:282	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
+differential:findings:283	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
+differential:findings:284	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
+differential:findings:285	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
+differential:findings:286	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
 differential:findings:29	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:findings:290	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:291	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:292	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:293	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:294	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:295	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:296	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:findings:30	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:31	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:32	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
@@ -267,13 +286,25 @@ differential:sol:120	generated binding `__typescript_stdlib` has no authored Typ
 differential:sol:8	generated binding `__typescript_0_f` has no authored TypeScript spelling	a binding that shadows one in scope lowers to a generated slot, which has no authored spelling
 golden:span-lifted-inline	cannot render host descriptor constructor `timer.Schedule` without a constructor path	an admitted host descriptor constructor keeps no constructor path the printer can spell
 session:block-name-then-top-level-name:0	generated binding `__typescript_0_first` has no authored TypeScript spelling	a binding that shadows one in scope lowers to a generated slot, which has no authored spelling
+session:builtin-method-call-spread:0	cannot render a block in expression position as TypeScript	a call with a spread argument lowers to a statement sequence (its argument list), which has no expression spelling
 session:catch-and-switch-binders:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 session:caught-runtime-fault:0	generated binding `__typescript_heap_instanceof` has no authored TypeScript spelling	`instanceof` lowers to a heap builtin, which the lens printer does not re-sugar
+session:collection-copy-constructors:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+session:collection-methods-through-aliases:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+session:computed-literal-keys:0	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 session:destructuring-loop-heads:0	cannot render a destructuring loop binding as TypeScript	a destructuring loop head lowers through generated temporaries, which have no authored spelling
+session:durable-error-value:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+session:durable-error-value:1	generated binding `__typescript_heap_instanceof` has no authored TypeScript spelling	`instanceof` lowers to a heap builtin, which the lens printer does not re-sugar
+session:durable-regexp-match:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+session:durable-regexp-match:1	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+session:durable-shared-identity:1	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 session:exotic-globals:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 session:exotic-globals:1	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 session:exotic-globals:2	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+session:exotic-values-are-not-arrays:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 session:failed-cell:1	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+session:for-of-aliased-iterable:0	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+session:function-name-shadowed-in-its-body:0	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 session:generated-temporaries:0	generated binding `__typescript_20_object_pattern` has no authored TypeScript spelling	destructuring lowers through generated temporaries, which have no authored spelling
 session:global-object-and-lexical-binding:1	generated binding `__typescript_0_global_assignment` has no authored TypeScript spelling	a globalThis write lowers through a generated temporary, which has no authored spelling
 session:global-object-names:0	generated binding `__typescript_0_global_assignment` has no authored TypeScript spelling	a globalThis write lowers through a generated temporary, which has no authored spelling
@@ -289,7 +320,10 @@ session:loop-binders:0	generated binding `__typescript_stdlib` has no authored T
 session:mutation-through-session-globals:1	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 session:mutation-through-session-globals:2	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 session:optional-and-nullish-temporaries:0	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+session:optional-chain-method-calls:0	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
+session:parentheses-end-an-optional-chain:0	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
 session:per-iteration-bindings:0	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+session:printed-non-finite-numbers:0	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 session:printed-values:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 session:printed-values:1	cannot render a block in expression position as TypeScript	the operator lowers to a statement sequence (its operand conversions), which has no expression spelling
 session:shadowing:0	generated binding `__typescript_0_shade` has no authored TypeScript spelling	a binding that shadows one in scope lowers to a generated slot, which has no authored spelling

@@ -541,21 +541,18 @@ impl Lowerer {
         &mut self,
         properties: &[ObjectProperty],
     ) -> Result<LashExpr, Diagnostic> {
-        if properties.iter().all(|property| {
-            matches!(
-                property,
-                ObjectProperty::KeyValue(PropertyKey::Static(_), _)
-            )
-        }) {
+        let static_keys = properties
+            .iter()
+            .map(|property| match property {
+                ObjectProperty::KeyValue(key, value) => static_key(key).map(|key| (key, value)),
+                ObjectProperty::Spread(_) => None,
+            })
+            .collect::<Option<Vec<_>>>();
+        if let Some(fields) = static_keys {
             return Ok(LashExpr::Record(
-                properties
-                    .iter()
-                    .map(|property| match property {
-                        ObjectProperty::KeyValue(PropertyKey::Static(name), value) => {
-                            Ok((name.as_str().into(), self.lower_expr(value)?))
-                        }
-                        _ => unreachable!(),
-                    })
+                fields
+                    .into_iter()
+                    .map(|(key, value)| Ok((key.into(), self.lower_expr(value)?)))
                     .collect::<Result<_, Diagnostic>>()?,
             ));
         }
@@ -1047,6 +1044,41 @@ impl Lowerer {
             OptionalOperation::Member { optional, .. }
             | OptionalOperation::Call { optional, .. } => *optional,
         };
+        // `value?.method(args)` and `value?.a.method(args)` call a method of
+        // the chain's current value: lowered as the ordinary
+        // `receiver.method(args)` on that value, so a builtin method
+        // dispatches as it does outside a chain rather than being read as a
+        // field (which a string or array does not have) and called.
+        if let (
+            OptionalOperation::Member {
+                property: MemberProperty::Field(method),
+                ..
+            },
+            Some((
+                OptionalOperation::Call {
+                    args,
+                    optional: false,
+                },
+                rest,
+            )),
+        ) = (operation, tail.split_first())
+        {
+            let apply = self.lower_chain_method_call(&current, method, args)?;
+            let next = self.temporary("optional_value");
+            let continuation = LashExpr::Block(vec![
+                Self::temp_assignment(&next, apply),
+                self.lower_optional_operations(Self::variable(&next), rest)?,
+            ]);
+            return Ok(if optional {
+                LashExpr::If {
+                    condition: Box::new(Self::nullish(current)),
+                    then_block: Box::new(LashExpr::Undefined),
+                    else_block: Box::new(continuation),
+                }
+            } else {
+                continuation
+            });
+        }
         let apply = match operation {
             OptionalOperation::Member { property, .. } => match property {
                 MemberProperty::Field(field) => LashExpr::Field {
@@ -1563,5 +1595,22 @@ pub(super) fn js_add(left: LashExpr, right: LashExpr) -> LashExpr {
         left: Box::new(left),
         op: JavaScriptBinaryOp::Add,
         right: Box::new(right),
+    }
+}
+
+/// The key a property names statically: a written key, or a computed key that
+/// is a string literal, whose expression has no effect to order, so the
+/// literal types and lowers as the quoted key does. A prototype-chain name
+/// keeps the computed path and its registered runtime refusal: `['__proto__']`
+/// is a data property in ECMA-262 where the written key sets the prototype.
+fn static_key(key: &PropertyKey) -> Option<&str> {
+    match key {
+        PropertyKey::Static(name) => Some(name.as_str()),
+        PropertyKey::Computed(expr) => match expr.as_ref() {
+            Expr::String(name) if !crate::adapter::names_the_prototype_chain(name) => {
+                Some(name.as_str())
+            }
+            _ => None,
+        },
     }
 }

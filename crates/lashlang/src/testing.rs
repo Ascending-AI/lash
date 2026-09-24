@@ -16,3 +16,11 @@ pub mod harness;
 /// are shared rather than re-derived per crate, and stay behind the `testing`
 /// feature so they never ship in a production build.
 pub mod ast_builders;
+
+/// The name of every heap object kind: the value kinds a durable session can
+/// hold, one per variant of the heap's object enum, whose exhaustive match
+/// names each. The snapshot round-trip law (FIG-3608) holds every kind to a
+/// row, or to the stated reason no program builds one.
+pub fn heap_object_kinds() -> &'static [&'static str] {
+    &crate::runtime::HEAP_OBJECT_KINDS
+}

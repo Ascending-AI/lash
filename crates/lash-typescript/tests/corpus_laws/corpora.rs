@@ -160,7 +160,8 @@ fn test262() -> Vec<CorpusProgram> {
 }
 
 /// Every cell of the Node session corpus, linked against the globals the
-/// session's earlier cells bound. A cell the dialect rejects has no program.
+/// session's earlier cells bound. A cell the dialect refuses has no program:
+/// a `reject` cell, or a defect cell whose stated answer is the refusal.
 fn sessions() -> Vec<CorpusProgram> {
     super::sessions::corpus()
         .sessions
@@ -169,7 +170,7 @@ fn sessions() -> Vec<CorpusProgram> {
             let mut globals = BTreeSet::new();
             let mut programs = Vec::new();
             for (index, cell) in session.cells.iter().enumerate() {
-                if cell.reject.is_none() {
+                if !cell.refused() {
                     programs.push(CorpusProgram {
                         id: format!("session:{}:{index}", session.id),
                         source: cell.source.clone(),

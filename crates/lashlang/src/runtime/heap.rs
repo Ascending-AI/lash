@@ -13,6 +13,8 @@ mod validation;
 
 #[cfg(test)]
 use object::COLLECTION_ENTRY_BYTES;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use object::HEAP_OBJECT_KINDS;
 use object::{
     OBJECT_HEADER_BYTES, RECORD_FIELD_BYTES, VALUE_SLOT_BYTES, compound_identity,
     value_logical_bytes,

@@ -12,7 +12,7 @@ use super::{Diagnostic, DiagnosticCode, reject, source_span};
 use swc_common::Spanned;
 use swc_ecma_ast as swc;
 
-pub(super) fn is_prototype_chain_property(name: &str) -> bool {
+pub(crate) fn is_prototype_chain_property(name: &str) -> bool {
     matches!(
         name,
         "prototype"

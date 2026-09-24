@@ -23,6 +23,13 @@
 //! * [`durable_values`] — the values the host view cannot carry (the
 //!   TypeScript exotics, shared objects, property order) across cells and
 //!   reloads, checked against Node.
+//! * [`node_oracle`] — sessions checked against Node itself: the hand-written
+//!   session corpus, sessions a seeded generator draws from the accepted
+//!   grammar, and the snapshot round-trip law over every value type. The
+//!   generator checks semantics against a real engine, a few hundred sessions
+//!   deep; [`generative`] stays beside it because it needs no engine, so it
+//!   sweeps thousands of sessions through failing cells of every kind at a
+//!   cost the checked-in Node answers could not carry.
 //!
 //! Every scenario is its own `#[test]`, so `nextest` shards them and a failure
 //! names one cell sequence rather than a bundle. The whole suite runs with a

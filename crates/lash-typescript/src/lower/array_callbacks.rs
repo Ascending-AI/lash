@@ -309,6 +309,19 @@ impl Lowerer {
         if matches!(method, "sort" | "toSorted") {
             setup.push(driven);
             setup.push(variable(&receiver));
+        } else if method == "forEach" {
+            // A receiver not written as a collection (an alias, a field, a
+            // call's result) is an array or a collection only at run time. A
+            // `Map`, `Set` or `URLSearchParams` iterates by its own `forEach`,
+            // with live cursors; walking it as an array visited nothing.
+            setup.push(LashExpr::If {
+                condition: Box::new(stdlib("Array.isArray", vec![variable(&receiver)])),
+                then_block: Box::new(stdlib("__singleCallbackResult", vec![driven])),
+                else_block: Box::new(stdlib(
+                    "forEach",
+                    vec![variable(&receiver), variable(&callback_name)],
+                )),
+            });
         } else {
             setup.push(stdlib("__singleCallbackResult", vec![driven]));
         }

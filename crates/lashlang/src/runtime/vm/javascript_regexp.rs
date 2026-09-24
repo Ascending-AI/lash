@@ -245,7 +245,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .collect::<Vec<_>>()
                         .into(),
                 )),
-                "Array.isArray" => Some(Value::Bool(true)),
                 "Lash.ArrayFromIterable" => Some(Value::List(result.items.clone().into())),
                 _ => None,
             };

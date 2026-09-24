@@ -1822,6 +1822,667 @@
           }
         }
       ]
+    },
+    {
+      "id": "printed-non-finite-numbers",
+      "about": "inside a printed object or array a non-finite number is JSON's null (FIG-3608)",
+      "probe": [
+        "values"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const values = [NaN, Infinity];\nconsole.log(values, { low: -Infinity }, NaN, [undefined]);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[null,null] {\"low\":null} NaN [null]"
+            ],
+            "probes": {
+              "values": "object [null,null]"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "exotic-values-are-not-arrays",
+      "about": "Array.isArray and instanceof Array answer for every exotic without crossing the host boundary (FIG-3608)",
+      "probe": [
+        "tags",
+        "link",
+        "match"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "{\n  const tags = new Set([1]);\n  const link = new URL('https://example.com/');\n  const match = /(a)/.exec('a');\n  console.log(Array.isArray(tags), link instanceof Array, new Date(0) instanceof Array, /a/ instanceof Array, Array.isArray(match));\n}\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "false false false false true"
+            ],
+            "probes": {
+              "tags": "unbound",
+              "link": "unbound",
+              "match": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "function-name-shadowed-in-its-body",
+      "about": "a function body may declare a binding of the function's own name (FIG-3608)",
+      "probe": [
+        "named",
+        "arrow",
+        "scale"
+      ],
+      "deviations": [
+        "closure-boundary"
+      ],
+      "cells": [
+        {
+          "source": "function named() {\n  let named = 1;\n  return named;\n}\nconst arrow = (scale) => {\n  const arrow = scale * 2;\n  return arrow;\n};\nconsole.log(named(), arrow(3));\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1 6"
+            ],
+            "probes": {
+              "named": "function undefined",
+              "arrow": "function undefined",
+              "scale": "unbound"
+            },
+            "closures": [
+              "named",
+              "arrow"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "computed-literal-keys",
+      "about": "a computed key that is a string literal is that key, so a later field write links (FIG-3608)",
+      "probe": [
+        "keyed"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const keyed = { ['q']: 1, r: 2 };\nkeyed.q = 7;\nconsole.log(keyed.q, keyed);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "7 {\"q\":7,\"r\":2}"
+            ],
+            "probes": {
+              "keyed": "object {\"q\":7,\"r\":2}"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "optional-chain-method-calls",
+      "about": "a method called inside an optional chain is the value's method (FIG-3608)",
+      "probe": [
+        "data",
+        "none"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const data = { list: [3, 1], text: 'ab' };\nconst none = null;\nconsole.log(data?.text.toUpperCase(), data?.list.includes(1), (data?.text).padEnd(4, '.'), none?.text.toUpperCase());\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "AB true ab.. undefined"
+            ],
+            "probes": {
+              "data": "object {\"list\":[3,1],\"text\":\"ab\"}",
+              "none": "object null"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "parentheses-end-an-optional-chain",
+      "about": "in (a?.b).c the short circuit ends at the parenthesis, so .c reads undefined (FIG-3608)",
+      "probe": [
+        "none"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const none = null;\nconsole.log((none?.b).c);\n",
+          "reject": null,
+          "deviation": "runtime-fault-brand",
+          "defect": null,
+          "node": {
+            "outcome": "throw",
+            "prints": [],
+            "error": "TypeError",
+            "probes": {
+              "none": "object null"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "throw",
+              "error": "RuntimeError",
+              "prints": [],
+              "probes": {
+                "none": "object null"
+              }
+            },
+            "restart": {
+              "outcome": "throw",
+              "error": "RuntimeError",
+              "prints": [],
+              "probes": {
+                "none": "object null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "durable-error-value",
+      "about": "an Error bound at the top level stays an Error after a reload (FIG-3608)",
+      "probe": [
+        "failure"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const failure = new RangeError('out', { cause: 'why' });\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "failure": "object {}"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "console.log(String(failure), failure instanceof RangeError, failure.cause);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "RangeError: out true why"
+            ],
+            "probes": {
+              "failure": "object {}"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "durable-regexp-match",
+      "about": "a RegExp match bound at the top level keeps its index and groups after a reload (FIG-3608)",
+      "probe": [
+        "found"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const found = /(?<word>[a-z]+)/.exec('  lash');\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "found": "object [\"lash\",\"lash\"]"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "console.log(found.index, found.groups.word);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "2 lash"
+            ],
+            "probes": {
+              "found": "object [\"lash\",\"lash\"]"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "durable-shared-identity",
+      "about": "two session paths to one object stay one object after a reload (FIG-3608)",
+      "probe": [
+        "shared",
+        "pair"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const shared = { count: 1 };\nconst pair = { left: shared, right: shared };\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "shared": "object {\"count\":1}",
+              "pair": "object {\"left\":{\"count\":1},\"right\":{\"count\":1}}"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "pair.left.count = 2;\nconsole.log(pair.right.count, shared.count);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "2 2"
+            ],
+            "probes": {
+              "shared": "object {\"count\":2}",
+              "pair": "object {\"left\":{\"count\":2},\"right\":{\"count\":2}}"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "for-of-shadowed-iterable",
+      "about": "a for...of body may declare a binding of its iterable's name (FIG-3625)",
+      "probe": [
+        "items",
+        "item"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const items = [1, 2];\nfor (const item of items) {\n  const items = [item];\n  console.log(items.length);\n}\n",
+          "reject": null,
+          "deviation": null,
+          "defect": "for-of-shadowed-iterable",
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1",
+              "1"
+            ],
+            "probes": {
+              "items": "object [1,2]",
+              "item": "unbound"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "rejected",
+              "diagnostic": "TS_FOR_OF_UNSUPPORTED",
+              "prints": [],
+              "probes": {
+                "item": "unbound",
+                "items": "unbound"
+              }
+            },
+            "restart": {
+              "outcome": "rejected",
+              "diagnostic": "TS_FOR_OF_UNSUPPORTED",
+              "prints": [],
+              "probes": {
+                "item": "unbound",
+                "items": "unbound"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "spread-object-field-check",
+      "about": "a field of an object literal built by a spread links as TypeScript types it (FIG-3626)",
+      "probe": [
+        "base",
+        "copy"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const base = { a: 1 };\nconst copy = { ...base, b: 2 };\ncopy.a = 3;\nconsole.log(copy);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": "spread-object-field-check",
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "{\"a\":3,\"b\":2}"
+            ],
+            "probes": {
+              "base": "object {\"a\":1}",
+              "copy": "object {\"a\":3,\"b\":2}"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "rejected",
+              "diagnostic": "TS_LINK_ERROR",
+              "prints": [],
+              "probes": {
+                "base": "unbound",
+                "copy": "unbound"
+              }
+            },
+            "restart": {
+              "outcome": "rejected",
+              "diagnostic": "TS_LINK_ERROR",
+              "prints": [],
+              "probes": {
+                "base": "unbound",
+                "copy": "unbound"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "builtin-call-spread",
+      "about": "a spread argument to a builtin function passes the array's items (FIG-3627)",
+      "probe": [
+        "items"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const items = [3, 1];\nconsole.log(Math.max(...items));\n",
+          "reject": null,
+          "deviation": null,
+          "defect": "builtin-call-spread",
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "3"
+            ],
+            "probes": {
+              "items": "object [3,1]"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "rejected",
+              "diagnostic": "TS_METHOD_UNSUPPORTED",
+              "prints": [],
+              "probes": {
+                "items": "unbound"
+              }
+            },
+            "restart": {
+              "outcome": "rejected",
+              "diagnostic": "TS_METHOD_UNSUPPORTED",
+              "prints": [],
+              "probes": {
+                "items": "unbound"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "builtin-method-call-spread",
+      "about": "a spread argument to a builtin method passes the array's items (FIG-3627)",
+      "probe": [
+        "items"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const items = [3, 1];\nitems.push(...[4, 5]);\nconsole.log(items);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": "builtin-call-spread",
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[3,1,4,5]"
+            ],
+            "probes": {
+              "items": "object [3,1,4,5]"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "throw",
+              "error": "RuntimeError",
+              "prints": [],
+              "probes": {
+                "items": "object [3,1]"
+              }
+            },
+            "restart": {
+              "outcome": "throw",
+              "error": "RuntimeError",
+              "prints": [],
+              "probes": {
+                "items": "object [3,1]"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "collection-methods-through-aliases",
+      "about": "a Map, Set or URLSearchParams not written as one (an alias, a field) iterates as itself (FIG-3608)",
+      "probe": [
+        "out",
+        "map",
+        "alias",
+        "box",
+        "value",
+        "key"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const out = [];\n{\n  const map = new Map([['k', 1], ['j', 2]]);\n  const alias = map;\n  alias.forEach((value, key) => { out.push(key + value); });\n  const box = { set: new Set([4, 5]), params: new URLSearchParams('a=1') };\n  box.set.forEach((value) => { out.push(value * 2); });\n  box.params.forEach((value, key) => { out.push(key); });\n  console.log([...alias.keys()], [...alias.values()], [...box.params.entries()]);\n}\nconsole.log(out);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[\"k\",\"j\"] [1,2] [[\"a\",\"1\"]]",
+              "[\"k1\",\"j2\",8,10,\"a\"]"
+            ],
+            "probes": {
+              "out": "object [\"k1\",\"j2\",8,10,\"a\"]",
+              "map": "unbound",
+              "alias": "unbound",
+              "box": "unbound",
+              "value": "unbound",
+              "key": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "collection-copy-constructors",
+      "about": "new Map and new Set copy another collection (FIG-3608)",
+      "probe": [
+        "map",
+        "set",
+        "copies"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "{\n  const map = new Map([['k', 1]]);\n  const set = new Set([4, 5]);\n  const copies = [new Set(set).size, new Map(map).get('k'), new Map(new Set([['x', 2]])).get('x'), [...new Set(map)]];\n  console.log(copies);\n}\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[2,1,2,[[\"k\",1]]]"
+            ],
+            "probes": {
+              "map": "unbound",
+              "set": "unbound",
+              "copies": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "for-of-aliased-iterable",
+      "about": "a for...of loop visits what its body appends through an alias made before the loop (FIG-3625)",
+      "probe": [
+        "items",
+        "same",
+        "item"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const items = [1];\nconst same = items;\nfor (const item of items) {\n  if (same.length < 3) {\n    same.push(item + 1);\n  }\n}\nconsole.log(same);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": "for-of-aliased-iterable",
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[1,2,3]"
+            ],
+            "probes": {
+              "items": "object [1,2,3]",
+              "same": "object [1,2,3]",
+              "item": "unbound"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "normal",
+              "prints": [
+                "[1,2]"
+              ],
+              "probes": {
+                "item": "unbound",
+                "items": "object [1,2]",
+                "same": "object [1,2]"
+              }
+            },
+            "restart": {
+              "outcome": "normal",
+              "prints": [
+                "[1,2]"
+              ],
+              "probes": {
+                "item": "unbound",
+                "items": "object [1,2]",
+                "same": "object [1,2]"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sibling-block-binding-types",
+      "about": "sibling blocks may declare one name with values of different types (FIG-3631)",
+      "probe": [
+        "label"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "if (true) {\n  let label = 1;\n} else {\n  let label = true;\n}\n{\n  let label = 'x';\n  console.log(label);\n}\n",
+          "reject": null,
+          "deviation": null,
+          "defect": "sibling-block-binding-types",
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "x"
+            ],
+            "probes": {
+              "label": "unbound"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "rejected",
+              "diagnostic": "TS_LINK_ERROR",
+              "prints": [],
+              "probes": {
+                "label": "unbound"
+              }
+            },
+            "restart": {
+              "outcome": "rejected",
+              "diagnostic": "TS_LINK_ERROR",
+              "prints": [],
+              "probes": {
+                "label": "unbound"
+              }
+            }
+          }
+        }
+      ]
     }
   ]
 }
