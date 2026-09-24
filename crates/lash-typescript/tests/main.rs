@@ -36,6 +36,8 @@ mod differential_oracle;
 mod ecma_regressions;
 #[path = "fluency_smoke.rs"]
 mod fluency_smoke;
+#[path = "for_of_facets.rs"]
+mod for_of_facets;
 #[path = "global_this_reads.rs"]
 mod global_this_reads;
 #[path = "grammar_coverage.rs"]
