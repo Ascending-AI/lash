@@ -85,6 +85,15 @@ service_run_spec() {
         --env POSTGRES_PASSWORD=lash
         --env POSTGRES_DB=lash
       )
+      # A linguistic default collation, so the suites that compare key order
+      # against the database's own locale have one to compare against: the
+      # alpine images' libc locale sorts bytewise even when named en_US.utf8
+      # (replay_key_collation, FIG-3586). ICU as the cluster's default
+      # provider exists from PostgreSQL 15; PG14 runs only the catalog
+      # compatibility checks and keeps its default.
+      if [ "$1" != pg14 ]; then
+        RUN_ARGS+=(--env "POSTGRES_INITDB_ARGS=--locale-provider=icu --icu-locale=en-US")
+      fi
       # pg_stat_statements is what the statement-count tests measure through.
       # The default 100 connections and lock table fit one test process; the
       # store job runs POSTGRES_SLOT_COUNT at once, each with its own pools and
