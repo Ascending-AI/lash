@@ -899,14 +899,10 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
             "singleton",
         ),
     ),
-    // `await_event_meta` is carried by the shared await-event fragment into
-    // both the durable-core and effect-replay databases; each carrier's
-    // inspection must find the check.
+    // `await_event_meta` is carried by the await-event fragment into the
+    // effect-replay database, whose inspection must find the check.
     expected_constraint(
-        &[
-            SqliteConstraintDatabase::DurableCore,
-            SqliteConstraintDatabase::EffectReplay,
-        ],
+        &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "await_event_meta",
             "ck_await_event_meta_singleton",
@@ -921,10 +917,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     // Postgres stores these flags as native BOOLEAN, so the integer-domain
     // vocabulary checks exist only on the SQLite side.
     sqlite_only_constraint(
-        &[
-            SqliteConstraintDatabase::DurableCore,
-            SqliteConstraintDatabase::EffectReplay,
-        ],
+        &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "await_event_waits",
             "ck_await_event_waits_turn_control",

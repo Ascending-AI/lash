@@ -36,7 +36,7 @@ static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 struct FailOnceProcessEnvStore {
-    inner: Arc<lash_core_execution::InMemoryProcessExecutionEnvStore>,
+    inner: Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
     retire_failures: std::sync::atomic::AtomicUsize,
 }
 
@@ -150,7 +150,11 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
             .await
             .expect("open durable module store"),
     );
-    let env_inner = Arc::new(lash_core_execution::InMemoryProcessExecutionEnvStore::new());
+    let env_inner: Arc<dyn lash_core_execution::ProcessExecutionEnvStore> = Arc::new(
+        Store::open(&dir.path().join("environments.db"))
+            .await
+            .expect("open the process-exec-env store"),
+    );
     let env_store = Arc::new(FailOnceProcessEnvStore {
         inner: Arc::clone(&env_inner),
         retire_failures: std::sync::atomic::AtomicUsize::new(usize::from(
@@ -874,7 +878,8 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
         .create_store(&request)
         .await
         .expect("create live session store");
-    let backend = lash_core_execution::attachments::InMemoryAttachmentStore::new();
+    let backend =
+        lash_core_execution::attachments::FileAttachmentStore::new(dir.path().join("blobs"));
     let attachment = lash_core_execution::AttachmentStore::put(
         &backend,
         b"sqlite-live-committed-blob".to_vec(),
@@ -968,7 +973,8 @@ async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
             .join(crate::SqliteDatabase::DurableCore.file_name()),
     )
     .expect("remove catalog for operator reset");
-    let backend = lash_core_execution::attachments::InMemoryAttachmentStore::new();
+    let backend =
+        lash_core_execution::attachments::FileAttachmentStore::new(dir.path().join("blobs"));
 
     let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
         &factory,

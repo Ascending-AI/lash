@@ -62,12 +62,14 @@ fn after_commit_points() -> Vec<(&'static str, TurnCrashPoint)> {
 /// journaled controller on backends with an effect journal, whose redrive
 /// runs in strict replay.
 pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, I>(
+    stores: Arc<dyn crate::StoreSet>,
     make: F,
     make_invocation: I,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
     I: Fn(&str, crate::ExecutionScope) -> super::super::ConformanceInvocation,
 {
+    let stores = stores.as_ref();
     let generated = generated_points(&golden_trace());
     for (key, point) in after_commit_points() {
         assert!(
@@ -76,6 +78,7 @@ pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, I>
         );
         let scenario = format!("after-commit-redrive-{key}");
         Box::pin(run_after_commit_redrive(
+            stores,
             &make,
             &make_invocation,
             &scenario,
@@ -90,6 +93,7 @@ pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, I>
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn run_after_commit_redrive<F, I>(
+    stores: &dyn crate::StoreSet,
     make: &F,
     make_invocation: &I,
     scenario: &str,
@@ -112,6 +116,7 @@ async fn run_after_commit_redrive<F, I>(
         journal_faults: None,
     });
     let runtime = Box::pin(build_runtime(
+        stores,
         SeamStore::wrap(raw, control.clone()),
         control.clone(),
         Arc::clone(&controller),
@@ -164,6 +169,7 @@ async fn run_after_commit_redrive<F, I>(
         journal_faults: None,
     });
     let mut successor = Box::pin(build_runtime_with_lease_timings(
+        stores,
         SeamStore::wrap(make(scenario), successor_control.clone()),
         successor_control.clone(),
         Arc::clone(&successor_controller),

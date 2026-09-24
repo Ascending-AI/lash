@@ -276,3 +276,14 @@ fn abandon_writer_str(writer: &lash_core::AbandonWriter) -> &'static str {
         } => "resume_refused_substrate_lost",
     }
 }
+
+/// A fresh SQLite memory store set's process registry.
+pub(super) async fn memory_registry()
+-> Result<Arc<lash_sqlite_store::SqliteProcessRegistry>, super::RuntimeBoundaryError> {
+    lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .map(|stores| stores.process_registry())
+        .map_err(|err| {
+            super::RuntimeBoundaryError::new(format!("open a SQLite memory store set: {err}"))
+        })
+}

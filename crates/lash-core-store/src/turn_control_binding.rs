@@ -51,18 +51,6 @@ pub fn admitted_turn_cancel_scope(
     }
 }
 
-/// The reopenable turn-cancellation authority a store may provide.
-///
-/// The authority owns an `AwaitEventResolver`, which is effect-executor
-/// machinery and stays in `lash-core`, so the store names this seam and
-/// transports the value without inspecting it. Two concrete variants are
-/// known: `lash-core`'s `TurnCancellationAuthority` (custom resolver) and
-/// `lash-core-effect`'s `NativeAwaitEventAuthority` (native registry handle).
-pub trait StoreTurnCancellationAuthority: std::any::Any + Send + Sync {
-    /// Stable identity of the durable authority that minted the accepted keys.
-    fn binding_id(&self) -> &str;
-}
-
 /// The durable identity of the turn-cancellation authority that may cancel one
 /// unit of admitted work.
 ///

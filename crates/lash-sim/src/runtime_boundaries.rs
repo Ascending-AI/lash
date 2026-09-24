@@ -994,16 +994,16 @@ impl RuntimeBoundaryHarness {
     ///
     /// The recorded facts (terminal, writer, evidence, independently-observed
     /// lease/authorization) are the ground truth the `process_never_double_started`
-    /// and `abandoned_requires_evidence` oracles verify. The registry is in-memory
-    /// (independent of the session-store backend), so the recorded observation is
-    /// identical across the cross-backend replay lanes.
+    /// and `abandoned_requires_evidence` oracles verify. The registry is a fresh
+    /// SQLite memory one (independent of the session-store backend), so the
+    /// recorded observation is identical across the cross-backend replay lanes.
     pub async fn run_process_lifecycle(
         &mut self,
         event: &BoundaryEvent,
     ) -> Result<Value, RuntimeBoundaryError> {
         let session = boundary_session_alias(event);
         let registry: Arc<dyn lash_core::ProcessRegistry> =
-            Arc::new(lash_core::TestLocalProcessRegistry::default());
+            process_lifecycle::memory_registry().await?;
 
         // A sweep claimant and a crashed holder with distinct incarnations.
         let sweep_owner =
@@ -1427,7 +1427,7 @@ impl RuntimeBoundaryHarness {
             Arc<dyn lash_core::ProcessContinuationStore>,
         ) = match &self.effect_replay_store {
             RuntimeEffectReplayStore::Memory => {
-                let store = Arc::new(lash_core::TestLocalProcessRegistry::default());
+                let store = process_lifecycle::memory_registry().await?;
                 (store.clone(), store)
             }
             RuntimeEffectReplayStore::SqliteFile(path) => {

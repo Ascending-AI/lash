@@ -226,9 +226,9 @@ storage behind one trait.
 
 ## Superseded by this ADR on landing of FIG-3585
 
-These passages describe the native tier, `EffectJournaling` or store-delegated
-turn control. They stay as written until FIG-3585 rewrites them in the change
-that deletes what they describe.
+These passages described the native tier, `EffectJournaling` or store-delegated
+turn control. FIG-3585 rewrote them in the change that deleted what they
+described; the line numbers below are those of the passages before that rewrite.
 
 - ADR 0045:78-81, the `EffectJournaling` allowed difference, plus the stale
   `supports_concurrent_effects` at :80.

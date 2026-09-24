@@ -371,9 +371,10 @@ async fn withheld_cancel_case(
 )]
 pub async fn immediate_cancel_defers_withheld_inject_now_input(
     prefix: &str,
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let effect_host = backend.effect_host();
     let decorated = Arc::new(StopAfterTerminalClaim {
         inner: Arc::clone(&store),
         effect_host: Arc::clone(&effect_host),
@@ -399,7 +400,7 @@ pub async fn immediate_cancel_defers_withheld_inject_now_input(
     let runtime = acceptance_runtime_for_session(
         SESSION_ID,
         &runtime_store,
-        &effect_host,
+        &backend,
         provider,
         Vec::new(),
         crate::testing::runtime_lease_owner(),

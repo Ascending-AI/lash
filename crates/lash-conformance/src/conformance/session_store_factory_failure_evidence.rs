@@ -10,14 +10,16 @@ use std::sync::Arc;
 
 /// Prove that a real mid-stream provider failure settles durable evidence that
 /// survives closing the runtime and reopening through the backend's read view.
+/// The turn runs on `backend`'s own effect host, over its session catalog.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn session_store_factory_mid_stream_failure_evidence(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    backend: Arc<dyn crate::Backend>,
     advance_commit_clock: impl FnOnce(),
 ) {
+    let factory = backend.session_store_factory();
     const SESSION_ID: &str = "failure-evidence-session";
     const PARTIAL_TEXT: &str = "provider-visible prefix before the stream failed";
 
@@ -74,13 +76,11 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         })
         .build()
         .into_handle();
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let mut host = crate::LawBackend::in_process()
-        .with_effect_host(Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let effect_host = backend.effect_host();
+    let mut host = crate::LawBackend::over(backend.as_ref()).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = request.policy.clone();
     policy.session_id = Some(SessionId::from(SESSION_ID.to_string()));

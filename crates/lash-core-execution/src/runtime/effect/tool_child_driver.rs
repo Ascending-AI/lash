@@ -177,19 +177,6 @@ impl ToolChildHost {
         &self.openers
     }
 
-    /// The `ProcessLifetime` completion-key issuer a group child records
-    /// (ADR 0099 §14): this host's turn-control binding id.
-    ///
-    /// Read it from the host children actually resolve on rather than from
-    /// `RuntimeControlConfig::effect_host`: `BoundSession` re-binds that field
-    /// to the store's turn-control authority, whose binding id names the
-    /// durable registry while `prepare_completion_key` still issues the key
-    /// into the inner (native) registry the children run under.
-    #[must_use]
-    pub fn tool_child_completion_issuer(&self) -> Option<crate::TurnControlBindingId> {
-        crate::TurnControlBindingId::new(self.effect_host().ok()?.turn_control_binding_id()).ok()
-    }
-
     /// The host this resolver routes for, or the routing fact "gone".
     fn effect_host(&self) -> Result<Arc<dyn EffectHost>, RuntimeEffectControllerError> {
         self.host.upgrade().ok_or_else(|| {
@@ -785,86 +772,29 @@ async fn load_execution_env(
 ///
 /// * **Cancellation authority** (ADR 0099 §3): the recorded
 ///   [`TurnControlBindingId`](crate::TurnControlBindingId) is what the
-///   opener's cooperative signal is fenced on, and the matrix is exact —
-///   a durable-journaled participant must record *exactly* the binding this
-///   host derives for the child's admitted scope, and a locally
-///   participating one must record `None`, because a local participant has
-///   no durable address to signal. A `Some` under local participation or a
-///   `None` under durable journaling is a refused inconsistency: the child
-///   would observe a cancellation channel nothing signals, or none.
+///   opener's cooperative signal is fenced on, so the child must record
+///   *exactly* the binding this host derives for its admitted scope. A
+///   foreign binding means the child would observe a cancellation channel
+///   this opener never signals.
 /// * **Completion routing** (ADR 0099 §14): `Durable` requires a durable
-///   await-event resolver behind the child's controller — a host whose
-///   controller does not identify a durable authority would prepare keys no
-///   resolution can reach. `ProcessLifetime` is a local-participation
-///   admission only — a durable journal would resolve the key after the
-///   issuing process is gone — and its recorded issuer must be *this*
-///   host's registry identity: a process-lifetime key minted by another
-///   registry is unresolvable here and a fresh one would double dispatch.
+///   await-event resolver behind the child's controller — a controller that
+///   does not identify a durable authority would prepare keys no resolution
+///   can reach.
 pub(crate) async fn validate_recorded_authorities(
     host: &ToolChildHost,
     controller: &ScopedEffectController<'_>,
     request: &ToolChildRequest,
 ) -> Result<(), RuntimeEffectControllerError> {
-    use crate::runtime::effect::EffectJournaling;
-    let journaling = controller.controller().effect_journaling();
-    match (request.cancellation_authority.as_ref(), journaling) {
-        (Some(recorded), EffectJournaling::Journaled) => {
-            let effect_host = host.effect_host()?;
-            let binding = effect_host
-                .turn_control_binding(controller)
-                .await
-                .map_err(RuntimeEffectControllerError::from)?;
-            if binding.binding_id() != recorded.as_str() {
-                return Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
-                    format!(
-                        "tool child `{}` records cancellation authority `{}` and this host \
-                         derives `{}` for its admitted scope; a foreign binding means the \
-                         cooperative signal it would honour is not the one this opener sends",
-                        request.call.call_id,
-                        recorded.as_str(),
-                        binding.binding_id()
-                    ),
-                ));
-            }
-        }
-        (Some(recorded), EffectJournaling::Local) => {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
-                format!(
-                    "tool child `{}` records cancellation authority `{recorded}`, but its \
-                     admitted controller participates in turn control locally; a local \
-                     participant has no durable binding to signal, so the record names an \
-                     authority nothing can honour",
-                    request.call.call_id,
-                    recorded = recorded.as_str(),
-                ),
-            ));
-        }
-        (None, EffectJournaling::Journaled) => {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
-                format!(
-                    "tool child `{}` records no cancellation authority, but its admitted \
-                     controller participates through a durable journaled binding; the \
-                     cooperative signal exists and the record that omits it is inconsistent",
-                    request.call.call_id
-                ),
-            ));
-        }
-        // `None` records that no cooperative authority existed at admission;
-        // there is nothing to re-derive and the child simply is not wired to
-        // the cooperative signal.
-        (None, EffectJournaling::Local) => {}
-    }
+    // Routing first: a controller that names no durable authority cannot
+    // serve a durable child at all, and that, not the turn-control binding
+    // it also cannot derive, is why the child is refused.
     match &request.completion_routing {
         crate::runtime::effect::ToolChildCompletionRouting::Inline => {}
         crate::runtime::effect::ToolChildCompletionRouting::Durable => {
-            if journaling != EffectJournaling::Journaled
-                || controller
-                    .controller()
-                    .await_event_authority_binding_id()
-                    .is_none()
+            if controller
+                .controller()
+                .await_event_authority_binding_id()
+                .is_none()
             {
                 return Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting,
@@ -877,24 +807,25 @@ pub(crate) async fn validate_recorded_authorities(
                 ));
             }
         }
-        crate::runtime::effect::ToolChildCompletionRouting::ProcessLifetime { issuer } => {
-            let current = host.effect_host()?.turn_control_binding_id();
-            if journaling != EffectJournaling::Local || current != issuer.as_str() {
-                return Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting,
-                    format!(
-                        "tool child `{}` was admitted under a process-lifetime key issued by \
-                         registry `{issuer}`; this host is registry `{current}` with \
-                         {journaling:?} effect journaling — a process-lifetime \
-                         key resolves only while its issuing local registry lives, so a \
-                         durable journal or a foreign issuer makes it unresolvable here and \
-                         a fresh one would double dispatch",
-                        request.call.call_id,
-                        issuer = issuer.as_str(),
-                    ),
-                ));
-            }
-        }
+    }
+    let recorded = &request.cancellation_authority;
+    let effect_host = host.effect_host()?;
+    let binding = effect_host
+        .turn_control_binding(controller)
+        .await
+        .map_err(RuntimeEffectControllerError::from)?;
+    if binding.binding_id() != recorded.as_str() {
+        return Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority,
+            format!(
+                "tool child `{}` records cancellation authority `{}` and this host \
+                 derives `{}` for its admitted scope; a foreign binding means the \
+                 cooperative signal it would honour is not the one this opener sends",
+                request.call.call_id,
+                recorded.as_str(),
+                binding.binding_id()
+            ),
+        ));
     }
     Ok(())
 }
@@ -1026,24 +957,17 @@ fn child_tool_context<'run>(
     builder.build()
 }
 
-/// The cancellation trio a child waits under.
-///
-/// Observing when the child records a durable cancellation authority, and
-/// unobserved when it does not — which is the one legal `None` on the request:
-/// an opener whose controller participates in turn control locally has no
-/// durable address to signal, so there is nothing for a child of it to observe.
+/// The cancellation trio a child waits under: observing its recorded
+/// cancellation authority's gate for the child's physical turn.
 fn child_turn_cancel_wait(
     dispatch: &Arc<ToolDispatchContext<'_>>,
     request: &ToolChildRequest,
     cancel: &CancellationToken,
 ) -> crate::runtime::TurnCancelWait {
-    match request.cancellation_authority.as_ref() {
-        Some(_) => crate::runtime::TurnCancelWait::observing(
-            cancel.clone(),
-            child_turn_cancel_scope(dispatch, request),
-        ),
-        None => crate::runtime::TurnCancelWait::unobserved(cancel.clone()),
-    }
+    crate::runtime::TurnCancelWait::observing(
+        cancel.clone(),
+        child_turn_cancel_scope(dispatch, request),
+    )
 }
 
 /// The scope a child's turn-cancel gate registers under: the *physical* turn
@@ -1354,8 +1278,6 @@ pub fn opener_for_execution_scope(admitted: &AdmittedScope) -> Option<EffectOpen
     EffectOpener::for_scope(admitted).ok()
 }
 
-#[cfg(test)]
-mod local_participation_tests;
 #[cfg(test)]
 #[path = "tool_child_driver/tests.rs"]
 mod tests;

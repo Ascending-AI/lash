@@ -132,13 +132,10 @@ use super::executor::RuntimeEffectControllerError;
 /// find an opener arm it has no branch for, and fail somewhere other than the
 /// boundary. The v1 refusal is kept as its own test.
 ///
-/// Version 3 adds the issuing-authority field to
-/// [`ToolChildCompletionRouting::ProcessLifetime`]: a process-lifetime key can
-/// only be resolved by the registry identity that minted it, so the request
-/// records *who* issued it, not just *that* it was process-lifetime. Without
-/// the issuer, a reopen on a second host — or on the same host after its
-/// registry was rebuilt — would prepare a key under an authority that cannot
-/// authenticate it.
+/// Version 3 adds the issuing-authority field to the process-lifetime
+/// completion route: a process-lifetime key can only be resolved by the
+/// registry identity that minted it, so the request records *who* issued it,
+/// not just *that* it was process-lifetime. Version 8 retires that route.
 ///
 /// Version 4 retires the bare claim scope: `scope.admitted_scope` is now an
 /// [`AdmittedScope`], the checked scope/incarnation pair controller
@@ -160,7 +157,14 @@ use super::executor::RuntimeEffectControllerError;
 /// command's tool attempts key under the command's issue-ordinal key
 /// (`{command}:attempt:{a}`), never the call id, and a v6 reader has no such
 /// identity to rebuild a child's attempts under.
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 7;
+///
+/// Version 8 (FIG-3585) retires the process-lifetime completion route and
+/// makes the cancellation authority required: every host journals its effects
+/// (ADR 0102, D1), so every child records the durable binding its opener's
+/// cooperative signal is fenced on, and no key lives only as long as the
+/// process that issued it. A v7 request is refused, typed and before any
+/// effect, at [`ToolChildRequest::validate`].
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 8;
 
 /// The authority a tool child was admitted under, pinned at formation.
 ///
@@ -249,26 +253,10 @@ pub enum ToolChildCompletionRouting {
     /// The child may defer, and its completion key is routed durably — a
     /// completion still resolves after the worker that issued it is gone.
     ///
-    /// Valid only when the claim's admitted scope journals its effects
-    /// durably; the driver refuses a durable routing request whose scoped
-    /// controller reports [`EffectJournaling::Local`].
-    ///
-    /// [`EffectJournaling::Local`]:
-    ///     crate::runtime::effect::EffectJournaling::Local
+    /// Valid only when the child's controller names its durable await-event
+    /// authority; the driver refuses a durable routing request whose scoped
+    /// controller names none.
     Durable,
-    /// The child may defer, and its completion key lives only as long as the OS
-    /// process that issued it (`NativeEffectHost::allow_process_lifetime_completion_keys`,
-    /// ADR 0099 §14: "Native durability ends at the runtime's lifetime").
-    ///
-    /// `issuer` is the awaiting authority's durable identity — the host's
-    /// `EffectHost::turn_control_binding_id` at formation. Recovering such a
-    /// child under a different registry identity is a typed refusal, never a
-    /// fresh key: the original key is unresolvable and a new one would be a
-    /// second dispatch of an opaque tool body.
-    ProcessLifetime {
-        /// The await-event authority that minted the key.
-        issuer: TurnControlBindingId,
-    },
 }
 
 /// Where a tool child runs and whose work it is.
@@ -461,15 +449,9 @@ pub struct ToolChildRequest {
     /// `binding_id_admits_scope` checks — the address the cooperative cancel
     /// path (FIG-2266) signals and the one FIG-3409's cancel disposition is
     /// fenced on. Typed rather than a bare string because a frozen durable
-    /// shape may not carry an unvalidated identity.
-    ///
-    /// **`None` is legal in exactly one case**: the opener's controller
-    /// journals *locally* (`EffectJournaling::Local`) rather than through a
-    /// durable journaled authority, so there is no durable address to record
-    /// and a recovered child has no cancellation to honour. Every `Journaled`
-    /// opener records `Some`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancellation_authority: Option<TurnControlBindingId>,
+    /// shape may not carry an unvalidated identity. Required: every opener
+    /// journals through a durable authority, so every child has one.
+    pub cancellation_authority: TurnControlBindingId,
     /// The captured process-execution environment this child resolves, retained
     /// under `ArtifactOwner::Execution` through its last dependency.
     ///
@@ -504,8 +486,7 @@ impl ToolChildRequest {
     ) -> Option<(crate::ExecutionScope, crate::AwaitEventWaitIdentity)> {
         match self.completion_routing {
             ToolChildCompletionRouting::Inline => None,
-            ToolChildCompletionRouting::Durable
-            | ToolChildCompletionRouting::ProcessLifetime { .. } => Some((
+            ToolChildCompletionRouting::Durable => Some((
                 self.scope.admitted_scope.scope().clone(),
                 crate::AwaitEventWaitIdentity::tool_completion(self.call.call_id.clone()),
             )),
@@ -514,15 +495,17 @@ impl ToolChildRequest {
 
     /// Assembles a request at the current format version.
     ///
-    /// The facts with no sensible absence are taken here; the three that may
-    /// legitimately be absent are set through the builders below, so a caller
-    /// cannot omit an opener or an admission by forgetting a field.
+    /// The facts with no sensible absence are taken here; the enclosing
+    /// process, which only a process opener has, is set through the builder
+    /// below, so a caller cannot omit an opener, an admission or a
+    /// cancellation authority by forgetting a field.
     #[must_use]
     pub fn new(
         call: PreparedToolCall,
         admission: ToolChildAdmission,
         attempt_identity: ToolAttemptEffectIdentity,
         scope: ToolChildScope,
+        cancellation_authority: TurnControlBindingId,
         execution_env: ProcessExecutionEnvRef,
         completion_routing: ToolChildCompletionRouting,
     ) -> Self {
@@ -533,7 +516,7 @@ impl ToolChildRequest {
             attempt_identity,
             scope,
             enclosing_process: None,
-            cancellation_authority: None,
+            cancellation_authority,
             execution_env,
             completion_routing,
         }
@@ -542,15 +525,6 @@ impl ToolChildRequest {
     #[must_use]
     pub fn with_enclosing_process(mut self, process_ref: ProcessRef) -> Self {
         self.enclosing_process = Some(process_ref);
-        self
-    }
-
-    /// Binds the durable turn-cancellation authority that may cancel this child.
-    ///
-    /// Left unset only for a locally participating opener; see the field.
-    #[must_use]
-    pub fn with_cancellation_authority(mut self, binding_id: TurnControlBindingId) -> Self {
-        self.cancellation_authority = Some(binding_id);
         self
     }
 

@@ -325,10 +325,6 @@ impl lash_core_execution::AwaitEventResolver for ScopedControllerAdapter {
 
 #[async_trait::async_trait]
 impl lash_core_execution::RuntimeEffectController for ScopedControllerAdapter {
-    fn effect_journaling(&self) -> lash_core_execution::EffectJournaling {
-        self.0.controller().effect_journaling()
-    }
-
     async fn drive_independent_effect_work<'work>(
         &self,
         work: Vec<lash_core_execution::IndependentEffectWork<'work>>,
@@ -364,10 +360,6 @@ impl lash_core_execution::RuntimeEffectController for ScopedControllerAdapter {
         executors: Arc<dyn lash_core_execution::GroupExecutors>,
     ) -> Result<(), lash_core_execution::RuntimeEffectControllerError> {
         self.0.controller().register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.0.controller().native_effect_groups_substrate()
     }
 
     fn group_child_scoped_controller(
@@ -496,10 +488,6 @@ impl lash_core_execution::AwaitEventResolver for CrossingController {
 
 #[async_trait::async_trait]
 impl lash_core_execution::RuntimeEffectController for CrossingController {
-    fn effect_journaling(&self) -> lash_core_execution::EffectJournaling {
-        self.inner.effect_journaling()
-    }
-
     async fn drive_independent_effect_work<'work>(
         &self,
         work: Vec<lash_core_execution::IndependentEffectWork<'work>>,
@@ -569,10 +557,6 @@ impl lash_core_execution::RuntimeEffectController for CrossingController {
         executors: std::sync::Arc<dyn lash_core_execution::GroupExecutors>,
     ) -> Result<(), lash_core_execution::RuntimeEffectControllerError> {
         self.inner.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.inner.native_effect_groups_substrate()
     }
 
     /// A group child's commands are still this turn's crossings: its bound
@@ -829,12 +813,12 @@ async fn pg_law_backend(
     registry: Arc<dyn lash_core_execution::ProcessRegistry>,
 ) -> Arc<dyn lash_core_execution::Backend> {
     let detached = held_memory_backend().await;
-    // The laws write no attachment; the backend's attachment port is an
-    // in-process byte store.
+    // The laws write no attachment; the backend's attachment port is the
+    // detached memory backend's byte store.
     lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
         lash_postgres_store::PostgresBackend::new(
             storage,
-            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            lash_core_execution::Backend::attachment_store(&detached),
         ),
     ))
     .map_effect_host(|_| effect_host)

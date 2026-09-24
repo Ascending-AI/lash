@@ -172,6 +172,10 @@ fn effect_crossing_label(envelope: &RuntimeEffectEnvelope) -> String {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for AttemptAtomicitySentinel<'_> {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
@@ -248,10 +252,6 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.wants_segment_boundary(progress)
     }
 
-    fn effect_journaling(&self) -> crate::EffectJournaling {
-        self.inner.effect_journaling()
-    }
-
     async fn drive_independent_effect_work<'work>(
         &self,
         work: Vec<crate::IndependentEffectWork<'work>>,
@@ -295,10 +295,6 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         executors: Arc<dyn crate::GroupExecutors>,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         self.inner.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.inner.native_effect_groups_substrate()
     }
 
     fn group_child_scoped_controller(

@@ -91,7 +91,7 @@ fn presentation_group(
     env_ref: &crate::ProcessExecutionEnvRef,
     tool_id: &str,
     routing: ToolChildCompletionRouting,
-    cancellation: Option<crate::TurnControlBindingId>,
+    cancellation: crate::TurnControlBindingId,
 ) -> crate::RuntimeEffectGroup {
     single_leaf_group(
         scope,
@@ -395,9 +395,9 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
     .await;
 
     if probe.drain.is_none() {
-        // No journal outlives the process: the reopen serves the recorded
-        // settlement even after the opener is re-registered under a changed
-        // step chain.
+        // The engine keeps the journal and no Lash-owned drain: the reopen
+        // serves the recorded settlement even after the opener is
+        // re-registered under a changed step chain.
         let host = probe.host;
         let guard = register_opener_with_extras(
             &host,
@@ -434,9 +434,8 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
             .expect("the group closes");
         drop(guard);
 
-        // A re-registered opener is a new incarnation; what it observes depends
-        // on whether the tier keeps the journal the `PresentToolResult` record
-        // lives in.
+        // A re-registered opener is a new incarnation; the journal the
+        // `PresentToolResult` record lives in answers it.
         let (changed_factories, a2_runs, b2_runs) = ab2_steps();
         let _guard = register_opener_with_extras(
             &host,
@@ -453,40 +452,19 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
             },
         );
         let (scoped, handle, replayed) = settle_rank_zero(&host, &scope, group).await;
-        match fixture.deferrable_routing {
-            ToolChildDeferrableRouting::ProcessLifetime => {
-                // The in-memory tier keeps no journal, so the reopened group
-                // re-executes and the changed chain runs: the law observes
-                // `[a][b2]` — exactly the bypass a journaled replay must never
-                // serve.
-                assert!(
-                    presented_text(invocation_settlement(&replayed)).ends_with("[a][b2]"),
-                    "a new opener incarnation re-runs rather than replaying: the fresh \
-                     chain stamps [b2] — the answer a journaled replay must never give"
-                );
-                assert_eq!(
-                    a2_runs.load(Ordering::SeqCst) + b2_runs.load(Ordering::SeqCst),
-                    2,
-                    "the changed environment's steps ran under the new incarnation"
-                );
-            }
-            ToolChildDeferrableRouting::Durable => {
-                // Restate keeps the journal host-side — a durable routing —
-                // even though Lash walks no drain of its own, so the reopened
-                // group serves the recorded presentation and the changed
-                // chain's steps never run.
-                let presented = presented_text(invocation_settlement(&replayed));
-                assert!(
-                    presented.ends_with("[a][b]"),
-                    "the journaled presentation survives the opener registration: {presented:?}"
-                );
-                assert_eq!(
-                    a2_runs.load(Ordering::SeqCst) + b2_runs.load(Ordering::SeqCst),
-                    0,
-                    "the changed environment's steps never ran"
-                );
-            }
-        }
+        // The engine keeps the journal host-side even though Lash walks no
+        // drain of its own, so the reopened group serves the recorded
+        // presentation and the changed chain's steps never run.
+        let presented = presented_text(invocation_settlement(&replayed));
+        assert!(
+            presented.ends_with("[a][b]"),
+            "the journaled presentation survives the opener registration: {presented:?}"
+        );
+        assert_eq!(
+            a2_runs.load(Ordering::SeqCst) + b2_runs.load(Ordering::SeqCst),
+            0,
+            "the changed environment's steps never ran"
+        );
         scoped
             .controller()
             .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
@@ -498,6 +476,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
     // The durable arm: the child settles under env [a][b] in a worker that
     // then dies; a successor registering env [a][b2] serves the record.
     crashed_world(fixture, {
+        let fixture_processes = Arc::clone(&fixture.make_processes);
         let scope = scope.clone();
         let session_id = session_id.clone();
         let group_key = group_key.clone();
@@ -506,7 +485,6 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
         let env_store = Arc::clone(&scenario.process_env_store);
         let env_ref = scenario.env_ref.clone();
         let observation = Arc::clone(&scenario.observation);
-        let routing_kind = fixture.deferrable_routing;
         let opener = opener.clone();
         move |world| {
             Box::pin(async move {
@@ -514,7 +492,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
                     &world.host,
                     &scope,
                     provider,
-                    Arc::new(crate::TestLocalProcessRegistry::default()),
+                    fixture_processes().await.process_registry(),
                     env_store,
                     opener,
                     tokio_util::sync::CancellationToken::new(),
@@ -536,7 +514,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
                         &group_key,
                         &env_ref,
                         LEAF_DEFERRED,
-                        deferrable_routing(routing_kind, &world.host),
+                        ToolChildCompletionRouting::Durable,
                         recorded_cancellation_authority(&world.host, &crate::admit(scope.clone()))
                             .await,
                     ))
@@ -573,7 +551,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
     install_child_host(&successor.host, &scenario.process_env_store);
     until_claims_lapse(&successor, &group_key).await;
     let (changed_factories, a2_runs, b2_runs) = ab2_steps();
-    let registry = (fixture.make_processes)().await.registry;
+    let registry = (fixture.make_processes)().await.process_registry();
     let _guard = register_opener_with_extras(
         &successor.host,
         &scope,
@@ -597,7 +575,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
             &group_key,
             &scenario.env_ref,
             LEAF_DEFERRED,
-            deferrable_routing(fixture.deferrable_routing, &successor.host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
         ),
     )
@@ -701,11 +679,11 @@ pub async fn the_oracle_and_the_budget_plugin_coexist(fixture: &ToolChildLawFixt
         .expect("the group closes");
 }
 
-/// An `AttachmentStore` wrapper that counts `put`s, so the law can prove a
-/// replayed presentation retains nothing twice.
-#[derive(Default)]
+/// An `AttachmentStore` wrapper over the tier's own attachment store that
+/// counts `put`s, so the law can prove a replayed presentation retains
+/// nothing twice.
 struct CountingAttachmentStore {
-    inner: crate::InMemoryAttachmentStore,
+    inner: Arc<dyn crate::AttachmentStore>,
     puts: AtomicUsize,
 }
 
@@ -771,7 +749,10 @@ pub async fn a_retained_full_output_is_a_durable_artifact_not_a_path(
     // The law's own handle on the store the dispatch binds: one backend, two
     // facades — the child's, and the second the law reads through, standing in
     // for another host over the same substrate.
-    let backend = Arc::new(CountingAttachmentStore::default());
+    let backend = Arc::new(CountingAttachmentStore {
+        inner: Arc::clone(&scenario.attachment_store),
+        puts: AtomicUsize::new(0),
+    });
     let attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
         Arc::clone(&backend) as Arc<dyn crate::AttachmentStore>,
     ));

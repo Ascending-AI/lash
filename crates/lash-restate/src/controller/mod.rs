@@ -25,10 +25,10 @@ use std::time::Duration;
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectGroupHandle, EffectHost, EffectJournaling, ExecutionScope, GroupSettlement, LoserPolicy,
-    PluginError, ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord,
-    ProcessRegistry, QueuedLaneAcquisition, QueuedLaneProbe, RankedGroupSettlement, Resolution,
-    ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    EffectGroupHandle, EffectHost, ExecutionScope, GroupSettlement, LoserPolicy, PluginError,
+    ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord, ProcessRegistry,
+    QueuedLaneAcquisition, QueuedLaneProbe, RankedGroupSettlement, Resolution, ResolveOutcome,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
     ScopedEffectController, SleepSpec, facade_support::CanonicalRuntimeEffectEnvelope,
@@ -1001,10 +1001,6 @@ where
         _range: &lash_core::RecordedKeyRange,
     ) -> Result<lash_core::RecordedJournal, RuntimeEffectControllerError> {
         Ok(lash_core::RecordedJournal::Positional)
-    }
-
-    fn effect_journaling(&self) -> EffectJournaling {
-        EffectJournaling::Journaled
     }
 
     fn wants_segment_boundary(

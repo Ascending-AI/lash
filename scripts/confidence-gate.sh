@@ -2593,7 +2593,7 @@ run_authority_rebind_mutation_evidence() {
     cargo mutants \
     -p lash-internal-core-execution \
     --file crates/lash-core-execution/src/runtime/effect/tool_child.rs \
-    --re 'ToolChildScope::validate|ToolChildRequest::validate|with_enclosing_process|with_cancellation_authority|retry_policy|manifest|grant' \
+    --re 'ToolChildScope::validate|ToolChildRequest::validate|with_enclosing_process|retry_policy|manifest|grant' \
     --baseline skip \
     --cargo-arg=--features=testing \
     --jobs "$mutation_jobs" \

@@ -28,7 +28,7 @@ fn process_leaf_request(
     parent: &crate::RuntimeInvocation,
     opener_ref: &crate::ProcessRef,
     enclosing: Option<crate::ProcessRef>,
-    cancellation: Option<crate::TurnControlBindingId>,
+    cancellation: crate::TurnControlBindingId,
 ) -> crate::runtime::effect::ToolChildRequest {
     let mut request = crate::runtime::effect::ToolChildRequest::new(
         crate::PreparedToolCall::from_parts(
@@ -54,14 +54,12 @@ fn process_leaf_request(
             session_id: session_id.clone(),
             agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
         },
+        cancellation,
         env_ref.clone(),
         routing,
     );
     if let Some(process_ref) = enclosing {
         request = request.with_enclosing_process(process_ref);
-    }
-    if let Some(binding) = cancellation {
-        request = request.with_cancellation_authority(binding);
     }
     request
 }
@@ -83,7 +81,7 @@ fn incarnation_group(
     env_ref: &crate::ProcessExecutionEnvRef,
     recorded_ref: &crate::ProcessRef,
     routing: ToolChildCompletionRouting,
-    cancellation: Option<crate::TurnControlBindingId>,
+    cancellation: crate::TurnControlBindingId,
 ) -> crate::RuntimeEffectGroup {
     let parent = parent_invocation(scope);
     let child = |position: usize,
@@ -188,10 +186,10 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         crate::EffectOpener::for_scope(&crate::AdmittedScope::process(successor_ref.clone()))
             .expect("a pinned process scope derives an opener");
     let group_key = format!("{prefix}-incarnation-group");
-    let env_store = (fixture.make_processes)().await.process_env_store;
+    let env_store = (fixture.make_processes)().await.process_env_store();
     let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
     let observation = Arc::new(LawObservation::default());
-    let registry = (fixture.make_processes)().await.registry;
+    let registry = (fixture.make_processes)().await.process_registry();
     let provider = || -> Arc<dyn crate::ToolProvider> {
         Arc::new(LawLeafProvider {
             definitions: leaf_definitions(),
@@ -228,7 +226,8 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         &parent_invocation(&scope_p),
         &recorded_ref,
         None,
-        None,
+        crate::TurnControlBindingId::new("lash-conformance-malformed-probe")
+            .expect("a valid binding id"),
     );
     let error = malformed
         .validate()
@@ -314,6 +313,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         // The durable tiers: journal the group under `process(P)#7` while its
         // opener is live, then kill the worker with the deferred leaf parked.
         crashed_world(fixture, {
+            let fixture_processes = Arc::clone(&fixture.make_processes);
             let scope_p = scope_p.clone();
             let session_id = session_id.clone();
             let group_key = group_key.clone();
@@ -322,7 +322,6 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
             let env_ref = env_ref.clone();
             let observation = Arc::clone(&observation);
             let opener_7 = opener_7.clone();
-            let routing_kind = fixture.deferrable_routing;
             let expected_parent = expected_parent.clone();
             move |world| {
                 Box::pin(async move {
@@ -336,7 +335,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                             intent_target: crate::ProcessId::from("unused-in-incarnation"),
                             start_metadata: serde_json::Value::Null,
                         }),
-                        Arc::new(crate::TestLocalProcessRegistry::default()),
+                        fixture_processes().await.process_registry(),
                         env_store,
                         opener_7,
                         tokio_util::sync::CancellationToken::new(),
@@ -353,7 +352,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                             &group_key,
                             &env_ref,
                             &recorded_ref,
-                            deferrable_routing(routing_kind, &world.host),
+                            ToolChildCompletionRouting::Durable,
                             recorded_cancellation_authority(
                                 &world.host,
                                 &crate::AdmittedScope::process(recorded_ref.clone()),
@@ -471,7 +470,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
             "the recorded incarnation's drain settles its own child: {report:?}"
         );
     } else {
-        // The in-memory tier: the gate is the open itself. A live
+        // A drain-less tier: the gate is the open itself. A live
         // `process(P)#9` does not satisfy it; `process(P)#7` does.
         let host = world.host;
         let scoped = host
@@ -494,7 +493,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                 &group_key,
                 &env_ref,
                 &recorded_ref,
-                deferrable_routing(fixture.deferrable_routing, &host),
+                ToolChildCompletionRouting::Durable,
                 recorded_cancellation_authority(
                     &host,
                     &crate::AdmittedScope::process(recorded_ref.clone()),
@@ -522,7 +521,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                 &group_key,
                 &env_ref,
                 &recorded_ref,
-                deferrable_routing(fixture.deferrable_routing, &host),
+                ToolChildCompletionRouting::Durable,
                 recorded_cancellation_authority(
                     &host,
                     &crate::AdmittedScope::process(recorded_ref.clone()),

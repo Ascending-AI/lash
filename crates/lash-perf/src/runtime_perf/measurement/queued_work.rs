@@ -420,11 +420,19 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     let owner = lash_core::LeaseOwnerIdentity::opaque("runtime-perf", "turn-input-ingress");
     let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let (store, mut commit_state) = run
+    let (store, mut commit_state, _restate, turn_control) = run
         .build(async {
             let store = memory_perf_store(&session_id).await?;
             let commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
-            Ok((store, commit_state))
+            // The effect host that owns the turn-control promises the
+            // deferrals settle: the in-process lane's Restate host.
+            let restate = restate_backend().await?;
+            let host = restate.lash_backend().effect_host();
+            let turn_control = lash_core::TurnCancellationAuthority::new(
+                host.turn_control_binding_id(),
+                host as Arc<dyn lash_core::AwaitEventResolver>,
+            );
+            Ok((store, commit_state, restate, turn_control))
         })
         .await?;
 
@@ -613,19 +621,23 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     anyhow::bail!("turn-input ingress active claim lost attachment bytes");
                 }
 
+                // The deferral's completion gate is settled through the
+                // effect host that owns the turn-control promises; the phase
+                // measures the store's complete-and-defer commit.
+                let deferral =
+                    lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
+                        store.as_ref(),
+                        &turn_control,
+                        &lease.fence(),
+                        RuntimeCommit::persisted_state_for_test(&commit_state, &[])
+                            .completing_turn_input_claim(active_claim.completion())
+                            .deferring_interrupted_turn_inputs(turn_id.clone(), None),
+                    )
+                    .await?;
                 let (_, phase) = Box::pin(measure_runtime_perf_async_phase(
                     "turn_input_ingress.complete_active_and_defer",
                     async {
-                        let result = store
-                    .commit_runtime_state(
-                        lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
-                            store.as_ref(), &lease.fence(),
-                            RuntimeCommit::persisted_state_for_test(&commit_state, &[])
-                                .completing_turn_input_claim(active_claim.completion())
-                                .deferring_interrupted_turn_inputs(turn_id.clone(), None),
-                        ).await?,
-                    )
-                    .await?;
+                        let result = store.commit_runtime_state(deferral).await?;
                         commit_state.apply_persisted_commit_result(result);
                         Ok::<(), anyhow::Error>(())
                     },

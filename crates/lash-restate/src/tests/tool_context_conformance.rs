@@ -187,10 +187,9 @@ impl ProductionToolCell {
         );
         host.durability.attachment_store = Arc::new(
             lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
-                DurableMemoryAttachmentStore::default(),
+                lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
             )),
         );
-        host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
 
         let store = Arc::new(
             lash_sqlite_store::Store::open(&dir.path().join("session.db"))

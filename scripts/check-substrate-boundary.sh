@@ -33,8 +33,13 @@ cd "$repo_root"
 clock_forbidden='tokio::time::(sleep|sleep_until|interval)|tokio::task::yield_now|use[[:space:]]+tokio::time::\{[^}]*(sleep|sleep_until|interval)'
 containment_forbidden='(^|[^[:alnum:]_])(NativeQueuedWork|NoQueuedWork|NativeProcessWork|NativeProcessAwaiter|NativeSubstrateSetup|NativeSubstrateSlot|WakeDeliveryDriver)([^[:alnum:]_]|$)'
 fallback_forbidden='ProcessAwaiter::polling|Option[[:space:]]*<[[:space:]]*Arc[[:space:]]*<[[:space:]]*dyn[[:space:]]+(QueuedWorkSubstrate|ProcessWorkSubstrate)[[:space:]]*>[[:space:]]*>|Option[[:space:]]*<[[:space:]]*(ProcessWorkDriver|QueuedWorkDriver)[[:space:]]*>'
-capability_names='replay_ownership|journal_addressing|durable_workflow_controller|allows_process_lifetime_completion_keys|turn_control_participation|runtime_effect_failure_disposition'
+capability_names='replay_ownership|journal_addressing|durable_workflow_controller|allows_process_lifetime_completion_keys|turn_control_participation|runtime_effect_failure_disposition|effect_journaling|turn_control_authority_owner'
 capability_forbidden="fn[[:space:]]+(${capability_names})([^[:alnum:]_]|$)|\.(${capability_names})[[:space:]]*\(|(^|[^[:alnum:]_])(${capability_names})[[:space:]]*:"
+# Every effect host journals (FIG-3585): the in-process native tier, its
+# journaling fact, store-delegated turn control and in-memory persistence are
+# deleted, and none of their types may come back under any shape.
+retired_type_names='EffectJournaling|TurnControlAuthorityOwner|NativeEffectHost|NativeRuntimeEffectController|NativeEffectGroups|NativeAwaitEventAuthority|AwaitEventRegistry|StoreTurnCancellationAuthority|InMemorySessionStore|InMemorySessionStoreFactory|TestLocalProcessRegistry'
+retired_type_forbidden="(^|[^[:alnum:]_])(${retired_type_names})([^[:alnum:]_]|$)"
 test_path_regex='^crates/lash-conformance/|(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)'
 containment_test_path_regex='^crates/lash-conformance/|(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)|_tests\.rs$'
 
@@ -215,10 +220,24 @@ if [[ -s "$tmp_dir/rule3.hits" ]]; then
   failed=1
 fi
 
-capture_search "capability query" "$capability_forbidden" "$tmp_dir/rule4.hits" crates
+# Rule 4 scans every Rust tree that links lash: the crates, and the examples
+# and runbooks where a tree has them.
+rule4_roots=(crates)
+for root in examples runbooks; do
+  [[ -d $root ]] && rule4_roots+=("$root")
+done
+
+capture_search "capability query" "$capability_forbidden" "$tmp_dir/rule4.hits" "${rule4_roots[@]}"
 if [[ -s "$tmp_dir/rule4.hits" ]]; then
   cat "$tmp_dir/rule4.hits" >&2
   echo "substrate boundary rule 4 failed: capability-query declaration, call, or field found" >&2
+  failed=1
+fi
+
+capture_search "retired native tier" "$retired_type_forbidden" "$tmp_dir/rule4b.hits" "${rule4_roots[@]}"
+if [[ -s "$tmp_dir/rule4b.hits" ]]; then
+  cat "$tmp_dir/rule4b.hits" >&2
+  echo "substrate boundary rule 4 failed: a retired native-tier or in-memory type name was found" >&2
   failed=1
 fi
 

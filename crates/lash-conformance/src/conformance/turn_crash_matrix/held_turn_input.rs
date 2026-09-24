@@ -19,12 +19,14 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
+    stores: Arc<dyn crate::StoreSet>,
     make: F,
     make_invocation: I,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
+    let stores = stores.as_ref();
     let scenario = "held-turn-input-visibility";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = make(scenario);
@@ -32,7 +34,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
-    let invocation = make_invocation(scenario);
+    let invocation = make_invocation(scenario, reference_turn_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -40,6 +42,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
         journal_faults: invocation.effect_journal_faults(),
     });
     let runtime = Box::pin(build_runtime(
+        stores,
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
@@ -146,6 +149,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
             journal_faults: successor_invocation.effect_journal_faults(),
         });
     let successor = Box::pin(build_runtime_with_lease_timings(
+        stores,
         successor_store,
         successor_control.clone(),
         Arc::clone(&successor_effect_controller),

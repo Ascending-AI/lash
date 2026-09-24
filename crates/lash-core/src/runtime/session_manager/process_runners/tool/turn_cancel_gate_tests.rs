@@ -14,6 +14,11 @@ struct AwaitShapeRecorder {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for AwaitShapeRecorder {
+    /// A shape recorder mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &crate::ExecutionScope,

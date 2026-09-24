@@ -198,6 +198,7 @@ pub async fn superseded_checkpoint_is_a_witnessed_sweep(
 pub async fn empty_root_set_refusal_returns_its_partial_report(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
+    attachments: Arc<dyn crate::AttachmentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("maintenance-refusal"),
@@ -208,9 +209,8 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
         .create_store(&request)
         .await
         .expect("create session store");
-    let attachments = crate::attachments::InMemoryAttachmentStore::new();
     let orphan = crate::AttachmentStore::put(
-        &attachments,
+        attachments.as_ref(),
         b"maintenance-refusal-orphan".to_vec(),
         lash_sansio::AttachmentCreateMeta::new(
             lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
@@ -223,7 +223,7 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
 
     let failure = crate::attachments::reclaim_unreferenced_attachments(
         &*factory,
-        &attachments,
+        attachments.as_ref(),
         crate::AttachmentReclamationPolicy {
             grace_period_ms: 0,
             empty_root_set: crate::EmptyRootSetPolicy::Refuse,
@@ -246,7 +246,7 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
         0,
         "{backend}: a refusal reclaims nothing: {failure:?}"
     );
-    crate::AttachmentStore::get(&attachments, &orphan.id)
+    crate::AttachmentStore::get(attachments.as_ref(), &orphan.id)
         .await
         .expect("the refused sweep left the blob in place");
 }

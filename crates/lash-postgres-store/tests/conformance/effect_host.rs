@@ -10,7 +10,8 @@ lash_conformance::effect_host_cold_await_event_tests!({
     reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
-    (database_lock, move || {
+    let catalog_url = database_url.clone();
+    let make = move || {
         let database_url = database_url.clone();
         let storage = sync_await(async move {
             PostgresStorage::connect(&database_url)
@@ -18,7 +19,18 @@ lash_conformance::effect_host_cold_await_event_tests!({
                 .expect("cold PostgreSQL effect host")
         });
         Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
-    })
+    };
+    let make_catalog = move || {
+        let database_url = catalog_url.clone();
+        let storage = sync_await(async move {
+            PostgresStorage::connect(&database_url)
+                .await
+                .expect("cold PostgreSQL session catalog")
+        });
+        Arc::new(storage.session_store_factory())
+            as Arc<dyn lash_core_execution::SessionStoreFactory>
+    };
+    (database_lock, make, make_catalog)
 });
 
 lash_conformance::effect_host_tests!({
@@ -58,10 +70,12 @@ lash_conformance::cell_binding_drift_tests!({
     let host = Arc::new(storage.effect_host());
     let faults = host.effect_journal_faults();
     let host = host as Arc<dyn EffectHost>;
+    let (attachments, stores) = pg_law_stores(&storage);
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres",
         Arc::clone(&host),
+        stores,
         lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
         vec![rlm_factory(&artifacts, false)],
     )
@@ -81,10 +95,12 @@ lash_conformance::model_call_drift_park_tests!({
         .await
         .expect("open the artifact backend");
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    let (attachments, stores) = pg_law_stores(&storage);
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres",
         Arc::clone(&host),
+        stores,
         lash_conformance::HostTurnRunner::shared(host),
         vec![rlm_factory(&artifacts, false)],
     )
@@ -105,10 +121,12 @@ lash_conformance::tool_batch_parallelism_tests!({
     let artifacts = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open the artifact backend");
+    let (attachments, stores) = pg_law_stores(&storage);
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres",
         Arc::clone(&host),
+        stores,
         // Every producer this tier reaches: the turn's own parallel model tool
         // calls, `Promise.all` on the RLM cell bridge, and the same aggregate
         // on the process bridge.
@@ -161,9 +179,11 @@ lash_conformance::turn_work_driver_tests!({
     };
     reset(storage.pool()).await;
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    let (attachments, stores) = pg_law_stores(&storage);
     (
-        database_lock,
+        (database_lock, attachments),
         host,
+        stores,
         lash_conformance::await_event_registration_observed,
     )
 });
@@ -178,8 +198,10 @@ lash_conformance::effect_host_await_event_tests!({
     reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
+    let foreign = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let foreign_backends = Arc::clone(&foreign);
     (
-        database_lock,
+        (database_lock, foreign),
         move || {
             let database_url = database_url.clone();
             let storage = sync_await(async move {
@@ -190,6 +212,20 @@ lash_conformance::effect_host_await_event_tests!({
             Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
         },
         lash_conformance::effect_host_journaled_wait_registration_witness,
+        // A SQLite memory backend is another substrate, so another registry.
+        move || {
+            let backend = sync_await(async {
+                lash_sqlite_store::SqliteBackend::memory()
+                    .await
+                    .expect("foreign SQLite memory backend")
+            });
+            let host = backend.effect_host() as Arc<dyn EffectHost>;
+            foreign_backends
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(backend);
+            host
+        },
     )
 });
 
@@ -256,6 +292,36 @@ lash_conformance::effect_group_close_race_tests!(
         })
     }
 );
+
+lash_conformance::effect_group_unwired_host_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres effect-group conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    drop(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
+    (database_lock, move |executors| {
+        let database_url = database_url.clone();
+        let storage = sync_await(async move {
+            PostgresStorage::connect(&database_url)
+                .await
+                .expect("PostgreSQL effect-group host")
+        });
+        let host = storage.effect_host();
+        // Registration is what makes the host support groups at all: since
+        // FIG-1578 a group carries envelopes, and what runs a child is the
+        // resolver its host was built with. `None` is the unregistered host two
+        // laws are about, over the same database as the wired ones.
+        if let Some(executors) = executors {
+            host.register_group_executors(executors)
+                .expect("a freshly connected host has no resolver yet");
+        }
+        Arc::new(host) as Arc<dyn EffectHost>
+    })
+});
 
 // A cancelled child's cancellation is journaled as its terminal, and a host
 // that was not running when the close happened reads it back (FIG-1564).
@@ -361,14 +427,14 @@ lash_conformance::effect_group_runtime_retirement_tests!({
     )
 });
 
-/// The turn-driving laws' fixture: a reset database's effect host and process
-/// registry, a native process-work substrate over that registry, and a runner
-/// that scopes each turn on the same host.
+/// The turn-driving laws' fixture: a reset database's effect host, the
+/// store set over it, a native process-work substrate over that store set's
+/// process registry, and a runner that scopes each turn on the same host.
 type PostgresTurnRunnerFixture = (
-    SharedDatabaseLock,
+    (SharedDatabaseLock, tempfile::TempDir),
     &'static str,
     Arc<dyn EffectHost>,
-    Arc<dyn ProcessRegistry>,
+    Arc<dyn lash_core_execution::StoreSet>,
     Arc<dyn lash_core_execution::ProcessWorkSubstrate>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
     fn(&'static str) -> std::future::Ready<()>,
@@ -378,16 +444,16 @@ async fn postgres_turn_runner_fixture() -> Option<PostgresTurnRunnerFixture> {
     let (database_lock, storage) = storage().await?;
     reset(storage.pool()).await;
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let (attachments, stores) = pg_law_stores(&storage);
     let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
-        Arc::clone(&registry),
+        stores.process_registry(),
     )) as Arc<dyn lash_core_execution::ProcessWorkSubstrate>;
     let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
     Some((
-        database_lock,
+        (database_lock, attachments),
         "postgres-turn-runner",
         host,
-        registry,
+        stores,
         process_work,
         runner,
         // The Postgres host owns no post-law assertion beyond the shared checks.
@@ -426,7 +492,7 @@ lash_conformance::migrated_tools_redrive_tests!({
     };
     reset(storage.pool()).await;
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let (attachments, stores) = pg_law_stores(&storage);
     let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
     let orchestration: Vec<Arc<dyn lash_core_execution::facade_support::PluginFactory>> = vec![
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
@@ -440,10 +506,10 @@ lash_conformance::migrated_tools_redrive_tests!({
         ))),
     ];
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres-migrated-tools",
         host,
-        registry,
+        stores,
         runner,
         orchestration,
     )

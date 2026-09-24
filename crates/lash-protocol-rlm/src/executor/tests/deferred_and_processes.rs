@@ -62,7 +62,11 @@ struct FaultingSqliteDeferredController {
     fault: SqliteDeferredFault,
 }
 
-impl lash_core::AwaitEventResolver for FaultingSqliteDeferredController {}
+impl lash_core::AwaitEventResolver for FaultingSqliteDeferredController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        lash_core::AwaitEventResolver::await_event_authority_binding_id(&self.inner)
+    }
+}
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {

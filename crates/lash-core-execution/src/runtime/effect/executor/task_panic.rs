@@ -40,28 +40,3 @@ pub(super) fn map_effect_task_join(
     drop(payload);
     result
 }
-
-pub(super) fn map_process_task_join(
-    join: Result<
-        Result<super::ProcessEffectOutcome, RuntimeEffectControllerError>,
-        tokio::task::JoinError,
-    >,
-) -> Result<super::ProcessEffectOutcome, RuntimeEffectControllerError> {
-    match join {
-        Ok(result) => result,
-        Err(err) if err.is_panic() => {
-            let payload = err.into_panic();
-            let message = crate::panic_containment::payload_message(payload.as_ref());
-            let result = Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::ProcessPanicked,
-                message,
-            ));
-            crate::panic_containment::enforce_loudness(payload);
-            result
-        }
-        Err(err) => Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
-            format!("native process effect task failed: {err}"),
-        )),
-    }
-}

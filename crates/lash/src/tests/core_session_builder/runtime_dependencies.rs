@@ -707,12 +707,14 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
 
 #[tokio::test]
 async fn fork_observer_selection_is_recoverable_selective_and_wake_independent() -> Result<()> {
-    // The registry's read-fault hook is what injects the transient observer
-    // failure below; no SQLite registry seam reaches that read.
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    // The fault decorator's read hook injects the transient observer failure
+    // below, over the backend's own registry.
+    let sqlite = memory_backend().await;
+    let registry = Arc::new(lash_core::testing::ProcessRegistryFaults::new(
+        lash_core::Backend::process_registry(sqlite.as_ref()),
+    ));
     let fault_registry = Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>;
-    let backend = DecoratedBackend::over_sqlite(memory_backend().await)
-        .process_registry(move |_| fault_registry);
+    let backend = DecoratedBackend::over_sqlite(sqlite).process_registry(move |_| fault_registry);
     let factory = lash_core::Backend::session_store_factory(&backend);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         Arc::new(backend),
@@ -854,11 +856,9 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     assert_eq!(inherited.len(), 1);
     assert_eq!(inherited[0].id, "fork-visible-process");
 
-    registry
-        .set_process_read_error(Some(lash_core::PluginError::Session(
-            "transient fork observer registry failure".to_string(),
-        )))
-        .await;
+    registry.set_process_read_error(Some(lash_core::PluginError::Session(
+        "transient fork observer registry failure".to_string(),
+    )));
     core.fork_at(crate::ForkRequest {
         session_id: ("fork-transient-branch").into(),
         node_id: (&fork_node_id).into(),
@@ -873,7 +873,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     })
     .await
     .expect("transient observer registry failure must not fail fork_at");
-    registry.set_process_read_error(None).await;
+    registry.set_process_read_error(None);
     assert!(
         registry
             .list_observed_by(

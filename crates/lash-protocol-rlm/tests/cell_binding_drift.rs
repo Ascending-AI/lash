@@ -43,10 +43,13 @@ lash_conformance::cell_binding_drift_tests!({
     let artifacts = lash_sqlite_store::SqliteBackend::memory()
         .await
         .unwrap_or_else(|error| panic!("open the artifact backend: {error}"));
+    // The law's runtime takes its storage from the artifact backend's store set.
+    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(artifacts.stores().clone());
     (
         dir,
         "sqlite",
         Arc::clone(&host),
+        stores,
         lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
         vec![rlm_factory(&artifacts)],
     )
@@ -62,10 +65,13 @@ lash_conformance::model_call_drift_park_tests!({
     let artifacts = lash_sqlite_store::SqliteBackend::memory()
         .await
         .unwrap_or_else(|error| panic!("open the artifact backend: {error}"));
+    // The law's runtime takes its storage from the artifact backend's store set.
+    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(artifacts.stores().clone());
     (
         dir,
         "sqlite",
         Arc::clone(&host),
+        stores,
         lash_conformance::HostTurnRunner::shared(host),
         vec![rlm_factory(&artifacts)],
     )

@@ -544,7 +544,6 @@ pub struct PostgresSessionStore {
     #[cfg(feature = "testing")]
     fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
-    await_event_signing_secret: Arc<[u8]>,
     clock: Arc<dyn lash_core_execution::Clock>,
     session_id: SessionId,
     turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
@@ -1031,7 +1030,6 @@ impl PostgresStorage {
     pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
-            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             session_id: session_id.into(),
             turn_cancel_closure_owner: None,

@@ -26,13 +26,15 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F, S, I>(
+    stores: Arc<dyn crate::StoreSet>,
     make: F,
     make_invocation: I,
 ) where
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
+    let stores = stores.as_ref();
     let scenario = "pre-cutover-generation-redrive";
     let make_runtime = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
     let identity = ReferenceIdentity::for_scenario(scenario);
@@ -41,7 +43,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
-    let invocation = make_invocation(scenario);
+    let invocation = make_invocation(scenario, reference_turn_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -49,6 +51,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
         journal_faults: None,
     });
     let runtime = Box::pin(build_runtime(
+        stores,
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
@@ -111,6 +114,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
         });
     successor_control.clear();
     let refused = Box::pin(try_build_runtime_with_lease_timings(
+        stores,
         successor_store,
         successor_control.clone(),
         successor_effect_controller,
@@ -178,18 +182,27 @@ enum ClaimPath {
 /// claim. Exactly one claim is attempted, and no provider request, effect or
 /// commit follows it.
 pub async fn pre_cutover_generation_turn_claim_is_refused_typed<F, S, I>(
+    stores: Arc<dyn crate::StoreSet>,
     make: F,
     make_invocation: I,
 ) where
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
+    let stores = stores.as_ref();
     for (scenario, path) in [
         ("pre-cutover-generation-claim-direct", ClaimPath::Direct),
         ("pre-cutover-generation-claim-queued", ClaimPath::Queued),
     ] {
-        Box::pin(refuse_claim(&make, &make_invocation, scenario, path)).await;
+        Box::pin(refuse_claim(
+            stores,
+            &make,
+            &make_invocation,
+            scenario,
+            path,
+        ))
+        .await;
     }
 }
 
@@ -197,18 +210,23 @@ pub async fn pre_cutover_generation_turn_claim_is_refused_typed<F, S, I>(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn refuse_claim<F, S, I>(make: &F, make_invocation: &I, scenario: &str, path: ClaimPath)
-where
+async fn refuse_claim<F, S, I>(
+    stores: &dyn crate::StoreSet,
+    make: &F,
+    make_invocation: &I,
+    scenario: &str,
+    path: ClaimPath,
+) where
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = make(scenario) as Arc<dyn RuntimePersistence>;
     seed_reference_ingress(&raw, &identity, scenario).await;
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let invocation = make_invocation(scenario);
+    let invocation = make_invocation(scenario, reference_turn_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -216,6 +234,7 @@ where
         journal_faults: None,
     });
     let mut runtime = Box::pin(build_runtime(
+        stores,
         SeamStore::wrap(raw, control.clone()),
         control.clone(),
         Arc::clone(&effect_controller),

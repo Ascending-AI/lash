@@ -60,9 +60,10 @@ would still wait for every leaf — a `race([tool(), sleep(t)])` that never fire
 early is wrong in exactly the case people write it for. Both combinators
 therefore rejected with a named diagnostic.
 
-And Restate never ran batches concurrently at all. `supports_concurrent_effects()`
-is `false` there because the Rust SDK requires `ctx.run` closures to be awaited
-immediately, so the batch path took a serial branch and reported input order.
+And Restate never ran batches concurrently at all. Its controller refused
+concurrent effects (the flag FIG-3397 later deleted) because the Rust SDK requires
+`ctx.run` closures to be awaited immediately, so the batch path took a serial
+branch and reported input order.
 That report was honest — execution really was serial — but it meant the same
 program could select a different rejection on Restate than on any other tier.
 
@@ -525,13 +526,12 @@ resolver refuses the whole surface coherently with `EffectGroupUnsupported`
 durability flag**. The durability claim stays the existing
 `replay_ownership` / journal-addressing fact, which the contract already warns
 is only a routing fact and not an end-to-end durability claim.
-*(Superseded: this fact is now the one sync `RuntimeEffectController::effect_journaling()` → `EffectJournaling { Local, Journaled }` (FIG-2226).)*
+*(Superseded: FIG-2226 made this the one sync `effect_journaling()` fact, and FIG-3585 deleted that fact because every host journals.)*
 
-- **In-memory/inline** implements the full observable semantics — wake,
-  ordering, loser completion, disposition — in memory, durable only within the
-  runtime's life. It is the behavioral reference and the conformance definition
-  of the contract's *semantics*. It stores no journal entries at all, so
-  persistence work never lands there.
+- **In-memory/inline** was the behavioral reference, durable only within the
+  runtime's life and storing no journal entries. FIG-3585 deleted it with the
+  native host; the conformance definition of the contract's semantics is now the
+  engine legs.
 - **SQLite and Postgres** implement the durable form and are the only tiers
   where the crash-permutation hazard is actually closed.
 - **Restate and Temporal** get it from the engine. A Restate child is a full

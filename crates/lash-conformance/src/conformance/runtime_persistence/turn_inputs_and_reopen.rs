@@ -910,7 +910,12 @@ pub async fn accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed(
 )]
 pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     store: Arc<dyn RuntimePersistence>,
+    effect_host: Arc<dyn crate::EffectHost>,
 ) {
+    let authority = crate::TurnCancellationAuthority::new(
+        effect_host.turn_control_binding_id(),
+        effect_host as Arc<dyn crate::AwaitEventResolver>,
+    );
     let turn_id = "cancel-active-turn";
     let active_keep = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
@@ -968,6 +973,7 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
         .commit_runtime_state(
             lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                 store.as_ref(),
+                &authority,
                 &lease.fence(),
                 RuntimeCommit::persisted_state_for_test(&state, &[])
                     .deferring_interrupted_turn_inputs(turn_id, None),
@@ -1025,7 +1031,12 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
 )]
 pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     store: Arc<dyn RuntimePersistence>,
+    effect_host: Arc<dyn crate::EffectHost>,
 ) {
+    let authority = crate::TurnCancellationAuthority::new(
+        effect_host.turn_control_binding_id(),
+        effect_host as Arc<dyn crate::AwaitEventResolver>,
+    );
     let turn_id = "active-turn-1";
     let accepted = store
         .enqueue_pending_turn_input(
@@ -1113,6 +1124,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         .commit_runtime_state(
             lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                 store.as_ref(),
+                &authority,
                 &lease.fence(),
                 RuntimeCommit::persisted_state_for_test(&state, &[])
                     .completing_turn_input_claim(claim.completion())
@@ -1652,7 +1664,12 @@ fn assert_source_key_conflict(
 )]
 pub async fn identical_retry_after_defer_is_existing_not_conflict(
     store: Arc<dyn RuntimePersistence>,
+    effect_host: Arc<dyn crate::EffectHost>,
 ) {
+    let authority = crate::TurnCancellationAuthority::new(
+        effect_host.turn_control_binding_id(),
+        effect_host as Arc<dyn crate::AwaitEventResolver>,
+    );
     let session_id = SessionId::from("root");
     let ended_turn = "fig3544-ended-turn";
     let dead_turn = "fig3544-dead-turn";
@@ -1690,6 +1707,7 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
         .commit_runtime_state(
             lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                 store.as_ref(),
+                &authority,
                 &lease.fence(),
                 RuntimeCommit::persisted_state_for_test(&state, &[])
                     .deferring_interrupted_turn_inputs(ended_turn, None),

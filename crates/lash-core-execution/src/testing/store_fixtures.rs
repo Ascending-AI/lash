@@ -24,19 +24,17 @@ pub async fn recorded_process_admission(
 }
 
 /// Authorize and settle the completion gate for a direct store-deferral fixture.
-/// This performs the same store-owned promise protocol as a real Native turn.
+/// This performs the same promise protocol as a real turn, through
+/// `authority`: the backend's effect host, which owns the turn-control
+/// promises.
 pub async fn authorize_completion_deferral_for_test(
     store: &dyn RuntimePersistence,
+    authority: &crate::TurnCancellationAuthority,
     fence: &SessionExecutionLeaseAuthority,
     mut commit: RuntimeCommit,
 ) -> Result<RuntimeCommit, RuntimeError> {
     let store_error =
         |error: StoreError| RuntimeError::new(RuntimeErrorCode::RuntimeStore, error.to_string());
-    let authority = crate::runtime::effect::executor::concrete_turn_cancellation_authority(
-        &store
-            .turn_cancellation_authority()
-            .expect("fixture store owns cancellation"),
-    );
     let address = TurnAddress::new(
         &commit.session_id,
         commit

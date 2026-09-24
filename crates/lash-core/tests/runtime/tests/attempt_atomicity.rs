@@ -72,6 +72,10 @@ impl ControllerOwnedTier {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for ControllerOwnedTier {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -105,10 +109,6 @@ impl lash_core::AwaitEventResolver for ControllerOwnedTier {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for ControllerOwnedTier {
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
-        lash_core::EffectJournaling::Journaled
-    }
-
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
@@ -1186,6 +1186,10 @@ impl OrdinalJournaledTier {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for OrdinalJournaledTier {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn await_event_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -1205,10 +1209,6 @@ impl lash_core::AwaitEventResolver for OrdinalJournaledTier {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
-        lash_core::EffectJournaling::Journaled
-    }
-
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,

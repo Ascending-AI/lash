@@ -38,9 +38,7 @@
 //! # Tier shape
 //!
 //! The trait is object-safe and exists once over the store-backed
-//! effect-replay driver, so both SQL tiers answer it through one type; the
-//! native tier answers it against its in-memory group table with the same
-//! phase vocabulary. The Restate tier holds no group row — its engine-side
+//! effect-replay driver, so both SQL tiers answer it through one type. The Restate tier holds no group row — its engine-side
 //! `EffectGroupIndex` `Closed`/`Retired` states are the twin — so it answers
 //! [`EffectHost::effect_group_closing`](crate::EffectHost::effect_group_closing)
 //! with `None`, and laws written against this seam return early there the way

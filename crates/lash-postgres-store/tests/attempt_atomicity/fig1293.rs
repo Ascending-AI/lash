@@ -274,7 +274,7 @@ async fn fig1293_runtime(
             lash_core_execution::testing::runtime_lease_owner(),
         ),
     )
-    .expect("valid test native substrate config");
+    .expect("valid test substrate config");
     let process_work = lash_core_execution::ProcessWorkWiring::new(
         watched.clone(),
         Arc::new(lash_core_execution::NativeProcessWork::new(
@@ -406,9 +406,9 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     let inline_registry = inline_backend.process_registry();
     fig1293_seed_control_target(&inline_registry).await;
     let (inline_model, inline_model_calls) = fig1293_model();
-    let native_effect_host = inline_backend.effect_host();
+    let inline_effect_host = inline_backend.effect_host();
     let inline_policy = fig1293_policy();
-    let mut native = fig1293_runtime(
+    let mut inline_runtime = fig1293_runtime(
         Arc::clone(&inline_backend),
         inline_model,
         detached_session_store().await,
@@ -418,10 +418,10 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     .await;
     let inline_turn = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        run_fig1293_turn(&mut native, native_effect_host.as_ref()),
+        run_fig1293_turn(&mut inline_runtime, inline_effect_host.as_ref()),
     )
     .await
-    .expect("native FIG-1293 substrate turn timed out");
+    .expect("inline FIG-1293 substrate turn timed out");
     assert_fig1293_literal_outputs(&inline_turn).await;
     assert_eq!(inline_model_calls.load(Ordering::SeqCst), 3);
 

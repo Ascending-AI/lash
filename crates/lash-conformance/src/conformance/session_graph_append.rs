@@ -453,11 +453,10 @@ async fn append_conformance_runtime(
         None => host.build_session(request.session_id.clone()),
     }
     .expect("append conformance plugin session");
-    let runtime_host =
-        crate::EmbeddedRuntimeHost::new(crate::LawBackend::in_process().host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        ));
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
         Arc::clone(store),
@@ -481,7 +480,7 @@ async fn append_conformance_runtime(
 /// Integrator class (ADR 0051): **conformance-suite embedders**.
 pub async fn append_receipt_mixed_usage_envelope(store: Arc<dyn crate::RuntimePersistence>) {
     lash_core::testing::conformance_support::append_receipt_mixed_usage_envelope_conformance(
-        crate::LawBackend::in_process().into_backend(),
+        crate::StoreLawBackend::new().into_backend(),
         store,
     )
     .await;
@@ -500,7 +499,7 @@ pub async fn append_usage_cancellation_publishes_exactly_once<A, W, R>(
     R: FnOnce(),
 {
     lash_core::testing::conformance_support::append_usage_cancellation_exactly_once_conformance(
-        crate::LawBackend::in_process().into_backend(),
+        crate::StoreLawBackend::new().into_backend(),
         store,
         arm_and_wait,
     )

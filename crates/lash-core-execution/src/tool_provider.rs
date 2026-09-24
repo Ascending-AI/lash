@@ -1028,8 +1028,8 @@ impl<'run> ToolContext<'run> {
             crate::CompletionKeyPreparation::Issued(key) => self.completion.store(key),
             crate::CompletionKeyPreparation::Unsupported
             | crate::CompletionKeyPreparation::NotNeeded => Err(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
-                "completion keys require an effect controller with process-loss-safe await-event routing; single-process deployments may explicitly opt in with NativeEffectHost::allow_process_lifetime_completion_keys()",
+                crate::RuntimeErrorCode::AwaitEventUnsupported,
+                "completion keys require an effect controller that issues durable await-event keys",
             )),
         }
     }
@@ -1532,9 +1532,6 @@ pub trait ToolProvider: Send + Sync + 'static {
         false
     }
 }
-
-#[cfg(test)]
-mod process_lifetime_tests;
 
 #[cfg(test)]
 mod tests {

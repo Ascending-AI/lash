@@ -203,25 +203,6 @@ pub fn cancel_decided_refusal() -> RuntimeError {
     )
 }
 
-/// Turn-control promises are never swept: cancelling their observation must
-/// not manufacture a turn cancellation or terminal publication. Existing
-/// terminals are equally immutable.
-pub(crate) fn cancel_sweep(
-    wait: &AwaitEventWaitIdentity,
-    state: PromiseState,
-) -> PromiseTransition {
-    if wait.is_turn_control() {
-        return PromiseTransition::Unchanged;
-    }
-    match state {
-        PromiseState::Missing => PromiseTransition::Unchanged,
-        PromiseState::Pending => PromiseTransition::Store(Resolution::Cancelled),
-        PromiseState::Resolved(terminal) => PromiseTransition::AlreadyResolved(terminal),
-        PromiseState::Revoked => PromiseTransition::UnknownOrRevoked,
-        PromiseState::CancelDecided => PromiseTransition::Unchanged,
-    }
-}
-
 /// Why an await-event waiter stopped before its promise resolved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaitStopReason {
@@ -247,26 +228,6 @@ pub fn turn_control_wait_stop(
             "turn-control waiter timed out without resolving its keyed promise",
         ),
     })
-}
-
-/// Pure session-tombstone decision shared by in-memory and durable stores.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SessionRevocationTransition {
-    MarkRevoked,
-    AlreadyRevoked,
-}
-
-pub(crate) fn revoke_session(already_revoked: bool) -> SessionRevocationTransition {
-    if already_revoked {
-        SessionRevocationTransition::AlreadyRevoked
-    } else {
-        SessionRevocationTransition::MarkRevoked
-    }
-}
-
-/// Both operations must consult the tombstone before touching promise rows.
-pub(crate) fn session_allows_access(revoked: bool) -> bool {
-    !revoked
 }
 
 /// Compare authentication bytes without branching on their contents.
@@ -406,42 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn cancel_sweep_excludes_turn_control_and_existing_terminals() {
-        assert_eq!(
-            cancel_sweep(
-                &AwaitEventWaitIdentity::TurnCancelGate,
-                PromiseState::Pending,
-            ),
-            PromiseTransition::Unchanged
-        );
-        assert_eq!(
-            cancel_sweep(
-                &AwaitEventWaitIdentity::tool_completion("call"),
-                PromiseState::Pending,
-            ),
-            PromiseTransition::Store(Resolution::Cancelled)
-        );
-        assert_eq!(
-            cancel_sweep(
-                &AwaitEventWaitIdentity::tool_completion("call"),
-                PromiseState::Resolved(Resolution::Timeout),
-            ),
-            PromiseTransition::AlreadyResolved(Resolution::Timeout)
-        );
-    }
-
-    #[test]
-    fn revoked_sessions_reject_access_and_revoke_idempotently() {
-        assert!(session_allows_access(false));
-        assert!(!session_allows_access(true));
-        assert_eq!(
-            revoke_session(false),
-            SessionRevocationTransition::MarkRevoked
-        );
-        assert_eq!(
-            revoke_session(true),
-            SessionRevocationTransition::AlreadyRevoked
-        );
+    fn revoked_sessions_reject_resolution() {
         assert_eq!(
             resolve(PromiseState::Revoked, Resolution::Cancelled),
             PromiseTransition::UnknownOrRevoked

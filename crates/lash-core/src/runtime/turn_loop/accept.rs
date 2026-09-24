@@ -161,8 +161,8 @@ impl LashRuntime {
     ///   from the turn's acceptance address (ADR 0069 §6), so re-running the
     ///   same turn id, whether a durable engine's redrive or a host retry,
     ///   names the same row: identical words adopt it, and different words are
-    ///   refused as `durable_identity_conflict`. On the native tier a turn id
-    ///   reused after its turn completed therefore cedes
+    ///   refused as `durable_identity_conflict`. A turn id reused after its
+    ///   turn completed therefore cedes
     ///   (`accepted_turn_input_ceded`) instead of admitting a second turn. A
     ///   retry under a fresh turn id is a new turn; a caller that needs
     ///   at-most-once submission across turn ids names its own `source_key`

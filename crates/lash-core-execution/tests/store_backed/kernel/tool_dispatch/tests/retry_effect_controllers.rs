@@ -5,7 +5,12 @@ pub(super) struct SleepRecordingEffectController {
     pub(super) sleeps: Arc<std::sync::Mutex<Vec<crate::RuntimeInvocation>>>,
 }
 
-impl crate::AwaitEventResolver for SleepRecordingEffectController {}
+impl crate::AwaitEventResolver for SleepRecordingEffectController {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for SleepRecordingEffectController {
@@ -66,7 +71,12 @@ impl crate::RuntimeEffectController for SleepRecordingEffectController {
 
 pub(super) struct FailingSleepEffectController;
 
-impl crate::AwaitEventResolver for FailingSleepEffectController {}
+impl crate::AwaitEventResolver for FailingSleepEffectController {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for FailingSleepEffectController {

@@ -24,8 +24,6 @@ pub(crate) use tokio::sync::mpsc;
 pub(crate) use tokio::task::JoinHandle;
 pub(crate) use tokio_util::sync::CancellationToken;
 
-#[cfg(test)]
-pub(crate) use lash_core::TestLocalProcessRegistry;
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{InputItem, TokenUsage};
 pub(crate) use lash_core::{

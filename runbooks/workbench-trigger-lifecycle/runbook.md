@@ -165,9 +165,7 @@ it before any dependent effect re-executes. Cells without resource call paths em
 new command, and no existing Lash replay key, checkpoint ordinal, or durable format
 version changes.
 
-The native controller remains intentionally process-local: it exercises the same
-ordering and typed failures but does not claim cold-restart persistence. Durable replay
-claims in this companion come from the file-backed SQLite controller; Restate supplies
+Durable replay claims in this companion come from the file-backed SQLite controller; Restate supplies
 the production engine-owned journal under the ordinal cutover above.
 
 **RLM snapshot cutover.** Snapshot version 19 adds the separate deferred-trigger

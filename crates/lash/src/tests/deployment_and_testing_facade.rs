@@ -62,21 +62,12 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     assert!(!status.drained());
 }
 
-/// FIG-3586: a parked turn keeps the deployment from reporting drained, on
-/// every store that counts turns, and its commit releases it.
+/// FIG-3586: a parked turn keeps the deployment from reporting drained, and
+/// its commit releases it.
 #[tokio::test]
 async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
-    // The in-memory catalog and the SQLite one, each as the catalog of a
-    // memory backend.
-    let backends: Vec<Arc<dyn lash_core::Backend>> = vec![
-        Arc::new(
-            DecoratedBackend::over_sqlite(memory_backend().await).session_store_factory(|_| {
-                Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new())
-            }),
-        ),
-        memory_backend().await,
-    ];
-    for backend in backends {
+    {
+        let backend: Arc<dyn lash_core::Backend> = memory_backend().await;
         let factory = backend.session_store_factory();
         let core = explicit_ephemeral_facets(
             LashCore::standard_builder(Arc::clone(&backend), crate::TurnBudget::Unbounded)

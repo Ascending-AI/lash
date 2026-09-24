@@ -142,31 +142,6 @@ impl Store {
         let conn =
             SqliteConnection::open_with_policy(core.target(), options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
-        let signing_secret = conn
-            .call(|connection| {
-                connection.query_row(
-                    crate::await_event::wait_sql(crate::scope_fence::Schema::Main)
-                        .meta_sqlite
-                        .select_signing_secret
-                        .sql(),
-                    [],
-                    |row| row.get::<_, Vec<u8>>(0),
-                )
-            })
-            .await?;
-        let authority = lash_core_execution::TurnCancellationAuthority::new(
-            core.store_authority_identity(),
-            Arc::new(
-                lash_core_execution::facade_support::await_event_coordinator::DirectAwaitEventResolver(
-                    crate::await_event::sqlite_await_events(
-                        conn.clone(),
-                        Arc::new(crate::scope_fence::RegistryAttachment::default()),
-                        signing_secret,
-                        Arc::clone(&clock),
-                    ),
-                ),
-            ),
-        );
         let process_registry_attached = if let Some(process_registry) = process_registry {
             attach_process_registry(&conn, process_registry, options.connection_policy).await?;
             true
@@ -176,7 +151,6 @@ impl Store {
         Ok(Self {
             conn,
             location: core.clone(),
-            turn_cancellation_authority: Some(authority),
             turn_cancel_closure_owner,
             session_id: Arc::new(OnceLock::new()),
             clock,
@@ -200,7 +174,6 @@ impl Store {
         Ok(Self {
             conn,
             location: core.clone(),
-            turn_cancellation_authority: None,
             turn_cancel_closure_owner: None,
             session_id: Arc::new(OnceLock::new()),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),

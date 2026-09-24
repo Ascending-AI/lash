@@ -16,9 +16,11 @@ lash_conformance::restored_claim_cede_tests!({
         return;
     };
     reset(storage.pool()).await;
+    let (attachments, backend) = super::pg_law_backend(&storage);
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres",
+        backend,
         Arc::new(storage.session_store(lash_conformance::RESTORED_CLAIM_CEDE_SESSION_ID))
             as Arc<dyn RuntimePersistence>,
     )

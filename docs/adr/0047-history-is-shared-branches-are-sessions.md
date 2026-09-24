@@ -75,7 +75,7 @@ The runtime durability tier on effect hosts, process engines, and cancellation
 receipts is removed. `EffectReplayOwnership` replaces it with the mechanical
 fact of whether the runtime or its controller owns replay; any end-to-end
 durability claim belongs to the Host Application.
-*(Superseded: this fact is now the one sync `RuntimeEffectController::effect_journaling()` → `EffectJournaling { Local, Journaled }` (FIG-2226).)*
+*(Superseded: FIG-2226 made this the one sync `effect_journaling()` fact, and FIG-3585 deleted that fact because every host journals.)*
 
 SQLite uses one factory-wide durable-core database so a new session head and
 its references to shared history can change atomically. Because that topology

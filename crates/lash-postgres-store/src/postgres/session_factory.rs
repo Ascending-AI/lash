@@ -12,10 +12,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         *self
             .turn_cancel_closure_owner
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = (effect_host
-            .turn_control_authority_owner()
-            == lash_core_execution::TurnControlAuthorityOwner::EffectHost)
-            .then(|| Arc::clone(effect_host));
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
         *self
             .effect_host
             .lock()

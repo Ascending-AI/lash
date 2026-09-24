@@ -116,7 +116,6 @@
       "src/runtime/native_substrate/awaiter/tests.rs",
       "src/runtime/process/engine_resolve_tests.rs",
       "src/runtime/process/model_filter_tests.rs",
-      "src/runtime/process/testing/lock_discipline_tests.rs",
       "src/runtime/process/tests.rs",
       "src/runtime/process/validation_tests.rs",
       "src/runtime/turn_control/tests.rs",

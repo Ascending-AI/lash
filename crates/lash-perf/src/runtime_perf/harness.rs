@@ -29,8 +29,8 @@ use super::providers::{
 };
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
-pub(crate) use backend::memory_stores;
-use backend::{PerfBackend, restate_backend};
+use backend::PerfBackend;
+pub(crate) use backend::{memory_stores, restate_backend};
 
 const HISTORY_EXCHANGES: usize = 18;
 // `deep_turn_composition` performs two provider iterations: one runs the

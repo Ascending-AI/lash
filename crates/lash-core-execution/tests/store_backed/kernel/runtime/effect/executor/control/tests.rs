@@ -49,7 +49,12 @@ async fn queued_lane_guard(backend: &lash_sqlite_store::SqliteBackend) -> Queued
 
 struct TestResolver;
 
-impl AwaitEventResolver for TestResolver {}
+impl AwaitEventResolver for TestResolver {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for TestResolver {

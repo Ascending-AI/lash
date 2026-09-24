@@ -53,8 +53,6 @@ pub enum StoreBackend {
         /// Host and database name, never the password.
         location: String,
     },
-    /// A process-lifetime store with nothing durable behind it.
-    InMemory,
 }
 
 impl std::fmt::Display for StoreBackend {
@@ -62,7 +60,6 @@ impl std::fmt::Display for StoreBackend {
         match self {
             StoreBackend::Sqlite { location } => write!(f, "sqlite ({location})"),
             StoreBackend::Postgres { location } => write!(f, "postgres ({location})"),
-            StoreBackend::InMemory => write!(f, "in-memory"),
         }
     }
 }

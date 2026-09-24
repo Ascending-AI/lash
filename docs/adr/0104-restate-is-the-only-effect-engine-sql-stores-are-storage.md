@@ -32,7 +32,7 @@ Lash owns two effect engines and delegates to a third:
   `lash-postgres-store`. The decisions are shared (`decide_*` and `plan_*`), but
   every transaction around them is written twice: 45 mirrored modules and 293
   dialect-only statements, 68 of them lock or clock forks.
-- **The native effect host**, which FIG-3585 deletes under ADR 0102.
+- **The native effect host**, which FIG-3585 deleted under ADR 0102.
 - **Restate**, through `lash-restate`. It implements `Backend`, `EffectHost` and
   `RuntimeEffectController` over the Restate SDK and forwards every other port
   to an `Arc<dyn StoreSet>`, SQLite or PostgreSQL. Under Restate the replay rows

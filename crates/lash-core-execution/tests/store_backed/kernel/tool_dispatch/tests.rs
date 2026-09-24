@@ -289,6 +289,11 @@ impl IntentReplayController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for IntentReplayController {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+
     async fn await_event_key(
         &self,
         scope: &crate::ExecutionScope,

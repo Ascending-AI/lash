@@ -27,7 +27,12 @@ struct CountingProcessEffectController {
     process_starts: AtomicUsize,
 }
 
-impl lash::runtime::AwaitEventResolver for CountingProcessEffectController {}
+impl lash::runtime::AwaitEventResolver for CountingProcessEffectController {
+    /// A counting double mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl lash::runtime::RuntimeEffectController for CountingProcessEffectController {
@@ -662,17 +667,11 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     let durable_host: Arc<dyn lash::durability::EffectHost> = restate.effect_host();
     let scope = lash::runtime::AdmittedScope::turn("routing-session", "routing-turn");
     let durable_scoped = durable_host.scoped(scope).expect("durable scope");
-    assert!(matches!(
-        durable_host
-            .turn_control_binding(&durable_scoped)
-            .await
-            .expect("durable binding"),
-        lash::runtime::TurnControlBinding::RunScoped {
-            resolver: _,
-            durable_cancel_after_llm: true,
-            ..
-        }
-    ));
+    let binding = durable_host
+        .turn_control_binding(&durable_scoped)
+        .await
+        .expect("durable binding");
+    assert_eq!(binding.binding_id(), durable_host.turn_control_binding_id());
 
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let ownership_core = |backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,

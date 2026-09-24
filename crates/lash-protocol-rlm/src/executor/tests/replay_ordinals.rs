@@ -330,13 +330,13 @@ pub(super) async fn run_cell(
     // Triggers answer from a store of their own: a trigger operation is a
     // leaf a cell's aggregate may settle before its group head.
     let triggers = lash_core::testing::test_trigger_router(
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+        crate::testing::memory_trigger_store().await,
         crate::testing::memory_process_registry().await,
     );
     let ctx = lash_core::testing::TestExecutionContextBuilder::new(
         lash_core::testing::TestExecutionPorts::over_host(
             host as Arc<dyn lash_core::EffectHost>,
-            Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new()),
+            crate::testing::memory_backend().await.process_env_store(),
         ),
     )
     .provider(Arc::new(tools.clone()))

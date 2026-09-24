@@ -108,42 +108,22 @@ impl IssuanceSpy {
     }
 }
 
-/// The three routing facts a retained child can record, mapped to the
-/// `may_defer` question the issuance gate is actually asked: `Inline` never
-/// needs a key; the two deferring modes always do. `ProcessLifetime` names
-/// its minting authority on this base — the value is not what the pairwise
-/// ruling judges, so the law binds a fixed identity.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-fn modes() -> [(ToolChildCompletionRouting, bool); 3] {
+/// The routing facts a retained child can record, mapped to the `may_defer`
+/// question the issuance gate is actually asked: `Inline` never needs a key;
+/// `Durable` always does.
+fn modes() -> [(ToolChildCompletionRouting, bool); 2] {
     [
         (ToolChildCompletionRouting::Inline, false),
         (ToolChildCompletionRouting::Durable, true),
-        (
-            ToolChildCompletionRouting::ProcessLifetime {
-                issuer: crate::TurnControlBindingId::new("lash-conformance-completion-routing")
-                    .expect("a valid binding id"),
-            },
-            true,
-        ),
     ]
 }
 
-/// Host kinds the pairwise matrix covers. The tier host is whatever the
-/// fixture's `make` produces; the two native hosts pin the capability
-/// boundary every tier shares: a native host that never opted into
-/// process-lifetime keys must refuse deferring routing, and one that did must
-/// issue keys it honestly names process-lifetime (no durable authority).
+/// The host the pairwise matrix covers: whatever the fixture's `make`
+/// produces. Every host journals (ADR 0102, D1), so whether it issues a
+/// deferring key follows from the durable authority it reports.
 struct HostArm {
     name: &'static str,
     resolver: IssuanceSpy,
-    binding_id: String,
-    /// Whether a deferring `prepare_completion_key` must issue for this host
-    /// — `None` derives the answer from the authority signal the host reports
-    /// (used for the tier arm, whose capability is the fixture's).
-    deferred_issues: Option<bool>,
 }
 
 fn preparation_name(answer: &CompletionKeyPreparation) -> &'static str {
@@ -226,7 +206,7 @@ async fn assert_foreign_registry_refuses(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn exercise_host_arm(arm: &HostArm, second_handle: Option<&IssuanceSpy>) {
+async fn exercise_host_arm(arm: &HostArm, second: &IssuanceSpy, foreign: &IssuanceSpy) {
     let spy = &arm.resolver;
     let scope = ExecutionScope::turn(
         format!("completion-routing-{}", arm.name),
@@ -234,9 +214,8 @@ async fn exercise_host_arm(arm: &HostArm, second_handle: Option<&IssuanceSpy>) {
     );
 
     // The capability signal must be truthful before it can be a gate: a host
-    // that names a durable authority must issue deferring keys, and a host
-    // that issues deferring keys while naming none is the process-lifetime
-    // arm — never a durable routing target.
+    // that names a durable authority must issue deferring keys, and one that
+    // names none must refuse them.
     let authority = spy.authority();
     for (mode, may_defer) in modes() {
         let cell = format!("({mode:?} × {})", arm.name);
@@ -258,7 +237,7 @@ async fn exercise_host_arm(arm: &HostArm, second_handle: Option<&IssuanceSpy>) {
             assert_no_issuance(spy, &cell);
             continue;
         }
-        let expects_issue = arm.deferred_issues.unwrap_or_else(|| authority.is_some());
+        let expects_issue = authority.is_some();
         assert_eq!(
             matches!(answer, CompletionKeyPreparation::Issued(_)),
             expects_issue,
@@ -308,36 +287,20 @@ async fn exercise_host_arm(arm: &HostArm, second_handle: Option<&IssuanceSpy>) {
         // Registry identity — foreign arm: a key presented under a registry
         // that did not mint it is refused at every read path, and the foreign
         // registry issues nothing in its place.
-        let foreign = IssuanceSpy::new(Arc::new(
-            crate::runtime::NativeRuntimeEffectController::default(),
-        ) as Arc<dyn AwaitEventResolver>);
-        assert_foreign_registry_refuses(&key, &foreign, &cell).await;
+        assert_foreign_registry_refuses(&key, foreign, &cell).await;
 
         // Registry identity — second handle over the same substrate: a
         // durable-authority host authenticates its keys from any handle,
-        // which is what "durable routing" means; a process-lifetime host's
-        // second handle is a different process, which must refuse.
-        if let Some(second) = second_handle {
-            let second_read = second.peek(&key).await;
-            match authority {
-                Some(_) => assert_eq!(
-                    second_read.expect("a durable registry reads its own key from any handle"),
-                    Some(Resolution::Ok(serde_json::json!({"cell": cell}))),
-                    "{cell}: a second handle over one durable substrate must \
-                     see the same registry"
-                ),
-                None => {
-                    let error = second_read
-                        .expect_err("a second native process holds a different registry");
-                    assert_eq!(
-                        error.code,
-                        RuntimeErrorCode::AwaitEventUnknownOrRevoked,
-                        "{cell}: the second process is a foreign registry and \
-                         must refuse by name"
-                    );
-                }
-            }
-        }
+        // which is what "durable routing" means.
+        assert_eq!(
+            second
+                .peek(&key)
+                .await
+                .expect("a durable registry reads its own key from any handle"),
+            Some(Resolution::Ok(serde_json::json!({"cell": cell}))),
+            "{cell}: a second handle over one durable substrate must see the \
+             same registry"
+        );
     }
 }
 
@@ -347,78 +310,32 @@ async fn exercise_host_arm(arm: &HostArm, second_handle: Option<&IssuanceSpy>) {
 ///
 /// The pairwise ruling table, reviewed cell by cell:
 ///
-/// | mode | host kind | minting registry | foreign registry |
+/// | mode | host | minting registry | foreign registry |
 /// |---|---|---|---|
 /// | `Inline` | any | `NotNeeded`, zero issuance | no key exists to present |
-/// | `Durable` | native-locked | `Unsupported`, zero issuance | n/a |
-/// | `Durable` | native-process | `Issued` — declared incompatible: the host names no durable authority (`await_event_authority_binding_id().is_none()`), so the recorded-routing gate must refuse before this cell is reached | key refused |
 /// | `Durable` | tier (durable authority) | `Issued`; resolves on the minting registry and on a second handle over the same substrate | key refused |
 /// | `Durable` | tier (no durable authority) | `Unsupported`, zero issuance | n/a |
-/// | `ProcessLifetime` | native-locked | `Unsupported`, zero issuance | n/a |
-/// | `ProcessLifetime` | native-process | `Issued`; resolves on the minting registry only — a second process is a foreign registry | key refused |
-/// | `ProcessLifetime` | tier | `Issued` if the tier issues | key refused |
 ///
-/// The two `native-process` rows are the pair the substrate cannot yet refuse
-/// inside `prepare_completion_key`: the host mechanically can issue, and the
-/// routing fact says it must not for `Durable`. What the substrate owes — and
-/// this law asserts — is a truthful capability signal: the host names no
-/// durable authority, so a driver checking `await_event_authority_binding_id`
-/// refuses the pair before asking for a key. The recorded-routing gate that
-/// consumes that signal lands with the C1 fix round (FIG-2266); the signal
-/// being honest is the precondition this oracle guards.
-pub async fn completion_routing_pairwise_refusal<F>(make: F)
+/// `make` returns fresh hosts over the tier's substrate; `make_foreign` a host
+/// over a different substrate, whose registry did not mint the tier's keys.
+pub async fn completion_routing_pairwise_refusal<F, G>(make: F, make_foreign: G)
 where
     F: Fn() -> Arc<dyn EffectHost>,
+    G: Fn() -> Arc<dyn EffectHost>,
 {
     let first = make();
     let second = make();
     crate::assert_fresh_instances(&first, &second, "completion_routing");
 
-    // Host kinds: the tier host under test, plus the two native capability
-    // arms that pin the shared boundary — refuse-deferral and
-    // process-lifetime issuance.
-    let native_process =
-        crate::NativeEffectHost::default().allow_process_lifetime_completion_keys();
-    let native_arms = [
-        HostArm {
-            name: "native-locked",
-            binding_id: crate::NativeEffectHost::default().turn_control_binding_id(),
-            resolver: IssuanceSpy::new(
-                Arc::new(crate::NativeEffectHost::default()) as Arc<dyn AwaitEventResolver>
-            ),
-            deferred_issues: Some(false),
-        },
-        HostArm {
-            name: "native-process",
-            binding_id: native_process.turn_control_binding_id(),
-            resolver: IssuanceSpy::new(Arc::new(native_process) as Arc<dyn AwaitEventResolver>),
-            deferred_issues: Some(true),
-        },
-    ];
-
-    // The issuer axis for process-lifetime routing: two native hosts are two
-    // registry identities, so the binding id a retained issuer check would
-    // compare is provably distinct across processes.
-    assert_ne!(
-        native_arms[0].binding_id, native_arms[1].binding_id,
-        "two native hosts share a registry identity — the issuer check a \
-         process-lifetime routing depends on could not tell them apart"
-    );
-
-    for arm in &native_arms {
-        exercise_host_arm(arm, None).await;
-    }
-
-    // The tier arm gets the registry-identity axis a durable substrate makes
-    // interesting: a second handle over the same substrate is the same
-    // registry on a durable tier and a foreign one on a process-lifetime
-    // tier. It runs once — re-running would re-resolve the same key.
+    // The registry-identity axis a durable substrate makes interesting: a
+    // second handle over the same substrate is the same registry, and a host
+    // over another substrate is a foreign one. The row runs once — re-running
+    // would re-resolve the same key.
     let second_spy = IssuanceSpy::new(second as Arc<dyn AwaitEventResolver>);
+    let foreign_spy = IssuanceSpy::new(make_foreign() as Arc<dyn AwaitEventResolver>);
     let tier_arm = HostArm {
         name: "tier",
-        binding_id: first.turn_control_binding_id(),
-        resolver: IssuanceSpy::new(Arc::clone(&first) as Arc<dyn AwaitEventResolver>),
-        deferred_issues: None,
+        resolver: IssuanceSpy::new(first as Arc<dyn AwaitEventResolver>),
     };
-    exercise_host_arm(&tier_arm, Some(&second_spy)).await;
+    exercise_host_arm(&tier_arm, &second_spy, &foreign_spy).await;
 }

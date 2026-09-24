@@ -20,7 +20,12 @@ struct JournalByEffectId {
     outcomes: std::sync::Mutex<HashMap<String, crate::RuntimeEffectOutcome>>,
 }
 
-impl crate::AwaitEventResolver for JournalByEffectId {}
+impl crate::AwaitEventResolver for JournalByEffectId {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for JournalByEffectId {
@@ -208,7 +213,12 @@ struct StableHashRecorder {
     hashes: std::sync::Mutex<Vec<(String, String)>>,
 }
 
-impl crate::AwaitEventResolver for StableHashRecorder {}
+impl crate::AwaitEventResolver for StableHashRecorder {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for StableHashRecorder {
@@ -308,7 +318,12 @@ async fn a_fast_and_a_slow_run_present_under_one_replay_identity() {
 #[derive(Default)]
 struct DivergedPresentation;
 
-impl crate::AwaitEventResolver for DivergedPresentation {}
+impl crate::AwaitEventResolver for DivergedPresentation {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for DivergedPresentation {

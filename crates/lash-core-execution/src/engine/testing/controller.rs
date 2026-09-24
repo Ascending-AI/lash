@@ -11,8 +11,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::cx::LocalTestCx;
 use crate::{
-    AdmittedScope, AwaitEventResolver, EffectGroupHandle, EffectJournaling, GroupSettlement,
-    LoserPolicy, RecordedJournal, RecordedKeyRange, RecordedKeys, RuntimeEffectController,
+    AdmittedScope, AwaitEventResolver, EffectGroupHandle, GroupSettlement, LoserPolicy,
+    RecordedJournal, RecordedKeyRange, RecordedKeys, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
     effect_groups_unsupported,
@@ -31,14 +31,15 @@ impl LocalTestCx {
     }
 }
 
-impl AwaitEventResolver for LocalTestCx {}
+impl AwaitEventResolver for LocalTestCx {
+    /// A drive-test context mints no durable await-event keys.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for LocalTestCx {
-    fn effect_journaling(&self) -> EffectJournaling {
-        EffectJournaling::Journaled
-    }
-
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

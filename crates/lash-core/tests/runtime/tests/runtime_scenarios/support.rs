@@ -133,6 +133,9 @@ struct RuntimeScenarioContext {
     host_behavior: RuntimeHostBehavior,
     clock: Arc<lash_core::testing::TestClock>,
     store: Arc<RecordingStore>,
+    /// The backend's effect host as the turn-control authority: it owns the
+    /// turn-cancellation promises a deferral fixture settles.
+    turn_control: lash_core::TurnCancellationAuthority,
     owner: Option<LeaseOwnerIdentity>,
     lease: Option<SessionExecutionLease>,
     state: RuntimeSessionState,
@@ -158,11 +161,17 @@ impl RuntimeScenarioContext {
         };
         state.ensure_agent_frame_initialized();
         let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+        let effect_host = backend.effect_host();
+        let turn_control = lash_core::TurnCancellationAuthority::new(
+            effect_host.turn_control_binding_id(),
+            effect_host,
+        );
         Self {
             name,
             session_id,
             host_behavior,
             store: unbound_recording_store_with_clock(&backend, clock.clone()).await,
+            turn_control,
             clock,
             owner: None,
             lease: None,

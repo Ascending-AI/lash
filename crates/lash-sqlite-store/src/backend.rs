@@ -260,6 +260,11 @@ impl SqliteBackend {
         self.stores.location()
     }
 
+    /// The store set this backend's effect host journals beside.
+    pub fn stores(&self) -> &SqliteStoreSet {
+        &self.stores
+    }
+
     /// The options this backend was opened with.
     pub fn options(&self) -> &SqliteBackendOptions {
         &self.stores.inner.options

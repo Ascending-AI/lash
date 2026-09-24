@@ -140,11 +140,8 @@ mod tests {
             crate::TurnContext::default(),
         );
         context = context.with_tool_child_host(effect_host);
-        if let Some((guard, issuer)) = wiring {
+        if let Some(guard) = wiring {
             context = context.with_live_opener_guard(Arc::new(guard));
-            if let Some(issuer) = issuer {
-                context = context.with_tool_child_completion_issuer(issuer);
-            }
         }
         (context, executions)
     }
@@ -435,7 +432,12 @@ mod tests {
     /// settlement.
     struct BatchFailureEffectController;
 
-    impl crate::AwaitEventResolver for BatchFailureEffectController {}
+    impl crate::AwaitEventResolver for BatchFailureEffectController {
+        /// A test double that mints keys under no durable authority.
+        fn await_event_authority_binding_id(&self) -> Option<String> {
+            None
+        }
+    }
 
     #[async_trait::async_trait]
     impl crate::RuntimeEffectController for BatchFailureEffectController {

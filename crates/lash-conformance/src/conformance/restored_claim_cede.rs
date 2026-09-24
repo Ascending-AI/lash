@@ -348,17 +348,22 @@ impl crate::store::RuntimePersistenceDecorator for PreCommitResidentState {
 /// journal across worker incarnations.
 struct JournaledRun {
     effect_host: Arc<dyn crate::EffectHost>,
+    /// `backend` with [`Self::effect_host`] in place of its own host.
+    backend: Arc<dyn crate::Backend>,
     turn_id: TurnId,
 }
 
 impl JournaledRun {
-    fn new(turn_id: TurnId) -> Self {
+    fn new(backend: &Arc<dyn crate::Backend>, turn_id: TurnId) -> Self {
         let journal: Arc<dyn crate::testing::EffectLayer> = Arc::new(JournalLayer::default());
+        let effect_host: Arc<dyn crate::EffectHost> = Arc::new(
+            crate::testing::LayeredEffectHost::new(backend.effect_host(), journal),
+        );
         Self {
-            effect_host: Arc::new(crate::testing::LayeredEffectHost::new(
-                Arc::new(crate::NativeEffectHost::default()),
-                journal,
-            )),
+            backend: crate::LawBackend::over(backend.as_ref())
+                .with_effect_host(Arc::clone(&effect_host))
+                .into_backend(),
+            effect_host,
             turn_id,
         }
     }
@@ -376,7 +381,7 @@ impl JournaledRun {
         let mut runtime = acceptance_runtime_for_session(
             SESSION_ID,
             store,
-            &self.effect_host,
+            &self.backend,
             provider,
             vec![tools_plugin()],
             lease_owner,
@@ -422,14 +427,14 @@ async fn until_lane_released(store: &Arc<dyn crate::RuntimePersistence>) {
 /// [`recovery_provider`].
 async fn fresh_worker(
     owner: &str,
+    backend: &Arc<dyn crate::Backend>,
     store: &Arc<dyn crate::RuntimePersistence>,
-    effect_host: &Arc<dyn crate::EffectHost>,
     requests: Arc<Mutex<Vec<String>>>,
 ) -> crate::LashRuntime {
     acceptance_runtime_for_session(
         SESSION_ID,
         store,
-        effect_host,
+        backend,
         recovery_provider(requests),
         vec![tools_plugin()],
         crate::LeaseOwnerIdentity::opaque(format!("{owner}-owner"), format!("{owner}-incarnation")),
@@ -444,11 +449,12 @@ async fn fresh_worker(
 )]
 async fn drain(
     drain_id: &str,
+    backend: &Arc<dyn crate::Backend>,
     store: &Arc<dyn crate::RuntimePersistence>,
     requests: Arc<Mutex<Vec<String>>>,
 ) {
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let mut drainer = fresh_worker(drain_id, store, &effect_host, requests).await;
+    let effect_host = backend.effect_host();
+    let mut drainer = fresh_worker(drain_id, backend, store, requests).await;
     let scope = effect_host
         .scoped(admit(crate::ExecutionScope::queue_drain(
             SESSION_ID, drain_id,
@@ -472,6 +478,7 @@ async fn drain(
 )]
 async fn peer_dies_holding(
     turn_id: &TurnId,
+    backend: &Arc<dyn crate::Backend>,
     store: &Arc<dyn crate::RuntimePersistence>,
     row_id: String,
     requests: Arc<Mutex<Vec<String>>>,
@@ -484,8 +491,8 @@ async fn peer_dies_holding(
         admitted,
         died: Arc::clone(&died),
     });
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let mut peer = fresh_worker(turn_id.as_str(), &dying, &effect_host, requests).await;
+    let effect_host = backend.effect_host();
+    let mut peer = fresh_worker(turn_id.as_str(), backend, &dying, requests).await;
     let scope = effect_host
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
         .expect("scope the peer turn");
@@ -545,12 +552,13 @@ enum Recovery {
 )]
 async fn redrive_after_recovery(
     prefix: &str,
+    backend: &Arc<dyn crate::Backend>,
     store: &Arc<dyn crate::RuntimePersistence>,
     row: CheckpointRow,
     words: &str,
     recovery: Recovery,
 ) -> (String, Result<crate::AssembledTurn, crate::RuntimeError>) {
-    let run = JournaledRun::new(TurnId::from(format!("{prefix}-logical-run")));
+    let run = JournaledRun::new(backend, TurnId::from(format!("{prefix}-logical-run")));
     let follow_on = crate::store::QueuedRunPosition::derive_turn_id(&run.turn_id, 1);
     let admitted = Arc::new(AdmittedRow::default());
     let died = Arc::new(tokio::sync::Notify::new());
@@ -606,6 +614,7 @@ async fn redrive_after_recovery(
             }
             drain(
                 &format!("{prefix}-recovery-drain"),
+                backend,
                 store,
                 Arc::clone(&recovery_requests),
             )
@@ -619,6 +628,7 @@ async fn redrive_after_recovery(
         Recovery::PeerDiesHolding => {
             peer_dies_holding(
                 &TurnId::from(format!("{prefix}-peer")),
+                backend,
                 store,
                 row_id.clone(),
                 Arc::clone(&recovery_requests),
@@ -655,6 +665,7 @@ async fn redrive_after_recovery(
         until_lane_released(store).await;
         drain(
             &format!("{prefix}-final-drain"),
+            backend,
             store,
             Arc::new(Mutex::new(Vec::new())),
         )
@@ -746,11 +757,13 @@ async fn assert_answered_once(
 /// follow-on turn: the input has one application and one answer.
 pub async fn a_redrive_commits_nothing_for_input_a_recovery_drain_answered(
     prefix: &str,
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let words = "steer the follow-on turn once";
     let (row_id, _) = Box::pin(redrive_after_recovery(
         prefix,
+        &backend,
         &store,
         CheckpointRow::TurnInput,
         words,
@@ -772,11 +785,13 @@ pub async fn a_redrive_commits_nothing_for_input_a_recovery_drain_answered(
 /// answers it, and commits. The redrive commits nothing for the follow-on.
 pub async fn a_redrive_commits_nothing_for_work_a_recovery_checkpoint_answered(
     prefix: &str,
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let words = "the producer woke the session once";
     let (row_id, _) = Box::pin(redrive_after_recovery(
         prefix,
+        &backend,
         &store,
         CheckpointRow::QueuedWork,
         words,
@@ -791,11 +806,13 @@ pub async fn a_redrive_commits_nothing_for_work_a_recovery_checkpoint_answered(
 /// it cedes and commits nothing; the next drain answers the input once.
 pub async fn a_redrive_cedes_checkpoint_input_a_peer_reclaimed(
     prefix: &str,
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let words = "steer the follow-on turn once";
     let (row_id, redriven) = Box::pin(redrive_after_recovery(
         prefix,
+        &backend,
         &store,
         CheckpointRow::TurnInput,
         words,
@@ -818,11 +835,13 @@ pub async fn a_redrive_cedes_checkpoint_input_a_peer_reclaimed(
 /// drain answers the wake once.
 pub async fn a_redrive_cedes_checkpoint_work_a_peer_reclaimed(
     prefix: &str,
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let words = "the producer woke the session once";
     let (row_id, redriven) = Box::pin(redrive_after_recovery(
         prefix,
+        &backend,
         &store,
         CheckpointRow::QueuedWork,
         words,

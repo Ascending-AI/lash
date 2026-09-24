@@ -17,8 +17,6 @@ mod file_attachment_store_tests;
 #[cfg(feature = "lashlang")]
 pub mod fused_artifact_store;
 #[cfg(test)]
-mod in_memory;
-#[cfg(test)]
 mod live_replay_store_tests;
 
 /// Locate a dev-only recovery helper for a conformance test.

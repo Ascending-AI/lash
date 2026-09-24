@@ -194,27 +194,22 @@ impl RuntimeTurnDriver<'_> {
         // away from mid-flight. The durable contract is therefore cancellation
         // between iterations. A local provider may still cooperatively observe
         // `cancel` while the run is executing, and that result is journaled.
-        // Runtime-owned (native) execution keeps its existing cooperative-token
-        // behavior. Only a controller-owned journal needs this additional
-        // durable, replayed boundary.
-        if self.observes_durable_cancel_after_llm {
-            let pending_cancel = self
-                .turn_control
-                .observe_pending_cancel(
-                    &self.scoped_effect_controller,
-                    crate::runtime::turn_control::TurnCancelPeekIdentity::AfterLlm {
-                        protocol_iteration: machine.protocol_iteration(),
-                    },
-                )
-                .await?;
-            if let Some(evidence) = pending_cancel {
-                cancel.cancel();
-                self.emit_recorded(event_tx, SessionStreamEvent::Done);
-                machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
-                    evidence,
-                }));
-                return Ok(());
-            }
+        let pending_cancel = self
+            .turn_control
+            .observe_pending_cancel(
+                &self.scoped_effect_controller,
+                crate::runtime::turn_control::TurnCancelPeekIdentity::AfterLlm {
+                    protocol_iteration: machine.protocol_iteration(),
+                },
+            )
+            .await?;
+        if let Some(evidence) = pending_cancel {
+            cancel.cancel();
+            self.emit_recorded(event_tx, SessionStreamEvent::Done);
+            machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
+                evidence,
+            }));
+            return Ok(());
         }
         if let Ok(response) = &result {
             let usage = crate::runtime::effect::token_usage_from_llm(&response.usage);
@@ -295,7 +290,7 @@ impl RuntimeTurnDriver<'_> {
                 if !machine.is_done()
                     && let Some(closed_iteration) = machine.protocol_iteration().checked_sub(1)
                 {
-                    self.observe_step_boundary_cancel(machine, closed_iteration, event_tx, cancel)
+                    self.observe_step_boundary_cancel(machine, closed_iteration, event_tx)
                         .await?;
                 }
             }
@@ -336,33 +331,23 @@ impl RuntimeTurnDriver<'_> {
     }
 
     /// Observe the cancellation gate at the step boundary that closed
-    /// `closed_iteration` (`turn_cancel.after_step.{n}`), identically on the
-    /// native and the controller-owned binding.
+    /// `closed_iteration` (`turn_cancel.after_step.{n}`).
     ///
-    /// An after-step request found here is honoured without the cooperative
-    /// token: nothing is in flight, the checkpoint is committed, so the turn
-    /// simply finishes cancelled. An immediate request found here on the
-    /// native binding fires the token and lets the run observe it exactly as
-    /// the live watcher would have; on a controller-owned journal it finishes
-    /// here, between journal commands, like the after-LLM gate.
+    /// A request found here is honoured without the cooperative token:
+    /// nothing is in flight, the checkpoint is committed, so the turn simply
+    /// finishes cancelled, between journal commands, like the after-LLM gate.
     async fn observe_step_boundary_cancel(
         &mut self,
         machine: &mut TurnMachine,
         closed_iteration: usize,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         let effect_host = Arc::clone(&self.host.core.control.effect_host);
         let binding = effect_host
             .turn_control_binding(&self.scoped_effect_controller)
             .await?;
-        let (resolver, peek_controller): (&dyn AwaitEventResolver, &ScopedEffectController<'_>) =
-            match &binding {
-                crate::TurnControlBinding::HostOwned { resolver, peek, .. } => (*resolver, peek),
-                crate::TurnControlBinding::RunScoped { resolver, .. } => {
-                    (*resolver, &self.scoped_effect_controller)
-                }
-            };
+        let resolver = binding.resolver();
+        let peek_controller = &self.scoped_effect_controller;
         // A process-local after-step stop lands on the durable gate before
         // the journaled peek, so replay sees the gate and never the flag.
         self.turn_control.resolve_local_after_step(resolver).await?;
@@ -378,10 +363,6 @@ impl RuntimeTurnDriver<'_> {
         let Some(evidence) = pending_cancel else {
             return Ok(());
         };
-        if evidence.mode.is_immediate() && !self.observes_durable_cancel_after_llm {
-            cancel.cancel();
-            return Ok(());
-        }
         // `binding` still borrows the controller, so this records the
         // terminal `Done` field by field rather than through `emit_recorded`.
         self.recorded_assembly.record(&SessionStreamEvent::Done);

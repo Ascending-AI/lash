@@ -15,7 +15,6 @@ use crate::admit;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::store::SessionCommitStore as _;
 use lash_sansio::{SessionId, TurnId};
 
 const TOOL: &str = "pass_refusal";
@@ -82,7 +81,7 @@ struct Parts {
     session_id: SessionId,
     turn_id: TurnId,
     host: crate::RuntimeHostConfig,
-    store: Arc<crate::InMemorySessionStore>,
+    store: Arc<dyn crate::RuntimePersistence>,
     pass: Arc<AtomicUsize>,
 }
 
@@ -114,7 +113,7 @@ async fn build_runtime(parts: &Parts) -> crate::LashRuntime {
             .with_policy(policy)
             .with_initial_state(state)
             .with_plugin_factories(factories)
-            .with_store(Arc::clone(&parts.store) as Arc<dyn crate::RuntimePersistence>)
+            .with_store(Arc::clone(&parts.store))
             .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
             .build(),
     )
@@ -169,7 +168,7 @@ fn attempt(
 pub async fn a_diverged_tool_presentation_parks_the_turn(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
-    _registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
@@ -209,19 +208,20 @@ pub async fn a_diverged_tool_presentation_parks_the_turn(
             }
         })
         .build();
-    let mut host = crate::LawBackend::in_process()
-        .with_effect_host(Arc::clone(&effect_host))
+    let mut host = crate::LawBackend::over_stores(stores.as_ref(), Arc::clone(&effect_host))
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+    let session_id = SessionId::from(format!("{prefix}-presentation-divergence-session"));
+    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let parts = Parts {
-        session_id: SessionId::from(format!("{prefix}-presentation-divergence-session")),
+        session_id,
         turn_id: TurnId::from(format!("{prefix}-presentation-divergence-turn")),
         host,
-        store: Arc::new(crate::InMemorySessionStore::new()),
+        store,
         pass: Arc::new(AtomicUsize::new(0)),
     };
     let requests_seen = || {

@@ -134,9 +134,8 @@ Stored registration fingerprints are not recomputed. Because the ledger is
 keyed by parent scope rather than by process id, a ledger row no longer depends
 on the process row it was written for: retention prunes a terminal parent on
 the ordinary horizon whether or not its row is settled, the row outlives it,
-and the sweep still finds the children through their own Parent Scope column. The in-memory registry keys the ledger by kind and id;
-both it and Restate retain the Lifecycle Policy on the process record, and
-Restate journals the discriminated plan. `wake_session_id` deliberately remains
+and the sweep still finds the children through their own Parent Scope column. Restate
+retains the Lifecycle Policy on the process record and journals the discriminated plan. `wake_session_id` deliberately remains
 column-only.
 
 #### Where the turn-parent row is written, and why fencing still holds
@@ -250,7 +249,7 @@ Turn-level cancellation remains separate.
 #### Start compensation
 
 No admitted-unconfirmed state or registration-plus-admission transaction is
-introduced. On native tiers, the registered row is admission and the worker
+introduced. On the SQL tiers, the registered row is admission and the worker
 poke is advisory: poke failure is logged and start returns the record.
 
 On Restate, submission is keyed by segment: `process_id` for segment zero and

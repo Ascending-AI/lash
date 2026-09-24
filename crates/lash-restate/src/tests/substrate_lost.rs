@@ -417,12 +417,12 @@ pub(super) async fn law_d_a_journal_lost_after_effects_is_substrate_lost_with_no
 pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
     let process_id = ProcessId::from("admission-law-d-tool");
     let executions = Arc::new(AtomicUsize::new(0));
-    let stores = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let registry: Arc<dyn ProcessRegistry> = stores.clone();
-    let continuations: Arc<dyn lash_core::ProcessContinuationStore> = stores.clone();
+    let stores = memory_process_stores().await;
+    let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
+    let continuations = Arc::clone(&stores.continuations);
     let worker = recovery_worker_with_plugins(
         Arc::clone(&registry),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        memory_session_store_factory().await,
         vec![counting_tool_plugin(Arc::clone(&executions))],
     )
     .await;
@@ -488,10 +488,10 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
         )
         .build();
     stores
-        .fail_next_external_ref_write_for_testing(PluginError::Session(
+        .registry
+        .fail_next_external_ref_write(PluginError::Session(
             "injected store fault at segment 1's boundary".to_string(),
-        ))
-        .await;
+        ));
     let key = process_segment_workflow_key(&process_id, 1);
     let crashed = invoke_process_workflow_endpoint(
         &endpoint,
@@ -543,12 +543,12 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
 pub(super) async fn an_admitted_lashlang_process_runs_its_body_and_is_running() {
     let process_id = ProcessId::from("admission-fresh-lashlang");
     let executions = Arc::new(AtomicUsize::new(0));
-    let stores = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let registry: Arc<dyn ProcessRegistry> = stores.clone();
-    let continuations: Arc<dyn lash_core::ProcessContinuationStore> = stores.clone();
+    let stores = memory_process_stores().await;
+    let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
+    let continuations = Arc::clone(&stores.continuations);
     let worker = recovery_worker_with_plugins(
         Arc::clone(&registry),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        memory_session_store_factory().await,
         vec![counting_tool_plugin(Arc::clone(&executions))],
     )
     .await;
@@ -779,9 +779,9 @@ impl RestateProcessRunner for BoundaryRunner {
 #[tokio::test]
 pub(super) async fn a_successor_reference_store_fault_is_retried_by_restate() {
     let process_id = ProcessId::from("admission-ref-fault");
-    let stores = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let registry: Arc<dyn ProcessRegistry> = stores.clone();
-    let continuations: Arc<dyn lash_core::ProcessContinuationStore> = stores.clone();
+    let stores = memory_process_stores().await;
+    let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
+    let continuations = Arc::clone(&stores.continuations);
     let registration = rerunnable_registration(process_id.as_str());
     registry
         .register_process(registration.clone())
@@ -799,10 +799,10 @@ pub(super) async fn a_successor_reference_store_fault_is_retried_by_restate() {
         .build();
     let input = segment_input(&registration, 0);
     stores
-        .fail_next_external_ref_write_for_testing(PluginError::Session(
+        .registry
+        .fail_next_external_ref_write(PluginError::Session(
             "injected transient reference write failure".to_string(),
-        ))
-        .await;
+        ));
     let failed =
         invoke_process_workflow_endpoint(&endpoint, "run", process_id.as_str(), &input, true)
             .await

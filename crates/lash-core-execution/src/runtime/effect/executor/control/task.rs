@@ -212,7 +212,6 @@ pub struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
     scope: ExecutionScope,
     owns_commit_backpressure: bool,
-    effect_journaling: EffectJournaling,
     await_event_authority_binding_id: Option<String>,
 }
 
@@ -232,7 +231,6 @@ impl EffectTaskController {
             requests,
             scope: admitted.scope().clone(),
             owns_commit_backpressure: controller.owns_commit_backpressure(),
-            effect_journaling: controller.effect_journaling(),
             await_event_authority_binding_id: controller.await_event_authority_binding_id(),
         };
         Ok((
@@ -359,10 +357,6 @@ impl AwaitEventResolver for EffectTaskController {
 impl RuntimeEffectController for EffectTaskController {
     fn owns_commit_backpressure(&self) -> bool {
         self.owns_commit_backpressure
-    }
-
-    fn effect_journaling(&self) -> EffectJournaling {
-        self.effect_journaling
     }
 
     async fn execute_effect(

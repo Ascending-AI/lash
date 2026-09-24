@@ -1514,7 +1514,7 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
 
 #[tokio::test]
 pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_prefix() {
-    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let store = memory_trigger_store().await;
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
@@ -1847,7 +1847,7 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
 
 #[tokio::test]
 pub(super) async fn fig811_independent_client_retry_reports_duplicate_without_a_second_process() {
-    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let store = memory_trigger_store().await;
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     register_fig811_subscription(

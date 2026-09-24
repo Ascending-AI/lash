@@ -1300,7 +1300,7 @@ pub(super) async fn execute_with_host_environment(
     // never reaches it.
     let ctx = lash_core::testing::code_execution_context_with_trigger_store(
         crate::testing::memory_backend_ports().await,
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+        crate::testing::memory_trigger_store().await,
         crate::testing::memory_process_registry().await,
     );
     let surface = LashlangSurface::new(

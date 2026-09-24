@@ -41,8 +41,7 @@ use lash_core::{
     ProcessQuery as _, ProcessRegistry, Resolution, ResolveOutcome, RuntimeAttribution,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectInvocation,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
-    SessionExecutionLeaseStore, TurnInputStore, facade_support::TurnAddress,
-    facade_support::TurnAttach,
+    facade_support::TurnAddress, facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
 use lash_core_worker::DurableProcessWorker;
@@ -93,6 +92,61 @@ pub(super) async fn memory_host_config() -> lash_core::facade_support::RuntimeHo
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
+}
+
+/// A session-store catalog over a fresh SQLite memory backend: the catalog a
+/// process-worker test hands its worker.
+pub(super) async fn memory_session_store_factory() -> Arc<dyn lash_core::SessionStoreFactory> {
+    lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend")
+        .session_store_factory()
+}
+
+/// The process ports of a fresh SQLite memory store set, with the fault
+/// decorator over its registry: the registry a Restate process test writes
+/// through and can fault.
+pub(super) struct MemoryProcessStores {
+    pub(super) registry: Arc<lash_core::testing::ProcessRegistryFaults>,
+    pub(super) continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+    pub(super) env_store: Arc<dyn ProcessExecutionEnvStore>,
+}
+
+pub(super) async fn memory_process_stores() -> MemoryProcessStores {
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("open a SQLite memory store set");
+    let registry = stores.process_registry();
+    MemoryProcessStores {
+        registry: Arc::new(lash_core::testing::ProcessRegistryFaults::new(
+            Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+        )),
+        continuations: registry,
+        env_store: stores.process_env_store(),
+    }
+}
+
+/// A root session store for `session_id` over a fresh SQLite memory backend.
+pub(super) async fn memory_session_store(
+    session_id: &str,
+) -> Arc<dyn lash_core::RuntimePersistence> {
+    memory_session_store_factory()
+        .await
+        .create_store(&lash_core::testing::store_fixtures::session_store_request(
+            &SessionId::from(session_id),
+            "restate-test-model",
+            lash_core::SessionRelation::Root,
+        ))
+        .await
+        .expect("create a SQLite memory session store")
+}
+
+/// The trigger store of a fresh SQLite memory store set.
+pub(super) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
+    lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("open a SQLite memory store set")
+        .trigger_store()
 }
 
 mod bindings;

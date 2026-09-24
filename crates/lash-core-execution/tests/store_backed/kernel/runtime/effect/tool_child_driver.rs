@@ -79,6 +79,7 @@ mod tests {
                 session_id: SessionId::from("child-session"),
                 agent_frame_id: FrameNodeId::new("child-frame").expect("a valid frame id"),
             },
+            crate::TurnControlBindingId::new("recorded-binding").expect("a valid binding id"),
             ProcessExecutionEnvRef::new("env-ref"),
             ToolChildCompletionRouting::Inline,
         )
@@ -136,15 +137,6 @@ mod tests {
             clock: Arc::new(crate::SystemClock),
         }
     }
-    /// The child's own admitted controller, bound to the child's claim scope and
-    /// not the opener's.
-    fn child_controller() -> ScopedEffectController<'static> {
-        ScopedEffectController::shared(
-            Arc::new(crate::testing::UnavailableEffectController),
-            crate::AdmittedScope::turn("child-session", "turn"),
-        )
-        .expect("a valid child scope")
-    }
 
     /// The backend host's own controller for the child's admitted turn scope:
     /// a durable participant whose await-event authority is the host's.
@@ -155,8 +147,8 @@ mod tests {
     }
 
     /// A request whose recorded cancellation authority is exactly what `host`
-    /// derives for the child's admitted scope — the fixture every durable-side
-    /// check needs, because a durable participant always records `Some`.
+    /// derives for the child's admitted scope — the fixture every check that
+    /// passes the authority line needs.
     fn durably_admitted_request(
         host: &Arc<dyn EffectHost>,
         routing: ToolChildCompletionRouting,
@@ -166,9 +158,9 @@ mod tests {
             &ExecutionScope::turn("child-session", "turn"),
         )
         .expect("a scope-derived binding id");
-        let mut request = request().with_cancellation_authority(
-            crate::TurnControlBindingId::new(derived).expect("a valid binding id"),
-        );
+        let mut request = request();
+        request.cancellation_authority =
+            crate::TurnControlBindingId::new(derived).expect("a valid binding id");
         request.completion_routing = routing;
         request
     }
@@ -330,22 +322,21 @@ mod tests {
         let backend = crate::support::memory_backend().await;
         let host: Arc<dyn EffectHost> = backend.effect_host();
         let tool_children = ToolChildHost::new(&host, backend.process_env_store());
-        let request = request().with_cancellation_authority(
+        let mut request = request();
+        request.cancellation_authority =
             crate::TurnControlBindingId::new("a-binding-this-host-did-not-mint")
-                .expect("a valid binding id"),
-        );
-        let error =
-            crate::validate_recorded_authorities(&tool_children, &child_controller(), &request)
-                .await
-                .expect_err("a binding this host did not mint for the scope is refused");
+                .expect("a valid binding id");
+        let controller = durable_child_controller(&host);
+        let error = crate::validate_recorded_authorities(&tool_children, &controller, &request)
+            .await
+            .expect_err("a binding this host did not mint for the scope is refused");
         assert_eq!(
             error.code,
             crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority
         );
     }
-    /// And the matching one is accepted: presence was never the check — the
-    /// recorded id must equal what this host derives for the admitted scope, and
-    /// it is only legal under the durable participation that minted it.
+    /// And the matching one is accepted: the recorded id must equal what this
+    /// host derives for the admitted scope.
     #[tokio::test]
     async fn the_recorded_cancellation_binding_is_accepted() {
         let backend = crate::support::memory_backend().await;
@@ -357,24 +348,8 @@ mod tests {
             .await
             .expect("the binding this host derives for the admitted scope is accepted");
     }
-    /// A `None` record is legal only under local participation: reopened against
-    /// a durable-journaled controller it is an inconsistency, because the
-    /// cooperative authority exists and the record that omits it lies.
-    #[tokio::test]
-    async fn a_missing_cancellation_record_on_a_durable_participant_is_refused() {
-        let backend = crate::support::memory_backend().await;
-        let host: Arc<dyn EffectHost> = backend.effect_host();
-        let tool_children = ToolChildHost::new(&host, backend.process_env_store());
-        let controller = durable_child_controller(&host);
-        let error = crate::validate_recorded_authorities(&tool_children, &controller, &request())
-            .await
-            .expect_err("a durable participant without a recorded binding is inconsistent");
-        assert_eq!(
-            error.code,
-            crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority
-        );
-    }
-    /// And it is admitted where the authority exists.
+    /// Durable routing is admitted where the controller names its durable
+    /// await-event authority.
     #[tokio::test]
     async fn durable_routing_with_a_durable_authority_is_accepted() {
         let backend = crate::support::memory_backend().await;

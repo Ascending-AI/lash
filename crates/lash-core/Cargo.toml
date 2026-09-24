@@ -19,13 +19,13 @@ doctest = false
 [features]
 # Keep core portable by default.
 default = []
-otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace", "lash-core-memory/otel-trace", "lash-core-execution/otel-trace"]
+otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace", "lash-core-execution/otel-trace"]
 # Internal performance instrumentation. Production builds leave every call
 # site compiled out unless an internal witness explicitly enables this feature.
-perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness", "lash-core-memory/perf-witness", "lash-core-execution/perf-witness"]
+perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness", "lash-core-execution/perf-witness"]
 # Expose `lash::testing` for downstream plugin crates to share mock
 # session-manager/turn fixtures with lash's own tests.
-testing = ["lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-memory/testing", "lash-core-execution/testing"]
+testing = ["lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-execution/testing"]
 
 [lints]
 workspace = true
@@ -35,7 +35,6 @@ lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }
 lash-core-store = { workspace = true }
 lash-core-effect = { workspace = true }
-lash-core-memory = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }

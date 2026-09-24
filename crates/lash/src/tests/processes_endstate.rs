@@ -659,8 +659,12 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         .await?
         .acquired()
         .expect("fresh session lane is available");
-    let handle = store.turn_cancellation_authority().expect("has authority");
-    let authority = lash_core::concrete_turn_cancellation_authority(&handle);
+    // The backend's effect host owns the turn-control promises.
+    let effect_host = backend.effect_host();
+    let authority = lash_core::TurnCancellationAuthority::new(
+        effect_host.turn_control_binding_id(),
+        effect_host,
+    );
     let physical_scope = lash_core::ExecutionScope::process(process_id.clone());
     let binding_id = lash_core::facade_support::turn_control_binding_id_for_scope(
         authority.binding_id(),
@@ -767,10 +771,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         .await?
         .acquired()
         .expect("fresh late session lane is available");
-    let late = late_store
-        .turn_cancellation_authority()
-        .expect("late authority");
-    let late_authority = lash_core::concrete_turn_cancellation_authority(&late);
+    let late_authority = authority.clone();
     let late_scope = lash_core::ExecutionScope::process(process_id.clone());
     let late_binding_id = lash_core::facade_support::turn_control_binding_id_for_scope(
         late_authority.binding_id(),
