@@ -50,7 +50,7 @@ fn session_retirement_refusal(envelope: &RuntimeEffectEnvelope) -> RuntimeEffect
         .execution_scope()
         .session_id()
         .cloned()
-        .expect("the scripted tool attempt runs under a session scope");
+        .unwrap_or_else(|| panic!("the scripted tool attempt runs under a session scope"));
     crate::StoreError::SessionDeleted { session_id }.into()
 }
 
