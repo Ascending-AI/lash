@@ -73,6 +73,33 @@ fn a_continuation_one_format_version_behind_is_refused() {
         .expect("the current format version validates");
 }
 
+/// The last format that metered intrinsics on the old fuel schedule — before
+/// `JSON.parse` and `JSON.stringify` charged per byte — is refused typed, so a
+/// continuation parked by an older build never resumes under a meter it was
+/// not recorded against (FIG-3672).
+#[test]
+fn a_continuation_from_before_the_intrinsic_fuel_schedule_is_refused() {
+    const BEFORE_INTRINSIC_FUEL: u32 = 22;
+    let mut continuation = empty_continuation(Heap::default());
+    continuation.format_version = BEFORE_INTRINSIC_FUEL;
+    assert_eq!(
+        validate_continuation(&continuation),
+        Err(ContinuationError::FormatVersionMismatch {
+            expected: VM_CONTINUATION_FORMAT_VERSION,
+            found: BEFORE_INTRINSIC_FUEL,
+        })
+    );
+    let wire = serde_json::to_string(&continuation).expect("serialize");
+    let decode_error = serde_json::from_str::<VmContinuation>(&wire)
+        .expect_err("a pre-fuel-schedule continuation must not decode");
+    assert!(
+        decode_error
+            .to_string()
+            .contains(&BEFORE_INTRINSIC_FUEL.to_string()),
+        "the decode error must name the refused version: {decode_error}"
+    );
+}
+
 /// When an older build reads continuation bytes produced by a newer build that
 /// carries enum variants unknown to the older build (e.g. newly minted error brands),
 /// the version mismatch must be caught before serde attempts to deserialize
