@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
-  "cargo_package_count": 47,
-  "cargo_target_count": 160,
+  "cargo_package_count": 48,
+  "cargo_target_count": 163,
   "feature_lane_units": [
     {
       "features": [],
@@ -18007,7 +18007,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 219,
+  "generated_label_count": 223,
   "packages": [
     {
       "declared_features": [
@@ -19656,6 +19656,67 @@
       }
     },
     {
+      "declared_features": [],
+      "dependencies": [
+        "async-trait",
+        "base64",
+        "bytes",
+        "http",
+        "http-body",
+        "http-body-util",
+        "lash-internal-core",
+        "lash-internal-core-worker",
+        "lash-internal-http-transport",
+        "lash-internal-restate",
+        "lash-internal-sqlite-store",
+        "lash-runtime",
+        "prost",
+        "restate-sdk",
+        "serde",
+        "serde_json",
+        "thiserror",
+        "tokio",
+        "tokio-util"
+      ],
+      "doc": "//crates/lash-restate-test:lash-restate-test__doc",
+      "manifest": "crates/lash-restate-test/Cargo.toml",
+      "package": "lash-internal-restate-test",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_restate_test",
+          "kind": "lib",
+          "label": "//crates/lash-restate-test:lash-restate-test"
+        },
+        {
+          "cargo": "lash_restate_test",
+          "kind": "unit-test",
+          "label": "//crates/lash-restate-test:lash-restate-test__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "server_semantics",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:server_semantics__test",
+          "tags": []
+        },
+        {
+          "cargo": "turn_crash_replay",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:turn_crash_replay__test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": "//crates/lash-restate-test:test_batch",
+        "members": [
+          "//crates/lash-restate-test:lash-restate-test__unit_test",
+          "//crates/lash-restate-test:server_semantics__test",
+          "//crates/lash-restate-test:turn_crash_replay__test"
+        ]
+      }
+    },
+    {
       "declared_features": [
         "lashlang"
       ],
@@ -19677,6 +19738,7 @@
         "lash-internal-postgres-store",
         "lash-internal-protocol-rlm",
         "lash-internal-protocol-standard",
+        "lash-internal-restate-test",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "lash-internal-subagents",
@@ -19851,6 +19913,7 @@
         "lash-internal-provider-auth",
         "lash-internal-provider-google",
         "lash-internal-provider-openai",
+        "lash-internal-restate-test",
         "lash-internal-rlm-types",
         "lash-internal-s3-store",
         "lash-internal-sansio",

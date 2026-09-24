@@ -1,0 +1,685 @@
+//! The Restate server double.
+//!
+//! [`RestateTestServer`] plays `restate-server` for one endpoint: its ingress
+//! and admin APIs are an in-process [`HttpTransport`], its invoker drives the
+//! endpoint's real `Endpoint::handle` with protocol streams, and its partition
+//! processor keeps journals, keys, promises and timers in memory. Time is
+//! virtual; ids, random seeds, timer tie-breaks and random crashes come from
+//! one seed.
+
+mod attempt;
+mod body;
+pub mod catalog;
+mod commands;
+mod crash;
+mod ids;
+mod ingress;
+mod model;
+mod processor;
+mod query;
+mod timers;
+
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
+use std::time::Duration;
+
+use lash_http_transport::HttpTransport;
+use restate_sdk::endpoint::Endpoint;
+use tokio::sync::Notify;
+
+pub use catalog::{HandlerKind, OnMaxAttempts, ServiceKind};
+pub use crash::{CrashPoint, CrashRule, RandomCrashes};
+pub use ids::InvocationId;
+pub use model::TimerView;
+pub use processor::{RetryPolicy, Stats};
+
+use catalog::{Catalog, HandlerSpec};
+use model::{InvKey, Status};
+use processor::{ControlResult, Flow, State};
+
+use crate::protocol::{Frame, MessageType, ProtocolVersion};
+
+/// How virtual time moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimeMode {
+    /// Only [`RestateTestServer::advance`] and friends move time: a sim
+    /// clock or the test decides when every timer fires, retry backoffs
+    /// included.
+    Manual,
+    /// When the server has been quiescent — every live attempt blocked on
+    /// the server — for `idle` of wall time, it moves on by itself:
+    ///
+    /// * a pending invoker retry starts at once, without moving time (its
+    ///   backoff is compressed; retry timing is no contract);
+    /// * otherwise the next timer fires, moving time to it, if it is due
+    ///   within `horizon` of virtual now.
+    ///
+    /// Between moves virtual time also flows at wall speed, so a longer
+    /// timer (a minute-long sleep, a deadline) fires when a real server
+    /// would, or earlier on an explicit advance — work outside the server,
+    /// a test about to resolve or cancel something, is never overtaken by a
+    /// timer a real server would not fire yet.
+    AutoAdvance { idle: Duration, horizon: Duration },
+}
+
+impl TimeMode {
+    /// [`TimeMode::AutoAdvance`] with a 5 ms idle grace and a one-second
+    /// horizon.
+    pub const fn auto() -> Self {
+        Self::AutoAdvance {
+            idle: Duration::from_millis(5),
+            horizon: Duration::from_secs(1),
+        }
+    }
+}
+
+/// The server's configuration. [`Default`] is what production runs:
+/// protocol V6, streaming attempts, Restate 1.7's default retry policy.
+#[derive(Clone, Debug)]
+pub struct ServerConfig {
+    /// The seed of every id, random seed, timer tie-break and random crash.
+    pub seed: u64,
+    pub protocol: ProtocolVersion,
+    /// Close each attempt's input right after the replayed journal, so the
+    /// handler suspends at every await the journal cannot answer and every
+    /// step replays — the `INACTIVITY_TIMEOUT=0s` mode.
+    pub always_replay: bool,
+    pub time: TimeMode,
+    /// Virtual epoch milliseconds the server starts at.
+    pub start_time_ms: u64,
+    /// Virtual idle time after which the invoker closes a starved stream.
+    pub inactivity_timeout: Duration,
+    /// The invoker retry policy handlers inherit unless their deployment
+    /// overrides it.
+    pub retry: RetryPolicy,
+    /// The base URL clients address; any value works, nothing listens.
+    pub ingress_url: String,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            protocol: ProtocolVersion::V6,
+            always_replay: false,
+            time: TimeMode::auto(),
+            start_time_ms: 1_800_000_000_000,
+            inactivity_timeout: Duration::from_secs(60),
+            retry: RetryPolicy {
+                initial_interval: Duration::from_millis(500),
+                exponentiation_factor: 2.0,
+                max_interval: Duration::from_secs(60),
+                max_attempts: Some(70),
+                on_max_attempts: OnMaxAttempts::Pause,
+            },
+            ingress_url: "http://restate.test".to_owned(),
+        }
+    }
+}
+
+impl ServerConfig {
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    pub fn always_replay(mut self, always_replay: bool) -> Self {
+        self.always_replay = always_replay;
+        self
+    }
+
+    pub fn time(mut self, time: TimeMode) -> Self {
+        self.time = time;
+        self
+    }
+
+    pub fn protocol(mut self, protocol: ProtocolVersion) -> Self {
+        self.protocol = protocol;
+        self
+    }
+
+    pub fn retry(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
+    }
+
+    /// `spec`'s effective retry policy: its deployment overrides over this
+    /// server's defaults.
+    fn retry_policy(&self, spec: &HandlerSpec) -> RetryPolicy {
+        let overrides = spec.retry;
+        RetryPolicy {
+            initial_interval: overrides
+                .initial_interval_ms
+                .map_or(self.retry.initial_interval, Duration::from_millis),
+            exponentiation_factor: overrides
+                .exponentiation_factor
+                .unwrap_or(self.retry.exponentiation_factor),
+            max_interval: overrides
+                .max_interval_ms
+                .map_or(self.retry.max_interval, Duration::from_millis),
+            max_attempts: overrides.max_attempts.or(self.retry.max_attempts),
+            on_max_attempts: overrides
+                .on_max_attempts
+                .unwrap_or(self.retry.on_max_attempts),
+        }
+    }
+}
+
+/// The registered deployment: the endpoint and what it serves.
+struct Deployment {
+    endpoint: Endpoint,
+    catalog: Catalog,
+}
+
+pub(crate) struct Shared {
+    deployment: OnceLock<Deployment>,
+    config: ServerConfig,
+    runtime: tokio::runtime::Handle,
+    state: Mutex<State>,
+    /// Pulsed whenever an attempt starts, blocks, or ends, or time moves.
+    activity: Arc<Notify>,
+    /// Told the new virtual time whenever it moves, so clocks the handlers
+    /// read (a store set's) move with it.
+    time_listener: OnceLock<Arc<dyn Fn(u64) + Send + Sync>>,
+}
+
+impl Shared {
+    fn time_moved(&self, now_ms: u64) {
+        if let Some(listener) = self.time_listener.get() {
+            listener(now_ms);
+        }
+    }
+}
+
+impl Shared {
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// What the registered deployment serves; empty before registration, so
+    /// every target is "not found" as on a server with no deployment.
+    fn catalog(&self) -> &Catalog {
+        static EMPTY: OnceLock<Catalog> = OnceLock::new();
+        self.deployment.get().map_or_else(
+            || EMPTY.get_or_init(Catalog::default),
+            |deployment| &deployment.catalog,
+        )
+    }
+
+    fn endpoint(&self) -> Option<&Endpoint> {
+        self.deployment.get().map(|deployment| &deployment.endpoint)
+    }
+
+    fn invocation_id(&self, key: InvKey) -> String {
+        self.lock().invocations[key.0].id.as_str().to_owned()
+    }
+
+    fn on_frame(
+        self: &Arc<Self>,
+        key: InvKey,
+        number: u32,
+        frame: Frame,
+        received_us: u128,
+    ) -> Flow {
+        self.lock().on_frame(self, key, number, frame, received_us)
+    }
+
+    fn stream_ended(self: &Arc<Self>, key: InvKey, number: u32, detail: String) {
+        self.lock().stream_ended(self, key, number, detail);
+    }
+}
+
+/// An in-process Restate server for one endpoint. Cheap to clone.
+#[derive(Clone)]
+pub struct RestateTestServer {
+    shared: Arc<Shared>,
+    _shutdown: Arc<Shutdown>,
+}
+
+/// Held by every handle of one server; the last one dropped stops the
+/// server's live attempts, whose tasks would otherwise hold it forever.
+struct Shutdown {
+    shared: Weak<Shared>,
+}
+
+impl Drop for Shutdown {
+    fn drop(&mut self) {
+        let Some(shared) = self.shared.upgrade() else {
+            return;
+        };
+        let mut state = shared.lock();
+        for invocation in &mut state.invocations {
+            if let Status::Running(attempt) = &mut invocation.status {
+                attempt.input = None;
+                if let Some(abort) = attempt.abort.take() {
+                    abort.abort();
+                }
+            }
+        }
+        state.timers.clear();
+    }
+}
+
+impl std::fmt::Debug for RestateTestServer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RestateTestServer")
+            .field("seed", &self.shared.config.seed)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Why the server could not start or register a deployment.
+#[derive(Debug, thiserror::Error)]
+pub enum StartError {
+    #[error("the endpoint's discovery document could not be read: {0}")]
+    Discovery(String),
+    #[error("the server needs a Tokio runtime to run attempts on")]
+    NoRuntime,
+    #[error("the server already has a deployment registered")]
+    AlreadyRegistered,
+}
+
+/// What an introspection read reports about one invocation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InvocationView {
+    pub id: String,
+    pub target: String,
+    pub status: &'static str,
+    pub attempts: u32,
+    pub suspensions: u32,
+    pub journal_len: usize,
+    /// The `retry_count` restate reports: failed attempts in this loop.
+    pub retry_count: u32,
+    pub last_failure: Option<(u32, String)>,
+    /// For a running attempt: whether it is blocked on the server (its SDK
+    /// waits on input and everything it wrote is applied) rather than on
+    /// its own work.
+    pub blocked_on_server: Option<bool>,
+}
+
+/// One journal entry as introspection reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JournalEntryView {
+    pub ty: MessageType,
+    pub name: Option<String>,
+    /// A digest of the entry's bytes, for comparing journals across runs.
+    pub digest: u64,
+    /// The entry's protobuf payload.
+    pub payload: bytes::Bytes,
+}
+
+impl RestateTestServer {
+    /// Start a server with no deployment. Its [`transport`](Self::transport)
+    /// works at once, so a deployment whose services need a connection to
+    /// this very server can be built before it is
+    /// [`register`](Self::register)ed. Must run inside a Tokio runtime.
+    pub fn new(config: ServerConfig) -> Result<Self, StartError> {
+        let runtime = tokio::runtime::Handle::try_current().map_err(|_| StartError::NoRuntime)?;
+        let state = State::new(config.seed, config.start_time_ms);
+        let shared = Arc::new(Shared {
+            deployment: OnceLock::new(),
+            config,
+            runtime,
+            state: Mutex::new(state),
+            activity: Arc::new(Notify::new()),
+            time_listener: OnceLock::new(),
+        });
+        if let TimeMode::AutoAdvance { idle, horizon } = shared.config.time {
+            shared
+                .runtime
+                .spawn(auto_advance(Arc::downgrade(&shared), idle, horizon));
+        }
+        let shutdown = Arc::new(Shutdown {
+            shared: Arc::downgrade(&shared),
+        });
+        Ok(Self {
+            shared,
+            _shutdown: shutdown,
+        })
+    }
+
+    /// Register `endpoint` as the server's one deployment, reading its
+    /// discovery document as `restate-server` does.
+    pub async fn register(&self, endpoint: Endpoint) -> Result<(), StartError> {
+        let catalog = Catalog::discover(&endpoint)
+            .await
+            .map_err(StartError::Discovery)?;
+        self.shared
+            .deployment
+            .set(Deployment { endpoint, catalog })
+            .map_err(|_| StartError::AlreadyRegistered)
+    }
+
+    /// Start a server and register `endpoint` on it.
+    pub async fn start(endpoint: Endpoint, config: ServerConfig) -> Result<Self, StartError> {
+        let server = Self::new(config)?;
+        server.register(endpoint).await?;
+        Ok(server)
+    }
+
+    pub fn config(&self) -> &ServerConfig {
+        &self.shared.config
+    }
+
+    /// The base URL of the server's ingress and admin APIs.
+    pub fn ingress_url(&self) -> &str {
+        &self.shared.config.ingress_url
+    }
+
+    /// The server's ingress and admin APIs as an HTTP transport: hand it to
+    /// a Restate connection in place of a network client.
+    pub fn transport(&self) -> Arc<dyn HttpTransport> {
+        Arc::new(ingress::IngressTransport::new(&self.shared))
+    }
+
+    /// The service names the registered endpoint serves.
+    pub fn service_names(&self) -> Vec<String> {
+        self.shared.catalog().names().map(str::to_owned).collect()
+    }
+
+    // --- virtual time ----------------------------------------------------
+
+    pub fn now_ms(&self) -> u64 {
+        self.shared.lock().now_ms
+    }
+
+    /// Call `listener` with the new virtual epoch milliseconds every time
+    /// virtual time moves (once; a second listener is refused). A
+    /// `TestClock` the stores read follows the server this way.
+    pub fn on_time_moved(&self, listener: Arc<dyn Fn(u64) + Send + Sync>) -> bool {
+        self.shared.time_listener.set(listener).is_ok()
+    }
+
+    /// Move virtual time forward by `duration`, firing every timer due.
+    pub fn advance(&self, duration: Duration) -> usize {
+        let mut state = self.shared.lock();
+        let target = state
+            .now_ms
+            .saturating_add(processor::duration_ms(duration));
+        state.advance_to(&self.shared, target)
+    }
+
+    /// Move virtual time to `epoch_ms` (never backwards), firing every timer
+    /// due. A sim clock drives the server through this.
+    pub fn advance_to(&self, epoch_ms: u64) -> usize {
+        self.shared.lock().advance_to(&self.shared, epoch_ms)
+    }
+
+    /// Fire the earliest pending timer, moving time to it. Returns the new
+    /// virtual time, or `None` when no timer is pending.
+    pub fn fire_next_timer(&self) -> Option<u64> {
+        self.shared.lock().fire_next(&self.shared)
+    }
+
+    pub fn timers(&self) -> Vec<TimerView> {
+        self.shared.lock().timers()
+    }
+
+    /// Wait until every live attempt is blocked on the server (or there is
+    /// none). In [`TimeMode::AutoAdvance`] this also waits for the retries
+    /// and in-horizon timers it fires by itself; every other timer is the
+    /// caller's to fire.
+    pub async fn settle(&self) {
+        loop {
+            let notified = self.shared.activity.notified();
+            {
+                let state = self.shared.lock();
+                let timers_pending = match self.shared.config.time {
+                    TimeMode::AutoAdvance { horizon, .. } => {
+                        state.has_auto_timer(processor::duration_ms(horizon))
+                    }
+                    TimeMode::Manual => false,
+                };
+                if state.is_quiescent() && !timers_pending {
+                    return;
+                }
+            }
+            let _ = tokio::time::timeout(Duration::from_millis(5), notified).await;
+        }
+    }
+
+    // --- crashes and operator commands -------------------------------------
+
+    /// Script a crash.
+    pub fn crash_on(&self, rule: CrashRule) {
+        self.shared.lock().crash_plan.add(rule);
+    }
+
+    /// Crash attempts at random frames, seeded by the server's seed.
+    pub fn crash_randomly(&self, random: Option<RandomCrashes>) {
+        self.shared.lock().crash_plan.set_random(random);
+    }
+
+    pub fn clear_crashes(&self) {
+        self.shared.lock().crash_plan.clear();
+    }
+
+    /// Crash `invocation`'s running attempt now and replay it. Returns
+    /// whether an attempt was running.
+    pub fn crash(&self, invocation: &str) -> bool {
+        let mut state = self.shared.lock();
+        match state.lookup(invocation) {
+            Some(key) => state.crash(&self.shared, key),
+            None => false,
+        }
+    }
+
+    /// Cancel `invocation` as the admin API does.
+    pub fn cancel(&self, invocation: &str) -> Option<bool> {
+        let mut state = self.shared.lock();
+        let key = state.lookup(invocation)?;
+        Some(state.cancel(&self.shared, key) != ControlResult::AlreadyCompleted)
+    }
+
+    /// Kill `invocation` as the admin API does.
+    pub fn kill(&self, invocation: &str) -> Option<bool> {
+        let mut state = self.shared.lock();
+        let key = state.lookup(invocation)?;
+        Some(state.kill(&self.shared, key) != ControlResult::AlreadyCompleted)
+    }
+
+    /// Resume a paused `invocation` as the admin API does.
+    pub fn resume(&self, invocation: &str) -> Option<bool> {
+        let mut state = self.shared.lock();
+        let key = state.lookup(invocation)?;
+        Some(state.resume(&self.shared, key))
+    }
+
+    // --- introspection ------------------------------------------------------
+
+    pub fn stats(&self) -> Stats {
+        self.shared.lock().stats.clone()
+    }
+
+    pub fn invocations(&self) -> Vec<InvocationView> {
+        self.shared
+            .lock()
+            .invocations
+            .iter()
+            .map(|invocation| InvocationView {
+                id: invocation.id.as_str().to_owned(),
+                target: invocation.target.display(),
+                status: invocation.status.name(),
+                attempts: invocation.attempts,
+                suspensions: invocation.suspensions,
+                journal_len: invocation.journal.len(),
+                retry_count: invocation.retry.failures_in_loop,
+                blocked_on_server: match &invocation.status {
+                    Status::Running(attempt) => Some(attempt.probe.is_idle()),
+                    _ => None,
+                },
+                last_failure: invocation
+                    .retry
+                    .last_failure
+                    .as_ref()
+                    .map(|failure| (failure.code, failure.message.clone())),
+            })
+            .collect()
+    }
+
+    /// `invocation`'s journal, commands and notifications in stored order.
+    pub fn journal(&self, invocation: &str) -> Option<Vec<JournalEntryView>> {
+        let state = self.shared.lock();
+        let key = state.lookup(invocation)?;
+        Some(
+            state.invocations[key.0]
+                .journal
+                .iter()
+                .map(|entry| JournalEntryView {
+                    ty: entry.frame.ty,
+                    name: command_name(&entry.frame),
+                    digest: fnv1a(&stable_payload(&entry.frame)),
+                    payload: entry.frame.payload.clone(),
+                })
+                .collect(),
+        )
+    }
+
+    /// A digest of every invocation's id, target and journal, taken in id
+    /// order: equal across two runs exactly when both produced the same
+    /// invocations with the same journals, however concurrent handlers
+    /// interleaved.
+    pub fn journal_digest(&self) -> u64 {
+        let state = self.shared.lock();
+        let mut invocations: Vec<_> = state.invocations.iter().collect();
+        invocations.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut digest = FNV_OFFSET;
+        for invocation in invocations {
+            digest = fnv1a_extend(digest, invocation.id.as_str().as_bytes());
+            digest = fnv1a_extend(digest, invocation.target.display().as_bytes());
+            for entry in &invocation.journal {
+                digest = fnv1a_extend(digest, &entry.frame.ty.code().to_be_bytes());
+                digest = fnv1a_extend(digest, &stable_payload(&entry.frame));
+            }
+        }
+        digest
+    }
+
+    /// Whether `invocation` has completed, and with what: `Ok(bytes)` or
+    /// `Err((code, message))`.
+    pub fn outcome(&self, invocation: &str) -> Option<Result<bytes::Bytes, (u32, String)>> {
+        let state = self.shared.lock();
+        let key = state.lookup(invocation)?;
+        match &state.invocations[key.0].status {
+            Status::Completed(model::Outcome::Success(bytes)) => Some(Ok(bytes.clone())),
+            Status::Completed(model::Outcome::Failure(failure)) => {
+                Some(Err((failure.code, failure.message.clone())))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The virtual-time driver of [`TimeMode::AutoAdvance`].
+async fn auto_advance(shared: Weak<Shared>, idle: Duration, horizon: Duration) {
+    let horizon_ms = processor::duration_ms(horizon);
+    loop {
+        let Some(strong) = shared.upgrade() else {
+            return;
+        };
+        let activity = Arc::clone(&strong.activity);
+        let quiescent_with_timer = {
+            let mut state = strong.lock();
+            // Time flows at wall speed between jumps: a timer past the
+            // horizon fires when a real server would have fired it.
+            let flowed = state.wall_flowed_ms();
+            if state
+                .next_timer_ms()
+                .is_some_and(|fire_at| fire_at <= flowed)
+            {
+                state.advance_to(&strong, flowed);
+            }
+            state.is_quiescent() && state.next_timer_ms().is_some()
+        };
+        drop(strong);
+        if !quiescent_with_timer {
+            let _ = tokio::time::timeout(Duration::from_millis(50), activity.notified()).await;
+            continue;
+        }
+        // Stay quiet for `idle` before time moves: give work outside the
+        // server (a test, a worker) the chance to act first.
+        if tokio::time::timeout(idle, activity.notified())
+            .await
+            .is_ok()
+        {
+            continue;
+        }
+        let Some(strong) = shared.upgrade() else {
+            return;
+        };
+        let moved = {
+            let mut state = strong.lock();
+            if !state.is_quiescent() || state.fire_next_retry(&strong) {
+                true
+            } else {
+                let within_horizon = state
+                    .next_timer_ms()
+                    .is_some_and(|fire_at| fire_at <= state.now_ms.saturating_add(horizon_ms));
+                within_horizon && state.fire_next(&strong).is_some()
+            }
+        };
+        drop(strong);
+        if !moved {
+            // Nothing may move by itself: wait for activity or an explicit
+            // advance.
+            let _ = tokio::time::timeout(Duration::from_millis(50), activity.notified()).await;
+        }
+    }
+}
+
+fn command_name(frame: &Frame) -> Option<String> {
+    use prost::Message as _;
+    // Every command carries its entry name at field 12 (`name`, or
+    // `entry_name` on SendSignal); the notification template reserves it.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Named {
+        #[prost(string, tag = "12")]
+        name: String,
+    }
+    if !frame.ty.is_command() {
+        return None;
+    }
+    Named::decode(frame.payload.clone())
+        .ok()
+        .map(|named| named.name)
+        .filter(|name| !name.is_empty())
+}
+
+/// An entry's payload with the SDK's wall-clock stamps (a sleep's wake-up
+/// time, a delayed send's invoke time) zeroed: the bytes a digest compares
+/// across runs.
+fn stable_payload(frame: &Frame) -> bytes::Bytes {
+    use crate::protocol::generated::{OneWayCallCommandMessage, SleepCommandMessage};
+    use prost::Message as _;
+    match frame.ty {
+        MessageType::SleepCommand => frame
+            .decode::<SleepCommandMessage>()
+            .map(|mut sleep| {
+                sleep.wake_up_time = 0;
+                bytes::Bytes::from(sleep.encode_to_vec())
+            })
+            .unwrap_or_else(|_| frame.payload.clone()),
+        MessageType::OneWayCallCommand => frame
+            .decode::<OneWayCallCommandMessage>()
+            .map(|mut send| {
+                send.invoke_time = 0;
+                bytes::Bytes::from(send.encode_to_vec())
+            })
+            .unwrap_or_else(|_| frame.payload.clone()),
+        _ => frame.payload.clone(),
+    }
+}
+
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    fnv1a_extend(FNV_OFFSET, bytes)
+}
+
+fn fnv1a_extend(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash
+}

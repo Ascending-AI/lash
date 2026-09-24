@@ -46,6 +46,10 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash-conformance.workspace = true
+# The in-process Restate server double the effect-group suites run on. Only
+# its server (endpoint-agnostic) is used here, so the second copy of this
+# crate it links for its own backend never meets these tests' types.
+lash-restate-test.workspace = true
 chrono = { workspace = true }
 http-body = "1"
 http-body-util = { version = "0.1", features = ["channel"] }

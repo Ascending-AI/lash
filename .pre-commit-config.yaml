@@ -88,7 +88,7 @@ repos:
         name: Restate handler panic boundary
         language: system
         entry: python3 scripts/check-restate-handler-panics.py
-        files: '^crates/lash-restate/src/.*\.rs$'
+        files: '^(crates/lash-restate/src/.*|crates/lash-restate-test/src/backend)\.rs$'
         pass_filenames: false
 
       # Every *_json column must stay explicitly enrolled, excluded, or proven

@@ -227,6 +227,33 @@ impl EffectGroupSdkWorkflow {
     }
 }
 
+/// A handler that always fails retryably, under a small invoker retry policy
+/// that pauses the invocation once it is exhausted: the witness for engine
+/// retry exhaustion parking, on the real server and on the double alike.
+struct EffectGroupSdkFlaky {
+    attempts: Arc<AtomicUsize>,
+}
+
+#[restate_sdk::service(name = "EffectGroupSdkFlaky")]
+impl EffectGroupSdkFlaky {
+    #[handler(
+        name = "fail",
+        invocation_retry_policy(
+            initial_interval = "10ms",
+            factor = 1.0,
+            max_interval = "10ms",
+            max_attempts = 3,
+            on_max_attempts = "pause",
+        )
+    )]
+    async fn fail(&self, _ctx: Context<'_>) -> HandlerResult<()> {
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        Err(HandlerError::from(std::io::Error::other(
+            "the flaky witness always fails retryably",
+        )))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SendResponse {
@@ -245,26 +272,52 @@ fn live_effect_group_sdk_preconditions() {
             // Raised from 30s with the cancellation-coverage witness, which
             // waits on cancellation propagation and `sys_invocation`
             // visibility rather than on a local handler returning.
-            tokio::time::timeout(Duration::from_secs(120), run_live_witnesses())
+            tokio::time::timeout(Duration::from_secs(120), run_witnesses(WitnessServer::Live))
                 .await
                 .expect("EG0 witnesses exceeded their 120 second ceiling");
         });
 }
 
-async fn run_live_witnesses() {
-    let ingress_url = required_url("RESTATE_INGRESS_URL");
-    let admin_url = required_url("RESTATE_ADMIN_URL");
-    let bind_addr = std::env::var("EG0_RESTATE_ENDPOINT_BIND")
-        .expect("EG0_RESTATE_ENDPOINT_BIND must be set by `just effect-group-conformance-e2e`")
-        .parse::<SocketAddr>()
-        .expect("valid EG0_RESTATE_ENDPOINT_BIND");
-    let endpoint_url = required_url("EG0_RESTATE_ENDPOINT_URL");
+/// The same witnesses on the in-process `lash-restate-test` server double: the
+/// parity check that keeps the double's semantics the real server's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn effect_group_sdk_preconditions_on_the_server_double() {
+    tokio::time::timeout(
+        Duration::from_secs(120),
+        run_witnesses(WitnessServer::InProcess),
+    )
+    .await
+    .expect("EG0 witnesses on the server double exceeded their 120 second ceiling");
+}
+
+enum WitnessServer {
+    Live,
+    InProcess,
+}
+
+/// Where the witnesses reach Restate: its ingress and admin APIs over one
+/// transport.
+struct Witness {
+    transport: Arc<dyn lash_http_transport::HttpTransport>,
+    ingress_url: String,
+    admin_url: String,
+    /// The in-process server, kept alive for the transport's sake.
+    _server: Option<lash_restate_test::RestateTestServer>,
+}
+
+impl Witness {
+    fn admin(&self) -> crate::RestateAdminClient {
+        crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
+            self.admin_url.clone(),
+            Arc::clone(&self.transport),
+        ))
+    }
+}
+
+async fn run_witnesses(target: WitnessServer) {
     let workflow_executions = Arc::new(AtomicUsize::new(0));
     let coverage_children = Arc::new(std::sync::Mutex::new(None));
-
-    let listener = tokio::net::TcpListener::bind(bind_addr)
-        .await
-        .expect("bind EG0 Restate endpoint");
+    let flaky_attempts = Arc::new(AtomicUsize::new(0));
     let endpoint = Endpoint::builder()
         .bind(EffectGroupSdkTarget)
         .bind(EffectGroupSdkWitness {
@@ -273,22 +326,68 @@ async fn run_live_witnesses() {
         .bind(EffectGroupSdkWorkflow {
             executions: Arc::clone(&workflow_executions),
         })
+        .bind(EffectGroupSdkFlaky {
+            attempts: Arc::clone(&flaky_attempts),
+        })
         .build();
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(async move {
-        HttpServer::new(endpoint)
-            .serve_with_cancel(listener, async {
-                let _ = shutdown_rx.await;
-            })
-            .await;
-    });
 
-    wait_for_endpoint(bind_addr).await;
-    register_deployment(&admin_url, &endpoint_url).await;
-
-    let client = reqwest::Client::new();
+    let (witness, live_server) = match target {
+        WitnessServer::Live => {
+            let ingress_url = required_url("RESTATE_INGRESS_URL");
+            let admin_url = required_url("RESTATE_ADMIN_URL");
+            let bind_addr = std::env::var("EG0_RESTATE_ENDPOINT_BIND")
+                .expect(
+                    "EG0_RESTATE_ENDPOINT_BIND must be set by `just effect-group-conformance-e2e`",
+                )
+                .parse::<SocketAddr>()
+                .expect("valid EG0_RESTATE_ENDPOINT_BIND");
+            let endpoint_url = required_url("EG0_RESTATE_ENDPOINT_URL");
+            let listener = tokio::net::TcpListener::bind(bind_addr)
+                .await
+                .expect("bind EG0 Restate endpoint");
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+            let server = tokio::spawn(async move {
+                HttpServer::new(endpoint)
+                    .serve_with_cancel(listener, async {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await;
+            });
+            wait_for_endpoint(bind_addr).await;
+            register_deployment(&admin_url, &endpoint_url).await;
+            (
+                Witness {
+                    transport: Arc::new(lash_http_transport::ReqwestHttpTransport::new()),
+                    ingress_url,
+                    admin_url,
+                    _server: None,
+                },
+                Some((shutdown_tx, server)),
+            )
+        }
+        WitnessServer::InProcess => {
+            let server = lash_restate_test::RestateTestServer::start(
+                endpoint,
+                lash_restate_test::ServerConfig::default(),
+            )
+            .await
+            .expect("start the Restate server double");
+            let url = server.ingress_url().trim_end_matches('/').to_owned();
+            (
+                Witness {
+                    transport: server.transport(),
+                    ingress_url: url.clone(),
+                    admin_url: url,
+                    _server: Some(server),
+                },
+                None,
+            )
+        }
+    };
+    let ingress_url = witness.ingress_url.clone();
+    let client = &witness;
     let same_key: SameKeyReport = post_json(
-        &client,
+        client,
         format!("{ingress_url}/{WITNESS_SERVICE}/same_key"),
         &SameKeyRequest {
             same_key: "eg0-same-key".to_string(),
@@ -304,13 +403,13 @@ async fn run_live_witnesses() {
     );
 
     let workflow_url = format!("{ingress_url}/{WITNESS_WORKFLOW}/eg0-workflow/run");
-    let first: SendResponse = post_json(&client, format!("{workflow_url}/send"), &"payload").await;
-    let second: SendResponse = post_json(&client, format!("{workflow_url}/send"), &"payload").await;
+    let first: SendResponse = post_json(client, format!("{workflow_url}/send"), &"payload").await;
+    let second: SendResponse = post_json(client, format!("{workflow_url}/send"), &"payload").await;
     assert_eq!(first.status, "Accepted");
     assert_eq!(second.status, "PreviouslyAccepted");
     assert_eq!(first.invocation_id, second.invocation_id);
     let attached: String = post_json(
-        &client,
+        client,
         format!("{ingress_url}/{WITNESS_SERVICE}/attach_workflow"),
         &first.invocation_id,
     )
@@ -324,7 +423,7 @@ async fn run_live_witnesses() {
     );
 
     let attach: AttachReport = post_empty(
-        &client,
+        client,
         format!("{ingress_url}/{WITNESS_SERVICE}/attach_smoke"),
     )
     .await;
@@ -339,16 +438,90 @@ async fn run_live_witnesses() {
         attach.cancelled_error_message
     );
 
-    witness_implicit_cancellation_covers_calls_not_sends(
-        &client,
-        &ingress_url,
-        &admin_url,
-        &coverage_children,
+    witness_implicit_cancellation_covers_calls_not_sends(client, &coverage_children).await;
+
+    witness_retry_exhaustion_pauses_until_resumed(client, &flaky_attempts).await;
+
+    if let Some((shutdown_tx, server)) = live_server {
+        let _ = shutdown_tx.send(());
+        server.await.expect("EG0 endpoint server task");
+    }
+}
+
+/// Engine retry exhaustion parks: a handler that fails retryably under
+/// `max_attempts = 3, on_max_attempts = "pause"` is paused after exactly its
+/// third attempt and runs no fourth until an operator resumes it; the resume
+/// starts a fresh retry loop.
+async fn witness_retry_exhaustion_pauses_until_resumed(
+    client: &Witness,
+    attempts: &Arc<AtomicUsize>,
+) {
+    use crate::{RestateInvocationId, RestateInvocationLifecycle};
+
+    let ingress_url = &client.ingress_url;
+    let flaky: SendResponse = post_empty(
+        client,
+        format!("{ingress_url}/EffectGroupSdkFlaky/fail/send"),
     )
     .await;
+    let id = RestateInvocationId::new(flaky.invocation_id.clone());
+    let admin = client.admin();
+    let paused = RestateInvocationLifecycle::Unknown("paused".to_owned());
+    let is_paused = || async {
+        let status = admin.invocation_status(&id).await.ok()??;
+        (status.status == paused).then_some(())
+    };
+    poll_until(
+        Duration::from_secs(30),
+        "the flaky invocation to pause",
+        is_paused,
+    )
+    .await;
+    let first_loop = attempts.load(Ordering::SeqCst);
+    assert_eq!(
+        first_loop, 3,
+        "the pause lands after exactly max_attempts attempts"
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        3,
+        "a paused invocation runs no further attempt"
+    );
 
-    let _ = shutdown_tx.send(());
-    server.await.expect("EG0 endpoint server task");
+    let resume = lash_http_transport::HttpRequest::new(
+        lash_http_transport::HttpMethod::Patch,
+        format!(
+            "{}/invocations/{}/resume",
+            client.admin_url, flaky.invocation_id
+        ),
+        "",
+    );
+    let response = client
+        .transport
+        .send(resume, Some(Duration::from_secs(30)))
+        .await
+        .expect("resume the paused invocation");
+    assert!(
+        response.is_success(),
+        "resume of a paused invocation answered {}",
+        response.status
+    );
+    poll_until(
+        Duration::from_secs(30),
+        "the resumed invocation to run and pause again",
+        || async {
+            (attempts.load(Ordering::SeqCst) > first_loop)
+                .then_some(())
+                .and(is_paused().await)
+        },
+    )
+    .await;
+    let after_resume = attempts.load(Ordering::SeqCst);
+    println!(
+        "EG0_WITNESS retry-exhaustion-pauses-until-resumed PASS first_loop={first_loop} after_resume={after_resume}"
+    );
+    let _ = admin.kill_invocation_for_test_cleanup(&id).await;
 }
 
 /// Drives `cancellation_coverage` and reads the two children back out of
@@ -360,13 +533,12 @@ async fn run_live_witnesses() {
 /// are both asynchronous, so a tight bound would turn a scheduling delay into
 /// a false claim about SDK semantics.
 async fn witness_implicit_cancellation_covers_calls_not_sends(
-    client: &reqwest::Client,
-    ingress_url: &str,
-    admin_url: &str,
+    client: &Witness,
     coverage_children: &Arc<std::sync::Mutex<Option<CoverageChildIds>>>,
 ) {
-    use crate::{RestateAdminClient, RestateInvocationId};
+    use crate::RestateInvocationId;
 
+    let ingress_url = &client.ingress_url;
     let parent: SendResponse = post_empty(
         client,
         format!("{ingress_url}/{WITNESS_SERVICE}/cancellation_coverage/send"),
@@ -385,7 +557,7 @@ async fn witness_implicit_cancellation_covers_calls_not_sends(
     )
     .await;
 
-    let admin = RestateAdminClient::new(admin_url.to_string());
+    let admin = client.admin();
     let sent_id = RestateInvocationId::new(children.sent_id.clone());
     let called_id = RestateInvocationId::new(children.called_id.clone());
     assert_ne!(
@@ -506,49 +678,42 @@ async fn register_deployment(admin_url: &str, endpoint_url: &str) {
     );
 }
 
-async fn post_json<T, R>(client: &reqwest::Client, url: String, body: &T) -> R
+async fn post_json<T, R>(client: &Witness, url: String, body: &T) -> R
 where
     T: Serialize + ?Sized,
     R: for<'de> Deserialize<'de>,
 {
-    let response = client
-        .post(&url)
-        .json(body)
-        .send()
-        .await
-        .unwrap_or_else(|error| panic!("POST {url} failed: {error}"));
-    let status = response.status();
-    let bytes = response
-        .bytes()
-        .await
-        .unwrap_or_else(|error| panic!("read POST {url} response: {error}"));
-    assert!(
-        status.is_success(),
-        "POST {url} failed: {status} {}",
-        String::from_utf8_lossy(&bytes)
-    );
-    serde_json::from_slice(&bytes).unwrap_or_else(|error| {
-        panic!(
-            "decode POST {url} response as JSON: {error}; body={}",
-            String::from_utf8_lossy(&bytes)
-        )
-    })
+    let body = serde_json::to_vec(body).expect("encode the witness request");
+    post(
+        client,
+        lash_http_transport::HttpRequest::post(&url, body)
+            .with_header("content-type", "application/json"),
+    )
+    .await
 }
 
-async fn post_empty<R>(client: &reqwest::Client, url: String) -> R
+async fn post_empty<R>(client: &Witness, url: String) -> R
 where
     R: for<'de> Deserialize<'de>,
 {
+    post(client, lash_http_transport::HttpRequest::post(&url, "")).await
+}
+
+async fn post<R>(client: &Witness, request: lash_http_transport::HttpRequest) -> R
+where
+    R: for<'de> Deserialize<'de>,
+{
+    let url = request.url.clone();
     let response = client
-        .post(&url)
-        .send()
+        .transport
+        .send(request, Some(Duration::from_secs(60)))
         .await
         .unwrap_or_else(|error| panic!("POST {url} failed: {error}"));
-    let status = response.status();
-    let bytes = response
-        .bytes()
+    let status = response.status;
+    let bytes = lash_http_transport::read_http_body_bytes(response.body, None, "witness body")
         .await
         .unwrap_or_else(|error| panic!("read POST {url} response: {error}"));
+    let status = http::StatusCode::from_u16(status).expect("a valid HTTP status");
     assert!(
         status.is_success(),
         "POST {url} failed: {status} {}",

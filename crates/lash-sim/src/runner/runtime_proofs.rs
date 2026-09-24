@@ -261,11 +261,49 @@ fn committed_transcript_contains(session: &lash::LashSession, needle: &str) -> b
     })
 }
 
+/// The proof's input prompt.
+pub(super) const PENDING_TOOL_PROMPT: &str = "use async tool";
+
+/// Starts the proof's turn where the backend runs turns and hands back its
+/// completion: in the calling process on an in-process backend, inside an
+/// engine handler on a Restate backend.
+pub(super) type PendingToolTurnDriver = Box<
+    dyn FnOnce(
+            lash::LashSession,
+            Arc<RuntimeProofRecordingEvents>,
+        ) -> tokio::task::JoinHandle<Result<lash::TurnReport, String>>
+        + Send,
+>;
+
+/// The proof on the SQLite memory backend, its turn driven in process.
 pub(super) async fn prove_pending_tool_completion_through_turn()
 -> Result<PendingToolCompletionProof, FixedScriptRunnerError> {
+    let backend = crate::backend::memory_backend().await?;
+    prove_pending_tool_completion_on(
+        backend,
+        0x5eed_7001,
+        Box::new(|session, events| {
+            tokio::spawn(async move {
+                session
+                    .turn(lash::TurnInput::text(PENDING_TOOL_PROMPT))
+                    .stream_to(events.as_ref())
+                    .await
+                    .map_err(|err| err.to_string())
+            })
+        }),
+    )
+    .await
+}
+
+/// A turn parks on a pending tool until the boundary scheduler, seeded by
+/// `seed`, delivers the tool's resolution; the turn then finishes.
+pub(super) async fn prove_pending_tool_completion_on(
+    backend: Arc<dyn lash::Backend>,
+    seed: u64,
+    drive_turn: PendingToolTurnDriver,
+) -> Result<PendingToolCompletionProof, FixedScriptRunnerError> {
     let (key_tx, key_rx) = tokio::sync::oneshot::channel();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let backend = crate::backend::memory_backend().await?;
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -285,14 +323,7 @@ pub(super) async fn prove_pending_tool_completion_through_turn()
         .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let turn_session = session.clone();
-    let turn_events = Arc::clone(&events);
-    let turn = tokio::spawn(async move {
-        turn_session
-            .turn(lash::TurnInput::text("use async tool"))
-            .stream_to(turn_events.as_ref())
-            .await
-    });
+    let turn = drive_turn(session.clone(), Arc::clone(&events));
 
     let key = key_rx.await.map_err(|_| {
         FixedScriptRunnerError::Runtime("pending tool did not send completion key".to_string())
@@ -311,7 +342,7 @@ pub(super) async fn prove_pending_tool_completion_through_turn()
     });
     let completion_boundary_id = "sim-pending-tool-session:tool-completion:001";
     let mut scheduler = BoundaryScheduler::with_events(
-        0x5eed_7001,
+        seed,
         [BoundaryEvent::new(
             completion_boundary_id,
             "sim-pending-tool-session",
@@ -354,7 +385,7 @@ pub(super) async fn prove_pending_tool_completion_through_turn()
         .map_err(|err| {
             FixedScriptRunnerError::Runtime(format!("pending tool turn task failed: {err}"))
         })?
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        .map_err(FixedScriptRunnerError::Runtime)?;
     let completed_after = events.tool_completed_count().await;
     let completed_outputs = events.tool_completed_outputs().await;
     let assistant_message = result.assistant_message().unwrap_or_default().to_string();
