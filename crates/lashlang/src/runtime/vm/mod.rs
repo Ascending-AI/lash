@@ -448,13 +448,20 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 )?;
                 self.stack.push(closure);
             }
-            Instruction::Call { argc } => {
-                let start = self.stack_drain_start(argc + 1)?;
+            Instruction::Call { argc } | Instruction::CallMethod { argc } => {
+                let with_receiver = matches!(instruction, Instruction::CallMethod { .. });
+                let start = self.stack_drain_start(argc + 1 + usize::from(with_receiver))?;
                 let mut values = self.stack.drain(start..).collect::<Vec<_>>();
+                let receiver = if with_receiver {
+                    values.remove(0)
+                } else {
+                    Value::Undefined
+                };
                 let function = values.remove(0);
                 let active = self.begin_lashlang_execution(self.current_instruction_ip());
                 match self.begin_function_call(
                     function,
+                    receiver,
                     CallArguments::Owned(values),
                     ReturnTarget::Direct,
                 ) {
@@ -471,7 +478,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     }
                 }
             }
-            Instruction::CallDynamic => self.execute_dynamic_call()?,
+            Instruction::CallDynamic => self.execute_dynamic_call(false)?,
+            Instruction::CallMethodDynamic => self.execute_dynamic_call(true)?,
             Instruction::Map => {
                 let function = self.pop_stack()?;
                 let items = self.pop_stack()?;
@@ -1316,6 +1324,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::EndIter
             | Instruction::MakeClosure { .. }
             | Instruction::Call { .. }
+            | Instruction::CallMethod { .. }
+            | Instruction::CallMethodDynamic
             | Instruction::CallDynamic
             | Instruction::Map
             | Instruction::AsyncMap

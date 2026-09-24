@@ -86,9 +86,13 @@ use super::exceptions::PendingErrorOrigin;
 /// passed. The wire shape is unchanged; the meaning of the meter is not, so an
 /// older continuation is refused typed before any effect rather than resumed.
 ///
+/// v24 (FIG-3700) binds call receivers: a function that reads `this` lays out
+/// a receiver slot in its frame, and member calls return to `CallMethod`
+/// sites. A v23 continuation was laid out without them, so it is refused.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 23;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 24;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).

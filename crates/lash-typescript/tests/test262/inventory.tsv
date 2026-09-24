@@ -234,6 +234,7 @@ typescript	delete-non-reference
 typescript	direct-eval
 typescript	enum
 typescript	function-constructor
+typescript	function-receivers
 typescript	function-redeclaration
 typescript	generics
 typescript	instanceof-arbitrary

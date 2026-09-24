@@ -206,6 +206,10 @@ impl Compiler {
                 .as_deref()
                 .map_or_else(Arc::default, Arc::from);
             let self_slot = definition.name.as_deref().map(|name| self.push_slot(name));
+            let receiver_slot = definition
+                .receiver
+                .as_deref()
+                .map(|name| self.push_slot(name));
             let parameter_slots = definition
                 .params
                 .iter()
@@ -229,6 +233,7 @@ impl Compiler {
                 capture_count: definition.captures.len(),
                 js_name,
                 self_slot,
+                receiver_slot,
                 parameter_slots: parameter_slots.into_boxed_slice(),
                 capture_slots: capture_slots.into_boxed_slice(),
                 slot_names,
@@ -429,6 +434,9 @@ impl Compiler {
                 name: None,
                 // The ECMA `name` is the declaration's own.
                 js_name: Some(function.name.clone()),
+                // A declared function has no receiver: its call names a chunk
+                // function, never a member.
+                receiver: None,
                 params: function
                     .params
                     .iter()
@@ -1211,6 +1219,8 @@ impl Compiler {
             Expr::Block(_)
             | Expr::Function(_)
             | Expr::Call { .. }
+            | Expr::MethodCall { .. }
+            | Expr::ThisCall { .. }
             | Expr::FunctionCall { .. }
             | Expr::Map { .. }
             | Expr::Try(_)

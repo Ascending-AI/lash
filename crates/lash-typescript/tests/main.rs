@@ -57,6 +57,8 @@ mod projected_coercion;
 #[path = "projected_durable_restore.rs"]
 mod projected_durable_restore;
 mod projected_paths;
+#[path = "receivers.rs"]
+mod receivers;
 #[path = "regex_runtime.rs"]
 mod regex_runtime;
 #[path = "rejections.rs"]

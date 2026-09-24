@@ -235,6 +235,7 @@ typescript	delete-non-reference	rejected	TS_DELETE_NON_REFERENCE_UNSUPPORTED	con
 typescript	direct-eval	rejected	TS_EVAL_UNSUPPORTED	eval('1');
 typescript	enum	accepted	-	-
 typescript	function-constructor	rejected	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED	const f = Function('return 1');
+typescript	function-receivers	accepted	-	-
 typescript	function-redeclaration	rejected	TS_FUNCTION_REDECLARATION_UNSUPPORTED	function f() { } function f() { }
 typescript	generics	accepted	-	-
 typescript	instanceof-arbitrary	rejected	TS_INSTANCEOF_UNSUPPORTED	const b = 'a' instanceof String;

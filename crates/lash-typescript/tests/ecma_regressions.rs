@@ -592,13 +592,19 @@ fn a_member_call_on_undefined_names_the_undefined_receiver() {
         "{error}"
     );
 
-    // A method that really is unsupported, on a receiver that really exists,
-    // still says so.
-    let error = execute("const holder: any = { a: 1 }; finish(holder.get('k'));")
-        .expect_err("an unsupported method on a record must refuse");
-    assert!(
-        error.to_string().contains("TS_METHOD_UNSUPPORTED"),
-        "{error}"
+    // A plain object has no `get`: calling a member it lacks is ECMA-262's
+    // TypeError, naming the method (FIG-3700).
+    assert_eq!(
+        finished(
+            "const holder: any = { a: 1 }; let r: any = 'no'; try { holder.get('k'); } catch (e) { r = [e instanceof TypeError, e.message]; } finish(r);"
+        ),
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::String("get is not a function".into())
+            ]
+            .into()
+        )
     );
 }
 

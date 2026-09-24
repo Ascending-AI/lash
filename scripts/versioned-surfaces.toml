@@ -1846,6 +1846,7 @@ symbols = [
   "AssignPathStep",
   "Expr",
   "FunctionExpr",
+  "MethodKey",
   "ProcessLiteralExpr",
   "TryExpr",
   "CatchClause",

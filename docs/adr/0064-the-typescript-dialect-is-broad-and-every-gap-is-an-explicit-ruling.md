@@ -48,6 +48,17 @@ TS2300); and `TS_DELETE_NON_REFERENCE_UNSUPPORTED`, `delete` of an operand
 that is not a property reference (TS2703). An ECMA-262 early error in the
 same cell still reports first.
 
+Amended 2026-09-24 (FIG-3700, decision 42): method calls and `this` are ruled
+in. Object-literal methods were already accepted syntax; their `this` now
+binds exactly (member-call receivers, callback `thisArg`, JSON holders,
+lexical arrows, `undefined` for a plain call; see
+[ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md#status)),
+and a member call on a name that is not a built-in prototype method is a call
+of the receiver's own property rather than a `TS_METHOD_UNSUPPORTED` refusal.
+A built-in method outside the stdlib surface keeps its named refusal. Top-level
+`this` stays rejected; classes, constructors and prototype surgery are
+unchanged.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves

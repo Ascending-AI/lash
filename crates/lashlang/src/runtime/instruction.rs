@@ -141,6 +141,8 @@ pub(crate) struct CompiledFunction {
     /// when no naming context reached the function.
     pub(crate) js_name: Arc<str>,
     pub(crate) self_slot: Option<usize>,
+    /// The slot the call's receiver is bound to ([`crate::FunctionExpr::receiver`]).
+    pub(crate) receiver_slot: Option<usize>,
     pub(crate) parameter_slots: Box<[usize]>,
     pub(crate) capture_slots: Box<[usize]>,
     pub(crate) slot_names: Box<[Name]>,
@@ -412,7 +414,16 @@ pub(crate) enum Instruction {
     Call {
         argc: usize,
     },
+    /// Calls with an explicit receiver: the stack holds `[receiver, function,
+    /// args..]`, and the callee's receiver slot, when it has one, is bound to
+    /// `receiver`.
+    CallMethod {
+        argc: usize,
+    },
     CallDynamic,
+    /// [`Self::CallDynamic`] with a receiver beneath the callee: the stack
+    /// holds `[receiver, function, arguments]`.
+    CallMethodDynamic,
     Map,
     AsyncMap,
     Return,
@@ -611,7 +622,10 @@ impl Instruction {
             Instruction::SleepFor | Instruction::SleepUntil => InstructionProfileTag::Sleep,
             Instruction::Intrinsic(_) => InstructionProfileTag::Intrinsic,
             Instruction::MakeClosure { .. } => InstructionProfileTag::MakeClosure,
-            Instruction::Call { .. } | Instruction::CallDynamic => InstructionProfileTag::Call,
+            Instruction::Call { .. }
+            | Instruction::CallMethod { .. }
+            | Instruction::CallDynamic
+            | Instruction::CallMethodDynamic => InstructionProfileTag::Call,
             Instruction::Map | Instruction::AsyncMap => InstructionProfileTag::Callback,
             Instruction::Return => InstructionProfileTag::Return,
             Instruction::PushHandler { .. }

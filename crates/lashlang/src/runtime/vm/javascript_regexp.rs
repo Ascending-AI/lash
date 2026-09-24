@@ -635,6 +635,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Err(js_stdlib_error("missing RegExp operation discriminator"));
         };
         let args = &values[1..];
+        // An authored `o.split(..)`, `o.test(..)` and their siblings on a plain
+        // object call its own member (FIG-3700): a plain object has no string
+        // or RegExp methods.
+        if matches!(
+            operation.as_str(),
+            "exec" | "test" | "match" | "search" | "matchAll" | "split"
+        ) && let [receiver, arguments @ ..] = args
+            && let Some(resolved) = self.plain_object_method(receiver, operation.as_str())?
+        {
+            let name = operation.to_string();
+            let receiver = receiver.clone();
+            let arguments = arguments.to_vec();
+            return self.call_plain_object_method(resolved, &name, receiver, arguments);
+        }
         let result = match (operation.as_str(), args) {
             ("exec", [Value::Ref(receiver), input]) => {
                 let input = self.heap.javascript_to_string(input)?;

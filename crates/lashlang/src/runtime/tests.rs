@@ -858,6 +858,8 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         }
         Instruction::Call { argc } => format!("call argc={argc}"),
         Instruction::CallDynamic => "call_dynamic".to_string(),
+        Instruction::CallMethod { argc } => format!("call_method argc={argc}"),
+        Instruction::CallMethodDynamic => "call_method_dynamic".to_string(),
         Instruction::Map => "map_callback".to_string(),
         Instruction::AsyncMap => "async_map_callback".to_string(),
         Instruction::Return => "return".to_string(),
@@ -1257,6 +1259,7 @@ mod continuation_wire_cases;
 mod declared_function_cases;
 mod exception_cases;
 mod function_cases;
+mod receiver_cases;
 use exception_cases::*;
 mod exception_control_flow_cases;
 mod exception_review_cases;

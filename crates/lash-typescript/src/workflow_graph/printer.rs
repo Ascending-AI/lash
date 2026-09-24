@@ -30,9 +30,10 @@
 
 use lashlang::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessLiteralExpr,
-    Program, ResourceRefExpr, StructuralRole, TypeExpr, UnaryOp,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, MethodKey, ProcessDecl,
+    ProcessLiteralExpr, Program, ResourceRefExpr, StructuralRole, TypeExpr, UnaryOp,
 };
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
@@ -87,7 +88,7 @@ pub(super) fn program_print_count() -> usize {
 ///
 /// This is the textual form carried by editable workflow-graph node fields.
 pub fn typescript_expression_source(expression: &Expr) -> Printed {
-    Printer::PLAIN.statement_expression(expression)
+    Printer::plain().statement_expression(expression)
 }
 
 /// Print one statement as canonical TypeScript.
@@ -97,7 +98,7 @@ pub fn typescript_expression_source(expression: &Expr) -> Printed {
 /// opaque node, which owns a whole statement rather than one expression.
 pub fn typescript_statement_source(expression: &Expr, bound: &[String]) -> Printed {
     let mut bound = bound.to_vec();
-    Ok(Printer::PLAIN
+    Ok(Printer::plain()
         .statement(expression, 0, &mut bound, &BTreeSet::new())?
         .trim_end()
         .to_string())
@@ -105,7 +106,7 @@ pub fn typescript_statement_source(expression: &Expr, bound: &[String]) -> Print
 
 /// Print one assignment target as canonical TypeScript.
 pub fn typescript_assign_target_source(target: &AssignTarget) -> Printed {
-    Printer::PLAIN.assign_target(target)
+    Printer::plain().assign_target(target)
 }
 
 /// The printer, with the program's lifted process declarations in view: an
@@ -113,12 +114,19 @@ pub fn typescript_assign_target_source(target: &AssignTarget) -> Printed {
 /// reference prints back as the literal it was lifted from.
 struct Printer<'p> {
     lifted: BTreeMap<&'p str, &'p ProcessDecl>,
+    /// The receiver slots of the functions printed so far. A read of one is
+    /// the source's `this`: the function that owns it prints first, and an
+    /// arrow inside it reads the same slot as a capture.
+    receivers: RefCell<BTreeSet<String>>,
 }
 
 impl Printer<'static> {
-    const PLAIN: Self = Self {
-        lifted: BTreeMap::new(),
-    };
+    fn plain() -> Self {
+        Self {
+            lifted: BTreeMap::new(),
+            receivers: RefCell::new(BTreeSet::new()),
+        }
+    }
 }
 
 impl<'p> Printer<'p> {
@@ -134,6 +142,7 @@ impl<'p> Printer<'p> {
                     _ => None,
                 })
                 .collect(),
+            receivers: RefCell::new(BTreeSet::new()),
         }
     }
 
@@ -617,6 +626,9 @@ impl<'p> Printer<'p> {
             Expr::Bool(value) => Ok(value.to_string()),
             Expr::Number(value) => number_literal(*value),
             Expr::String(value) => Ok(string_literal(value.as_str())),
+            Expr::Variable(name) if self.receivers.borrow().contains(name.as_str()) => {
+                Ok("this".to_string())
+            }
             Expr::Variable(name) => self.identifier("variable", name.as_str()),
             Expr::List(items) => {
                 let items = items
@@ -728,6 +740,32 @@ impl<'p> Printer<'p> {
                     args.join(", ")
                 ))
             }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.expression(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let receiver = self.member_target(receiver)?;
+                Ok(match method {
+                    MethodKey::Field(field) => format!(
+                        "{receiver}.{}({})",
+                        self.identifier("method", field.as_str())?,
+                        args.join(", ")
+                    ),
+                    MethodKey::Index(key) => {
+                        format!("{receiver}[{}]({})", self.expression(key)?, args.join(", "))
+                    }
+                })
+            }
+            // Only generated code passes an explicit receiver (a callback's
+            // `thisArg`); the dialect has no `Function.prototype.call`.
+            Expr::ThisCall { .. } => Err(TypeScriptSourceError::Unrepresentable {
+                kind: "a call with an explicit receiver",
+            }),
             Expr::Function(function) => self.arrow(function),
             // An inline process body prints back as the authored async arrow
             // in its argument position, which re-parses to the same literal.
@@ -965,6 +1003,27 @@ impl<'p> Printer<'p> {
         if let Some(name) = &function.name {
             return self.named_function(name.as_str(), function);
         }
+        // A function that reads its receiver is a `function` form: an arrow's
+        // `this` is its enclosing function's.
+        if let Some(receiver) = &function.receiver {
+            self.receivers.borrow_mut().insert(receiver.to_string());
+            let params = function
+                .params
+                .iter()
+                .map(|param| self.identifier("function parameter", param.as_str()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut bound = function.params.iter().map(ToString::to_string).collect();
+            return Ok(format!(
+                "{}function ({}) {}",
+                if awaits_in_own_body(&function.body) {
+                    "async "
+                } else {
+                    ""
+                },
+                params.join(", "),
+                self.rooted_block(&function.body, 0, &mut bound)?
+            ));
+        }
         let params = function
             .params
             .iter()
@@ -995,6 +1054,9 @@ impl<'p> Printer<'p> {
     /// bound inside it, so an arrow (which has none) would lower to a
     /// different function.
     fn named_function(&self, name: &str, function: &FunctionExpr) -> Printed {
+        if let Some(receiver) = &function.receiver {
+            self.receivers.borrow_mut().insert(receiver.to_string());
+        }
         let params = function
             .params
             .iter()
@@ -1029,6 +1091,7 @@ impl<'p> Printer<'p> {
             | Expr::BuiltinCall { .. }
             | Expr::FunctionCall { .. }
             | Expr::Call { .. }
+            | Expr::MethodCall { .. }
             | Expr::Field { .. }
             | Expr::Index { .. } => self.expression(expression),
             _ => Ok(format!("({})", self.expression(expression)?)),
@@ -1314,7 +1377,7 @@ fn attribute_assignment(
     let Some(parts) = lashlang::AttributeAssignParts::of(expr) else {
         return Ok(None);
     };
-    let printer = Printer::PLAIN;
+    let printer = Printer::plain();
     let object = printer.member_target(parts.object)?;
     let target = match parts.step {
         lashlang::AttributeStep::Field(field) => {

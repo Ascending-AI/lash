@@ -310,6 +310,13 @@ const fn str_eq(left: &str, right: &str) -> bool {
     true
 }
 
+/// Whether `method` is an instance method of the advertised surface.
+pub(crate) fn is_instance_method(method: &str) -> bool {
+    INSTANCE_STDLIB_SIGNATURES
+        .iter()
+        .any(|signature| signature.method == method)
+}
+
 /// The declared arity of an instance method that takes a fixed number of
 /// arguments — `None` for variadic rows and for names outside the surface.
 pub(crate) const fn instance_method_arity(method: &str) -> Option<usize> {

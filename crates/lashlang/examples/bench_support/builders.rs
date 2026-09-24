@@ -406,6 +406,7 @@ pub fn closure(name: Option<&str>, params: &[&str], captures: &[&str], body: Exp
     Expr::Function(Box::new(FunctionExpr {
         name: name.map(Into::into),
         js_name: None,
+        receiver: None,
         params: params.iter().map(|name| AstString::from(*name)).collect(),
         captures: captures.iter().map(|name| AstString::from(*name)).collect(),
         body: Box::new(body),

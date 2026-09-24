@@ -20,9 +20,14 @@ use super::*;
 pub(super) const CONSOLE_OBSERVATION_TEXT: &str = "__consoleObservationText";
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    pub(super) fn execute_dynamic_call(&mut self) -> Result<(), RuntimeError> {
+    pub(super) fn execute_dynamic_call(&mut self, with_receiver: bool) -> Result<(), RuntimeError> {
         let arguments = self.pop_stack()?;
         let function = self.pop_stack()?;
+        let receiver = if with_receiver {
+            self.pop_stack()?
+        } else {
+            Value::Undefined
+        };
         let arguments = match arguments {
             Value::Ref(id) => match self.heap.get(id)? {
                 HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
@@ -41,7 +46,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 });
             }
         };
-        self.begin_direct_function_call(function, arguments)
+        self.begin_function_call(
+            function,
+            receiver,
+            CallArguments::Owned(arguments),
+            ReturnTarget::Direct,
+        )
     }
 
     pub(super) fn execute_async_map(&mut self) -> Result<(), RuntimeError> {

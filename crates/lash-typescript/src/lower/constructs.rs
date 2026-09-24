@@ -278,18 +278,18 @@ impl Lowerer {
         name
     }
 
-    fn temp_assignment(name: &str, value: LashExpr) -> LashExpr {
+    pub(super) fn temp_assignment(name: &str, value: LashExpr) -> LashExpr {
         LashExpr::Assign {
             target: AssignTarget::variable(name.into()),
             expr: Box::new(value),
         }
     }
 
-    fn variable(name: &str) -> LashExpr {
+    pub(super) fn variable(name: &str) -> LashExpr {
         LashExpr::Variable(name.into())
     }
 
-    fn nullish(value: LashExpr) -> LashExpr {
+    pub(super) fn nullish(value: LashExpr) -> LashExpr {
         LashExpr::JavaScriptLogical {
             left: Box::new(LashExpr::JavaScriptBinary {
                 left: Box::new(value.clone()),
@@ -329,6 +329,7 @@ impl Lowerer {
         LashExpr::Function(Box::new(FunctionExpr {
             name: None,
             js_name: Some(name.into()),
+            receiver: None,
             params: vec![value.into()],
             captures: Vec::new(),
             body: Box::new(body),
@@ -1030,98 +1031,6 @@ impl Lowerer {
             name: "__typescript_heap_delete_member".into(),
             args: vec![self.lower_expr(object)?, key],
         })
-    }
-
-    pub(super) fn lower_optional_chain(
-        &mut self,
-        base: &Expr,
-        operations: &[OptionalOperation],
-    ) -> Result<LashExpr, Diagnostic> {
-        let current = self.temporary("optional_chain");
-        let base = self.lower_expr(base)?;
-        let tail = self.lower_optional_operations(Self::variable(&current), operations)?;
-        Ok(LashExpr::Block(vec![
-            Self::temp_assignment(&current, base),
-            tail,
-        ]))
-    }
-
-    fn lower_optional_operations(
-        &mut self,
-        current: LashExpr,
-        operations: &[OptionalOperation],
-    ) -> Result<LashExpr, Diagnostic> {
-        let Some((operation, tail)) = operations.split_first() else {
-            return Ok(current);
-        };
-        let optional = match operation {
-            OptionalOperation::Member { optional, .. }
-            | OptionalOperation::Call { optional, .. } => *optional,
-        };
-        // `value?.method(args)` and `value?.a.method(args)` call a method of
-        // the chain's current value: lowered as the ordinary
-        // `receiver.method(args)` on that value, so a builtin method
-        // dispatches as it does outside a chain rather than being read as a
-        // field (which a string or array does not have) and called.
-        if let (
-            OptionalOperation::Member {
-                property: MemberProperty::Field(method),
-                ..
-            },
-            Some((
-                OptionalOperation::Call {
-                    args,
-                    optional: false,
-                },
-                rest,
-            )),
-        ) = (operation, tail.split_first())
-        {
-            let apply = self.lower_chain_method_call(&current, method, args)?;
-            let next = self.temporary("optional_value");
-            let continuation = LashExpr::Block(vec![
-                Self::temp_assignment(&next, apply),
-                self.lower_optional_operations(Self::variable(&next), rest)?,
-            ]);
-            return Ok(if optional {
-                LashExpr::If {
-                    condition: Box::new(Self::nullish(current)),
-                    then_block: Box::new(LashExpr::Undefined),
-                    else_block: Box::new(continuation),
-                }
-            } else {
-                continuation
-            });
-        }
-        let apply = match operation {
-            OptionalOperation::Member { property, .. } => match property {
-                MemberProperty::Field(field) => LashExpr::Field {
-                    target: Box::new(current.clone()),
-                    field: field.as_str().into(),
-                },
-                MemberProperty::Index(index) => LashExpr::Index {
-                    target: Box::new(current.clone()),
-                    index: Box::new(self.lower_expr(index)?),
-                },
-            },
-            OptionalOperation::Call { args, .. } => {
-                self.lower_dynamic_call_value(current.clone(), args)?
-            }
-        };
-        let next = self.temporary("optional_value");
-        let continuation = LashExpr::Block(vec![
-            Self::temp_assignment(&next, apply),
-            self.lower_optional_operations(Self::variable(&next), tail)?,
-        ]);
-        if optional {
-            Ok(LashExpr::If {
-                condition: Box::new(Self::nullish(current)),
-                then_block: Box::new(LashExpr::Undefined),
-                else_block: Box::new(continuation),
-            })
-        } else {
-            Ok(continuation)
-        }
     }
 
     pub(super) fn lower_dynamic_call_value(

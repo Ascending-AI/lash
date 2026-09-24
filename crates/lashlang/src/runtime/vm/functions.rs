@@ -55,6 +55,24 @@ pub(super) struct CallbackDriver {
     pub(super) live_url_search_params: bool,
 }
 
+/// A plain object's answer to a member call on a built-in method name.
+pub(super) enum PlainObjectMethod {
+    /// Its own closure.
+    Own(Value),
+    /// An own property that is not a function, or no member at all.
+    NotCallable,
+}
+
+/// The methods `Object.prototype` gives every plain object.
+const OBJECT_PROTOTYPE_METHODS: &[&str] = &[
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "toString",
+    "valueOf",
+];
+
 #[derive(Clone, Copy)]
 pub(super) enum CallbackCompletion {
     Collect,
@@ -219,12 +237,67 @@ impl<H: ExecutionHost> Vm<'_, H> {
         clear_pending_calls(&mut self.frames, receiver);
     }
 
-    pub(super) fn begin_direct_function_call(
+    /// How a member call `receiver.name(..)` on a built-in method name
+    /// resolves when the receiver is a plain object (FIG-3700).
+    ///
+    /// A plain object has no array or string methods: its own property is the
+    /// method, or, for the methods `Object.prototype` defines, the built-in
+    /// answers when it has none. `None` means the receiver is not a plain object
+    /// or the built-in answers.
+    pub(super) fn plain_object_method(
+        &self,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Option<PlainObjectMethod>, RuntimeError> {
+        let record = match receiver {
+            Value::Record(record) => record.as_ref(),
+            Value::Ref(id) => match self.heap.get(*id)? {
+                HeapObject::Record(record) => record.as_ref(),
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        Ok(match record.get(name) {
+            Some(member @ Value::Ref(id))
+                if matches!(self.heap.get(*id)?, HeapObject::Closure { .. }) =>
+            {
+                Some(PlainObjectMethod::Own(member.clone()))
+            }
+            Some(_) => Some(PlainObjectMethod::NotCallable),
+            None if OBJECT_PROTOTYPE_METHODS.contains(&name) => None,
+            None => Some(PlainObjectMethod::NotCallable),
+        })
+    }
+
+    /// Calls what [`Self::plain_object_method`] resolved, as a member call
+    /// with `receiver` as `this`; a member that is not a function throws the
+    /// `TypeError` ECMA-262's Call does.
+    pub(super) fn call_plain_object_method(
         &mut self,
-        closure: Value,
-        args: Vec<Value>,
+        method: PlainObjectMethod,
+        name: &str,
+        receiver: Value,
+        arguments: Vec<Value>,
     ) -> Result<(), RuntimeError> {
-        self.begin_function_call(closure, CallArguments::Owned(args), ReturnTarget::Direct)
+        match method {
+            PlainObjectMethod::Own(function) => self.begin_function_call(
+                function,
+                receiver,
+                CallArguments::Owned(arguments),
+                ReturnTarget::Direct,
+            ),
+            PlainObjectMethod::NotCallable => Err(
+                match self.heap.allocate_error(
+                    crate::runtime::heap::ErrorKind::TypeError,
+                    Some(format!("{name} is not a function")),
+                    None,
+                    None,
+                ) {
+                    Ok(value) => RuntimeError::UncaughtException { value },
+                    Err(error) => error,
+                },
+            ),
+        }
     }
 
     /// Keeps a returning frame's slot state for the next call. Its contents
@@ -253,9 +326,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
         slots
     }
 
+    /// The one entry point every guest call takes — a call instruction, a
+    /// builtin's callback driver, a member call, a coercion hook — so each
+    /// is held to the same frame-depth limit and instruction accounting.
+    ///
+    /// `receiver` is the call's receiver (`undefined` for a plain call). It
+    /// lands in the callee's receiver slot when the callee declares one, and
+    /// is dropped otherwise: an arrow reads its enclosing function's slot as a
+    /// capture, so no frame carries a receiver it never reads.
     pub(super) fn begin_function_call(
         &mut self,
         closure: Value,
+        receiver: Value,
         mut args: CallArguments<'_>,
         return_target: ReturnTarget,
     ) -> Result<(), RuntimeError> {
@@ -333,6 +415,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut slots = self.take_slot_state(function.slot_names.len());
         if let Some(slot) = function.self_slot {
             slots.values[slot] = Some(Value::Ref(id));
+        }
+        if let Some(slot) = function.receiver_slot {
+            slots.values[slot] = Some(receiver);
         }
         match args {
             CallArguments::Owned(values) => {
@@ -416,6 +501,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     let arguments = callback_arguments(call)?;
                     self.begin_function_call(
                         function,
+                        Value::Undefined,
                         CallArguments::Borrowed(&arguments),
                         ReturnTarget::Callback(callback),
                     )?;
@@ -465,6 +551,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         self.begin_function_call(
             function,
+            Value::Undefined,
             CallArguments::Borrowed(&first),
             ReturnTarget::Callback(callback),
         )
@@ -503,6 +590,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         self.begin_function_call(
             function,
+            Value::Undefined,
             CallArguments::Owned(first),
             ReturnTarget::Callback(callback),
         )

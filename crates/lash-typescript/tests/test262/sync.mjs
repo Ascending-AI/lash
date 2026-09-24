@@ -167,6 +167,7 @@ const typescriptNames = [
   "tagged-templates",
   "temporal-dead-zone",
   "this",
+  "function-receivers",
   "unresolvable-references",
   "with",
   "source-size",
