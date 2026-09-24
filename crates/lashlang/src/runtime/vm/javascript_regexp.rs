@@ -384,7 +384,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         match self
             .heap
-            .allocate_error(ErrorKind::SyntaxError, message, None, None)
+            .allocate_error(ErrorKind::SyntaxError, Some(message), None, None)
         {
             Ok(value) => RuntimeError::UncaughtException { value },
             Err(error) => error,
@@ -1063,7 +1063,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn regexp_type_error(&mut self, message: &str) -> RuntimeError {
         match self
             .heap
-            .allocate_error(ErrorKind::TypeError, message.to_string(), None, None)
+            .allocate_error(ErrorKind::TypeError, Some(message.to_string()), None, None)
         {
             Ok(value) => RuntimeError::UncaughtException { value },
             Err(error) => error,

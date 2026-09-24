@@ -260,8 +260,8 @@ impl RuntimeErrorCode {
             Self::RestateAwaitEventSessionUpdate => Retryable,
             // engine interaction failed; the engine redrives the invocation.
             Self::RestateEffectController => Redrivable,
-            // a replaced worker's journal disagrees with this run; only this invocation aborts, and a fresh drive succeeds.
-            Self::WorkerReplacementAbort => Redrivable,
+            // the redrive diverged from the engine's journal; only the build that wrote it serves it.
+            Self::EffectReplayDivergence => Parked,
             // replay met a retired key format; a redrive meets it again.
             Self::ToolIntentReplayKeyFormatCutover => Terminal,
             // the re-executed program no longer issues its recorded commands; only the build that wrote the journal serves it.

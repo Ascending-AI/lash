@@ -122,9 +122,23 @@ impl ErrorKind {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ErrorObject {
     pub(crate) kind: ErrorKind,
-    pub(crate) message: String,
+    /// The own `message` data property. `Some` when the constructor received
+    /// a non-`undefined` argument (ToString'ed at install, per ECMA-262) or a
+    /// write installed one; `None` when the argument was absent or `undefined`,
+    /// or a `delete` removed the property. A read of an absent `message`
+    /// answers `""`, the value `Error.prototype.message` supplies in Node.
+    ///
+    /// The slot is text-only because both durable wires carry `message` as a
+    /// bare string: a write of a non-string refuses rather than persisting a
+    /// shape the wire cannot hold.
+    pub(crate) message: Option<String>,
+    /// The own `cause` data property: `Some` exactly when the constructor's
+    /// `options` argument carried a `cause` property (InstallErrorCause) or a
+    /// write installed one — `Some(Value::Undefined)` for `{cause: undefined}`.
     pub(crate) cause: Option<Value>,
-    /// Present only for AggregateError and always a JavaScript List value.
+    /// The own `errors` data property. `Some` only for AggregateError — the
+    /// constructor installs it and it is always a JavaScript List value; a
+    /// `delete` can remove it, so `None` on an AggregateError means deleted.
     pub(crate) errors: Option<Value>,
 }
 
@@ -333,7 +347,7 @@ impl Heap {
     pub(crate) fn allocate_error(
         &mut self,
         kind: ErrorKind,
-        message: String,
+        message: Option<String>,
         cause: Option<Value>,
         errors: Option<Value>,
     ) -> Result<Value, RuntimeError> {
@@ -959,10 +973,13 @@ impl Heap {
             Some(HeapObject::Set(_)) => objects.string_or_refuse("[object Set]", "a Set", depth)?,
             Some(HeapObject::RegExp(regexp)) => Value::String(regexp_string(regexp).into()),
             Some(HeapObject::Error(error)) => Value::String(
-                if error.message.is_empty() {
-                    error.kind.name().to_string()
-                } else {
-                    format!("{}: {}", error.kind.name(), error.message)
+                match error
+                    .message
+                    .as_deref()
+                    .filter(|message| !message.is_empty())
+                {
+                    None => error.kind.name().to_string(),
+                    Some(message) => format!("{}: {}", error.kind.name(), message),
                 }
                 .into(),
             ),
@@ -1098,7 +1115,7 @@ pub(super) fn error_boundary_record(
     output.insert("name".to_string(), Value::String(error.kind.name().into()));
     output.insert(
         "message".to_string(),
-        Value::String(error.message.as_str().into()),
+        Value::String(error.message.clone().unwrap_or_default().into()),
     );
     if let Some(cause) = &error.cause {
         output.insert("cause".to_string(), export_child(cause)?);

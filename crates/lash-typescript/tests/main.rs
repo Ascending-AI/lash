@@ -61,6 +61,8 @@ mod rejections;
 mod scoping_regressions;
 #[path = "session_globals.rs"]
 mod session_globals;
+#[path = "spread_calls.rs"]
+mod spread_calls;
 #[path = "structural_contract.rs"]
 mod structural_contract;
 #[path = "trigger_inputs.rs"]
@@ -85,5 +87,7 @@ mod execution_site_correlation;
 
 #[path = "workflow_graph.rs"]
 mod workflow_graph;
+#[path = "workflow_graph_round_trip.rs"]
+mod workflow_graph_round_trip;
 #[path = "workflow_graph_schema.rs"]
 mod workflow_graph_schema;

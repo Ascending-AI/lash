@@ -142,6 +142,13 @@ REGISTRATION_BASELINES = {
     "crates/lash-core-execution/src/runtime/effect/tool_child.rs:TOOL_CHILD_REQUEST_VERSION": (
         "sha256:296da08a0c7d581e875b1494223ff65c68e01dc40d73614c0f1aa8992390f0ba"
     ),
+    # FIG-3672 (P1): the Restate effect journal -- every recorded effect's
+    # `lash:{replay_key}` ctx.run entry -- had no version, so there was nowhere
+    # to refuse an old history. A new surface, not a rename: the constant
+    # arrives with the stamp and the controller's typed refusal (ADR 0105 §12).
+    "crates/lash-restate/src/controller/effect_journal.rs:EFFECT_JOURNAL_VERSION": (
+        "sha256:8b4c2577687f74745c963232314f93ea521212275a72e2a89a7b46e6ffc5c1ec"
+    ),
     # FIG-3588: the Restate process handler's leading journaled commands (the
     # segment admission verdict and start steps) are a new versioned surface,
     # registered once with the lead's approval (2026-09-24).

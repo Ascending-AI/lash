@@ -1112,8 +1112,11 @@ def collect_gate_paths(repo: Path, base: str, head: str, worktree: bool) -> list
 # Implementations whose direct proof is a named self-test rather than a
 # test file of their own name.
 SCRIPT_PROOFS = {
+    "scripts/check-substrate-boundary.sh": "scripts/test_check_substrate_boundary.py",
     "scripts/dev-test.py": "scripts/test_dev_test.py",
     "scripts/ci_plan.py": "scripts/test_ci_plan.py",
+    "scripts/drive-determinism-allowlist.count": "scripts/test_check_substrate_boundary.py",
+    "scripts/drive-determinism-allowlist.txt": "scripts/test_check_substrate_boundary.py",
     "tools/bazel/test_batch_runner.sh": "scripts/test_test_batch_runner.py",
     "tools/bazel/junit_xml.py": "scripts/test_test_xml.py",
     "tools/bazel/test_xml_runner.sh": "scripts/test_test_xml.py",

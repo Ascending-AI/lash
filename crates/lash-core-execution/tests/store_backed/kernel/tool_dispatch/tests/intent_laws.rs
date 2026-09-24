@@ -552,7 +552,7 @@ async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None).await.with_process_abort(
         crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::WorkerReplacementAbort,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
             "reconstructed process-command envelope diverged",
         ),
     ));
@@ -583,7 +583,7 @@ async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect
     let error = execution
         .take_nested_effect_error()
         .expect("the fixed scalar host reply must latch the enclosing controller abort");
-    assert_eq!(error.code, crate::RuntimeErrorCode::WorkerReplacementAbort);
+    assert_eq!(error.code, crate::RuntimeErrorCode::EffectReplayDivergence);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 

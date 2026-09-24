@@ -4,6 +4,7 @@ use super::*;
 fn canonical_decode_rejects_first_over_limit_value_depth_for_every_nested_shape() {
     fn decode(value: CanonicalValue) -> Result<Snapshot, SnapshotDecodeError> {
         let wire = CanonicalSnapshot {
+            expired_functions: Vec::new(),
             version: LASHLANG_SNAPSHOT_VERSION,
             globals: Some(vec![CanonicalBinding {
                 name: "root".to_string(),
@@ -87,6 +88,7 @@ fn canonical_decode_rejects_first_over_limit_value_depth_for_every_nested_shape(
 fn canonical_decode_refuses_a_record_key_naming_the_prototype_chain() {
     for name in ["__proto__", "__defineGetter__", "__lookupSetter__"] {
         let wire = CanonicalSnapshot {
+            expired_functions: Vec::new(),
             version: LASHLANG_SNAPSHOT_VERSION,
             globals: Some(vec![CanonicalBinding {
                 name: "root".to_string(),
@@ -110,6 +112,7 @@ fn canonical_decode_refuses_a_record_key_naming_the_prototype_chain() {
     }
 
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "root".to_string(),

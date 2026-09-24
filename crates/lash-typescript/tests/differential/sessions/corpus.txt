@@ -503,7 +503,7 @@ cell deviation global-object-aliases-lexical-bindings
 let level = 1;
 function readLevel() { return globalThis.level; }
 console.log(readLevel());
-lash {"outcome":"normal","prints":["1"],"probes":{"level":"number 1","readLevel":"unbound"}}
+lash {"outcome":"normal","prints":["1"],"probes":{"level":"number 1","readLevel":"dropped"}}
 end
 
 session global-this-read-past-a-parameter
@@ -664,13 +664,12 @@ end
 session for-of-shadowed-iterable
 about a for...of body may declare a binding of its iterable's name (FIG-3625)
 probe items item
-cell defect for-of-shadowed-iterable
+cell
 const items = [1, 2];
 for (const item of items) {
   const items = [item];
   console.log(items.length);
 }
-lash {"outcome":"rejected","diagnostic":"TS_FOR_OF_UNSUPPORTED","prints":[],"probes":{"item":"unbound","items":"unbound"}}
 end
 
 session spread-built-object-fields
@@ -711,20 +710,21 @@ end
 session builtin-call-spread
 about a spread argument to a builtin function passes the array's items (FIG-3627)
 probe items
-cell defect builtin-call-spread
+cell
 const items = [3, 1];
-console.log(Math.max(...items));
-lash {"outcome":"rejected","diagnostic":"TS_METHOD_UNSUPPORTED","prints":[],"probes":{"items":"unbound"}}
+console.log(Math.max(...items), Math.min(...items, 0), String.fromCharCode(...[104, 105]));
 end
 
 session builtin-method-call-spread
-about a spread argument to a builtin method passes the array's items (FIG-3627)
-probe items
-cell defect builtin-call-spread
+about a spread argument to a builtin method passes the array's items, among fixed ones and nested (FIG-3627)
+probe items rows count row
+cell
 const items = [3, 1];
 items.push(...[4, 5]);
-console.log(items);
-lash {"outcome":"throw","error":"RuntimeError","prints":[],"probes":{"items":"object [3,1]"}}
+const rows = [[9, 2], [6]];
+const count = items.push(0, ...rows.map((row) => Math.max(...row)));
+console.log(items, count);
+console.log(...items);
 end
 
 session collection-methods-through-aliases
@@ -759,7 +759,7 @@ end
 session for-of-aliased-iterable
 about a for...of loop visits what its body appends through an alias made before the loop (FIG-3625)
 probe items same item
-cell defect for-of-aliased-iterable
+cell
 const items = [1];
 const same = items;
 for (const item of items) {
@@ -768,7 +768,49 @@ for (const item of items) {
   }
 }
 console.log(same);
-lash {"outcome":"normal","prints":["[1,2]"],"probes":{"item":"unbound","items":"object [1,2]","same":"object [1,2]"}}
+end
+
+session for-of-appends-during-the-loop
+about a for...of loop visits what its body appends, and stops short of what it removes (FIG-3625)
+probe queue seen item
+cell
+const queue = [1];
+const seen = [];
+for (const item of queue) {
+  seen.push(item);
+  if (item < 4) {
+    queue.push(item * 2);
+  }
+}
+console.log(seen, queue);
+cell
+for (const item of queue) {
+  queue.pop();
+  seen.push(item);
+}
+console.log(seen, queue);
+end
+
+session for-of-map-and-set-are-live
+about a for...of over a Map or a Set visits entries added during the loop and skips ones deleted before their turn (FIG-3625)
+probe counts tags key value tag
+cell
+const counts = new Map([['a', 1], ['b', 2], ['c', 3]]);
+for (const [key, value] of counts) {
+  if (key === 'a') {
+    counts.delete('b');
+    counts.set('d', 4);
+    counts.set('c', 30);
+  }
+  console.log(key, value);
+}
+const tags = new Set(['x']);
+for (const tag of tags) {
+  if (tags.size < 3) {
+    tags.add(tag + 'y');
+  }
+  console.log(tag);
+}
 end
 
 session sibling-block-binding-types
@@ -807,4 +849,18 @@ cell
 alias.n = 2;
 holder.n = holder.n + 10;
 console.log(holder.n, alias.n, holder === alias, holder.doc.title);
+end
+
+session closure-refused-in-a-later-cell
+about a later cell's use of a function an earlier cell bound is refused by name, live and after a reload (FIG-3608)
+probe helper twice box n
+deviation closure-boundary
+cell
+const helper = (n) => n + 1;
+function twice(n) { return n * 2; }
+const box = { run: helper, n: 2 };
+console.log(helper(1), twice(2), box.n);
+cell deviation closure-boundary
+console.log(typeof helper, twice(3), box.n);
+lash {"outcome":"rejected","diagnostic":"TS_FUNCTION_NOT_PERSISTED","prints":[],"probes":{"box":"dropped","helper":"dropped","n":"unbound","twice":"dropped"}}
 end

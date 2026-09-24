@@ -222,7 +222,10 @@ async fn ensure_group_is_new(ingress: &RestateIngressClient, run_id: &str) -> Ap
             "EffectGroupIndex",
             &group_key(run_id),
             "read_rank",
-            &EffectGroupReadRankRequest { rank: 1 },
+            &EffectGroupReadRankRequest {
+                rank: 1,
+                for_caller: false,
+            },
         )
         .await
         .map_err(|error| AppError::internal(format!("probe effect group rank one: {error}")))?;
@@ -246,7 +249,10 @@ async fn read_effect_group_report(
                 "EffectGroupIndex",
                 &group_key,
                 "read_rank",
-                &EffectGroupReadRankRequest { rank },
+                &EffectGroupReadRankRequest {
+                    rank,
+                    for_caller: false,
+                },
             )
             .await
             .map_err(|error| {

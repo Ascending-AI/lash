@@ -1216,20 +1216,24 @@ pub(crate) async fn terminalize_turn_execution(
                 );
                 Err(HandlerError::from(err))
             }
-            AppErrorVerdict::ReplacementAbort => {
-                let message = err.message.clone();
-                settle_workbench_turn(state, session_id, turn_id)
-                    .await
-                    .map_err(settlement_handler_error)?;
-                record_turn_failure(
-                    state,
+            // The turn parked: its park is written and its claims are held.
+            // Settling would release them and recording a failure would end
+            // a turn that a restored deployment completes, so neither
+            // happens. The attempt fails retryably and the invocation keeps
+            // its journal; the handler's retry policy pauses it after its
+            // last attempt.
+            AppErrorVerdict::Parked => {
+                state.trace_for_session(
                     session_id,
-                    turn_id,
-                    trace_name,
-                    &message,
-                    crate::REPLAY_DIVERGENCE_TURN_FAILURE_MESSAGE,
+                    "turn.restate.parked",
+                    json!({
+                        "operation": trace_name,
+                        "session_id": session_id,
+                        "turn_id": turn_id,
+                        "error": err.message,
+                    }),
                 );
-                Err(terminal_handler_error(err))
+                Err(HandlerError::from(err))
             }
             AppErrorVerdict::Terminal => {
                 let message = err.message.clone();

@@ -528,7 +528,7 @@ def cargo_test_policy(
     //...`. It is reserved for labels the cacheable partition genuinely cannot
     execute as proof: a live service, a nested Cargo invocation, a Cargo-relative
     asset tree, or a toolchain the Bazel job does not install. Service-gated
-    labels are still *built* by Bazel; the PostgreSQL and MinIO jobs execute
+    labels are still *built* by Bazel; the PostgreSQL and S3 jobs execute
     them with `--nocache_test_results` so a cached result can never stand in for
     a run against a real service, and so an unconfigured service is never proof.
     """

@@ -17,6 +17,12 @@ async helpers, blocks, `if`, `while`, `do...while`, the canonical
 `break`, `continue`, `try`/`catch`/`finally`, `throw`, `return`, destructuring in
 every binding and assignment position, defaults/rest, optional chains, array/call/object
 spread, compound/logical assignment, update operators, arrays, records, and calls.
+A spread argument passes the array's items as the call's arguments, to a
+function the program defines and to a builtin alike (`Math.max(...xs)`,
+`items.push(...more)`, `console.log(...parts)`). A builtin whose lowering
+depends on how many arguments it takes (a callback method such as `map`, a
+coercion, an agent primitive) refuses a spread argument by name
+(`TS_METHOD_UNSUPPORTED`).
 Arithmetic includes exponentiation and ECMA `ToInt32`/`ToUint32` bitwise and shift
 operators. `in` is an own-property query because dialect objects have no prototypes;
 `instanceof` accepts the Error family, Map, Set, Date, RegExp, URL,
@@ -185,11 +191,14 @@ Mutually recursive function declarations reject with
 and call itself by that name, and self-recursive declarations are unaffected.
 
 The canonical classic `for` lowering rejects a `continue` that crosses a
-`finally`, because the current loop epilogue would otherwise run before the
-`finally`. `for...of` snapshots arrays and strings before iteration; until a
-resumable iterator protocol exists, a loop body that mutates, aliases, or
-passes the iterable itself rejects with `TS_FOR_OF_UNSUPPORTED`. Calls that do
-not touch the iterable are unaffected.
+`finally` with `TS_FOR_UNSUPPORTED`, because the current loop epilogue would
+otherwise run before the `finally`. `for...of` follows its iterable live, as
+ECMA-262 does (FIG-3625): an array or a `URLSearchParams` is read at the
+iterator's index on every step, so a body that appends to, removes from or
+rewrites the iterable (through any name, a function, or a pattern default)
+changes what the loop visits next; a `Map` or a `Set` visits entries added
+during the loop and skips ones deleted before their turn. A string iterates its
+code points.
 
 ## Conformance
 
@@ -490,9 +499,12 @@ corpus cites:
   declaration, an arrow, an array or object holding one — does not survive
   its cell ([ADR 0076](../../docs/adr/0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
   a function's index is only meaningful inside the program that compiled it,
-  so a later cell finds the name unbound, where Node still holds the function.
-  A closure used within its own cell, capturing earlier cells' globals, is
-  exact.
+  where Node still holds the function. The session remembers the name, live
+  and across a reload, so a later cell that reads it (by name, with `typeof`,
+  or as `globalThis.name` it does not write) is refused as
+  `TS_FUNCTION_NOT_PERSISTED` rather than degraded to an unknown or undefined
+  name, until something binds the name again. A closure used within its own
+  cell, capturing earlier cells' globals, is exact.
 - `cross-cell-redeclaration`: a cell's top-level declaration may rebind a name
   an earlier cell declared, whatever either declaration's kind. ECMA-262's
   GlobalDeclarationInstantiation throws a `SyntaxError` for `let`/`const` over
@@ -531,21 +543,7 @@ to an ordinary row. The session generator draws none of their shapes until
 then, each exclusion naming its entry here. They are listed so no divergence
 is silent while its fix is owed.
 
-- `for-of-shadowed-iterable` (FIG-3625): the `for...of` iterable check is by
-  name, so a body that declares its own binding of the iterable's name and
-  then uses it is refused as touching the iterable (`TS_FOR_OF_UNSUPPORTED`).
-- `for-of-aliased-iterable` (FIG-3625): the same check misses an alias made
-  before the loop, so a body that appends to its array through the alias is
-  accepted, and the loop, which walks a snapshot, misses what Node visits:
-  `const same = items; for (const item of items) { same.push(item); }` visits
-  the items the loop started with, where Node also visits the appended ones
-  (and, unbounded, never ends).
-- `builtin-call-spread` (FIG-3627): a spread argument to a builtin is not
-  passed as the array's items. A static function (`Math.max(...items)`,
-  `String.fromCharCode(...codes)`) is refused as `TS_METHOD_UNSUPPORTED`,
-  naming the function as if it were missing from the surface, and a method
-  (`items.push(...more)`) faults at run time calling `undefined`. A spread
-  argument to a function the program defines is passed as ECMA specifies.
+None is open: FIG-3625, FIG-3626, FIG-3627 and FIG-3631 fixed the last four.
 
 ## Syntax, iteration, and Node traps
 
@@ -774,10 +772,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 653 rows, of which 580 are distinct
+The Node differential table carries 673 rows, of which 600 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of those 580 unique expressions rather than of all 653 rows. Every count in
+that of those 600 unique expressions rather than of all 673 rows. Every count in
 this paragraph is pinned against the table by
 `committed_row_counts_match_the_register`, and the generator pins each lane's
 own row count, so neither this paragraph nor a lane can drift from the corpus in

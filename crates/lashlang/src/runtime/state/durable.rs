@@ -10,8 +10,10 @@
 //! a `URL`, one object named by two bindings, an object's property order —
 //! because the reload is the heap the live run had (FIG-3605, FIG-3606).
 //!
-//! * The header is the format version and, for a heap-backed state, the heap's
-//!   counters. It changes with every allocation, so it is always written.
+//! * The header is the format version, for a heap-backed state the heap's
+//!   counters, and the names of the globals a cell boundary dropped for
+//!   holding a function. It changes with every allocation, so it is always
+//!   written.
 //! * A fragment is one root's value and the heap objects that root carries
 //!   under the durable partition (`Heap::durable_partition`): each live object
 //!   exactly once, owned by the first root, in name order, whose walk reaches
@@ -83,6 +85,9 @@ struct CanonicalDurableHeader {
     version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     heap: Option<CanonicalHeapCounters>,
+    /// [`State::expired_functions`], strictly sorted; absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    expired_functions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -145,6 +150,7 @@ impl State {
                     live_logical_bytes: partition.live_logical_bytes,
                     size_schedule_version: heap.schedule_version(),
                 }),
+            expired_functions: self.expired_functions.iter().cloned().collect(),
         };
 
         let mut fragments = BTreeMap::new();
@@ -223,6 +229,7 @@ impl State {
                     version: decoded_header.version,
                     globals: Some(roots),
                     heap: None,
+                    expired_functions: decoded_header.expired_functions,
                 }
             }
             Some(counters) => CanonicalSnapshot {
@@ -237,6 +244,7 @@ impl State {
                     roots,
                     objects,
                 }),
+                expired_functions: decoded_header.expired_functions,
             },
         };
         let state = State::from_snapshot(Snapshot::try_from(whole)?);

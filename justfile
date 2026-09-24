@@ -165,36 +165,27 @@ agent-service-restate-e2e:
 agent-workbench-restate-e2e:
   bash "{{repo}}/scripts/agent-workbench-restate-e2e.sh"
 
-# The regression gate for the Restate effect-group choreography. Both suites it
-# runs are `#[ignore]`d because they need an isolated Restate server, so this
-# recipe is the only thing that runs them: `scripts/check_service_gate_pinning.py`
-# pins the `--ignored` opt-in here so a future edit cannot turn the leg into an
-# invocation that selects them and runs none.
+# The regression gate for the Restate effect-group choreography. Its suites are
+# `#[ignore]`d because they need a Restate server, so this recipe is the only
+# thing that runs them: `scripts/ci/restate_suite.py` builds the test binary on
+# the shared pool, runs every ignored law of the suite (it asks libtest for
+# `--ignored` tests only, which `scripts/check_service_gate_pinning.py` pins)
+# beside pinned `restate-server`s, one law per process, and then runs the same
+# laws again with every await suspended and replayed (the replay leg). The
+# suite's filters, redelivery laws and replay divergences are registered in
+# `scripts/restate-suites.toml`.
 effect-group-conformance-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
   source "{{repo}}/scripts/worktree-gate-env.sh"
-  lash_gate_acquire effect-group-conformance-e2e
-  image="${EFFECT_GROUP_RESTATE_IMAGE:-restatedev/restate:1.7.0}"
-  container="${EFFECT_GROUP_RESTATE_CONTAINER:-lash-effect-group-restate-${LASH_GATE_WORKTREE_SLUG}}"
-  admin_port="${EFFECT_GROUP_RESTATE_ADMIN_PORT:-$((LASH_E2E_PORT_BASE + 35))}"
-  ingress_port="${EFFECT_GROUP_RESTATE_INGRESS_PORT:-$((LASH_E2E_PORT_BASE + 36))}"
-  node_port="${EFFECT_GROUP_RESTATE_NODE_PORT:-$((LASH_E2E_PORT_BASE + 37))}"
-  endpoint_bind="${EG_RESTATE_ENDPOINT_BIND:-127.0.0.1:$((LASH_E2E_PORT_BASE + 38))}"
-  endpoint_url="${EG_RESTATE_ENDPOINT_URL:-http://127.0.0.1:$((LASH_E2E_PORT_BASE + 38))}"
-  sdk_endpoint_bind="${EG0_RESTATE_ENDPOINT_BIND:-127.0.0.1:$((LASH_E2E_PORT_BASE + 39))}"
-  sdk_endpoint_url="${EG0_RESTATE_ENDPOINT_URL:-http://127.0.0.1:$((LASH_E2E_PORT_BASE + 39))}"
-  admin_url="${RESTATE_ADMIN_URL:-http://127.0.0.1:$admin_port}"
-  ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$ingress_port}"
+  lash_gate_acquire_locks effect-group-conformance-e2e
 
   # The ignored catalogue invocations are deferred laws (FIG-3472): they emit
   # execution receipts like every other suite, and the census below fails the
-  # recipe when one left none.
+  # recipe when one left none. The test binaries run with the crate dir as
+  # cwd, so a relative artifact dir (which is what CI exports) is anchored at
+  # the repo root.
   receipts_dir="${LASH_EFFECT_GROUP_ARTIFACT_DIR:-target/functional-e2e-artifacts/effect-group-conformance}"
-  # The test binaries run with the crate dir as cwd, so a relative artifact
-  # dir (which is what CI exports) must be anchored at the repo root or the
-  # receipts land under crates/lash-restate/target/... and the census reads
-  # an empty file.
   case "$receipts_dir" in
     /*) ;;
     *) receipts_dir="{{repo}}/$receipts_dir" ;;
@@ -203,68 +194,23 @@ effect-group-conformance-e2e:
   export LASH_LAW_RECEIPTS="$receipts_dir/law-receipts.txt"
   rm -f "$LASH_LAW_RECEIPTS"
 
-  cleanup() {
-    docker rm -f "$container" >/dev/null 2>&1 || true
-    lash_gate_cleanup
-  }
-  trap cleanup EXIT
-
-  bash "{{repo}}/scripts/docker-pull-with-retry.sh" "$image"
-
-  docker run -d --name "$container" --label "$LASH_GATE_LABEL" --network host \
-    -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
-    -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
-    -e RESTATE_BIND_PORT="$node_port" \
-    "$image" >/dev/null
-
-  deadline=$((SECONDS + 60))
-  until (echo >"/dev/tcp/127.0.0.1/$admin_port") >/dev/null 2>&1; do
-    if (( SECONDS >= deadline )); then
-      docker logs "$container" >&2 || true
-      echo "Restate admin port $admin_port did not become ready" >&2
-      exit 1
-    fi
-    sleep 1
-  done
-  until (echo >"/dev/tcp/127.0.0.1/$ingress_port") >/dev/null 2>&1; do
-    if (( SECONDS >= deadline )); then
-      docker logs "$container" >&2 || true
-      echo "Restate ingress port $ingress_port did not become ready" >&2
-      exit 1
-    fi
-    sleep 1
-  done
-
-  # The SDK preconditions run first: they are the cheap witnesses for the
-  # Restate behaviours the choreography is built on, so a broken assumption
-  # fails in thirty seconds instead of four minutes.
-  RESTATE_INGRESS_URL="$ingress_url" \
-  RESTATE_ADMIN_URL="$admin_url" \
-  EG0_RESTATE_ENDPOINT_BIND="$sdk_endpoint_bind" \
-  EG0_RESTATE_ENDPOINT_URL="$sdk_endpoint_url" \
-  cargo test -p lash-internal-restate --locked \
-    live_effect_group_sdk_preconditions -- --ignored --nocapture --test-threads=1
-
-  receipts="${LASH_LAW_RECEIPTS:-$(mktemp -t effect-group-law-receipts.XXXXXX)}"
-  # Parked invocations (scripts/deferred-law-invocations.toml) are ignored
-  # like deferred ones but run nowhere until their ticket lands.
-  mapfile -t parked_skips < <(python3 "{{repo}}/scripts/check_law_execution_receipts.py" --parked-skips lash_restate)
-  RESTATE_INGRESS_URL="$ingress_url" \
-  RESTATE_ADMIN_URL="$admin_url" \
-  EG_RESTATE_ENDPOINT_BIND="$endpoint_bind" \
-  EG_RESTATE_ENDPOINT_URL="$endpoint_url" \
-  LASH_LAW_RECEIPTS="$receipts" \
-  cargo test -p lash-internal-restate --locked \
-    tests::conformance_and_poison:: -- --ignored --nocapture --test-threads=1 "${parked_skips[@]}"
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg live \
+    --artifacts "$receipts_dir"
 
   python3 "{{repo}}/scripts/check_law_execution_receipts.py" \
     --deferred effect-group-conformance-e2e \
-    --receipts "$receipts"
+    --receipts "$LASH_LAW_RECEIPTS"
 
   # The executed-law census for the run: one `law<TAB>label` line per law the
   # generated tests actually reached the end of.
   echo "law execution receipts:"
-  sort "$receipts"
+  sort "$LASH_LAW_RECEIPTS"
+
+  # The replay leg holds back its registered divergences, so its receipts are
+  # a separate file the census above never reads.
+  LASH_LAW_RECEIPTS="$receipts_dir/replay-law-receipts.txt" \
+    python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg replay \
+    --artifacts "$receipts_dir"
 
 agent-workbench-attachment-usage-gate port='3030':
   bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"
@@ -278,7 +224,7 @@ process-operations-e2e:
 version-bump-recreation-e2e:
   bash "{{repo}}/scripts/version-bump-recreation-e2e.sh"
 
-# Fast live proof of the shared Postgres/MinIO/Restate gate isolation contract.
+# Fast live proof of the shared Postgres/S3/Restate gate isolation contract.
 gate-container-smoke:
   bash "{{repo}}/scripts/gate-container-smoke.sh"
 

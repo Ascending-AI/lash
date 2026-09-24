@@ -1220,13 +1220,13 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
             let journal = self.journal.lock_recover();
             let Some(entry) = journal.get(ordinal) else {
                 return Err(lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                    lash_core::RuntimeErrorCode::EffectReplayDivergence,
                     format!("RT0016: journal ended before ordinal {ordinal} (`{identity}`)"),
                 ));
             };
             if entry.identity != identity {
                 return Err(lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                    lash_core::RuntimeErrorCode::EffectReplayDivergence,
                     format!(
                         "RT0016: journal mismatch at ordinal {ordinal}: recorded `{}`, handler issued `{identity}`",
                         entry.identity
@@ -1235,7 +1235,7 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
             }
             let Some(outcome) = entry.outcome.clone() else {
                 return Err(lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                    lash_core::RuntimeErrorCode::EffectReplayDivergence,
                     format!("RT0016: recorded entry `{identity}` never settled"),
                 ));
             };

@@ -116,6 +116,44 @@ impl Heap {
         Ok(())
     }
 
+    /// The own data properties an error object carries — `message`, `cause`,
+    /// and on AggregateError `errors` — are writable in ECMA-262, so a write
+    /// through one of those names lands in the slot itself. `message` holds
+    /// text: the constructor ToString's its argument at install, and a write
+    /// of a non-string refuses because the durable wires carry `message` as a
+    /// bare string. `errors` keeps its constructor invariant, a JavaScript
+    /// list. Every other name keeps the standing refusal — this value model
+    /// has no slot for a guest-named property on an error.
+    fn assign_error_member(
+        &self,
+        error: &mut ErrorObject,
+        key: &str,
+        value: Value,
+    ) -> Result<(), RuntimeError> {
+        let unassignable = || RuntimeError::CannotAssignField {
+            field: key.to_string(),
+            actual: error.kind.name().to_string(),
+        };
+        match key {
+            "message" => {
+                let Value::String(message) = value else {
+                    return Err(unassignable());
+                };
+                error.message = Some(message.to_string());
+            }
+            "cause" => error.cause = Some(value),
+            "errors" if error.kind == ErrorKind::AggregateError => {
+                if !matches!(&value, Value::Ref(id) if matches!(self.get(*id), Ok(HeapObject::List(_))))
+                {
+                    return Err(unassignable());
+                }
+                error.errors = Some(value);
+            }
+            _ => return Err(unassignable()),
+        }
+        Ok(())
+    }
+
     pub(crate) fn delete_javascript_member(
         &mut self,
         receiver: &Value,
@@ -141,6 +179,15 @@ impl Heap {
         let mut new_object = old_object.clone();
         let deleted = match &mut new_object {
             HeapObject::Record(record) => record.remove(key.as_ref()).is_some(),
+            // An error's own data properties are all configurable, so `delete`
+            // removes the slot. Any other name is not an own property, and
+            // deleting a name an object does not own answers `true`.
+            HeapObject::Error(error) => match key.as_ref() {
+                "message" => error.message.take().is_some(),
+                "cause" => error.cause.take().is_some(),
+                "errors" => error.errors.take().is_some(),
+                _ => false,
+            },
             HeapObject::List(values) => {
                 if key.as_ref() == "length" {
                     return Ok(false);
@@ -428,6 +475,15 @@ impl Heap {
             }
             (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Field(field)) => {
                 self.assign_regexp_match_field(result, names[field].text.as_ref(), imported)?;
+            }
+            (HeapObject::Error(error), CompiledAssignPathStep::Field(field)) => {
+                self.assign_error_member(error, names[field].text.as_ref(), imported)?;
+            }
+            (HeapObject::Error(error), CompiledAssignPathStep::Index) => {
+                let key = self
+                    .javascript_assignment_index_key(indexes, index_cursor)?
+                    .ok_or(RuntimeError::MissingAssignmentIndex)?;
+                self.assign_error_member(error, &key, imported)?;
             }
             (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
                 let index = indexes

@@ -6,18 +6,20 @@ cd "$repo"
 # shellcheck source=scripts/worktree-gate-env.sh
 source "$repo/scripts/worktree-gate-env.sh"
 lash_gate_acquire push-gate
+# shellcheck source=scripts/ci/s3-service.sh
+source "$repo/scripts/ci/s3-service.sh"
 
 ci_features="${LASH_CI_FEATURES:-}"
 port_base="${LASH_PUSH_GATE_PORT_BASE:-$LASH_E2E_PORT_BASE}"
 postgres_container=""
-minio_container=""
+s3_container=""
 
 cleanup() {
   if [ -n "$postgres_container" ]; then
     docker rm -f "$postgres_container" >/dev/null 2>&1 || true
   fi
-  if [ -n "$minio_container" ]; then
-    docker rm -f "$minio_container" >/dev/null 2>&1 || true
+  if [ -n "$s3_container" ]; then
+    docker rm -f "$s3_container" >/dev/null 2>&1 || true
   fi
   lash_gate_cleanup
 }
@@ -254,31 +256,19 @@ run_e2e_suite() {
   AGENT_SERVICE_E2E_ENDPOINT_URL="${AGENT_SERVICE_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 23))}" \
     just agent-service-restate-e2e
 
+  # Both suites pick free loopback ports per shard (scripts/ci/restate_suite.py).
   step "Restate e2e: agent-workbench"
-  AGENT_WORKBENCH_RESTATE_ADMIN_PORT="${AGENT_WORKBENCH_RESTATE_ADMIN_PORT:-$((port_base + 30))}" \
-  AGENT_WORKBENCH_RESTATE_INGRESS_PORT="${AGENT_WORKBENCH_RESTATE_INGRESS_PORT:-$((port_base + 31))}" \
-  AGENT_WORKBENCH_RESTATE_NODE_PORT="${AGENT_WORKBENCH_RESTATE_NODE_PORT:-$((port_base + 32))}" \
-  AGENT_WORKBENCH_E2E_ENDPOINT_BIND="${AGENT_WORKBENCH_E2E_ENDPOINT_BIND:-127.0.0.1:$((port_base + 33))}" \
-  AGENT_WORKBENCH_E2E_ENDPOINT_URL="${AGENT_WORKBENCH_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 33))}" \
-    just agent-workbench-restate-e2e
+  just agent-workbench-restate-e2e
 
   step "Restate e2e: effect-group conformance"
-  EFFECT_GROUP_RESTATE_ADMIN_PORT="${EFFECT_GROUP_RESTATE_ADMIN_PORT:-$((port_base + 35))}" \
-  EFFECT_GROUP_RESTATE_INGRESS_PORT="${EFFECT_GROUP_RESTATE_INGRESS_PORT:-$((port_base + 36))}" \
-  EFFECT_GROUP_RESTATE_NODE_PORT="${EFFECT_GROUP_RESTATE_NODE_PORT:-$((port_base + 37))}" \
-  EG_RESTATE_ENDPOINT_BIND="${EG_RESTATE_ENDPOINT_BIND:-127.0.0.1:$((port_base + 38))}" \
-  EG_RESTATE_ENDPOINT_URL="${EG_RESTATE_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 38))}" \
-  EG0_RESTATE_ENDPOINT_BIND="${EG0_RESTATE_ENDPOINT_BIND:-127.0.0.1:$((port_base + 39))}" \
-  EG0_RESTATE_ENDPOINT_URL="${EG0_RESTATE_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 39))}" \
-    just effect-group-conformance-e2e
+  just effect-group-conformance-e2e
 
-  step "Restate/Postgres/MinIO workers e2e"
-  LASH_E2E_MINIO_PORT="${LASH_E2E_MINIO_PORT:-$((port_base + 40))}" \
+  step "Restate/Postgres/S3 workers e2e"
+  LASH_E2E_S3_PORT="${LASH_E2E_S3_PORT:-$((port_base + 40))}" \
     bash scripts/restate-postgres-workers-e2e.sh
 
   step "Process operations e2e"
-  LASH_PROCESS_OPERATIONS_MINIO_PORT="${LASH_PROCESS_OPERATIONS_MINIO_PORT:-$((port_base + 41))}" \
-  LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT="${LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT:-$((port_base + 42))}" \
+  LASH_PROCESS_OPERATIONS_S3_PORT="${LASH_PROCESS_OPERATIONS_S3_PORT:-$((port_base + 41))}" \
   LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:-$((port_base + 43))}" \
   LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT:-$((port_base + 44))}" \
   LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT:-$((port_base + 45))}" \
@@ -374,43 +364,21 @@ run_postgres_conformance() {
   fi
 }
 
-run_minio_conformance() {
-  step "MinIO/S3 conformance"
-  minio_container="lash-minio-push-gate-${LASH_GATE_WORKTREE_SLUG}"
-  local port="${LASH_PUSH_GATE_MINIO_PORT:-$((port_base + 11))}"
-  bash scripts/docker-pull-with-retry.sh quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
-  bash scripts/docker-pull-with-retry.sh quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
-  docker run -d --name "$minio_container" \
+run_s3_conformance() {
+  step "S3 conformance"
+  s3_container="lash-s3-push-gate-${LASH_GATE_WORKTREE_SLUG}"
+  local port="${LASH_PUSH_GATE_S3_PORT:-$((port_base + 11))}"
+  bash scripts/docker-pull-with-retry.sh "$LASH_S3_IMAGE"
+  lash_s3_start "$s3_container" "$port" \
     --label "$LASH_GATE_LABEL" \
-    --network "$LASH_E2E_NETWORK" \
-    -e MINIO_ROOT_USER=minioadmin \
-    -e MINIO_ROOT_PASSWORD=minioadmin \
-    -p "127.0.0.1:${port}:9000" \
-    quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
+    --network "$LASH_E2E_NETWORK"
+  lash_s3_wait "$s3_container" 60
 
-  local endpoint="http://127.0.0.1:${port}"
-  local deadline=$((SECONDS + 60))
-  until docker run --rm --name "lash-minio-probe-${LASH_GATE_WORKTREE_SLUG}-$$" \
-    --label "$LASH_GATE_LABEL" --network host quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z \
-    alias set fig831 "$endpoint" minioadmin minioadmin >/dev/null 2>&1; do
-    if (( SECONDS >= deadline )); then
-      docker logs "$minio_container" >&2 || true
-      echo "MinIO did not become ready on port ${port}" >&2
-      exit 1
-    fi
-    sleep 1
-  done
-  docker run --rm --name "lash-minio-setup-${LASH_GATE_WORKTREE_SLUG}-$$" \
-    --label "$LASH_GATE_LABEL" --network host --entrypoint /bin/sh \
-    quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
-    "mc alias set fig831 '$endpoint' minioadmin minioadmin >/dev/null && mc mb --ignore-existing fig831/lash-attachments >/dev/null"
+  local -a s3_test_env
+  mapfile -t s3_test_env < <(lash_s3_test_env "$port")
+  env "${s3_test_env[@]}" cargo test -p lash-internal-s3-store --locked
 
-  LASH_MINIO_ENDPOINT="$endpoint" \
-    LASH_REQUIRE_MINIO=1 \
-    cargo test -p lash-internal-s3-store --locked
-
-  LASH_MINIO_ENDPOINT="$endpoint" \
-    LASH_REQUIRE_MINIO=1 \
+  env "${s3_test_env[@]}" \
     cargo test -p lash-sim --test cross_backend_store_differential --locked \
       attachment_blob_store_differential_agrees -- --nocapture --include-ignored
 }
@@ -449,7 +417,7 @@ run_minio_conformance() {
 #     or a container stack of its own — a `-p` build is a different
 #     feature-unified graph, not a slice of the workspace one — and CI shards
 #     them across jobs that this script would have to run in series. What it
-#     runs instead is the workspace suite, the Postgres-16 and MinIO store
+#     runs instead is the workspace suite, the Postgres-16 and S3 store
 #     lanes, and the Restate E2Es above.
 #
 #   scripts/test-worktree-gate-env.sh
@@ -498,7 +466,7 @@ if api_surface_touched; then
 fi
 scoped RUST_COMPILE "lash-runtime feature boundary" run_runtime_feature_boundary_check
 scoped RUST_COMPILE "Postgres conformance" run_postgres_conformance
-scoped RUST_COMPILE "MinIO/S3 conformance" run_minio_conformance
+scoped RUST_COMPILE "S3 conformance" run_s3_conformance
 scoped RUST_COMPILE "Workspace tests" run_workspace_tests
 scoped RUST_COMPILE "Workflow graph example integration" run_workflow_graph_integration
 scoped RUST_COMPILE "Restate and process e2e suite" run_e2e_suite

@@ -17,8 +17,6 @@ use spans::SpanMarkers;
 
 mod stdlib;
 use stdlib::*;
-mod loops;
-use loops::*;
 mod array_callbacks;
 mod array_map;
 mod attribute_update;
@@ -30,10 +28,12 @@ mod constructs;
 mod entry;
 mod graph;
 mod json_replacer;
+mod loops;
 mod param_types;
 mod process_wrapper;
 mod regex;
 mod spans;
+mod spread_calls;
 mod triggers;
 pub(crate) use attribute_update::attribute_update;
 use binding::*;
@@ -146,9 +146,47 @@ struct Lowerer {
     /// before lowering: a top-level block binding of one of these names takes
     /// a generated slot, so the bare slot stays the session global's.
     global_this_names: BTreeSet<String>,
+    /// The session globals a cell boundary dropped for holding a function: a
+    /// reference to one is refused by name (`TS_FUNCTION_NOT_PERSISTED`), not
+    /// as a name nothing ever bound.
+    expired_functions: BTreeSet<String>,
+    /// Every name the program writes as `globalThis.name`: such a name is the
+    /// program's own again, whatever the session dropped.
+    global_this_writes: BTreeSet<String>,
 }
 
 impl Lowerer {
+    /// The refusal of a read of `name`, which no scope binds: by name when a
+    /// cell boundary dropped it for holding a function.
+    fn unknown_binding(&self, name: &str, span: Option<SourceSpan>) -> Diagnostic {
+        if self.expired_functions.contains(name) {
+            return Diagnostic::refusal(
+                DiagnosticCode::FunctionNotPersisted,
+                format!(
+                    "`{name}` held a function, and a function does not persist across cells: its binding ended with the cell that defined it"
+                ),
+                span,
+            );
+        }
+        Diagnostic::new(
+            DiagnosticCode::UnknownBinding,
+            format!("unknown binding `{name}`"),
+            span,
+        )
+    }
+
+    /// Refuses a `globalThis` read of a function the session dropped, unless
+    /// this program writes the name itself.
+    fn refuse_expired_global_read(&self, name: &str) -> Result<(), Diagnostic> {
+        if self.expired_functions.contains(name)
+            && !self.global_this_writes.contains(name)
+            && !self.has_binding(name)
+        {
+            return Err(self.unknown_binding(name, self.current_span));
+        }
+        Ok(())
+    }
+
     fn current_function(&self) -> usize {
         self.functions.last().map_or(0, |function| function.id)
     }
@@ -617,15 +655,8 @@ impl Lowerer {
                 iterable,
                 body,
             } => {
-                if let Some(reason) = body_may_mutate_iterable(iterable, body) {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::ForOfUnsupported,
-                        format!(
-                            "this for-of body {reason}; the v1 iterator walks a snapshot, so mutating the iterable mid-loop is not supported"
-                        ),
-                        None,
-                    ));
-                }
+                // The loop follows its iterable live, as ECMA-262 does
+                // (FIG-3625), so its body may change it freely.
                 self.in_loop_statement(|lowerer| {
                     lowerer.lower_for_each(pattern, *kind, iterable, body, false)
                 })?
@@ -1027,6 +1058,12 @@ impl Lowerer {
                         if !self.has_binding(name)
                             && !matches!(name.as_str(), "undefined" | "NaN" | "Infinity")) =>
                 {
+                    let Expr::Ident(name, _) = value.as_ref() else {
+                        unreachable!("the guard matched an identifier")
+                    };
+                    if self.expired_functions.contains(name) {
+                        return Err(self.unknown_binding(name, self.current_span));
+                    }
                     LashExpr::String("undefined".into())
                 }
                 UnaryOp::TypeOf
@@ -1209,11 +1246,7 @@ impl Lowerer {
                     .find_map(|scope| scope.bindings.get(name))
                     .cloned()
                 else {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::UnknownBinding,
-                        format!("unknown binding `{name}`"),
-                        None,
-                    ));
+                    return Err(self.unknown_binding(name, None));
                 };
                 if binding.kind != BindingKind::Let {
                     return Err(Diagnostic::new(
@@ -1305,6 +1338,7 @@ impl Lowerer {
                     // value, as a global object property read does, never a
                     // copy and never a local of the same name.
                     self.refuse_global_this_in_process(field)?;
+                    self.refuse_expired_global_read(field)?;
                     Ok(LashExpr::BuiltinCall {
                         name: "__typescript_global_get".into(),
                         args: vec![LashExpr::String(field.as_str().into())],

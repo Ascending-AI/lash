@@ -99,7 +99,7 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
             .scoped_effect_controller(admitted)
             .map_err(TerminalError::from_error)?;
         match (CatchUnwind { inner: job(scoped) }).await {
-            Ok(()) => Ok(Json(true)),
+            Ok(_) => Ok(Json(true)),
             // The crashing attempt died as the law asked: fail retryably, so
             // Restate redelivers the invocation and the redrive replays this
             // attempt's journal — the way a deployment recovers a turn whose
@@ -129,17 +129,17 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
 
 /// Polls a future under `catch_unwind`, turning a panic into `Err(())`. The
 /// payload is already on stderr through the panic hook.
-struct CatchUnwind<'a> {
-    inner: Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
+pub(super) struct CatchUnwind<'a, T> {
+    pub(super) inner: Pin<Box<dyn Future<Output = T> + Send + 'a>>,
 }
 
-impl Future for CatchUnwind<'_> {
-    type Output = Result<(), ()>;
+impl<T> Future for CatchUnwind<'_, T> {
+    type Output = Result<T, ()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let inner = &mut self.inner;
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
-            Ok(Poll::Ready(())) => Poll::Ready(Ok(())),
+            Ok(Poll::Ready(value)) => Poll::Ready(Ok(value)),
             Ok(Poll::Pending) => Poll::Pending,
             Err(_) => Poll::Ready(Err(())),
         }

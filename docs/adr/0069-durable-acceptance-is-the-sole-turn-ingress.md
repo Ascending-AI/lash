@@ -290,7 +290,7 @@ acceptance and the same journaled drive set (section 6), and the commit either
 settles those rows or finds the original commit's receipt and replays it. A host that treats this outcome as a
 terminal failure turns ordinary failover — where the accepted row is momentarily
 held by a driver that has gone away — into a user-visible fault, which is exactly
-what this section exists to prevent. The `Restate + Postgres + MinIO Workers`
+what this section exists to prevent. The `Restate + Postgres + S3 Workers`
 failover scenario is the behavioural witness.
 
 ### 6. Acceptance is journaled, so engine replay re-derives it

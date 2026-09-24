@@ -290,6 +290,12 @@ impl Session {
             .collect()
     }
 
+    /// The globals a cell boundary dropped for holding a function, which the
+    /// next cell links against as refused names.
+    pub(crate) fn expired_functions(&self) -> std::collections::BTreeSet<String> {
+        self.state.expired_functions().clone()
+    }
+
     /// The session's persisted execution state: the root record and every leaf
     /// body, exactly as a host would store them.
     pub(crate) fn persisted_state(&self) -> lash_core::plugin::HydratedExecutionState {

@@ -731,6 +731,16 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     // run's issue-ordinal state instead (FIG-3586).
     fixture["segment_state"]["commands"] =
         serde_json::to_value(crate::LashlangRunOrdinals::start()).expect("run ordinals encode");
+    // A v20 list cursor names the live collection it follows, if any
+    // (FIG-3625); the predecessor's parked loop walked a snapshot.
+    for iterator in fixture["segment_state"]["vm"]["iterator_stack"]
+        .as_array_mut()
+        .expect("the parked VM has an iterator stack")
+    {
+        if let Some(list) = iterator["cursor"].get_mut("List") {
+            list["collection"] = serde_json::json!({"kind": "unset"});
+        }
+    }
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
         .expect("the fixture carries a structurally valid current-envelope continuation");
     assert_eq!(

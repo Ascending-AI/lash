@@ -60,6 +60,10 @@ struct ToolChildProcessRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for ToolChildProcessRunner {
+    fn replay_key_grammar(&self, _registration: &lash_core::ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &crate::SegmentStarted,
@@ -115,6 +119,10 @@ impl LawProcessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for LawProcessRunner {
+    fn replay_key_grammar(&self, _registration: &lash_core::ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         started: &crate::SegmentStarted,
@@ -515,6 +523,35 @@ impl LiveConformanceHarness {
             Arc::new(RestateEffectHost::new_for_test(ingress_url.clone()))
                 as Arc<dyn lash_core::EffectHost>
         })
+    }
+
+    /// A maker of fresh Restate backends on this endpoint's ingress, each over
+    /// its own SQLite memory store set: the backend a law that builds a
+    /// runtime runs on.
+    pub(super) fn backend_factory(
+        &self,
+    ) -> impl Fn() -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Arc<dyn lash_core::Backend>> + Send>,
+    > + Send
+    + Sync
+    + 'static {
+        let ingress_url = self.ingress_url.clone();
+        move || {
+            let ingress_url = ingress_url.clone();
+            Box::pin(async move {
+                Arc::new(crate::RestateBackend::new(
+                    ingress_url.as_str(),
+                    crate::RestateAuthorityId::new("lash-conformance-backend-laws")
+                        .expect("valid authority"),
+                    Arc::new(
+                        lash_sqlite_store::SqliteStoreSet::memory()
+                            .await
+                            .expect("open the law's store set"),
+                    ),
+                    crate::RestateQueuedWork::Disabled,
+                )) as Arc<dyn lash_core::Backend>
+            })
+        }
     }
 
     pub(super) fn group_host_factory(&self) -> GroupHostFactory {
@@ -1345,7 +1382,10 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
             "EffectGroupIndex",
             &group_key,
             "read_rank",
-            &EffectGroupReadRankRequest { rank: 1 },
+            &EffectGroupReadRankRequest {
+                rank: 1,
+                for_caller: false,
+            },
         )
         .await
         .expect("dispatcher witness rank reads");

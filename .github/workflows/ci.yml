@@ -31,7 +31,7 @@ name: CI
 # Manual-only gates run on `workflow_dispatch` alone, the full profile
 # release.yml certifies against, and why each stays there:
 #
-# * Test heavy suites, Test S3 store against MinIO, Functional E2E, the
+# * Test heavy suites, Test S3 store against Garage, Functional E2E, the
 #   stack budget and the PostgreSQL pool-wait, simulator-backend-fault and
 #   cross-backend-differential steps of Test Postgres store: deferred by the
 #   2026-08-25 CI-scope ruling for their runner cost, until the FIG-2169
@@ -42,7 +42,7 @@ name: CI
 #   Bazel partition.
 # * Lashlang Git consumer: a compile configuration no other job resolves,
 #   carried by the release dispatch (FIG-2854).
-# * Worker release artifacts and the Restate + Postgres + MinIO workers E2E:
+# * Worker release artifacts and the Restate + Postgres + S3 workers E2E:
 #   release builds and multi-service harnesses. A pull request opts in with
 #   the `ci:workers` label.
 # * The PG14/PG18 compatibility legs on a non-schema diff: they compare
@@ -468,6 +468,7 @@ jobs:
           python3 scripts/test_check_checkpoint_component_flatten.py
           python3 scripts/test_action_sizes_from_log.py
           python3 scripts/test_agent_workbench_restate_e2e.py
+          python3 scripts/test_restate_suite.py
           python3 scripts/test_check_facade_only_examples.py
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
@@ -475,6 +476,7 @@ jobs:
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_conformance_law_registration.py
+          python3 scripts/test_check_substrate_boundary.py
           python3 scripts/test_check_law_execution_receipts.py
           python3 scripts/test_check_test_shard_coverage.py
           python3 scripts/test_check_transcript_diff.py
@@ -1613,7 +1615,7 @@ jobs:
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
   s3-store:
-    name: Test S3 store against MinIO
+    name: Test S3 store against Garage
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: plan
@@ -1621,15 +1623,16 @@ jobs:
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.stores == 'true'
     # Trusted events build these binaries from the shared cache and execute
-    # them uncached against the MinIO `scripts/ci/with-service.sh s3` starts for
-    # each step -- the same wrapper, image and bucket setup a developer runs on
-    # their own box. See scripts/ci/store-tests.sh.
+    # them uncached against the Garage `scripts/ci/with-service.sh s3` starts for
+    # each step (the S3 server figments runs in production) -- the same
+    # wrapper, image and bucket a developer runs on their own box. See
+    # scripts/ci/store-tests.sh and scripts/ci/s3-service.sh.
     environment: build-cache
     # The require flag stays at job level so no step can lose it on its own; the
     # endpoint cannot, because the port is chosen per step by `with-service.sh`.
     env:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
-      LASH_REQUIRE_MINIO: "1"
+      LASH_REQUIRE_S3: "1"
 
     steps:
       - *checkout
@@ -1792,7 +1795,13 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
+    # Trusted events take the worker binaries from the shared build cache
+    # (FIG-3666): the Cargo release build took 38 of this job's 40 minutes
+    # and gated every workers and process-operations leg behind it. Untrusted
+    # events receive no cache credentials and keep the Cargo release build.
+    environment: build-cache
     env:
+      BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
       RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
     steps:
       - name: Explain plan deferral
@@ -1829,22 +1838,33 @@ jobs:
         if: env.RUN_WORKER_ARTIFACTS == 'true'
         run: bash scripts/ci-reclaim-disk.sh
 
+      - name: Configure shared build cache
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED == 'true'
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
       - name: Install Rust toolchain
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
         uses: ./.github/actions/rust-toolchain
 
       - name: Install protoc
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       - name: Install mold
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
         uses: ./.github/actions/setup-mold
 
       - name: Restore worker release dependencies
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
@@ -1856,11 +1876,23 @@ jobs:
       - name: Build worker binaries once
         if: env.RUN_WORKER_ARTIFACTS == 'true'
         run: |
-          cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
-          mkdir -p "${RUNNER_TEMP}/worker-artifacts"
-          find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
-            -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
+          if [ "${BAZEL_TRUSTED}" = true ]; then
+            # Every binary of the package, under its Cargo name and
+            # stripped: the same set `--bins` builds below.
+            python3 scripts/ci/restate_suite.py stage-binaries \
+              //runbooks/restate-postgres-workers "${RUNNER_TEMP}/worker-artifacts"
+          else
+            cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+            mkdir -p "${RUNNER_TEMP}/worker-artifacts"
+            find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
+              -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
+          fi
           tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
+
+      - name: Remove client credentials
+        if: always() && env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED == 'true'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
       - name: Record worker binary provenance
         id: prepare-worker-binaries
@@ -1889,7 +1921,7 @@ jobs:
             ${{ runner.temp }}/worker-binaries.tar
             ${{ runner.temp }}/worker-binaries.provenance.json
           if-no-files-found: error
-          compression-level: 0
+          compression-level: 1
           retention-days: 1
 
   functional-e2e:
@@ -1900,6 +1932,11 @@ jobs:
     # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
+    # The live Restate suites (`bazel: true`) build their test binaries from
+    # the shared cache and run them here, beside pinned restate-servers that
+    # scripts/ci/restate_suite.py starts (FIG-3666). A dispatch is always a
+    # trusted event, so every leg may read the build-cache credentials.
+    environment: build-cache
 
     strategy:
       fail-fast: false
@@ -1910,42 +1947,49 @@ jobs:
             node: false
             artifact: none
             browser: false
+            bazel: false
             runner: ubuntu-24.04
           - name: agent-workbench
             recipe: agent-workbench-restate-e2e
             node: false
-            artifact: none
+            artifact: agent-workbench
             browser: false
+            bazel: true
             runner: ubuntu-24.04
           - name: effect-group-conformance
             recipe: effect-group-conformance-e2e
             node: false
             artifact: effect-group-conformance
             browser: false
+            bazel: true
             runner: ubuntu-24.04
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify
             node: true
             artifact: none
             browser: false
+            bazel: false
             runner: ubuntu-24.04
           - name: version-bump-recreation
             recipe: version-bump-recreation-e2e
             node: false
             artifact: version-bump-recreation
             browser: false
+            bazel: false
             runner: ubuntu-24.04
           - name: session-lease-triage
             recipe: session-lease-triage-e2e
             node: false
             artifact: session-lease-triage
             browser: false
+            bazel: false
             runner: ubuntu-24.04
           - name: slack-clone-full-host
             recipe: slack-clone-full-host-e2e
             node: false
             artifact: none
             browser: true
+            bazel: false
             runner: ubuntu-24.04
 
     steps:
@@ -1954,17 +1998,30 @@ jobs:
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
+      - name: Configure shared build cache
+        if: matrix.bazel
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
       - name: Install Rust toolchain
+        if: ${{ !matrix.bazel }}
         uses: ./.github/actions/rust-toolchain
 
-
       - name: Install protoc
+        if: ${{ !matrix.bazel }}
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
+        if: ${{ !matrix.bazel }}
         uses: ./.github/actions/setup-mold
 
       - name: Install Node
@@ -1998,8 +2055,14 @@ jobs:
           LASH_VERSION_BUMP_ARTIFACT_DIR: target/functional-e2e-artifacts/version-bump-recreation
           LASH_SESSION_LEASE_ARTIFACT_DIR: target/functional-e2e-artifacts/session-lease-triage
           LASH_EFFECT_GROUP_ARTIFACT_DIR: target/functional-e2e-artifacts/effect-group-conformance
+          AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: just ${{ matrix.recipe }}
+
+      - name: Remove client credentials
+        if: always() && matrix.bazel
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
       - name: Upload functional E2E failure artifacts
         if: failure() && matrix.artifact != 'none'
@@ -2025,6 +2088,9 @@ jobs:
     # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
+    # Its test binaries come from the shared build cache (FIG-3666); a
+    # dispatch is always a trusted event.
+    environment: build-cache
 
     strategy:
       fail-fast: false
@@ -2043,18 +2109,15 @@ jobs:
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
-
-
-      - name: Install protoc
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      # Provides the linker the workflow-level RUSTFLAGS names.
-      - name: Install mold
-        uses: ./.github/actions/setup-mold
+      - name: Configure shared build cache
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
       # The repo-local installer uses checksum-pinned release archives instead
       # of the GitHub releases API; merge-queue trains fan out enough jobs that
@@ -2108,6 +2171,11 @@ jobs:
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: just ${{ matrix.recipe }}
 
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
       - name: Upload functional E2E failure artifacts
         if: failure() && matrix.artifact != 'none'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -2117,7 +2185,7 @@ jobs:
           if-no-files-found: warn
 
   restate-postgres-workers:
-    name: Restate + Postgres + MinIO Workers (segment ${{ matrix.segment }})
+    name: Restate + Postgres + S3 Workers (segment ${{ matrix.segment }})
     runs-on: ubuntu-24.04
     if: >-
       github.event_name == 'workflow_dispatch'

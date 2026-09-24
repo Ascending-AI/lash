@@ -267,16 +267,16 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
 }
 
 #[tokio::test]
-pub(super) async fn worker_replacement_mid_child_aborts_parent_without_terminalizing_rerunnable_child()
+pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminalizing_rerunnable_child()
  {
-    let process_id = "replacement-aborted-child";
+    let process_id = "divergence-aborted-child";
     let registry = process_registry();
     let registration = rerunnable_registration(process_id);
     registry
         .register_process(registration.clone())
         .await
-        .expect("register replacement-aborted child");
-    let runner = Arc::new(ReplacementThenSuccessRunner {
+        .expect("register divergence-aborted child");
+    let runner = Arc::new(DivergenceThenSuccessRunner {
         runs: AtomicUsize::new(0),
     });
     let workflow = LashProcessWorkflowImpl::new_for_test(
@@ -293,19 +293,19 @@ pub(super) async fn worker_replacement_mid_child_aborts_parent_without_terminali
                 Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
                 durable_admission(&ExecutionScope::process(process_id)),
             )
-            .expect("replacement-aborted child scope"),
+            .expect("divergence-aborted child scope"),
             0,
             None,
             pending_process_cancel_signal(),
         )
         .await
-        .expect_err("worker replacement must abort the parent invocation");
+        .expect_err("a diverged child must abort the parent invocation");
     let rendered =
         <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&error)
             .to_string();
     assert!(
-        rendered.contains("worker_replacement_abort"),
-        "parent abort lost the typed replacement code: {rendered}"
+        rendered.contains("effect_replay_divergence"),
+        "parent abort lost the typed divergence code: {rendered}"
     );
     let interrupted = registry
         .get_process(&ProcessId::from(process_id))
@@ -314,7 +314,7 @@ pub(super) async fn worker_replacement_mid_child_aborts_parent_without_terminali
         .expect("interrupted child remains registered");
     assert!(
         !interrupted.is_terminal() && interrupted.outcome.is_none(),
-        "replacement abort must leave the rerunnable child non-terminal: {interrupted:?}"
+        "a divergence abort must leave the rerunnable child non-terminal: {interrupted:?}"
     );
 
     let rerun = workflow

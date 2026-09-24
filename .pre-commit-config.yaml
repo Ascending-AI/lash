@@ -64,6 +64,15 @@ repos:
         files: '\.rs$'
         pass_filenames: false
 
+      # Mirrors CI Lint "Check substrate boundary" — includes the
+      # drive-determinism ratchet (FIG-3672), whose allowlist can only shrink.
+      - id: substrate-boundary
+        name: substrate boundary
+        language: system
+        entry: bash scripts/check-substrate-boundary.sh
+        files: '^(\.pre-commit-config\.yaml|crates/.*\.rs|scripts/(check-substrate-boundary\.sh|drive-determinism-allowlist\.(count|txt)|test_check_substrate_boundary\.py))$'
+        pass_filenames: false
+
       # Orchestrating provider bodies are authored replay code. Keep obvious
       # nondeterminism out of their entrypoints before it reaches a journal.
       - id: orchestrating-tool-determinism

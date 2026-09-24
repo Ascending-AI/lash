@@ -1,0 +1,108 @@
+# The real-server Restate suites (FIG-3666), run by `scripts/ci/restate_suite.py`
+# beside a pinned `restate-server`: one server per shard, shared by the tests
+# it runs, isolated by unique keys and never reset.
+#
+# A suite names the Bazel label of its test binary (built on the shared pool),
+# the directory its tests run in, the `#[ignore]`d tests it runs (libtest name
+# filters; the runner asks for ignored tests only), and the loopback endpoints
+# each shard binds: every name in `endpoints` becomes `<NAME>_BIND` and
+# `<NAME>_URL` on a free port of the shard's own.
+#
+# Servers run with retries off: an invocation that fails is killed at once,
+# so a broken law fails in seconds instead of retrying for most of an hour.
+# `redelivery_laws` are the laws that crash a handler attempt on purpose and
+# need Restate to deliver it again; they run on a server that retries on a
+# short bounded schedule.
+#
+# Two legs. `live` is Restate's defaults. `replay` sets the invoker's
+# inactivity timeout to zero, so every await suspends and every resumption
+# replays the journal from the start. `[<suite>.replay.divergent]` holds back
+# the laws that do not yet hold under replay, each with the reason and the
+# ticket that brings it back (the list only shrinks); the runner
+# refuses an entry that names no test, and `--include-divergent` runs them.
+# A leg table may carry `report_only = "<reason>"`: its failures are printed
+# and annotated but do not fail the run, and the reason says why it does not
+# gate yet.
+
+[suites.effect-group]
+label = "//crates/lash-restate:lash-restate__unit_test"
+cwd = "crates/lash-restate"
+filters = ["live_effect_group_sdk_preconditions", "tests::conformance_and_poison::"]
+# Parked deferred-law invocations (scripts/deferred-law-invocations.toml).
+parked_crate = "lash_restate"
+endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
+shards = 3
+timeout_seconds = 240
+redelivery_laws = [
+  # The turn crashes after its tool calls settle; Restate redelivers it.
+  "tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes",
+  # A child whose process-env read faults fails retryably; Restate runs it
+  # again once the store answers.
+  "tests::conformance_and_poison::a_process_env_store_fault_is_never_the_childs_recorded_outcome",
+]
+
+[suites.effect-group.replay]
+# The replay leg reports and does not gate yet: the presented tool result's
+# wall-clock `command.duration_ms` reaches journaled identities (its effect
+# hash and the replay key of the child's follow-on call), so any tool-child
+# law can diverge on replay when two measurements differ by a millisecond.
+# The laws below diverge on every run or have been seen to; the rest pass
+# unless that measurement drifts. Gate it once the measurement leaves them.
+report_only = "tool-result durations reach journaled identities (FIG-3672); see scripts/restate-suites.toml"
+
+[suites.effect-group.replay.divergent]
+# A dispatch child that suspends inside its drain re-lands the drain's first
+# intent on resumption and never lands the second: the drain's landing is not
+# replay-stable.
+"tests::conformance_and_poison::a_committed_childs_final_is_protected_and_its_drain_is_finished" = "drain re-lands `start` and drops `event` when the child resumes (FIG-3681)"
+"tests::conformance_and_poison::drains_are_admitted_in_recorded_commit_order" = "drain re-lands `start` and drops `event` when the child resumes (FIG-3681)"
+"tests::conformance_and_poison::a_drain_held_at_the_barrier_parks_under_a_frozen_dispatch_clock" = "drain re-lands `start` when the held child resumes (FIG-3681)"
+"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "the retried step never reports its first retryable failure once the child resumes from its retry sleep (FIG-3681)"
+# The replayed redrive computes a different turn index than the attempt that
+# journaled it: `turn:1:0:llm_call:1` recorded, `turn:2:0:llm_call:1` replayed.
+"tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes" = "journal mismatch: the replayed turn derives turn index 2 where the journal recorded 1 (FIG-3682)"
+# The presented tool result's effect hash covers the tool's measured
+# `command.duration_ms`, so a replay that re-measures it parks the turn
+# (`effect_replay_divergence ... divergent_paths=[command.duration_ms]`)
+# whenever the two measurements differ by a millisecond.
+"tests::conformance_and_poison::a_retained_full_output_is_a_durable_artifact_not_a_path" = "present_tool_result hash covers the wall-clock command.duration_ms, so a replay diverges (FIG-3672)"
+# The same measurement reaches the replay key of the child's follow-on call
+# (`Call[14]`: `x-lash-replay-key` differs between executions), so the child
+# is refused on replay and its rank's settlement never arrives.
+"tests::conformance_and_poison::the_oracle_and_the_budget_plugin_coexist" = "the child's follow-on call replay key diverges on replay; rank 0 never settles (FIG-3672)"
+"tests::conformance_and_poison::a_same_name_process_incarnation_is_not_the_recorded_opener" = "the child's follow-on call replay key diverges on replay; rank 3 never settles (FIG-3672)"
+"tests::conformance_and_poison::tool_children_run_through_the_invocation_driver" = "the child's follow-on call replay key diverges on replay; rank 1 never settles (FIG-3672)"
+# The child's process-environment read is not journaled, so a replay reads
+# it again: "a park is not re-run: the child read its environment once" sees 2.
+"tests::conformance_and_poison::a_divergent_child_settles_with_its_park" = "the child's process-env read runs again on replay (FIG-3683)"
+# Harness, not product: ConformanceTurnProbe parks a run-once job and takes it
+# on the first execution, so a replayed handler finds no job and returns where
+# the journal recorded a `run`.
+"tests::conformance_and_poison::a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate" = "ConformanceTurnProbe runs a run-once job, which a replayed handler no longer has (FIG-3684)"
+"tests::conformance_and_poison::public_signal_intent_wakes_parked_process" = "ConformanceTurnProbe runs a run-once job, which a replayed handler no longer has (FIG-3684)"
+
+[suites.agent-workbench]
+label = "//examples/agent-workbench:agent-workbench__unit_test"
+cwd = "examples/agent-workbench"
+filters = ["live_restate_"]
+# Spawned by its parent test with the environment it needs; run directly it
+# panics before reaching Restate.
+skips = ["live_restate_participant_protocol_crash_child"]
+endpoints = ["AGENT_WORKBENCH_E2E_ENDPOINT", "AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT"]
+shards = 3
+timeout_seconds = 300
+# A law that passes while a background task panicked fails.
+panic_gate = true
+redelivery_laws = [
+  # A retried turn keeps the deployment it was admitted on.
+  "tests::restate_recovery_tests::immutable_deployment::live_restate_retry_keeps_the_admitted_deployment_configuration",
+  # The ingress owner restarts mid-turn; Restate redelivers the turn to it.
+  "tests::restate_recovery_tests::live_restate_ingress_owner_restart_resumes_and_remains_cancellable",
+]
+
+[suites.agent-workbench.env]
+# `scripts/agent-workbench-restate-e2e.sh` runs the suite inside
+# `scripts/ci/with-service.sh pg16`, whose server carries one database per
+# slot; each shard takes its own, and its own Restate trust domain.
+AGENT_WORKBENCH_E2E_DATABASE_URL = "{AGENT_WORKBENCH_E2E_POSTGRES_BASE_URL}/lash_slot_{shard}"
+RESTATE_AUTHORITY_ID = "agent-workbench-e2e:{AGENT_WORKBENCH_E2E_RUN_ID}:{shard}"

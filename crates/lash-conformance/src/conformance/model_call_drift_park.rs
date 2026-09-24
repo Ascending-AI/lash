@@ -130,9 +130,11 @@ fn attempt(
             if crash {
                 panic!("the crash probe did not fire before the turn commit: {turn:?}");
             }
+            let end = crate::ConformanceTurnEnd::of(&turn);
             if let Some(result_tx) = result_tx {
                 let _ = result_tx.send(turn);
             }
+            end
         })
     })
 }

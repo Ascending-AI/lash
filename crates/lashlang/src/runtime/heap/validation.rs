@@ -322,12 +322,9 @@ fn validate_exotic_invariants(heap: &Heap, id: HeapId, object: &HeapObject) -> R
             }
         }
         HeapObject::Error(error) => {
-            if error.kind == super::ErrorKind::AggregateError && error.errors.is_none() {
-                return Err(format!(
-                    "AggregateError object {} is missing its errors list",
-                    id.get()
-                ));
-            }
+            // `errors` is an own, configurable data property: a `delete`
+            // leaves an AggregateError legitimately carrying none, so absence
+            // is not a malformed wire.
             if error.kind != super::ErrorKind::AggregateError && error.errors.is_some() {
                 return Err(format!(
                     "{} object {} carries AggregateError errors",

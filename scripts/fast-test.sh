@@ -31,7 +31,7 @@ cd "$repo"
 
 # Implementer loops do not talk to live stores. CI owns Postgres/S3/E2E.
 unset LASH_POSTGRES_DATABASE_URL LASH_REQUIRE_POSTGRES \
-  LASH_S3_ENDPOINT LASH_REQUIRE_S3 LASH_MINIO_ENDPOINT
+  LASH_S3_ENDPOINT LASH_REQUIRE_S3
 
 base_rev=""
 dry_run=0

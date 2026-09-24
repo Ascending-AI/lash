@@ -8,18 +8,18 @@
 #      its runner instead of holding it to the job timeout.
 #   2. Bound the two known co-scheduling hazards — the fault-matrix chunk tests,
 #      which each fork real `cargo` invocations of their own, and the suites
-#      that share a single Postgres database or MinIO bucket.
+#      that share a single Postgres database or S3 bucket.
 #   3. Give CI a profile that finishes the whole run rather than stopping at
 #      the first failure, and that refuses to launder a flaky pass into a
 #      green run.
 #
 # Everything else stays at nextest's defaults on purpose.
 
-# Suites that talk to the one Postgres database / MinIO bucket that a run
+# Suites that talk to the one Postgres database / S3 bucket that a run
 # stands up. They are not isolated from each other: the `lash-internal-postgres-store`
 # binaries below truncate every `lash_*` table on the configured database, the
 # `lash-sim` cross-backend differential compares against those same tables, and
-# the `lash-internal-s3-store` MinIO tests share one bucket. Today they interlock by
+# the `lash-internal-s3-store` live S3 tests share one bucket. Today they interlock by
 # hand, holding a session-level Postgres advisory lock
 # (`SHARED_DATABASE_LOCK_KEY`) across process boundaries, which under
 # process-per-test means every waiter burns a test slot doing nothing but
@@ -84,7 +84,7 @@ filter = '''
     )
   + (package(lash-sim) & binary(cross_backend_store_differential))
   + (package(lash-runtime) & test(agent_scenarios::process_parent_atomicity::))
-  + (package(lash-internal-s3-store) & test(minio))
+  + (package(lash-internal-s3-store) & test(live_s3))
 '''
 test-group = "docker-services"
 

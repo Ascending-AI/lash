@@ -80,7 +80,6 @@ class Journey:
             self.data_root / "bot" / "lash" / "lash-sessions" / "durable-core.db"
         )
         self.trace_path = self.data_root / "bot" / "lash" / "trace.jsonl"
-        self.attachments_dir = self.data_root / "bot" / "lash" / "attachments"
         self.bot_log = args.state_dir / "run" / f"bot-{self.state_key}.log"
         self.bot_pid_file = args.state_dir / "run" / f"bot-{self.state_key}.pid"
         self.provider_log = args.state_dir / "provider" / "provider-requests.jsonl"
@@ -823,10 +822,21 @@ class Journey:
             if isinstance(tool, dict)
         }
 
-    def stored_attachment_bytes(self) -> list[bytes]:
-        if not self.attachments_dir.exists():
+    def stored_attachment_bytes(self, attachment_id: str) -> list[bytes]:
+        """The bytes the bot's attachment store holds under `attachment_id`.
+
+        The bot runs on one SQLite backend, and that backend keeps attachment
+        bytes in its session catalog (`attachment_blobs`), not in files beside
+        it. A reference that names no row reads as no bytes at all.
+        """
+        if not self.session_db.exists():
             return []
-        return [path.read_bytes() for path in self.attachments_dir.rglob("*") if path.is_file()]
+        rows = self.sql(
+            self.session_db,
+            "SELECT content FROM attachment_blobs WHERE attachment_id = ?",
+            (attachment_id,),
+        )
+        return [bytes(row["content"]) for row in rows]
 
     def checkpoint_mcp_runtime_attach(self) -> None:
         """Attach an MCP integration while the bot serves, use it, detach it."""
@@ -883,11 +893,11 @@ class Journey:
                         block for block in part["blocks"] if block.get("type") == "attachment"
                     )
         reference = attachments[0] if len(attachments) == 1 else {}
-        stored = self.stored_attachment_bytes()
+        stored = self.stored_attachment_bytes(reference.get("attachment_ref", {}).get("id", ""))
 
         self.gate("08-mcp-attach", "dom", "the attach turn and the post-detach turn each render exactly one reply in both contexts", all(len([r for r in self.dom_rows(p) if r["bot"]]) == before_bots + 2 and "workspace badge came back" in "\n".join(r["text"] for r in self.dom_rows(p)) for p in self.pages.values()), "08-mcp-attach-*.png")
         self.gate("08-mcp-attach", "platform", "the platform stores both mentions and both attributed replies", len(self.history()) == before_main + 4 and len(self.platform_rows()) == before_total + 4 and all(any(row["event_id"] in (r["metadata_json"] or "") for r in self.platform_rows()) for row in (attach_row, detached_row)), "08-mcp-attach-four-layers.json")
-        self.gate("08-mcp-attach", "bot", "the operator attaches a connected server, its binary content is committed as one stored attachment reference whose exact bytes reach the host attachment store, and detaching leaves only the server the bot booted with", attached.get("connected") is True and badge_tool in (attached.get("tools") or []) and reference.get("source") == "stored" and reference.get("attachment_ref", {}).get("byte_len") == len(badge_bytes) and reference.get("attachment_ref", {}).get("media_type") == "application/octet-stream" and any(blob == badge_bytes for blob in stored) and detached_ok and [view["name"] for view in after_detach["servers"]] == ["slack_clone"], "08-mcp-attach-four-layers.json")
+        self.gate("08-mcp-attach", "bot", "the operator attaches a connected server, its binary content is committed as one stored attachment reference whose exact bytes reach the host attachment store, and detaching leaves only the server the bot booted with", attached.get("connected") is True and badge_tool in (attached.get("tools") or []) and reference.get("source") == "stored" and reference.get("attachment_ref", {}).get("byte_len") == len(badge_bytes) and reference.get("attachment_ref", {}).get("media_type") == "application/octet-stream" and stored == [badge_bytes] and detached_ok and [view["name"] for view in after_detach["servers"]] == ["slack_clone"], "08-mcp-attach-four-layers.json")
         attach_turn = f"mention:{attach_row['event_id']}"
         completions = self.traces_for_turn(attach_turn, "tool_call_completed")
         offered_after_attach = [self.offered_tools(r) for r in self.provider_requests_for("FIG1341-MCP-ATTACH", without=("FIG1341-MCP-DETACHED",))]

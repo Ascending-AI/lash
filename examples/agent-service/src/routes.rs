@@ -477,7 +477,7 @@ pub(crate) async fn send_message(
             Ok(TurnAttempt::Completed) => wait_for_live_replay_flush(&mut replay).await,
             // The turn's own error is already on the stream. This path reports
             // in band and never hands the helper an error to propagate.
-            Ok(TurnAttempt::Failed) | Err(_) => replay.abort(),
+            Ok(TurnAttempt::Failed | TurnAttempt::Parked) | Err(_) => replay.abort(),
         }
         let _ = tx.send(StreamItem::Done).await;
     });
@@ -927,6 +927,14 @@ pub(crate) enum TurnAttempt {
     /// The turn itself failed. The runner has already reported the error, so
     /// the loop stops rather than spending a re-prompt on a broken turn.
     Failed,
+    /// The turn parked (a durable replay divergence): nothing is recorded and
+    /// its durable handler keeps the journal for a restored deployment to
+    /// finish. The loop stops.
+    #[cfg_attr(
+        not(feature = "restate"),
+        expect(dead_code, reason = "only a durable Restate turn parks")
+    )]
+    Parked,
 }
 
 /// An agent can finish a turn without ever calling `board.play`. `play()` is
@@ -956,8 +964,9 @@ where
     let mut turn_input = text;
     let mut turn_id = first_turn_id;
     for attempt in 0..=ZERO_MOVE_RETRIES {
-        if matches!(run_turn(turn_input, turn_id).await?, TurnAttempt::Failed) {
-            return Ok(TurnAttempt::Failed);
+        match run_turn(turn_input, turn_id).await? {
+            TurnAttempt::Completed => {}
+            stopped @ (TurnAttempt::Failed | TurnAttempt::Parked) => return Ok(stopped),
         }
         if !agent_still_owes_move(state, chat_id).await {
             break;

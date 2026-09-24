@@ -241,14 +241,15 @@ fn for_bindings_use_list_elements_and_unknown_iterables_remain_gradual() {
     LinkedModule::link(unknown, full_host_environment())
         .expect("unknown iterable elements should remain gradual");
 
-    // process consume() { for item in "not a list" { seen = item } }
+    // A string iterates its code points (FIG-3625); a number is no iterable.
+    // process consume() { for item in 7 { seen = item } }
     let non_list = builders::module(
         vec![builders::process(
             "consume",
             Vec::new(),
             builders::block(vec![builders::for_in(
                 "item",
-                builders::string("not a list"),
+                builders::num(7.0),
                 builders::block(vec![builders::assign("seen", builders::var("item"))]),
             )]),
         )],

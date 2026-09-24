@@ -78,18 +78,30 @@ pub fn parse_with_globals(
     globals: &std::collections::BTreeSet<String>,
 ) -> Result<lashlang::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
-    lower::lower_with_ambient(&normalized, globals, &std::collections::BTreeSet::new())
+    lower::lower_with_ambient(
+        &normalized,
+        globals,
+        &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::new(),
+    )
 }
 
-/// The second set is semantic binding metadata: it keeps an ambient handle awaitable without
-/// making arbitrary ambient values awaitable.
-pub fn parse_with_globals_and_process_handles(
+/// Parses a cell against the session its host environment describes: the live
+/// globals it may read, which of them are process handles (awaitable, where an
+/// arbitrary ambient value is not), and the globals a cell boundary dropped for
+/// holding a function, whose references are refused by name
+/// (`TS_FUNCTION_NOT_PERSISTED`).
+pub fn parse_cell(
     source: &str,
-    globals: &std::collections::BTreeSet<String>,
-    process_handles: &std::collections::BTreeSet<String>,
+    host: &lashlang::LashlangHostEnvironment,
 ) -> Result<lashlang::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
-    lower::lower_with_ambient(&normalized, globals, process_handles)
+    lower::lower_with_ambient(
+        &normalized,
+        &host.globals,
+        &host.process_handles,
+        &host.expired_functions,
+    )
 }
 
 /// Parses one editable workflow-graph fragment with `globals` already bound.
@@ -97,15 +109,18 @@ pub fn parse_with_globals_and_process_handles(
 /// Unlike a cell, a fragment was cut out of a program the lens projected: its
 /// ambient names are the bindings live where the fragment sits, and a fragment
 /// that reassigns one of them is ordinary edited source, not a const violation.
-/// `processes` names the process bodies the module declares, which a fragment
-/// may start through the catalogue tools.
+/// `session_globals` are the names earlier cells of the session bound, which
+/// the program itself linked against — readable like a cell's own globals but
+/// never reassignable. `processes` names the process bodies the module
+/// declares, which a fragment may start through the catalogue tools.
 pub fn parse_workflow_fragment(
     source: &str,
     globals: &std::collections::BTreeSet<String>,
+    session_globals: &std::collections::BTreeSet<String>,
     processes: &std::collections::BTreeSet<String>,
 ) -> Result<lashlang::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
-    lower::lower_workflow_fragment(&normalized, globals, processes)
+    lower::lower_workflow_fragment(&normalized, globals, session_globals, processes)
 }
 
 pub fn validate(source: &str) -> Result<(), Diagnostic> {
@@ -129,6 +144,7 @@ pub fn link(
         &host.globals,
         &host.process_handles,
         &module_authority_roots,
+        &host.expired_functions,
     )?;
     lashlang::LinkedModule::link(program, host)
         .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))

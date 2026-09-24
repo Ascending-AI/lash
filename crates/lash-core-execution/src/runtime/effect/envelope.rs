@@ -385,12 +385,18 @@ pub enum RuntimeEffectCommand {
     /// session's ordered presentation steps over this settled output once and
     /// journals the resulting [`ToolPresentation`](super::ToolPresentation).
     /// Replay serves the recorded outcome and never re-runs a step.
+    ///
+    /// The command names only recorded facts. How long the call took is an
+    /// observation: a redrive serves a journaled attempt at once and re-runs an
+    /// orchestrating body against its recorded effects, so a duration here
+    /// would move the envelope of a healthy redrive. The steps still read the
+    /// live duration from the local executor, and the outcome they fold to is
+    /// what replay serves.
     PresentToolResult {
         call_id: String,
         tool_name: String,
         args: serde_json::Value,
         output: Box<crate::ToolCallOutput>,
-        duration_ms: u64,
     },
     Trigger {
         command: Box<crate::TriggerCommand>,

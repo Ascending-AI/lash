@@ -493,7 +493,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `effect_kind`, and `lash_turn_parks.reason_json` with the `binding_drift`
 // and `effect_replay_divergence` reasons, which an older build cannot decode.
 // No relation changes; component-123 catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 124;
+// Version 125 replaces `worker_replacement_abort` in the durable error-code
+// vocabulary with the engine-neutral `effect_replay_divergence`, a parking
+// code; the retired code is not aliased. No relation changes; component-124
+// catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 125;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -34,8 +34,7 @@
 //!   field an object literal's type lacks (`TS_LINK_ERROR`; a later cell may
 //!   add one), block-level function declarations (Annex B, skipped by the
 //!   census), an effect inside a builtin callback (`EffectInBuiltinCallback`),
-//!   a `for...of` body that touches its iterable (`TS_FOR_OF_UNSUPPORTED`), a
-//!   closure reading a binding assigned after it copies it
+//!   a closure reading a binding assigned after it copies it
 //!   (`TS_MUTABLE_CAPTURE_UNSUPPORTED`; a closure reads only bindings nothing
 //!   reassigns), a reassigned `var`, parameter or catch binding
 //!   (`TS_ASSIGN_CONST`).
@@ -53,18 +52,7 @@ use std::collections::BTreeSet;
 /// when one is fixed, its README entry goes, the test holding this list to
 /// the README fails, and the exclusion is deleted here, which changes the
 /// generated corpus deliberately.
-pub(super) const OPEN_DEFECT_EXCLUSIONS: &[(&str, &str)] = &[
-    // A `for...of` body that declares a binding of its iterable's name is
-    // refused as touching the iterable. The body declares no such name.
-    ("for-of-shadowed-iterable", "FIG-3625"),
-    // A spread argument to a builtin function or method is refused or
-    // faults. Spread arguments go to the session's own functions.
-    ("builtin-call-spread", "FIG-3627"),
-    // A `for...of` body that appends to its array through an alias made
-    // before the loop is not refused, and the loop walks a snapshot: it
-    // misses what Node visits. The body touches no alias of its iterable.
-    ("for-of-aliased-iterable", "FIG-3625"),
-];
+pub(super) const OPEN_DEFECT_EXCLUSIONS: &[(&str, &str)] = &[];
 
 /// Where a construct's grammar is accepted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -175,7 +163,7 @@ fn static_rejections() -> Vec<(&'static str, &'static str)> {
             .then(|| (columns[3], columns[4]))
         })
         .filter(|(diagnostic, probe)| {
-            super::link_rejection(probe, BTreeSet::new())
+            super::link_rejection(probe, BTreeSet::new(), BTreeSet::new())
                 .is_some_and(|(code, _)| code == *diagnostic)
         })
         .collect()
@@ -385,9 +373,6 @@ struct Generator {
     /// a `for...of` or `for...in` body, a `try` or `catch` block): a `var`
     /// declared there hoists but may stay `undefined`, so none is.
     uncertain: usize,
-    /// Names no declaration may take: the iterables of the enclosing
-    /// `for...of` loops (`for-of-shadowed-iterable`).
-    reserved: Vec<String>,
     /// The next fresh value identity, and the identity the next declaration
     /// takes when its value is an alias of another binding's.
     next_identity: usize,
@@ -409,7 +394,6 @@ impl Generator {
             fresh: 0,
             callbacks: 0,
             uncertain: 0,
-            reserved: Vec::new(),
             next_identity: 1,
             alias_of: None,
         }
@@ -656,10 +640,7 @@ impl Generator {
             .iter()
             .map(|name| (*name).to_string())
             .filter(|name| {
-                if self.var_names.contains(name)
-                    || in_scope.contains(name)
-                    || self.reserved.contains(name)
-                {
+                if self.var_names.contains(name) || in_scope.contains(name) {
                     return false;
                 }
                 if top || hoisting {
@@ -832,7 +813,11 @@ impl Generator {
             Ty::Arr(item) => {
                 let value = self.value_for(&item);
                 match self.prng.below(8) {
-                    0 | 1 => self.emit(format!("{name}.push({value});")),
+                    0 => self.emit(format!("{name}.push({value});")),
+                    1 => {
+                        let more = self.value_for(&item);
+                        self.emit(format!("{name}.push(...[{value}, {more}]);"));
+                    }
                     2 => self.emit(format!("{name}.unshift({value});")),
                     3 => self.emit(format!("{name}[0] = {value};")),
                     4 => self.emit(format!("{name}.pop();")),
@@ -1340,37 +1325,39 @@ impl Generator {
         });
         // The iterable, and what each iteration binds, as `(text, element
         // types, the binding the body must not touch)`.
-        let (iterable, element, hidden) = if !iterables.is_empty() && self.prng.chance(70) {
-            let iterable = self.prng.pick(&iterables).clone();
-            let element = match iterable.ty.clone() {
-                Ty::Arr(item) => vec![*item],
-                Ty::Map(item) => {
-                    self.uses(MAP);
-                    vec![Ty::Str, *item]
-                }
-                Ty::Set => {
-                    self.uses(SET);
-                    vec![Ty::Num]
-                }
-                Ty::Params => {
-                    self.uses(URL_SEARCH_PARAMS);
-                    vec![Ty::Str, Ty::Str]
-                }
-                _ => vec![Ty::Str],
+        let (iterable, element, hidden, iterable_ty) =
+            if !iterables.is_empty() && self.prng.chance(70) {
+                let iterable = self.prng.pick(&iterables).clone();
+                let iterable_ty = Some(iterable.ty.clone());
+                let element = match iterable.ty.clone() {
+                    Ty::Arr(item) => vec![*item],
+                    Ty::Map(item) => {
+                        self.uses(MAP);
+                        vec![Ty::Str, *item]
+                    }
+                    Ty::Set => {
+                        self.uses(SET);
+                        vec![Ty::Num]
+                    }
+                    Ty::Params => {
+                        self.uses(URL_SEARCH_PARAMS);
+                        vec![Ty::Str, Ty::Str]
+                    }
+                    _ => vec![Ty::Str],
+                };
+                // Every name of the iterable's object, the aliases made before
+                // the loop included.
+                let names = self
+                    .visible()
+                    .into_iter()
+                    .filter(|binding| binding.identity == iterable.identity)
+                    .map(|binding| binding.name)
+                    .collect::<Vec<_>>();
+                (iterable.name.clone(), element, names, iterable_ty)
+            } else {
+                let (array, item) = self.fresh_array(1);
+                (array, vec![item], Vec::new(), None)
             };
-            // Every name of the iterable's object, the aliases made before
-            // the loop included (`for-of-aliased-iterable`).
-            let names = self
-                .visible()
-                .into_iter()
-                .filter(|binding| binding.identity == iterable.identity)
-                .map(|binding| binding.name)
-                .collect::<Vec<_>>();
-            (iterable.name.clone(), element, names)
-        } else {
-            let (array, item) = self.fresh_array(1);
-            (array, vec![item], Vec::new())
-        };
         // A head binding never names what its iterable reads: that read
         // would be in the temporal dead zone.
         let names = if element.len() == 2 {
@@ -1396,10 +1383,18 @@ impl Generator {
         self.emit(format!("{head} {{"));
         self.indent += 1;
         self.push_scope(ScopeKind::Block);
+        // The loop follows its iterable live (FIG-3625). The body changes it
+        // only through the bounded mutation below, so no draw grows it on
+        // every pass and leaves Node looping forever; it may still declare a
+        // binding of the iterable's name.
+        let live = iterable_ty
+            .as_ref()
+            .filter(|_| !hidden.is_empty() && self.prng.chance(40))
+            .and_then(|ty| {
+                let name = self.prng.pick(&hidden).clone();
+                self.live_iterable_mutation(&name, ty)
+            });
         for name in &hidden {
-            // `TS_FOR_OF_UNSUPPORTED`: the body never touches its iterable,
-            // by any of its names, and (`for-of-shadowed-iterable`) declares
-            // nothing of those names.
             self.scopes
                 .last_mut()
                 .expect("a scope")
@@ -1412,19 +1407,53 @@ impl Generator {
                     hidden: true,
                     identity: 0,
                 });
-            self.reserved.push(name.clone());
         }
         for (name, ty) in names.into_iter().zip(element) {
             self.binders.insert(name.to_string());
             self.declare(name, ty, Decl::Local);
         }
-        self.loop_body(depth);
-        for _ in &hidden {
-            self.reserved.pop();
+        if let Some(mutation) = live {
+            self.emit(mutation);
         }
+        self.loop_body(depth);
         self.pop_scope();
         self.indent -= 1;
         self.emit("}".to_string());
+    }
+
+    /// One change to a `for...of` iterable from inside its loop, through
+    /// `name` (the iterable or an alias of it), that the loop sees live. A
+    /// guard bounds every growth, so the loop ends in Node as it does here.
+    fn live_iterable_mutation(&mut self, name: &str, ty: &Ty) -> Option<String> {
+        Some(match ty {
+            Ty::Arr(item) => {
+                let value = self.value_for(item);
+                match self.prng.below(3) {
+                    0 => format!("if ({name}.length < 6) {name}.push({value});"),
+                    1 => format!("{name}.pop();"),
+                    _ => format!("if ({name}.length > 0) {name}[{name}.length - 1] = {value};"),
+                }
+            }
+            Ty::Map(item) => {
+                let key = self.expr(&Ty::Str, 1);
+                if self.prng.chance(50) {
+                    let value = self.value_for(item);
+                    format!("if ({name}.size < 6) {name}.set({key}, {value});")
+                } else {
+                    format!("{name}.delete({key});")
+                }
+            }
+            Ty::Set => {
+                let value = self.expr(&Ty::Num, 1);
+                if self.prng.chance(50) {
+                    format!("if ({name}.size < 6) {name}.add({value});")
+                } else {
+                    format!("{name}.delete({value});")
+                }
+            }
+            Ty::Params => format!("{name}.delete('a');"),
+            _ => return None,
+        })
     }
 
     fn for_in(&mut self, depth: usize) {
@@ -1995,16 +2024,20 @@ impl Generator {
                 format!("({left} {op} {right})")
             }
             17 => {
-                // A spread argument, to a function of the session's own: a
-                // builtin's is not drawn (`builtin-call-spread`).
+                // A spread argument, to a function of the session's own or
+                // to a builtin (FIG-3627).
                 let functions = self.visible_where(|b| b.ty == Ty::Fun { recursive: false });
                 let arrays = self.visible_where(|b| b.ty == Ty::Arr(Box::new(Ty::Num)));
-                if functions.is_empty() || arrays.is_empty() {
+                if arrays.is_empty() {
                     return self.number_literal();
                 }
-                let function = self.prng.pick(&functions).name.clone();
                 let array = self.prng.pick(&arrays).name.clone();
-                format!("{function}(...{array}, 1)")
+                if !functions.is_empty() && self.prng.chance(50) {
+                    let function = self.prng.pick(&functions).name.clone();
+                    return format!("{function}(...{array}, 1)");
+                }
+                let builtin = *self.prng.pick(&["max", "min"]);
+                format!("Math.{builtin}(...{array}, 1)")
             }
             18 => {
                 let sets = self.visible_where(|b| b.ty == Ty::Set);

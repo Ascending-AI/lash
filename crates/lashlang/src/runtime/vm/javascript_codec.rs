@@ -27,7 +27,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Err(()) => {
                 let value = self.heap.allocate_error(
                     ErrorKind::URIError,
-                    URI_MALFORMED.to_string(),
+                    Some(URI_MALFORMED.to_string()),
                     None,
                     None,
                 )?;

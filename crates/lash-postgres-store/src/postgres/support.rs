@@ -589,7 +589,9 @@ pub(crate) async fn count_checkpoint_data_statements<F: std::future::Future>(
     stats_pool: &sqlx::postgres::PgPool,
     future: F,
 ) -> (F::Output, usize) {
-    sqlx::query("SELECT pg_stat_statements_reset()")
+    sqlx::query(
+        "SELECT pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0)",
+    )
         .execute(stats_pool)
         .await
         .expect("reset PostgreSQL statement statistics");

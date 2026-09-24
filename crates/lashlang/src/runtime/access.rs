@@ -352,7 +352,12 @@ pub(crate) fn read_javascript_heap_field(
         }
         HeapObject::Error(error) => match field.text.as_ref() {
             "name" => Value::String(error.kind.name().into()),
-            "message" => Value::String(error.message.as_str().into()),
+            // An absent own `message` reads `""`, `Error.prototype.message`'s
+            // value in Node; the prototype is not a slot this model carries.
+            "message" => error
+                .message
+                .as_deref()
+                .map_or_else(|| Value::String("".into()), |m| Value::String(m.into())),
             "cause" => error.cause.clone().unwrap_or(Value::Undefined),
             "errors" if error.kind == ErrorKind::AggregateError => {
                 error.errors.clone().unwrap_or(Value::Undefined)
@@ -408,7 +413,10 @@ pub(crate) fn read_javascript_heap_index(
         HeapObject::Set(set) if key == "size" => Value::Number(set.values.len() as f64),
         HeapObject::Error(error) => match key.as_str() {
             "name" => Value::String(error.kind.name().into()),
-            "message" => Value::String(error.message.as_str().into()),
+            "message" => error
+                .message
+                .as_deref()
+                .map_or_else(|| Value::String("".into()), |m| Value::String(m.into())),
             "cause" => error.cause.clone().unwrap_or(Value::Undefined),
             "errors" if error.kind == ErrorKind::AggregateError => {
                 error.errors.clone().unwrap_or(Value::Undefined)

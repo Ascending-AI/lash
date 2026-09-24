@@ -213,7 +213,7 @@ async fn continuation_resumes_for_iterator_at_saved_cursor() {
         matches!(
             continuation.iterator_stack.as_slice(),
             [VmIteratorContinuation {
-                cursor: VmIteratorCursor::List { next_index: 2, .. },
+                cursor: VmIteratorCursor::Live { next_index: 2, .. },
                 ..
             }]
         )
@@ -268,7 +268,7 @@ async fn continuation_resumes_nested_inner_iterator() {
         continuation.iterator_stack.len() == 2
             && matches!(
                 &continuation.iterator_stack[1].cursor,
-                VmIteratorCursor::List { next_index: 2, .. }
+                VmIteratorCursor::Live { next_index: 2, .. }
             )
     })
     .await;
@@ -475,6 +475,7 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
         cursor: VmIteratorCursor::List {
             values: Vec::new(),
             next_index: 0,
+            collection: None,
         },
         binding_slot: slot_count,
         restore_value: None,

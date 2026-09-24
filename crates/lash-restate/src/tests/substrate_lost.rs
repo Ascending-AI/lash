@@ -134,6 +134,10 @@ struct EffectRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for EffectRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -528,6 +532,84 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
     assert!(substrate_lost(started.owner)(&outcome), "got {outcome:?}");
 }
 
+/// Admission writes a fresh process's start record, so that record must be
+/// the one its engine requires (the FIG-3588 regression). A lashlang process
+/// submitted fresh to the real handler is admitted, and its start record names
+/// the lashlang replay-key grammar: its body runs its first tool call and the
+/// process stays Running across its first boundary. An unstamped record is
+/// refused by the lashlang engine at the grammar cutover before any body runs,
+/// so the process would end Failed with no tool call.
+#[tokio::test]
+pub(super) async fn an_admitted_lashlang_process_runs_its_body_and_is_running() {
+    let process_id = ProcessId::from("admission-fresh-lashlang");
+    let executions = Arc::new(AtomicUsize::new(0));
+    let stores = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry: Arc<dyn ProcessRegistry> = stores.clone();
+    let continuations: Arc<dyn lash_core::ProcessContinuationStore> = stores.clone();
+    let worker = recovery_worker_with_plugins(
+        Arc::clone(&registry),
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        vec![counting_tool_plugin(Arc::clone(&executions))],
+    )
+    .await;
+    let registration = two_segment_tool_registration(&process_id).await;
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register the process");
+    let endpoint = Endpoint::builder()
+        .bind(
+            LashProcessWorkflowImpl::new_for_test(
+                Arc::new(RestateCoreProcessRunner::new(worker)),
+                Arc::clone(&registry),
+                Arc::clone(&continuations),
+            )
+            .with_segment_effect_budget_selector(|_| 1)
+            .serve(),
+        )
+        .build();
+
+    let _ = invoke_process_workflow_endpoint(
+        &endpoint,
+        "run",
+        &process_segment_workflow_key(&process_id, 0),
+        &segment_input(&registration, 0),
+        true,
+    )
+    .await;
+
+    let record = registry
+        .get_process(&process_id)
+        .await
+        .expect("read the admitted process")
+        .expect("the process exists");
+    let started = record
+        .first_started
+        .as_deref()
+        .cloned()
+        .expect("admission recorded the start");
+    assert_eq!(
+        started.replay_grammar,
+        Some(lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION),
+        "the admitted start record names the grammar the lashlang engine journals under"
+    );
+    assert!(
+        record.outcome.is_none(),
+        "an admitted fresh process is never refused before its body runs: {:?}",
+        record.outcome
+    );
+    assert_eq!(
+        record.status,
+        lash_core::ProcessStatus::Running,
+        "the admitted process is observable Running across its first boundary"
+    );
+    assert_eq!(
+        executions.load(Ordering::SeqCst),
+        1,
+        "the admitted body ran its first tool call"
+    );
+}
+
 /// A segment that already handed over completed: its successor carries the
 /// process. A late or fresh invocation of it is ignored, never refused — a
 /// false `SubstrateLost` there would abandon a healthy process.
@@ -660,6 +742,10 @@ struct BoundaryRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for BoundaryRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,

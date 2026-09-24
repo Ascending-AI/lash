@@ -2182,38 +2182,29 @@ enum BlobOperation {
 }
 
 #[tokio::test]
-#[ignore = "compares file and S3 blob stores; requires MinIO (`just push-gate`, or LASH_REQUIRE_MINIO=1 with --include-ignored)"]
+#[ignore = "compares file and S3 blob stores; requires a live S3 server (`scripts/ci/with-service.sh s3`, or LASH_REQUIRE_S3=1 with --include-ignored)"]
 async fn attachment_blob_store_differential_agrees() {
-    if std::env::var("LASH_REQUIRE_MINIO").as_deref() != Ok("1") {
-        eprintln!("SKIPPED attachment blob-store differential: LASH_REQUIRE_MINIO is not set");
+    if std::env::var("LASH_REQUIRE_S3").as_deref() != Ok("1") {
+        eprintln!("SKIPPED attachment blob-store differential: LASH_REQUIRE_S3 is not set");
         return;
     }
     let memory_backend = lash_sqlite_store::SqliteBackend::memory().await.unwrap();
     let memory = memory_backend.attachment_store();
     let root = tempfile::tempdir().unwrap();
     let file = lash_core::facade_support::FileAttachmentStore::new(root.path());
-    // The MinIO this runs against is not always on port 9000: the
-    // process-operations E2E driver and `scripts/ci/with-service.sh s3` both
-    // publish it on a free ephemeral port. Read the same LASH_MINIO_* settings
-    // the lash-s3-store suite reads, with the same defaults, so a literal here
-    // cannot pin the endpoint to one deployment.
+    // The S3 server this runs against is named by the same LASH_S3_* settings
+    // the lash-s3-store suite reads (`scripts/ci/s3-service.sh` owns them), so
+    // no literal here pins the endpoint or the credentials to one deployment.
+    let required = |name: &str| {
+        std::env::var(name).unwrap_or_else(|_| panic!("LASH_REQUIRE_S3=1 requires {name}"))
+    };
     let s3 = S3AttachmentStore::from_config(S3AttachmentStoreConfig {
-        endpoint_url: Some(
-            std::env::var("LASH_MINIO_ENDPOINT")
-                .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string()),
-        ),
-        region: std::env::var("LASH_MINIO_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
-        bucket: std::env::var("LASH_MINIO_BUCKET")
-            .unwrap_or_else(|_| "lash-attachments".to_string()),
+        endpoint_url: Some(required("LASH_S3_ENDPOINT")),
+        region: std::env::var("LASH_S3_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+        bucket: std::env::var("LASH_S3_BUCKET").unwrap_or_else(|_| "lash-attachments".to_string()),
         prefix: Some(format!("cross-backend/{}", run_nonce())),
-        access_key_id: Some(
-            std::env::var("LASH_MINIO_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
-        ),
-        secret_access_key: Some(
-            std::env::var("LASH_MINIO_SECRET_KEY")
-                .unwrap_or_else(|_| "minioadmin".to_string())
-                .into(),
-        ),
+        access_key_id: Some(required("LASH_S3_ACCESS_KEY")),
+        secret_access_key: Some(required("LASH_S3_SECRET_KEY").into()),
         path_style: true,
     })
     .unwrap();

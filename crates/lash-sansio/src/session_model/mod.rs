@@ -593,7 +593,7 @@ pub enum TurnFinish {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStop {
     /// The turn was cancelled. The evidence that settled the cancellation

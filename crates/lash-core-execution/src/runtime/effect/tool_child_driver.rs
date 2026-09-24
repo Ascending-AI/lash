@@ -1279,7 +1279,6 @@ async fn resolve_model_return(
                             tool_name: outcome.record.tool.clone(),
                             args: outcome.record.args.clone(),
                             output: Box::new(outcome.record.output.clone()),
-                            duration_ms: outcome.record.duration_ms,
                         },
                     ),
                     crate::RuntimeEffectLocalExecutor::presentation(
@@ -1293,6 +1292,7 @@ async fn resolve_model_return(
                             .capability
                             .attachment_acceptance)
                             .clone(),
+                        outcome.record.duration_ms,
                     ),
                 )
                 .await
