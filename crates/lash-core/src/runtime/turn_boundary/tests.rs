@@ -1440,8 +1440,11 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
     assert!(pipeline.state_mut().head_revision > 0);
 }
 
+/// FIG-3552: a peer's reclaim supersedes a queued-work claim the recovered
+/// turn restored from its predecessor's generation. The recovered commit cedes
+/// and writes nothing; it never drops the row and commits the rest of the turn.
 #[tokio::test]
-async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
+async fn recovered_final_commit_cedes_when_a_peer_supersedes_its_restored_queue_row() {
     let store = RecordingStore::default();
     let graph = SessionGraph::from_active_read_state(&[text_message(
         "u0",
@@ -1487,7 +1490,7 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
         .try_claim_session_execution_lease(
             &SessionId::from("session-1"),
             &peer_owner,
-            "recovered-final-commit-drops-only-the-peer-superseded-queue-row-executor",
+            "recovered-final-commit-cedes-to-a-peer-superseded-queue-row-executor",
             60_000,
         )
         .await
@@ -1516,7 +1519,7 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
         .try_claim_session_execution_lease(
             &SessionId::from("session-1"),
             &recovery_owner,
-            "recovered-final-commit-drops-only-the-peer-superseded-queue-row-executor-2",
+            "recovered-final-commit-cedes-to-a-peer-superseded-queue-row-executor-2",
             60_000,
         )
         .await
@@ -1524,7 +1527,8 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
         .acquired()
         .expect("recovery lease acquired");
     let returned_state = pipeline.export_state_for_assembly();
-    pipeline
+    let head_revision = pipeline.state_mut().head_revision;
+    let ceded = pipeline
         .final_commit_with_snapshots(FinalCommitInput {
             returned_state: &returned_state,
             tool_calls: &[],
@@ -1560,7 +1564,20 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
             session_execution_lease_completion: Some(recovery_lease.completion()),
         })
         .await
-        .expect("recovered commit drops stale settlement and reaches terminal state");
+        .expect_err("a recovered commit whose restored row a peer reclaimed must cede");
+    let StoreError::TurnOutcomeMaterializationRefused { error } = &ceded else {
+        panic!("the recovered commit cedes with a typed refusal: {ceded:?}");
+    };
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::AcceptedTurnInputCeded,
+        "{ceded:?}"
+    );
+    assert_eq!(
+        pipeline.state_mut().head_revision,
+        head_revision,
+        "the ceded commit publishes nothing"
+    );
 
     let queued = crate::QueuedWorkStore::list_queued_work(&store, &SessionId::from("session-1"))
         .await
@@ -1767,19 +1784,6 @@ fn state_after_export_is_the_real_committed_state() {
     assert_eq!(state.session_id, SessionId::from("session-1"));
     assert_eq!(state.turn_index, 7);
     assert_eq!(snapshot.session_id, state.session_id);
-}
-
-#[test]
-fn recovered_settlement_attempts_are_capped_by_original_rows() {
-    for rows in [0, 1, 2, 64] {
-        let mut budget = super::RecoveredSettlementBudget(rows);
-        let mut attempts = 1;
-        while budget.consume() {
-            attempts += 1;
-        }
-        assert_eq!(attempts, rows + 1);
-        assert!(!budget.consume(), "spent budget cannot reopen");
-    }
 }
 
 /// FIG-3515 Done-when: after a tool value that embeds an attachment, the

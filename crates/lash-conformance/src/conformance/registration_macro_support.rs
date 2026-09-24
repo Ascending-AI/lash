@@ -33,6 +33,7 @@ pub use super::process_references::*;
 pub use super::process_registry::status_filters::*;
 pub use super::process_registry::*;
 pub use super::process_trigger_retention::*;
+pub use super::restored_claim_cede::*;
 pub use super::retention::*;
 pub use super::runtime_persistence::*;
 pub use super::runtime_persistence_state_machine::*;

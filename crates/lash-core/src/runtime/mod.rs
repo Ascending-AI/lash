@@ -518,6 +518,9 @@ pub struct LashRuntime {
     pub runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub runtime_lease_executor_id: String,
     pub(crate) queued_run: Option<Box<crate::store::QueuedRunAdmission>>,
+    /// Rows the running queued run retook on resume because its checkpoints
+    /// had been assigned them (FIG-3552).
+    pub(crate) queued_run_reacquired: logical_turn::ReacquiredClaims,
     /// Session-scoped token cost ledger. Shared by ALL
     /// `RuntimeSessionServices` instances created from this runtime
     /// (both per-turn and async maintenance). Entries accumulate here
@@ -546,10 +549,9 @@ pub struct LashRuntime {
     /// [`LashRuntime::reconcile_unreported_usage`] needs.
     pub unreported_usage_attempts: Vec<UnreportedUsageAttempt>,
     /// Claim ids of the journaled initial drive set the running direct turn
-    /// replays (ADR 0069 §6). Such a claim is exempt from the
-    /// recovered-settlement drop: if its rows were reclaimed while the turn was
-    /// down, another driver answered them, so the turn cedes at commit instead
-    /// of committing the same words without a settlement.
+    /// replays (ADR 0069 §6). A superseded one cedes the turn at commit under
+    /// any generation: if its rows were reclaimed while the turn was down,
+    /// another driver answered them, so committing would answer them twice.
     pub(crate) journaled_drive_claims: std::collections::BTreeSet<String>,
 }
 

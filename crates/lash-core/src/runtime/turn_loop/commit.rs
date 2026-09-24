@@ -648,6 +648,7 @@ impl LashRuntime {
         let commit_effects = claims.commit_effects(
             prepared.outcome(),
             &self.journaled_drive_claims,
+            &self.queued_run_reacquired,
             &self.state.session_id,
             &trace_turn_id,
             Some(self.state.effective_protocol_turn_options().clone()),

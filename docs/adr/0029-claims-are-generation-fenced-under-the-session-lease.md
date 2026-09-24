@@ -19,6 +19,17 @@ LAW below apply unchanged to that one claim. A deferred row is released on its
 own and recomposed; only an interrupted claim is redriven as a unit (ADR 0101
 §7).
 
+Amended 2026-09-24 (FIG-3552): the LAW holds for a recovered commit too, and
+ownership moves only through the claim CAS. A resumed queued run retakes, under
+its resuming generation, every open row it owns: its members and the rows its
+checkpoints were assigned that are still held by a claim. A replayed checkpoint
+that restores the first execution's claim to such a row settles the row under
+the retaken claim. A restored claim that is still superseded at commit was
+therefore taken by another driver, and the redrive cedes with
+`accepted_turn_input_ceded` and writes nothing, for queued-work and turn-input
+claims alike. The recovered-settlement drop rule and its retry budget are
+deleted.
+
 ## Context
 
 Queued-work claims and turn-input claims carried a per-claim TTL (30s by default,

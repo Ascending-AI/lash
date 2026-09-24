@@ -178,6 +178,27 @@ pub struct SelectedQueuedRun {
     pub queued: Vec<crate::QueuedWorkClaim>,
     pub already_satisfied: Vec<BatchId>,
     pub refusal: Option<super::QueuedWorkClaimRefusal>,
+    /// On resume, the still-open rows the run's checkpoints were assigned,
+    /// retaken under the resuming generation (FIG-3552). They are not the
+    /// run's input: a replayed checkpoint that delivered them settles them
+    /// under these claims, so ownership moves only through the claim CAS.
+    pub reacquired_inputs: Vec<crate::turn_input_vocabulary::TurnInputClaim>,
+    /// The queued-work counterpart of [`Self::reacquired_inputs`].
+    pub reacquired_queued: Vec<crate::QueuedWorkClaim>,
+}
+
+impl QueuedRunAdmission {
+    /// Checkpoint-assigned rows that are not current members: the rows a
+    /// resume retakes beside its members (FIG-3552).
+    pub fn assigned_non_members(&self) -> impl Iterator<Item = &QueuedRunMember> {
+        self.assigned_members.iter().filter(|member| {
+            !self
+                .members
+                .iter()
+                .flatten()
+                .any(|current| current == *member)
+        })
+    }
 }
 
 /// Durable terminal evidence returned by an explicit-id replay.

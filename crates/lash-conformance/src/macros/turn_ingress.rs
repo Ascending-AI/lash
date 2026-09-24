@@ -1,6 +1,7 @@
 //! Registration macros for turn-ingress laws: direct-turn acceptance
-//! (ADR 0069), the aborted turn's bound input (FIG-3589), and the cancelled
-//! turn's withheld input (FIG-3531). Both take
+//! (ADR 0069), the aborted turn's bound input (FIG-3589), the cancelled
+//! turn's withheld input (FIG-3531), and the redrive that cedes rows it
+//! restored from its journal (FIG-3552). All take
 //! the same `(guard, prefix, store)` fixture, so they share one catalogue arm.
 
 /// Register one independently reported test per direct-turn acceptance law.
@@ -49,6 +50,21 @@ macro_rules! cancelled_turn_withheld_input_tests {
     ($fixture:block) => {
         $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
             (immediate_cancel_defers_withheld_inject_now_input, "cancel-defers-withheld-input"),
+        ]);
+    };
+}
+
+/// Register one independently reported test per restored-claim cede law
+/// (FIG-3552). The fixture shape is the direct-turn one, so the catalogue arm
+/// is shared.
+#[macro_export]
+macro_rules! restored_claim_cede_tests {
+    ($fixture:block) => {
+        $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
+            (a_redrive_commits_nothing_for_input_a_recovery_drain_answered, "restored-claim-recovery-answered-input"),
+            (a_redrive_commits_nothing_for_work_a_recovery_checkpoint_answered, "restored-claim-recovery-answered-work"),
+            (a_redrive_cedes_checkpoint_input_a_peer_reclaimed, "restored-claim-cede-input"),
+            (a_redrive_cedes_checkpoint_work_a_peer_reclaimed, "restored-claim-cede-queued-work"),
         ]);
     };
 }

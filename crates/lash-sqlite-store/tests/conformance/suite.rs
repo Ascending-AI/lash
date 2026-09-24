@@ -71,6 +71,8 @@ mod pre_sleep_spec;
 mod process_prune_reclaim;
 #[path = "process_retention.rs"]
 mod process_retention;
+#[path = "restored_claim_cede.rs"]
+mod restored_claim_cede;
 #[path = "session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "session_meta.rs"]

@@ -2418,6 +2418,8 @@ mod direct_turn_acceptance;
 mod drain_end;
 #[path = "conformance/injectors.rs"]
 mod injectors;
+#[path = "conformance/restored_claim_cede.rs"]
+mod restored_claim_cede;
 lash_conformance::session_read_view_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres read-session conformance: database URL is not set");
