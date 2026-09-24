@@ -310,4 +310,35 @@ mod layered_effect_group_host_laws {
             },
         )
     });
+
+    // A close racing its own children's settlements seats one terminal per
+    // child, through the same layered host.
+    lash_conformance::effect_group_close_race_tests!({
+        let backend = SqliteBackend::memory()
+            .await
+            .expect("open a memory backend");
+        let layer = Arc::new(RecordingLayer::default());
+        let hosts = backend.clone();
+        (
+            backend,
+            move |executors: Option<Arc<dyn GroupExecutors>>| {
+                let backend = hosts.clone();
+                let host = sync_await(async move {
+                    backend
+                        .reopen()
+                        .await
+                        .expect("reopen the backend")
+                        .effect_host()
+                });
+                if let Some(executors) = executors {
+                    host.register_group_executors(executors)
+                        .expect("a freshly opened host has no resolver yet");
+                }
+                Arc::new(LayeredEffectHost::new(
+                    host,
+                    Arc::clone(&layer) as Arc<dyn EffectLayer>,
+                )) as Arc<dyn EffectHost>
+            },
+        )
+    });
 }
