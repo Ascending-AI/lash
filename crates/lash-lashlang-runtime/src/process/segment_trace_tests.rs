@@ -8,7 +8,7 @@ use super::{
     LashlangProcessTraceIdentity, LashlangSegmentState, LashlangSegmentStateError,
     ReplayOrdinalsState, SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
     process_lashlang_execution_result, process_trace_session_id, record_segment_boundary_decline,
-    resolve_child_max_attempts, validate_lashlang_program_hash,
+    refuse_foreign_program, resolve_child_max_attempts,
 };
 use lash_sansio::ExecutionNodeKind;
 use lash_sansio::sync::MutexExt;
@@ -670,16 +670,28 @@ fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
     );
 }
 
+/// The shared resume refusal (FIG-3588), naming the identity it refused.
+#[track_caller]
+fn assert_retired_generation(output: &lash_core::ProcessAwaitOutput, found: &str) {
+    assert!(
+        matches!(
+            output,
+            lash_core::ProcessAwaitOutput::Abandoned { evidence, .. }
+                if evidence.writer == lash_core::AbandonWriter::ResumeRefused {
+                    reason: lash_core::ProcessResumeRefusal::RetiredGeneration {
+                        found: found.to_string(),
+                    },
+                }
+        ),
+        "{output:?}"
+    );
+}
+
 #[test]
 fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
-    let output = validate_lashlang_program_hash("sha256:old", "sha256:current")
-        .expect_err("changed bytecode identity must fail closed");
-    assert!(matches!(
-        *output,
-        lash_core::ProcessAwaitOutput::Settled { output }
-            if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
-                if failure.code == "restate_segment_program_hash_mismatch")
-    ));
+    let output = refuse_foreign_program("sha256:old", "sha256:current", None)
+        .expect("changed bytecode identity must fail closed");
+    assert_retired_generation(&output, "sha256:old");
 }
 
 #[test]
@@ -702,14 +714,9 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
         "the bytecode version must move identity"
     );
 
-    let output = validate_lashlang_program_hash(persisted, &current)
-        .expect_err("the predecessor must fail at the program-identity fence");
-    assert!(matches!(
-        *output,
-        lash_core::ProcessAwaitOutput::Settled { output }
-            if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
-                if failure.code == "restate_segment_program_hash_mismatch")
-    ));
+    let output = refuse_foreign_program(persisted, &current, None)
+        .expect("the predecessor must fail at the program-identity fence");
+    assert_retired_generation(&output, persisted);
 
     // Keep the predecessor capture intact. Only re-envelope its parked VM at
     // the current continuation version, with the envelope fields later
@@ -845,14 +852,9 @@ fn pre_fig3571_parked_segment_is_refused_at_both_fences() {
         .expect("fixture program hash");
     let current = super::lashlang_program_hash(&input);
     assert_ne!(persisted, current, "the bytecode bump must move identity");
-    let output = validate_lashlang_program_hash(persisted, &current)
-        .expect_err("the predecessor must fail at the program-identity fence");
-    assert!(matches!(
-        *output,
-        lash_core::ProcessAwaitOutput::Settled { output }
-            if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
-                if failure.code == "restate_segment_program_hash_mismatch")
-    ));
+    let output = refuse_foreign_program(persisted, &current, None)
+        .expect("the predecessor must fail at the program-identity fence");
+    assert_retired_generation(&output, persisted);
 
     // The literal handover bytes, unedited, meet the segment-version fence.
     let engine_state =

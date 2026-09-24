@@ -988,13 +988,22 @@ pub enum RemoteRecoveryContract {
 }
 
 /// Wire mirror of the writer that established an Abandoned terminal.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteAbandonWriter {
     OwnerDrain,
     Sweep,
     ReconciledRequest,
     EngineGaveUp,
+    ResumeRefused { reason: RemoteProcessResumeRefusal },
+}
+
+/// Wire mirror of why a started process cannot be resumed safely.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProcessResumeRefusal {
+    RetiredGeneration { found: String },
+    SubstrateLost,
 }
 
 /// Wire mirror of one lease holder incarnation. Fencing identity is the full

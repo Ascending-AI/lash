@@ -77,12 +77,12 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
     );
     let _ = lash_core::runtime::take_spawned_child_runtimes();
     let outcome = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             RestateRuntimeEffectController::new_for_test(context)
-                .scoped_effect_controller(durable_admission(&ExecutionScope::process(&process_id)))
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(&process_id)))
                 .expect("session-turn liveness process scope"),
             0,
             None,

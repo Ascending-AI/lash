@@ -34,6 +34,9 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
+# The segment-admission nonce (FIG-3588) is drawn from OS randomness: Restate
+# replays a journaled nonce, and its context RNG repeats after a purge.
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash-conformance.workspace = true

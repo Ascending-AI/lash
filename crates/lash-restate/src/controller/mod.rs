@@ -13,6 +13,7 @@ mod group_read;
 pub(crate) mod journal_budget;
 mod journaled_effect;
 mod scope_recording;
+mod scoped;
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -444,54 +445,6 @@ fn trace_context_for_invocation(
         base_context.clone(),
         invocation,
     )
-}
-
-impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
-where
-    C: RestateControllerContext<'ctx>,
-{
-    /// The controller bound to `scope`. A non-session scope gets a view that
-    /// records every effect it executes and every group it opens in the
-    /// scope's durable-wait index, so a `WhenQuiescent` retirement of the
-    /// scope refuses while they are live (FIG-2499); a session scope's
-    /// effects complete under Restate's own journal and need no record.
-    pub fn scoped_effect_controller<'run>(
-        &'run self,
-        admitted: lash_core::AdmittedScope,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        admitted.scope().validate()?;
-        ScopedEffectController::owned(
-            Arc::new(scope_recording::ScopeRecordingController {
-                inner: self,
-                scope: admitted.scope().clone(),
-                binding: None,
-            }),
-            admitted,
-        )
-    }
-
-    /// The group-child-bound twin of
-    /// [`scoped_effect_controller`](Self::scoped_effect_controller) (ADR 0099
-    /// §4, FIG-3470): every effect the returned controller serves is admitted
-    /// through `EffectGroupIndex/admit_semantic` under `binding`'s recorded
-    /// child before its `ctx.run`, so a nested admission minted under a
-    /// cancel-decided child refuses at the serialized index rather than
-    /// executing under ambient authority.
-    pub fn scoped_effect_controller_for_group_child<'run>(
-        &'run self,
-        admitted: lash_core::AdmittedScope,
-        binding: lash_core::GroupChildBinding,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        admitted.scope().validate()?;
-        ScopedEffectController::owned(
-            Arc::new(scope_recording::ScopeRecordingController {
-                inner: self,
-                scope: admitted.scope().clone(),
-                binding: Some(binding),
-            }),
-            admitted,
-        )
-    }
 }
 
 impl<C> fmt::Debug for RestateRuntimeEffectController<'_, C> {

@@ -59,21 +59,6 @@ pub enum ProcessExecutionWriteAuthority {
 }
 
 impl ProcessExecutionWriteAuthority {
-    /// Constructs owner-bound resume authority for durable-substrate implementors, pinning the
-    /// exact retained execution that may hand over.
-    pub fn invocation_resume(
-        process_id: impl Into<ProcessId>,
-        execution_id: impl Into<String>,
-        resume_from: ProcessStarted,
-    ) -> Self {
-        Self::Invocation {
-            process_id: process_id.into(),
-            execution_id: execution_id.into(),
-            attempt: None,
-            resume_from: Some(resume_from),
-        }
-    }
-
     /// Constructs a `ProcessExecutionWriteAuthority` using lease semantics for store and
     /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn lease(lease: ProcessLease) -> Self {

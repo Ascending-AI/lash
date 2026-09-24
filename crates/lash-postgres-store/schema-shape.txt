@@ -25,7 +25,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 122
+version 123
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -206,6 +206,7 @@ table lash_process_segment_handovers
   column handover_json text not-null
   column process_id text not-null
   column segment_ordinal bigint not-null
+  column started_json text nullable
   primary-key (process_id, segment_ordinal)
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_tombstones

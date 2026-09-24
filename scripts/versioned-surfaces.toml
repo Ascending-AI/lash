@@ -64,6 +64,17 @@ paths = ["crates/lash-restate/src/durable_wait.rs"]
 symbols = ["RestateDurableWaitAwaitRequest", "RestateDurableWaitDeadline"]
 
 [[surface]]
+constant = "RESTATE_PROCESS_JOURNAL_VERSION"
+constant_path = "crates/lash-restate/src/process/admission.rs"
+description = "leading journaled commands of a Restate process-segment invocation (segment admission)"
+manifest = "RestateProcessJournal"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/process/admission.rs"]
+symbols = ["ADMIT_STEP", "START_STEP", "AdmissionVerdict", "StartOutcome"]
+
+[[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 description = "PostgreSQL tables, indexes, constraints, and persisted column shapes"

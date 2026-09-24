@@ -113,3 +113,6 @@ rmp-serde = { workspace = true }
 serde_bytes = { workspace = true }
 trybuild = "1"
 tracing-subscriber = { workspace = true }
+# The compile-fail proof that a Restate process segment cannot reach its
+# effects without the committed start marker's proof (FIG-3588).
+lash-restate = { workspace = true }

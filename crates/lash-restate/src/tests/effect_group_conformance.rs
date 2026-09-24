@@ -62,6 +62,7 @@ struct ToolChildProcessRunner;
 impl RestateProcessRunner for ToolChildProcessRunner {
     async fn run_process_segment(
         &self,
+        _started: &crate::SegmentStarted,
         _registration: lash_core::ProcessRegistration,
         _execution_context: lash_core::ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -116,6 +117,7 @@ impl LawProcessRunner {
 impl RestateProcessRunner for LawProcessRunner {
     async fn run_process_segment(
         &self,
+        started: &crate::SegmentStarted,
         registration: lash_core::ProcessRegistration,
         execution_context: lash_core::ProcessExecutionContext,
         scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -125,6 +127,7 @@ impl RestateProcessRunner for LawProcessRunner {
         match self.installed() {
             Some(runner) => {
                 Box::pin(runner.run_process_segment(
+                    started,
                     registration,
                     execution_context,
                     scoped_effect_controller,
@@ -136,6 +139,7 @@ impl RestateProcessRunner for LawProcessRunner {
             None => {
                 ToolChildProcessRunner
                     .run_process_segment(
+                        started,
                         registration,
                         execution_context,
                         scoped_effect_controller,

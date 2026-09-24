@@ -3,6 +3,7 @@ use crate::plugin::PluginError;
 
 use super::super::registry::ProcessContinuationStore;
 use super::TestLocalProcessRegistry;
+use super::types::RetainedHandover;
 
 #[async_trait::async_trait]
 impl ProcessContinuationStore for TestLocalProcessRegistry {
@@ -17,7 +18,7 @@ impl ProcessContinuationStore for TestLocalProcessRegistry {
             }
             let key = (process_id.clone(), handover.segment_ordinal);
             if let Some(existing) = state.handovers.get(&key) {
-                if existing == &handover {
+                if existing.handover == handover {
                     return Ok(());
                 }
                 return Err(PluginError::Session(format!(
@@ -31,7 +32,13 @@ impl ProcessContinuationStore for TestLocalProcessRegistry {
                     stored_process_id != process_id
                         || *stored_ordinal >= handover.segment_ordinal.saturating_sub(1)
                 });
-            state.handovers.insert(key, handover);
+            state.handovers.insert(
+                key,
+                RetainedHandover {
+                    handover,
+                    started: None,
+                },
+            );
             Ok(())
         })
         .await
@@ -48,7 +55,7 @@ impl ProcessContinuationStore for TestLocalProcessRegistry {
             .await
             .handovers
             .get(&(ProcessId::from(process_id.to_string()), segment_ordinal))
-            .cloned())
+            .map(|retained| retained.handover.clone()))
     }
 
     async fn latest_segment_handover(
@@ -63,7 +70,38 @@ impl ProcessContinuationStore for TestLocalProcessRegistry {
             .iter()
             .filter(|((stored_process_id, _), _)| stored_process_id == process_id)
             .max_by_key(|((_, ordinal), _)| *ordinal)
-            .map(|(_, handover)| handover.clone()))
+            .map(|(_, retained)| retained.handover.clone()))
+    }
+
+    async fn segment_start(
+        &self,
+        segment: &crate::ProcessSegmentKey,
+    ) -> Result<Option<crate::SegmentStartMarker>, PluginError> {
+        Ok(self
+            .state
+            .lock()
+            .await
+            .handovers
+            .get(&(segment.process_id.clone(), segment.segment_ordinal))
+            .and_then(|retained| retained.started.clone()))
+    }
+
+    async fn mark_segment_started(
+        &self,
+        segment: &crate::ProcessSegmentKey,
+        marker: crate::SegmentStartMarker,
+    ) -> Result<crate::SegmentStartMarker, PluginError> {
+        let key = (segment.process_id.clone(), segment.segment_ordinal);
+        self.write(async |state| {
+            let retained = state.handovers.get_mut(&key).ok_or_else(|| {
+                PluginError::Session(format!(
+                    "process `{}` segment {} has no retained handover to mark started",
+                    segment.process_id, segment.segment_ordinal
+                ))
+            })?;
+            Ok(retained.started.get_or_insert(marker).clone())
+        })
+        .await
     }
 
     async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError> {

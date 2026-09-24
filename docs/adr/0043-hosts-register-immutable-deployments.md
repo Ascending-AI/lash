@@ -75,6 +75,18 @@ and rejected: each embeds version-conditional control flow in process code
 permanently to serve an occasional event, while fork keeps journals
 version-free and evolution at the deployment boundary.
 
+## The process handler's journal prefix (FIG-3588)
+
+A Restate process-segment invocation journals its segment admission — a
+read-only verdict, then the start marker — before anything else, and
+`RESTATE_PROCESS_JOURNAL_VERSION` owns that prefix. An invocation pinned to
+the deployment that started it replays its own prefix. A new-deployment
+handler meeting an input stamped with another generation (or none, which is
+generation 1) refuses it before journaling a command, and the process ends
+`ResumeRefused { RetiredGeneration }`. That refusal of chains an earlier build
+submitted is the current, temporary cutover policy (ADR 0045, amendment
+FIG-3588).
+
 ## What is not covered
 
 Restate object state is not part of a replayed journal and does survive a

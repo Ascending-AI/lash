@@ -1017,6 +1017,7 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
     process_id       TEXT NOT NULL,
     segment_ordinal  INTEGER NOT NULL,
     handover_json    TEXT NOT NULL,
+    started_json     TEXT,
     PRIMARY KEY (process_id, segment_ordinal),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
@@ -1141,7 +1142,11 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// projection rather than a delimiter-joined rendering. A pre-42 registry
 /// holds non-injective ids and payload-less ledger rows, so it is rejected at
 /// open and recreated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 42;
+/// Version 43 (FIG-3588) gives `process_segment_handovers` the nullable
+/// `started_json` start marker a Restate segment's admission writes
+/// set-if-absent before its first effect. A pre-43 registry lacks the column,
+/// so it is rejected at open and recreated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 43;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

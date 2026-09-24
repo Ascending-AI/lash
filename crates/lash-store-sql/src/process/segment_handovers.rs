@@ -51,5 +51,17 @@ crate::statements! {
                  WHERE process_id = ?1 AND segment_ordinal < ?2 - 1";
 
         delete_by_process = "DELETE FROM process_segment_handovers WHERE process_id = ?1";
+
+        /// Whether the handover of `?1` at segment `?2` is retained, and the
+        /// start marker recorded on it: no row when no handover is retained,
+        /// a NULL marker while the segment has not started (FIG-3588).
+        select_started = "SELECT started_json FROM process_segment_handovers
+                 WHERE process_id = ?1 AND segment_ordinal = ?2";
+
+        /// Record `?3` as the start marker of `?1` at segment `?2` unless one
+        /// is already recorded. The caller reads the row back: the marker a
+        /// set-if-absent write leaves is the one that counts.
+        mark_started = "UPDATE process_segment_handovers SET started_json = ?3
+                 WHERE process_id = ?1 AND segment_ordinal = ?2 AND started_json IS NULL";
     }
 }

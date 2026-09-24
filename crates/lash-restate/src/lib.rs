@@ -140,10 +140,11 @@ pub use ingress::{
 };
 pub use process::{
     LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,
-    RestateCoreProcessRunner, RestateProcessAwaitRequest, RestateProcessCancelRequest,
-    RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessDeployment,
-    RestateProcessIngressRunner, RestateProcessRunner, RestateProcessWorkflowInput,
-    RestateProcessWorkflowOutput, ServeLashProcessWorkflow,
+    RESTATE_PROCESS_JOURNAL_VERSION, RestateCoreProcessRunner, RestateProcessAwaitRequest,
+    RestateProcessCancelRequest, RestateProcessCancelSignal, RestateProcessCompleteRequest,
+    RestateProcessDeployment, RestateProcessIngressRunner, RestateProcessRunner,
+    RestateProcessWorkflowInput, RestateProcessWorkflowOutput, SegmentStarted,
+    ServeLashProcessWorkflow,
 };
 pub use process_attach::{
     LashProcessAttach, LashProcessAttachClient, LashProcessAttachImpl, RestateProcessAttachRequest,

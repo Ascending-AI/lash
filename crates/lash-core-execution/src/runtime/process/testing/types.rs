@@ -54,7 +54,7 @@ pub(super) struct RegistryState {
     pub(super) artifact_cleanup:
         HashMap<(ProcessId, ProcessIncarnation), crate::ProcessArtifactCleanup>,
     pub(super) leases: ManagedLeaseMap,
-    pub(super) handovers: HashMap<(ProcessId, u64), crate::PersistedSegmentHandover>,
+    pub(super) handovers: HashMap<(ProcessId, u64), RetainedHandover>,
     pub(super) tool_intent_submissions: HashMap<String, crate::ToolIntentSubmissionRecord>,
     pub(super) wake_deliveries: HashMap<String, crate::WakeDelivery>,
     pub(super) wake_allocation_floors: HashMap<(SessionId, ProcessId), u64>,
@@ -114,4 +114,12 @@ pub(super) struct ManagedProcessRecord {
     pub(super) change_seq: u64,
     pub(super) events: Vec<ProcessEvent>,
     pub(super) keyed_events: HashMap<String, ProcessEvent>,
+}
+
+/// A retained handover and the start marker of the segment it resumes, kept
+/// together as the SQL stores keep them in one row.
+#[derive(Clone, Debug)]
+pub(super) struct RetainedHandover {
+    pub(super) handover: crate::PersistedSegmentHandover,
+    pub(super) started: Option<crate::SegmentStartMarker>,
 }

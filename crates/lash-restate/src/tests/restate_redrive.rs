@@ -588,9 +588,18 @@ pub(super) async fn park_process_on_its_timer(
     process_id: &ProcessId,
     input: &RestateProcessWorkflowInput,
 ) -> Vec<u8> {
-    let recording = invoke_endpoint(endpoint, "LashProcessWorkflow", "run", process_id, input)
+    let admission = admission_journal(endpoint, process_id.as_str(), input)
         .await
-        .expect("first process attempt should park on recording its effect");
+        .expect("the first process attempt admits its segment");
+    let recording = invoke_endpoint_body(
+        endpoint,
+        "LashProcessWorkflow",
+        "run",
+        admitted_invocation_body(process_id.as_str(), input, &admission)
+            .expect("splice the admission"),
+    )
+    .await
+    .expect("first process attempt should park on recording its effect");
     let calls = restate_call_frames(&recording).expect("decode effect-recording calls");
     assert_eq!(
         calls
@@ -607,13 +616,17 @@ pub(super) async fn park_process_on_its_timer(
             RESTATE_SUSPENSION_MESSAGE_TYPE
         ]
     );
-    let admitted = encode_call_replay(
-        process_id,
-        input,
-        &[(calls[0].clone(), Some(serde_json::json!(true)))],
-        None,
+    let admitted = with_admission(
+        &encode_call_replay(
+            process_id,
+            input,
+            &[(calls[0].clone(), Some(serde_json::json!(true)))],
+            None,
+        )
+        .expect("splice the admitted effect recording"),
+        &admission,
     )
-    .expect("splice the admitted effect recording");
+    .expect("splice the admission");
     let parked = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", admitted)
         .await
         .expect("admitted process attempt should park on its timer");
@@ -624,7 +637,8 @@ pub(super) async fn park_process_on_its_timer(
             RESTATE_SUSPENSION_MESSAGE_TYPE
         ]
     );
-    let mut journal = recording.to_vec();
+    let mut journal = admission;
+    journal.extend_from_slice(&recording);
     journal.extend_from_slice(&parked);
     journal
 }
@@ -689,7 +703,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        execution_id: None,
+        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
     let parked = park_process_on_its_timer(&endpoint, &ProcessId::from(process_id), &input).await;
@@ -771,7 +785,7 @@ pub(super) async fn fig788_terminal_outcome_landing_preserves_the_suspended_comm
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        execution_id: None,
+        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
     let parked = park_process_on_its_timer(&endpoint, &ProcessId::from(process_id), &input).await;
@@ -858,13 +872,20 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
-        execution_id: Some("fig788-ordinal-one-execution".to_string()),
+        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
-    let terminal_delivery_suspension =
-        invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
-            .await
-            .expect("ordinal-one terminal delivery should suspend on its call");
+    let admission = admission_journal(&endpoint, process_id, &input)
+        .await
+        .expect("the first attempt admits its segment");
+    let terminal_delivery_suspension = invoke_endpoint_body(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+    )
+    .await
+    .expect("ordinal-one terminal delivery should suspend on its call");
     assert_eq!(
         restate_message_types(&terminal_delivery_suspension)
             .expect("decode ordinal-one terminal suspension"),
@@ -887,6 +908,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
 
     let replay =
         encode_process_terminal_delivery_replay(process_id, &input, &terminal_delivery_suspension)
+            .and_then(|replay| with_admission(&replay, &admission))
             .expect("splice deployed ordinal-one terminal journal");
     let output = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
         .await
@@ -969,12 +991,20 @@ pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() 
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
-        execution_id: Some("fig2083-missing-terminal-execution".to_string()),
+        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
-    let suspended = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
+    let admission = admission_journal(&endpoint, process_id, &input)
         .await
-        .expect("terminal attempt should suspend during root delivery");
+        .expect("the first attempt admits its segment");
+    let suspended = invoke_endpoint_body(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+    )
+    .await
+    .expect("terminal attempt should suspend during root delivery");
     assert_eq!(
         restate_message_types(&suspended).expect("decode terminal suspension"),
         vec![
@@ -1023,6 +1053,7 @@ pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() 
     // current handover contract, and the process already holds its durable
     // terminal, so the invocation must not be retried or re-completed.
     let replay = encode_process_terminal_delivery_replay(process_id, &input, &suspended)
+        .and_then(|replay| with_admission(&replay, &admission))
         .expect("splice the deployed terminal delivery");
     let redriven = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
         .await
@@ -1103,7 +1134,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
-        execution_id: Some("fig811-effectful-terminal-execution".to_string()),
+        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
     let effect_suspension =
@@ -1252,13 +1283,20 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        execution_id: None,
+        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
-    let segment_finish_suspension =
-        invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
-            .await
-            .expect("first segment attempt should suspend after scheduling its successor");
+    let admission = admission_journal(&endpoint, process_id, &input)
+        .await
+        .expect("the first attempt admits its segment");
+    let segment_finish_suspension = invoke_endpoint_body(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+    )
+    .await
+    .expect("first segment attempt should suspend after scheduling its successor");
     assert_eq!(
         restate_message_types(&segment_finish_suspension)
             .expect("decode segment-finish suspension frames"),
@@ -1280,6 +1318,7 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
         .await
         .expect("record between-attempt cancellation");
     let replay = encode_process_segment_send_replay(process_id, &input, &segment_finish_suspension)
+        .and_then(|replay| with_admission(&replay, &admission))
         .expect("splice deployed segment-send journal");
     let output = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
@@ -2068,75 +2107,16 @@ pub(super) async fn fig779_completed_durable_timer_replay_does_not_enter_guard_p
         .expect("completed durable timer replay should finish without panicking");
 }
 
-/// FIG-2964: a refused successor-reference write does not fail the segment.
-///
-/// The write happens after the successor send is journaled, so propagating its
-/// error would terminally fail a segment of a chain that is already advancing.
-/// The only cost of a missing later reference is one coalescing resubmission,
-/// which the ordinal-aware sweep performs against the successor's own workflow
-/// key.
-#[tokio::test]
-pub(super) async fn segment_handover_survives_a_refused_successor_reference_write() {
-    let process_id = "fig2964-handover-ref-write-refused";
-    let stores = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let (registry, continuations, boundary) = drive_to_live_segment_boundary_with_stores(
-        process_id,
-        Arc::clone(&stores) as Arc<dyn lash_core::ProcessRegistry>,
-        Arc::clone(&stores) as Arc<dyn lash_core::ProcessContinuationStore>,
-    )
-    .await;
-    stores
-        .fail_next_external_ref_write_for_testing(lash_core::PluginError::Session(
-            "injected external-ref write failure".to_string(),
-        ))
-        .await;
-
-    // The assertion inside `complete_handover` is the point: the segment still
-    // reports `SegmentChained`, so its invocation did not fail.
-    boundary.complete_handover(process_id).await;
-
-    let handover = continuations
-        .latest_segment_handover(&ProcessId::from(process_id))
-        .await
-        .expect("read handover")
-        .expect("the boundary persisted a handover");
-    assert_eq!(
-        handover.segment_ordinal, 1,
-        "the handover is durable whether or not its reference write landed"
-    );
-    let record = registry
-        .get_process(&ProcessId::from(process_id))
-        .await
-        .expect("read process")
-        .expect("the row stands");
-    assert_eq!(
-        record
-            .external_ref
-            .as_ref()
-            .and_then(|external| external.segment_ordinal),
-        Some(0),
-        "the refused write leaves the earlier reference standing; the sweep resubmits segment 1"
-    );
-}
-
-/// FIG-2964: the handover path writes the successor's external reference, so a
-/// live segment chain — not a hand-built fixture — is what produces a row whose
-/// recorded reference names an ordinal above zero.
-///
-/// Without this write the row keeps the segment-0 reference its start wrote for
-/// the whole chain, and the recovery sweep has nothing to compare a segment
-/// against: every handed-over row would read as "already submitted" forever.
 /// Drives one process up to a real segment boundary: the start's segment-0
-/// reference is recorded, the boundary persists the segment-1 handover, and the
-/// attempt then suspends on the successor send.
+/// reference is recorded, the boundary names segment 1's owner and persists
+/// the segment-1 handover, and the attempt then suspends on the successor
+/// send.
 ///
-/// That suspension is exactly the state a host crash between the successor send
-/// and its reference write leaves behind — handover at ordinal 1, reference
-/// still at ordinal 0 — and it is the state the recovery sweep meets in
-/// production. Nothing here is hand-built: a fixture that simply writes a
-/// handover row with no reference produces a state no live start can reach (the
-/// start always records ordinal 0 on success), so a sweep rule tested against
-/// it proves nothing about the rows the sweep actually has to repair.
+/// That suspension is the state a host crash between the handover and the
+/// successor send leaves behind, and it is the state the recovery sweep meets
+/// in production. The reference is written before the handover (FIG-3588), so
+/// no live boundary leaves a handover visible without its successor's
+/// reference.
 pub(super) async fn drive_to_live_segment_boundary(
     process_id: &str,
 ) -> (
@@ -2145,20 +2125,6 @@ pub(super) async fn drive_to_live_segment_boundary(
     LiveSegmentBoundary,
 ) {
     let (registry, continuations) = process_stores();
-    drive_to_live_segment_boundary_with_stores(process_id, registry, continuations).await
-}
-
-/// The same live boundary against caller-supplied stores, so a test can drive
-/// the handover against a registry that refuses a write.
-pub(super) async fn drive_to_live_segment_boundary_with_stores(
-    process_id: &str,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    continuations: Arc<dyn lash_core::ProcessContinuationStore>,
-) -> (
-    Arc<dyn lash_core::ProcessRegistry>,
-    Arc<dyn lash_core::ProcessContinuationStore>,
-    LiveSegmentBoundary,
-) {
     let registration = rerunnable_registration(process_id);
     registry
         .register_process(registration.clone())
@@ -2191,19 +2157,28 @@ pub(super) async fn drive_to_live_segment_boundary_with_stores(
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        execution_id: None,
+        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
     // The first attempt suspends after scheduling its successor, exactly as
     // FIG-788 pins.
-    let suspension = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
+    let admission = admission_journal(&endpoint, process_id, &input)
         .await
-        .expect("first segment attempt suspends after scheduling its successor");
+        .expect("the first attempt admits its segment");
+    let suspension = invoke_endpoint_body(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+    )
+    .await
+    .expect("first segment attempt suspends after scheduling its successor");
     (
         registry,
         continuations,
         LiveSegmentBoundary {
             endpoint,
             input,
+            admission,
             suspension,
         },
     )
@@ -2214,6 +2189,7 @@ pub(super) async fn drive_to_live_segment_boundary_with_stores(
 pub(super) struct LiveSegmentBoundary {
     endpoint: Endpoint,
     input: RestateProcessWorkflowInput,
+    admission: Vec<u8>,
     suspension: bytes::Bytes,
 }
 
@@ -2222,6 +2198,7 @@ impl LiveSegmentBoundary {
     /// and completes the handover, writing the successor's reference.
     pub(super) async fn complete_handover(&self, process_id: &str) {
         let replay = encode_process_segment_send_replay(process_id, &self.input, &self.suspension)
+            .and_then(|replay| with_admission(&replay, &self.admission))
             .expect("splice deployed segment-send journal");
         let output = invoke_endpoint_body_with_json_call_responses(
             &self.endpoint,
@@ -2253,7 +2230,8 @@ pub(super) async fn segment_handover_records_the_successor_external_reference() 
     let process_id = "fig2964-handover-external-ref";
     let (registry, continuations, boundary) = drive_to_live_segment_boundary(process_id).await;
 
-    // Before the handover completes, the row carries only what its start wrote.
+    // Suspended on the successor send, the row already names segment 1: the
+    // reference is written before the handover it guards (FIG-3588).
     let before = registry
         .get_process(&ProcessId::from(process_id))
         .await
@@ -2264,8 +2242,8 @@ pub(super) async fn segment_handover_records_the_successor_external_reference() 
             .external_ref
             .as_ref()
             .and_then(|external| external.segment_ordinal),
-        Some(0),
-        "the send has not been journaled yet, so segment 0 still owns the row"
+        Some(1),
+        "the boundary names its successor before the handover and the send"
     );
 
     boundary.complete_handover(process_id).await;

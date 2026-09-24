@@ -231,19 +231,30 @@ async fn run_counted(
     }
 }
 
+/// The shared resume-refusal terminal (FIG-3588): the process is Abandoned
+/// with `ResumeRefused` evidence carrying exactly `reason`.
 #[track_caller]
-fn assert_refused_before_any_effect(run: &RefusedRun, code: &str) {
-    assert!(run.outcome.is_terminal(), "the refusal is terminal");
+fn assert_resume_refused_before_any_effect(
+    run: &RefusedRun,
+    reason: lash_core::ProcessResumeRefusal,
+) {
     let lash_core::ProcessRunOutcome::Terminal { output } = &run.outcome else {
         panic!("expected a terminal, got {:?}", run.outcome);
     };
-    let lash_core::ProcessAwaitOutput::Settled { output } = output.as_ref() else {
-        panic!("expected a settled terminal, got {output:?}");
+    let lash_core::ProcessAwaitOutput::Abandoned { evidence, control } = output.as_ref() else {
+        panic!("expected an Abandoned terminal, got {output:?}");
     };
-    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
-        panic!("expected a typed failure, got {:?}", output.outcome);
-    };
-    assert_eq!(failure.code, code, "{}", failure.message);
+    assert_eq!(
+        evidence.writer,
+        lash_core::AbandonWriter::ResumeRefused { reason },
+        "the refusal is the shared resume-refusal terminal"
+    );
+    assert!(control.is_none(), "a resume refusal carries no control");
+    assert_stopped_before_any_effect(run);
+}
+
+#[track_caller]
+fn assert_stopped_before_any_effect(run: &RefusedRun) {
     assert_eq!(run.crossings, 0, "no effect may cross the controller");
     assert!(
         !run.runtime_built,
@@ -252,9 +263,9 @@ fn assert_refused_before_any_effect(run: &RefusedRun, code: &str) {
 }
 
 /// A module artifact the pre-FIG-3571 writer published cannot decode under
-/// the carrier IR. That is deterministic, so the run ends with the typed
-/// `process_artifact_generation_retired` terminal instead of retrying a
-/// fault that can never clear.
+/// the carrier IR. That is deterministic, so the run ends Abandoned with the
+/// shared `ResumeRefused { RetiredGeneration }` terminal, naming the module
+/// ref it refused, instead of retrying a fault that can never clear.
 #[tokio::test(flavor = "current_thread")]
 async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
     let stored: serde_json::Value = serde_json::from_slice(MODULE_ARTIFACT_PRE_FIG3571)
@@ -287,7 +298,12 @@ async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
         None,
     )
     .await;
-    assert_refused_before_any_effect(&run, "process_artifact_generation_retired");
+    assert_resume_refused_before_any_effect(
+        &run,
+        lash_core::ProcessResumeRefusal::RetiredGeneration {
+            found: input.module_ref.to_string(),
+        },
+    );
 }
 
 /// A sleep process the current build published, for the handover cases: were
@@ -342,7 +358,8 @@ fn parked_handover(program_hash: String) -> lash_core::SegmentHandover {
 }
 
 /// A segment the pre-FIG-3571 writer parked carries that build's program
-/// identity, so its handover is refused at the identity fence.
+/// identity, so its handover is refused at the identity fence: the shared
+/// resume refusal, naming the identity it found.
 #[tokio::test(flavor = "current_thread")]
 async fn pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect() {
     let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)
@@ -352,17 +369,30 @@ async fn pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_
         .unwrap_or_else(|| panic!("the fixture records its program hash"))
         .to_string();
     let (store, input) = published_sleep_process().await;
-    let run = run_counted(store, &input, Some(parked_handover(recorded))).await;
-    assert_refused_before_any_effect(&run, "restate_segment_program_hash_mismatch");
+    let run = run_counted(store, &input, Some(parked_handover(recorded.clone()))).await;
+    assert_resume_refused_before_any_effect(
+        &run,
+        lash_core::ProcessResumeRefusal::RetiredGeneration { found: recorded },
+    );
 }
 
 /// Behind the identity fence the parked bytes still meet the segment-version
-/// fence: even under a matching identity, a v17 segment is refused before its
-/// continuation is restored.
+/// fence: even under a matching identity, a v17 segment is refused with the
+/// shared resume refusal before its continuation is restored.
 #[tokio::test(flavor = "current_thread")]
 async fn pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect() {
     let (store, input) = published_sleep_process().await;
     let current = crate::process::lashlang_program_hash(&input);
+    let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)
+        .unwrap_or_else(|error| panic!("the parked-segment fixture is JSON: {error}"));
+    let parked_version = fixture["segment_state"]["version"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("the fixture records its segment-state version"));
     let run = run_counted(store, &input, Some(parked_handover(current))).await;
-    assert_refused_before_any_effect(&run, "process_segment_handover_invalid");
+    assert_resume_refused_before_any_effect(
+        &run,
+        lash_core::ProcessResumeRefusal::RetiredGeneration {
+            found: format!("lashlang-segment-state-v{parked_version}"),
+        },
+    );
 }

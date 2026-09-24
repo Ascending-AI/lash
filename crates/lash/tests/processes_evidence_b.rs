@@ -515,12 +515,6 @@ fn processes_area_witnesses_b() {
         lash::ProcessId::from("x"),
         String::new(),
     );
-    // W0492: lash::process::ProcessExecutionWriteAuthority::invocation_resume [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::invocation_resume(
-        lash::ProcessId::from("x"),
-        String::new(),
-        todo!(),
-    );
     // W0493: lash::process::ProcessExecutionWriteAuthority::invocation_started [function]
     let _ = lash::process::ProcessExecutionWriteAuthority::invocation_started;
     // W0494: lash::process::ProcessExecutionWriteAuthority::lease [function]

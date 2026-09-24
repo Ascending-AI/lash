@@ -300,7 +300,8 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
         DurableFormat::RestateDurableWaitRequest
         | DurableFormat::RestateDurableWaitIndexEpoch
         | DurableFormat::RestateProcessCommandJournal
-        | DurableFormat::RestateEffectGroupIndexProtocol => SurfaceRelation::Unwalkable(
+        | DurableFormat::RestateEffectGroupIndexProtocol
+        | DurableFormat::RestateProcessJournal => SurfaceRelation::Unwalkable(
             "no bounded surface: Restate journal and object state live in the Restate \
              deployment, outside lash's own store",
         ),

@@ -75,6 +75,7 @@ pub use lash_protocol_rlm::{
 pub use lash_restate::{
     DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION,
     EFFECT_GROUP_INDEX_PROTOCOL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
+    RESTATE_PROCESS_JOURNAL_VERSION,
 };
 pub use lash_sansio::{LASHLANG_SEMANTIC_HASH_VERSION, TURN_CHECKPOINT_SCHEMA_VERSION};
 #[cfg(feature = "rlm")]
@@ -172,6 +173,9 @@ pub enum DurableFormat {
     /// The Restate effect-group protocol a group's index stamps into its
     /// object state.
     RestateEffectGroupIndexProtocol,
+    /// The leading commands every Restate process-segment invocation
+    /// journals: segment admission (FIG-3588).
+    RestateProcessJournal,
     /// The Lashlang VM ABI this build implements. Never persisted — see
     /// [`FormatProbe::NotPersisted`].
     VmAbi,
@@ -216,6 +220,7 @@ impl DurableFormat {
             DurableFormat::RestateDurableWaitIndexEpoch => "Restate durable-wait index epoch",
             DurableFormat::RestateProcessCommandJournal => "Restate process-command journal",
             DurableFormat::RestateEffectGroupIndexProtocol => "Restate effect-group index protocol",
+            DurableFormat::RestateProcessJournal => "Restate process journal prefix",
             DurableFormat::VmAbi => "Lashlang VM ABI",
         }
     }
@@ -548,6 +553,14 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
             version: FormatVersion::Counter(EFFECT_GROUP_INDEX_PROTOCOL_VERSION),
             owning_crate: "lash-restate",
             constant: "EFFECT_GROUP_INDEX_PROTOCOL_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "restate")]
+        DurableFormatEntry {
+            format: DurableFormat::RestateProcessJournal,
+            version: FormatVersion::Counter(RESTATE_PROCESS_JOURNAL_VERSION),
+            owning_crate: "lash-restate",
+            constant: "RESTATE_PROCESS_JOURNAL_VERSION",
             probe: FormatProbe::Comparable,
         },
     ]

@@ -140,6 +140,9 @@ const REPLAY_ORDINAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const GROUP_PROTOCOL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-115-148f05d42/sqlite-expected.json",
 ];
+const DRAIN_WAIT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-116-99467515b/sqlite-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/sqlite-expected.json",
 ];

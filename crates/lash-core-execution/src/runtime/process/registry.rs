@@ -487,6 +487,40 @@ impl WakeDeliveryReport {
     }
 }
 
+/// One segment of one process: the key every segment-scoped durable fact is
+/// stored under. It is the single place a process-identity change (for
+/// example keying by incarnation) has to touch.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ProcessSegmentKey {
+    pub process_id: crate::ProcessId,
+    pub segment_ordinal: u64,
+}
+
+impl ProcessSegmentKey {
+    pub fn new(process_id: impl Into<crate::ProcessId>, segment_ordinal: u64) -> Self {
+        Self {
+            process_id: process_id.into(),
+            segment_ordinal,
+        }
+    }
+}
+
+/// The durable fact that a handed-over segment's execution started (FIG-3588).
+///
+/// Written once, by the substrate that runs the segment, before the segment
+/// issues any effect, and never cleared while the segment's handover is
+/// retained. `nonce` is drawn from OS randomness by the execution that
+/// admitted the segment and journaled with that admission, so the execution's
+/// own retry recognises the marker as its own, while any other execution of
+/// the segment — one whose journal is gone — finds a nonce it did not draw and
+/// refuses to run the segment again. Segment 0 has no marker of its own: its
+/// start is the process's `first_started`.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SegmentStartMarker {
+    pub nonce: String,
+    pub started_at_ms: u64,
+}
+
 /// Substrate-scoped durable continuation storage. This is not part of the
 /// uniform process registry because only segmented execution substrates need
 /// it.
@@ -510,6 +544,25 @@ pub trait ProcessContinuationStore: Send + Sync {
     ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
 
     async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError>;
+
+    /// The start marker of the handover retained for `segment`, or `None`
+    /// while no execution has started that segment (or no handover is
+    /// retained for it).
+    async fn segment_start(
+        &self,
+        segment: &ProcessSegmentKey,
+    ) -> Result<Option<SegmentStartMarker>, PluginError>;
+
+    /// Record that `segment` started, set-if-absent, and return the marker the
+    /// store now holds: `marker` when this call wrote it, or the one an
+    /// earlier call recorded, which is left unchanged. The caller compares the
+    /// returned nonce with its own. The segment's handover must be retained;
+    /// marking a segment with none is an error.
+    async fn mark_segment_started(
+        &self,
+        segment: &ProcessSegmentKey,
+        marker: SegmentStartMarker,
+    ) -> Result<SegmentStartMarker, PluginError>;
 }
 
 /// Compiled only under `cfg(any(test, feature = "testing"))` and never a

@@ -101,7 +101,7 @@ pub(super) async fn run_invocation(
     );
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(context));
     let scope = controller
-        .scoped_effect_controller(
+        .process_scope_for_test(
             recorded_process_admission(registry.as_ref(), &registration.id).await,
         )
         .expect("scope the process invocation");

@@ -27,6 +27,22 @@ impl ProcessContinuationStore for SqliteProcessRegistry {
         self.latest_segment_handover_impl(process_id).await
     }
 
+    async fn segment_start(
+        &self,
+        segment: &lash_core_execution::ProcessSegmentKey,
+    ) -> Result<Option<lash_core_execution::SegmentStartMarker>, lash_core_execution::PluginError>
+    {
+        self.segment_start_impl(segment).await
+    }
+
+    async fn mark_segment_started(
+        &self,
+        segment: &lash_core_execution::ProcessSegmentKey,
+        marker: lash_core_execution::SegmentStartMarker,
+    ) -> Result<lash_core_execution::SegmentStartMarker, lash_core_execution::PluginError> {
+        self.mark_segment_started_impl(segment, marker).await
+    }
+
     async fn delete_segment_handovers(
         &self,
         process_id: &ProcessId,

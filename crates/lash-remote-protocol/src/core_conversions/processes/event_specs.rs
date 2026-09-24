@@ -147,6 +147,9 @@ impl From<lash_core::AbandonWriter> for RemoteAbandonWriter {
             lash_core::AbandonWriter::Sweep => Self::Sweep,
             lash_core::AbandonWriter::ReconciledRequest => Self::ReconciledRequest,
             lash_core::AbandonWriter::EngineGaveUp => Self::EngineGaveUp,
+            lash_core::AbandonWriter::ResumeRefused { reason } => Self::ResumeRefused {
+                reason: reason.into(),
+            },
         }
     }
 }
@@ -158,6 +161,31 @@ impl From<RemoteAbandonWriter> for lash_core::AbandonWriter {
             RemoteAbandonWriter::Sweep => Self::Sweep,
             RemoteAbandonWriter::ReconciledRequest => Self::ReconciledRequest,
             RemoteAbandonWriter::EngineGaveUp => Self::EngineGaveUp,
+            RemoteAbandonWriter::ResumeRefused { reason } => Self::ResumeRefused {
+                reason: reason.into(),
+            },
+        }
+    }
+}
+
+impl From<lash_core::ProcessResumeRefusal> for RemoteProcessResumeRefusal {
+    fn from(value: lash_core::ProcessResumeRefusal) -> Self {
+        match value {
+            lash_core::ProcessResumeRefusal::RetiredGeneration { found } => {
+                Self::RetiredGeneration { found }
+            }
+            lash_core::ProcessResumeRefusal::SubstrateLost => Self::SubstrateLost,
+        }
+    }
+}
+
+impl From<RemoteProcessResumeRefusal> for lash_core::ProcessResumeRefusal {
+    fn from(value: RemoteProcessResumeRefusal) -> Self {
+        match value {
+            RemoteProcessResumeRefusal::RetiredGeneration { found } => {
+                Self::RetiredGeneration { found }
+            }
+            RemoteProcessResumeRefusal::SubstrateLost => Self::SubstrateLost,
         }
     }
 }

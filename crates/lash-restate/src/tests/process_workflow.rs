@@ -97,7 +97,7 @@ pub(super) async fn cancel_redrives_successor_engine() {
         .await
         .expect("cancel between segments");
     let outcome = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
             native_process_scope(&ProcessId::from("cancel-between-segments")),
@@ -215,7 +215,7 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
             registration,
             execution_context: ProcessExecutionContext::default(),
             segment_ordinal: 0,
-            execution_id: None,
+            journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
         },
         true,
     )
@@ -286,7 +286,7 @@ pub(super) async fn worker_replacement_mid_child_aborts_parent_without_terminali
     );
 
     let error = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration.clone(),
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
@@ -318,7 +318,7 @@ pub(super) async fn worker_replacement_mid_child_aborts_parent_without_terminali
     );
 
     let rerun = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
@@ -359,7 +359,7 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
     );
 
     workflow
-        .run_registration(
+        .run_registration_for_test(
             registration.clone(),
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
@@ -382,7 +382,7 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
     assert!(interrupted.outcome.is_none());
 
     let rerun = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
@@ -511,6 +511,8 @@ pub(super) fn boundary_with_armed_wait_is_declined_instead_of_terminalized() {
 #[tokio::test]
 pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
     let runner = Arc::new(RecordingRunner::default());
+    // The run is recorded and the process stays live for the cancel below.
+    runner.stay_live.store(true, Ordering::SeqCst);
     let registry = process_registry();
     let endpoint = Endpoint::builder()
         .bind(
@@ -524,7 +526,7 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
         .build();
     let context = Arc::new(RecordingContext::with_endpoint(endpoint));
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
-    let registration = external_registration("task-smoke")
+    let registration = rerunnable_registration("task-smoke")
         .with_wake_session_id(Some(SessionId::from("wake-smoke")));
     let execution_context = ProcessExecutionContext::default().with_causal_invocation(Some(
         runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-smoke").into_runtime_invocation(),
@@ -955,15 +957,6 @@ pub(super) async fn segmented_child_await_registration(
 
 #[tokio::test]
 pub(super) async fn lashlang_process_retains_child_possession_across_restate_segments() {
-    run_segmented_lashlang_process(false).await;
-}
-
-#[tokio::test]
-pub(super) async fn lashlang_non_initial_restate_redrive_opens_new_trace_attempt() {
-    run_segmented_lashlang_process(true).await;
-}
-
-async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
     let (registry, continuations) = process_stores();
     let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
     // The cell starts its child through `processes.start`, which is a plugin
@@ -985,11 +978,7 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
         .with_segment_effect_budget_selector(|_| 1),
     );
     let registration = segmented_child_await_registration(
-        &ProcessId::from(if redrive_non_initial {
-            "segmented-child-await-redrive"
-        } else {
-            "segmented-child-await-parent"
-        }),
+        &ProcessId::from("segmented-child-await-parent"),
         persist_recovery_env_ref().await,
     )
     .await;
@@ -1001,7 +990,6 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
     let mut ordinal = 0_u64;
     let mut input_handover = None;
     let mut boundary_count = 0_usize;
-    let mut execution_id = None::<String>;
     let restate_events = Arc::new(RecordingContext::default());
     loop {
         let context = Arc::new(ReplayableRecordingContext {
@@ -1013,27 +1001,18 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
             Arc::clone(&context),
             RestateEffectControllerOptions::default().segment_effect_budget(1),
         );
-        let retained = registry
-            .get_process(&registration.id)
-            .await
-            .expect("read retained child-await parent")
-            .expect("segmented child-await parent exists");
-        let (current_execution_id, execution_authority) = segment_execution_authority(
+        // Every segment continues the root segment's execution.
+        let execution_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
             &registration.id,
-            ordinal,
-            execution_id.as_deref(),
-            &format!("segmented-child-await-invocation-{ordinal}"),
-            retained.first_started.as_deref(),
-        )
-        .expect("derive segmented child-await authority");
-        execution_id = Some(current_execution_id);
+            "segmented-child-await-root-execution",
+        );
         let outcome = workflow
-            .run_registration(
+            .run_registration_for_test(
                 registration.clone(),
                 ProcessExecutionContext::default()
                     .with_execution_write_authority(execution_authority.clone()),
                 controller
-                    .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                    .process_scope_for_test(durable_admission(&ExecutionScope::process(
                         &registration.id,
                     )))
                     .expect("segmented child-await scope"),
@@ -1047,7 +1026,7 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
             lash_core::ProcessRunOutcome::SegmentBoundary(boundary) => {
                 boundary_count += 1;
                 let next = ordinal + 1;
-                if !redrive_non_initial && next == 1 {
+                if next == 1 {
                     let before = graphs
                         .graphs()
                         .into_iter()
@@ -1058,12 +1037,12 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
                         .expect("parent attempt graph before replay");
                     context.start_replay();
                     let replay = workflow
-                        .run_registration(
+                        .run_registration_for_test(
                             registration.clone(),
                             ProcessExecutionContext::default()
                                 .with_execution_write_authority(execution_authority),
                             controller
-                                .scoped_effect_controller(durable_admission(
+                                .process_scope_for_test(durable_admission(
                                     &ExecutionScope::process(&registration.id),
                                 ))
                                 .expect("replayed segment scope"),
@@ -1108,9 +1087,6 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
                         .expect("stored segmented child-await handover")
                         .handover,
                 );
-                if redrive_non_initial && next == 1 {
-                    execution_id = None;
-                }
                 ordinal = next;
             }
             lash_core::ProcessRunOutcome::Terminal { output, .. } => {
@@ -1140,15 +1116,7 @@ async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
         .map(|graph| graph.history[0].event.identity.attempt().expect("attempt"))
         .collect::<Vec<_>>();
     attempts.sort_unstable();
-    assert_eq!(
-        attempts,
-        if redrive_non_initial {
-            vec![1, 2]
-        } else {
-            vec![1]
-        },
-        "a fresh non-initial invocation opens a new attempt; continued segments do not"
-    );
+    assert_eq!(attempts, vec![1], "continued segments stay one attempt");
 }
 
 pub(super) fn recovery_session_policy() -> lash_core::SessionPolicy {

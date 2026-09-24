@@ -112,3 +112,64 @@ choice at the observation plane: the live-replay store is host-supplied, the
 streamed deltas already flow through it, and a durable implementation of it
 recovers the same evidence without touching the session store or this
 document's floor.
+
+## Amendment (FIG-3588, 2026-09-24): a Restate segment never restarts started work
+
+"Lash never re-drives engine-owned work" is absolute on the Restate tier. A
+Restate workflow's invocation id is a function of its key (Restate v1.7.0,
+`InvocationUuid::generate`), so a retry of the invocation that started a
+segment and a fresh invocation of the same key after its journal was lost
+carry the same id. The id cannot tell them apart; a durable start marker does.
+Every `LashProcessWorkflow/run` invocation admits its segment before any
+effect, in this order, each step its own journaled command:
+
+1. **Verdict** (read-only). Read the segment's start marker: segment 0's is
+   the process's `first_started`, a later segment's is the marker on its
+   retained handover. Present: the process ends `Abandoned` with
+   `ResumeRefused { SubstrateLost }`, naming the lost execution. Absent: admit,
+   with a nonce drawn from OS randomness inside the step so it is journaled
+   with the verdict. A segment whose successor handover exists already
+   completed; it is ignored, never refused.
+2. **Start**. Write the marker with that nonce, set-if-absent. The recorded
+   nonce equals ours: this execution's own marker, possibly from its earlier
+   try. A different nonce: a lost execution started the segment, so
+   `SubstrateLost`.
+3. **Effects**, only under the proof step 2 returns (`SegmentStarted`, which
+   has no public constructor and which the segment's controller and runner
+   require).
+
+The nonce and the marker are two journaled steps because a retry re-runs a
+step whose completion was not journaled; one step that drew and wrote would
+draw a second nonce and refuse its own marker. Neither the context RNG nor the
+invocation id may supply the nonce: both repeat after a purge.
+
+The resulting cases, each a law against Restate's own identity and retry
+semantics (`lash-restate` `tests::substrate_lost`):
+
+- (a) a crash between the steps retries over the journaled verdict and
+  proceeds;
+- (b) a journal lost before the marker commits admits a fresh run, and no
+  effect had run;
+- (c) a journal lost after the marker, before the first effect, ends
+  `SubstrateLost` with zero effects. This double fault is the accepted
+  direction: a false Abandoned, never a duplicate effect;
+- (d) a journal lost after effects ends `SubstrateLost` with no re-dispatch.
+
+Restate v1.7.0 refuses to purge an invocation or its journal while the
+invocation is not completed, so (b) and (c) arise from endpoint crashes and
+lost journal storage, not from ordinary purges.
+
+The ingress sweep therefore submits every live row under its latest segment's
+key, whatever its external reference says: Restate coalesces a submission onto
+a live or retained workflow, and a key it no longer holds runs the admission,
+which starts a segment that never started and refuses one that did. The
+external reference is observational. A boundary still writes its successor's
+reference before the handover and the send, and a store fault there is
+retried by Restate, never logged and dropped.
+
+`RESTATE_PROCESS_JOURNAL_VERSION` owns the handler's leading journaled
+commands; any change to them bumps it. Every submitter stamps it on the
+workflow input, and the handler refuses another generation before it
+journals anything, ending the process `ResumeRefused { RetiredGeneration }`.
+Refusing chains an earlier build submitted, rather than migrating them, is the
+current, temporary cutover policy, not a permanent law.
