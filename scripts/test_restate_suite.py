@@ -80,18 +80,18 @@ class RegistryTests(unittest.TestCase):
                 self.assertTrue(suite.filters)
                 self.assertGreaterEqual(suite.shards, 1)
 
-    def test_every_replay_divergence_gives_a_reason(self) -> None:
+    def test_every_replay_divergence_names_the_ticket_that_brings_it_back(self) -> None:
         for name in MODULE.load_registry():
             for law, reason in MODULE.load_suite(name).replay_divergent.items():
                 with self.subTest(law=law):
-                    self.assertTrue(reason.strip())
+                    self.assertRegex(reason, r"\(FIG-\d+\)$")
 
     def test_a_report_only_leg_says_why(self) -> None:
         for name in MODULE.load_registry():
             for leg, reason in MODULE.load_suite(name).report_only.items():
                 with self.subTest(suite=name, leg=leg):
                     self.assertIn(leg, MODULE.LEGS)
-                    self.assertTrue(reason.strip())
+                    self.assertRegex(reason, r"FIG-\d+")
 
     def test_legs_differ_only_in_the_inactivity_timeout(self) -> None:
         self.assertEqual({}, MODULE.LEGS["live"])
