@@ -768,6 +768,10 @@ pub(super) struct RecordingRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for RecordingRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -822,6 +826,10 @@ pub(super) struct OpaqueFailureThenSuccessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for DivergenceThenSuccessRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -857,6 +865,10 @@ impl RestateProcessRunner for DivergenceThenSuccessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -884,6 +896,10 @@ impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for TerminalFailureRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -909,6 +925,10 @@ impl RestateProcessRunner for TerminalFailureRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for AlreadyStartedRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1065,6 +1085,10 @@ impl HttpTransport for BlockingCancelSignalTransport {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for CancellationAwareRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1095,6 +1119,10 @@ impl RestateProcessRunner for CancellationAwareRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for SegmentedRecordingRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
