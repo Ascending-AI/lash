@@ -147,7 +147,10 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// of a load of the name, and a top-level block binding of a name the cell
 /// addresses through `globalThis` takes a generated private slot. A v20
 /// instruction stream is refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 21;
+/// v22 (FIG-3657): the embedded VM-continuation contract carries an error's
+/// own `message` as `Option<String>`, keeping an absent message distinct from
+/// an explicitly empty one. A v21 stream is refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 22;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

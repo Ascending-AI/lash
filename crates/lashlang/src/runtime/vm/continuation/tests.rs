@@ -177,6 +177,63 @@ fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {
     assert_eq!(number.to_bits(), (-0.0_f64).to_bits());
 }
 
+/// FIG-3657: same ownness contract as the snapshot wire — the heap error's
+/// `message` is `Option<String>` on this wire too, so an absent `message`
+/// restores as absent (`Object.hasOwn(e, "message")` is false) and an
+/// explicitly empty one restores as present.
+#[test]
+fn error_message_presence_round_trips_through_the_continuation_wire() {
+    let mut heap = Heap::default();
+    let absent = heap
+        .allocate_error(ErrorKind::Error, None, None, None)
+        .expect("new Error()");
+    let empty = heap
+        .allocate_error(ErrorKind::Error, Some(String::new()), None, None)
+        .expect("new Error('')");
+    let message = heap
+        .allocate_error(ErrorKind::Error, Some("m".to_string()), None, None)
+        .expect("new Error('m')");
+    let caused = heap
+        .allocate_error(
+            ErrorKind::Error,
+            Some("m".to_string()),
+            Some(Value::String("why".into())),
+            None,
+        )
+        .expect("new Error('m', { cause })");
+    let mut continuation = empty_continuation(heap);
+    // The forest form refuses TypeScript objects outright; a real suspension
+    // records this heap in the shared-graph form (`Vm::continuation` retries
+    // with `reference_semantics` when the forest validator fails).
+    continuation.reference_semantics = true;
+    continuation.slots = vec![Some(absent), Some(empty), Some(message), Some(caused)];
+    validate_continuation(&continuation).expect("a slot-rooted error heap validates");
+
+    let bytes = serde_json::to_vec(&continuation).expect("serialize continuation");
+    let restored: VmContinuation = serde_json::from_slice(&bytes).expect("restore continuation");
+    assert_eq!(
+        serde_json::to_vec(&restored).expect("redump continuation"),
+        bytes,
+        "the continuation re-encodes byte for byte"
+    );
+
+    let restored_error = |index: usize| -> &ErrorObject {
+        let Some(Some(Value::Ref(id))) = restored.slots.get(index) else {
+            panic!("slot {index} should restore as a heap reference");
+        };
+        let HeapObject::Error(error) = restored.heap.heap.get(*id).expect("restored object") else {
+            panic!("slot {index} should restore as an error");
+        };
+        error
+    };
+    assert_eq!(restored_error(0).message, None);
+    assert_eq!(restored_error(1).message.as_deref(), Some(""));
+    assert_eq!(restored_error(2).message.as_deref(), Some("m"));
+    let caused = restored_error(3);
+    assert_eq!(caused.message.as_deref(), Some("m"));
+    assert_eq!(caused.cause, Some(Value::String("why".into())));
+}
+
 #[test]
 fn continuation_numbers_canonicalize_nan_and_preserve_negative_zero() {
     let mut left = empty_continuation(Heap::default());

@@ -67,9 +67,15 @@ use super::exceptions::PendingErrorOrigin;
 /// `Set` holds the collection its pending tail follows. A v19 cursor is a
 /// snapshot the resumed loop would walk as if it were live, so it is refused.
 ///
+/// v21 (FIG-3657) carries an error's own `message` as `Option<String>`: absent
+/// stays absent and an explicitly empty message stays empty, where v20 encoded
+/// both as `""`. A v20 continuation decodes cleanly but would resurrect an
+/// error's `new Error('')` with no own `message`, so it is refused rather than
+/// resumed.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 20;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 21;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
@@ -421,7 +427,7 @@ mod continuation_serde {
         },
         Error {
             error_kind: ErrorKind,
-            message: String,
+            message: Option<String>,
             cause: Option<ValueWire>,
             errors: Option<ValueWire>,
         },
@@ -563,9 +569,7 @@ mod continuation_serde {
             },
             HeapObject::Error(error) => HeapObjectWire::Error {
                 error_kind: error.kind,
-                // Same wire rule as the canonical snapshot: an absent own
-                // `message` encodes as `""`, and `""` decodes as absent.
-                message: error.message.clone().unwrap_or_default(),
+                message: error.message.clone(),
                 cause: error.cause.as_ref().map(value_to_wire).transpose()?,
                 errors: error.errors.as_ref().map(value_to_wire).transpose()?,
             },
@@ -656,7 +660,7 @@ mod continuation_serde {
                 errors,
             } => HeapObject::Error(ErrorObject {
                 kind: error_kind,
-                message: (!message.is_empty()).then_some(message),
+                message,
                 cause: cause.map(value_from_wire).transpose()?,
                 errors: errors.map(value_from_wire).transpose()?,
             }),
