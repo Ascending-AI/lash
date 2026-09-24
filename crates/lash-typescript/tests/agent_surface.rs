@@ -1805,15 +1805,17 @@ fn the_selected_rejection_is_replay_deterministic() {
 /// journaled). The VM ABI is at v11 because `ResourceOperationBatch` now
 /// carries the consumer mode, timer leaves and the immediate-prefix boundary,
 /// and its reply is the four-way response algebra instead of a settlement
-/// order. The snapshot stays at v7: nothing about an aggregate is persisted
-/// in a session snapshot. The continuation moved separately, for the timer
-/// entries in its pending-request map and the refusals it can carry.
+/// order. The consumer mode did not move the snapshot: nothing about an
+/// aggregate is persisted in a session snapshot. It is at v8 for an unrelated
+/// reason, record property order (FIG-3606). The continuation moved
+/// separately, for the timer entries in its pending-request map and the
+/// refusals it can carry.
 #[test]
 fn the_consumer_mode_moves_the_vm_abi_and_not_the_snapshot() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        7,
-        "snapshot v7 carries the substrate-minted error brands"
+        8,
+        "snapshot v8 keeps record property order; no aggregate state rides it"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
