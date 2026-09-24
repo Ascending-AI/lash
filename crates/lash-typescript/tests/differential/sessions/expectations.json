@@ -2295,81 +2295,52 @@
       "deviations": [],
       "cells": [
         {
-          "source": "const items = [3, 1];\nconsole.log(Math.max(...items));\n",
+          "source": "const items = [3, 1];\nconsole.log(Math.max(...items), Math.min(...items, 0), String.fromCharCode(...[104, 105]));\n",
           "reject": null,
           "deviation": null,
-          "defect": "builtin-call-spread",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
-              "3"
+              "3 0 hi"
             ],
             "probes": {
               "items": "object [3,1]"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "rejected",
-              "diagnostic": "TS_METHOD_UNSUPPORTED",
-              "prints": [],
-              "probes": {
-                "items": "unbound"
-              }
-            },
-            "restart": {
-              "outcome": "rejected",
-              "diagnostic": "TS_METHOD_UNSUPPORTED",
-              "prints": [],
-              "probes": {
-                "items": "unbound"
-              }
-            }
           }
         }
       ]
     },
     {
       "id": "builtin-method-call-spread",
-      "about": "a spread argument to a builtin method passes the array's items (FIG-3627)",
+      "about": "a spread argument to a builtin method passes the array's items, among fixed ones and nested (FIG-3627)",
       "probe": [
-        "items"
+        "items",
+        "rows",
+        "count",
+        "row"
       ],
       "deviations": [],
       "cells": [
         {
-          "source": "const items = [3, 1];\nitems.push(...[4, 5]);\nconsole.log(items);\n",
+          "source": "const items = [3, 1];\nitems.push(...[4, 5]);\nconst rows = [[9, 2], [6]];\nconst count = items.push(0, ...rows.map((row) => Math.max(...row)));\nconsole.log(items, count);\nconsole.log(...items);\n",
           "reject": null,
           "deviation": null,
-          "defect": "builtin-call-spread",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
-              "[3,1,4,5]"
+              "[3,1,4,5,0,9,6] 7",
+              "3 1 4 5 0 9 6"
             ],
             "probes": {
-              "items": "object [3,1,4,5]"
+              "items": "object [3,1,4,5,0,9,6]",
+              "rows": "object [[9,2],[6]]",
+              "count": "number 7",
+              "row": "unbound"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "throw",
-              "error": "RuntimeError",
-              "prints": [],
-              "probes": {
-                "items": "object [3,1]"
-              }
-            },
-            "restart": {
-              "outcome": "throw",
-              "error": "RuntimeError",
-              "prints": [],
-              "probes": {
-                "items": "object [3,1]"
-              }
-            }
           }
         }
       ]

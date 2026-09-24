@@ -710,20 +710,21 @@ end
 session builtin-call-spread
 about a spread argument to a builtin function passes the array's items (FIG-3627)
 probe items
-cell defect builtin-call-spread
+cell
 const items = [3, 1];
-console.log(Math.max(...items));
-lash {"outcome":"rejected","diagnostic":"TS_METHOD_UNSUPPORTED","prints":[],"probes":{"items":"unbound"}}
+console.log(Math.max(...items), Math.min(...items, 0), String.fromCharCode(...[104, 105]));
 end
 
 session builtin-method-call-spread
-about a spread argument to a builtin method passes the array's items (FIG-3627)
-probe items
-cell defect builtin-call-spread
+about a spread argument to a builtin method passes the array's items, among fixed ones and nested (FIG-3627)
+probe items rows count row
+cell
 const items = [3, 1];
 items.push(...[4, 5]);
-console.log(items);
-lash {"outcome":"throw","error":"RuntimeError","prints":[],"probes":{"items":"object [3,1]"}}
+const rows = [[9, 2], [6]];
+const count = items.push(0, ...rows.map((row) => Math.max(...row)));
+console.log(items, count);
+console.log(...items);
 end
 
 session collection-methods-through-aliases

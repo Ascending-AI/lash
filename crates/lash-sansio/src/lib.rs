@@ -37,7 +37,11 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// v18 (FIG-3620): the builtin registry gains `__typescript_global_get`, the
 /// live root-global read every `globalThis.name` read lowers to.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v18";
+///
+/// v19 (FIG-3627): the standard-library dispatch gains `Lash.Apply`, which a
+/// call with a spread argument to a builtin lowers to, so a module that spreads
+/// into a builtin means nothing to a runtime without it.
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v19";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,

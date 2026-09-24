@@ -305,6 +305,7 @@ differential:sol:120	generated binding `__typescript_stdlib` has no authored Typ
 differential:sol:8	generated binding `__typescript_0_f` has no authored TypeScript spelling	a binding that shadows one in scope lowers to a generated slot, which has no authored spelling
 golden:span-lifted-inline	cannot render host descriptor constructor `timer.Schedule` without a constructor path	an admitted host descriptor constructor keeps no constructor path the printer can spell
 session:block-name-then-top-level-name:0	generated binding `__typescript_0_first` has no authored TypeScript spelling	a binding that shadows one in scope lowers to a generated slot, which has no authored spelling
+session:builtin-call-spread:0	cannot render a block in expression position as TypeScript	a call with a spread argument lowers to a statement sequence (its argument list), which has no expression spelling
 session:builtin-method-call-spread:0	cannot render a block in expression position as TypeScript	a call with a spread argument lowers to a statement sequence (its argument list), which has no expression spelling
 session:catch-and-switch-binders:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 session:caught-runtime-fault:0	generated binding `__typescript_heap_instanceof` has no authored TypeScript spelling	`instanceof` lowers to a heap builtin, which the lens printer does not re-sugar

@@ -52,11 +52,7 @@ use std::collections::BTreeSet;
 /// when one is fixed, its README entry goes, the test holding this list to
 /// the README fails, and the exclusion is deleted here, which changes the
 /// generated corpus deliberately.
-pub(super) const OPEN_DEFECT_EXCLUSIONS: &[(&str, &str)] = &[
-    // A spread argument to a builtin function or method is refused or
-    // faults. Spread arguments go to the session's own functions.
-    ("builtin-call-spread", "FIG-3627"),
-];
+pub(super) const OPEN_DEFECT_EXCLUSIONS: &[(&str, &str)] = &[];
 
 /// Where a construct's grammar is accepted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -817,7 +813,11 @@ impl Generator {
             Ty::Arr(item) => {
                 let value = self.value_for(&item);
                 match self.prng.below(8) {
-                    0 | 1 => self.emit(format!("{name}.push({value});")),
+                    0 => self.emit(format!("{name}.push({value});")),
+                    1 => {
+                        let more = self.value_for(&item);
+                        self.emit(format!("{name}.push(...[{value}, {more}]);"));
+                    }
                     2 => self.emit(format!("{name}.unshift({value});")),
                     3 => self.emit(format!("{name}[0] = {value};")),
                     4 => self.emit(format!("{name}.pop();")),
@@ -2024,16 +2024,20 @@ impl Generator {
                 format!("({left} {op} {right})")
             }
             17 => {
-                // A spread argument, to a function of the session's own: a
-                // builtin's is not drawn (`builtin-call-spread`).
+                // A spread argument, to a function of the session's own or
+                // to a builtin (FIG-3627).
                 let functions = self.visible_where(|b| b.ty == Ty::Fun { recursive: false });
                 let arrays = self.visible_where(|b| b.ty == Ty::Arr(Box::new(Ty::Num)));
-                if functions.is_empty() || arrays.is_empty() {
+                if arrays.is_empty() {
                     return self.number_literal();
                 }
-                let function = self.prng.pick(&functions).name.clone();
                 let array = self.prng.pick(&arrays).name.clone();
-                format!("{function}(...{array}, 1)")
+                if !functions.is_empty() && self.prng.chance(50) {
+                    let function = self.prng.pick(&functions).name.clone();
+                    return format!("{function}(...{array}, 1)");
+                }
+                let builtin = *self.prng.pick(&["max", "min"]);
+                format!("Math.{builtin}(...{array}, 1)")
             }
             18 => {
                 let sets = self.visible_where(|b| b.ty == Ty::Set);

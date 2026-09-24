@@ -17,6 +17,12 @@ async helpers, blocks, `if`, `while`, `do...while`, the canonical
 `break`, `continue`, `try`/`catch`/`finally`, `throw`, `return`, destructuring in
 every binding and assignment position, defaults/rest, optional chains, array/call/object
 spread, compound/logical assignment, update operators, arrays, records, and calls.
+A spread argument passes the array's items as the call's arguments, to a
+function the program defines and to a builtin alike (`Math.max(...xs)`,
+`items.push(...more)`, `console.log(...parts)`). A builtin whose lowering
+depends on how many arguments it takes (a callback method such as `map`, a
+coercion, an agent primitive) refuses a spread argument by name
+(`TS_METHOD_UNSUPPORTED`).
 Arithmetic includes exponentiation and ECMA `ToInt32`/`ToUint32` bitwise and shift
 operators. `in` is an own-property query because dialect objects have no prototypes;
 `instanceof` accepts the Error family, Map, Set, Date, RegExp, URL,
@@ -537,12 +543,7 @@ to an ordinary row. The session generator draws none of their shapes until
 then, each exclusion naming its entry here. They are listed so no divergence
 is silent while its fix is owed.
 
-- `builtin-call-spread` (FIG-3627): a spread argument to a builtin is not
-  passed as the array's items. A static function (`Math.max(...items)`,
-  `String.fromCharCode(...codes)`) is refused as `TS_METHOD_UNSUPPORTED`,
-  naming the function as if it were missing from the surface, and a method
-  (`items.push(...more)`) faults at run time calling `undefined`. A spread
-  argument to a function the program defines is passed as ECMA specifies.
+None is open: FIG-3625, FIG-3626, FIG-3627 and FIG-3631 fixed the last four.
 
 ## Syntax, iteration, and Node traps
 

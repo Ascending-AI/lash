@@ -33,6 +33,7 @@ mod param_types;
 mod process_wrapper;
 mod regex;
 mod spans;
+mod spread_calls;
 mod triggers;
 pub(crate) use attribute_update::attribute_update;
 use binding::*;

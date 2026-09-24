@@ -61,6 +61,8 @@ mod rejections;
 mod scoping_regressions;
 #[path = "session_globals.rs"]
 mod session_globals;
+#[path = "spread_calls.rs"]
+mod spread_calls;
 #[path = "structural_contract.rs"]
 mod structural_contract;
 #[path = "trigger_inputs.rs"]
