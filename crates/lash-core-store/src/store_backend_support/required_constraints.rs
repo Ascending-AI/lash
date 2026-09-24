@@ -231,6 +231,110 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
         &[SqliteConstraintDatabase::DurableCore],
         rendered(
+            "session_ingress",
+            "ck_session_ingress_kind",
+            "kind IN ('input', 'process_wake', 'session_command')",
+        ),
+        rendered(
+            "lash_session_ingress",
+            "ck_session_ingress_kind",
+            "kind IN ('input', 'process_wake', 'session_command')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "session_ingress",
+            "ck_session_ingress_lane",
+            "(kind = 'session_command' AND lane = 'command') OR (kind IN ('input', 'process_wake') AND lane = 'turn')",
+        ),
+        rendered(
+            "lash_session_ingress",
+            "ck_session_ingress_lane",
+            "(kind = 'session_command' AND lane = 'command') OR (kind IN ('input', 'process_wake') AND lane = 'turn')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "session_ingress",
+            "ck_session_ingress_state",
+            "state IN ('open', 'accepted', 'completed', 'cancelled')",
+        ),
+        rendered(
+            "lash_session_ingress",
+            "ck_session_ingress_state",
+            "state IN ('open', 'accepted', 'completed', 'cancelled')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "session_ingress",
+            "ck_session_ingress_delivery",
+            "(delivery_scope = 'turn' AND delivery_turn_id IS NOT NULL AND delivery_min_boundary IN ('after_work', 'before_completion')) OR (delivery_scope IN ('any_boundary', 'next_turn') AND delivery_turn_id IS NULL AND delivery_min_boundary IS NULL)",
+        ),
+        rendered(
+            "lash_session_ingress",
+            "ck_session_ingress_delivery",
+            "(delivery_scope = 'turn' AND delivery_turn_id IS NOT NULL AND delivery_min_boundary IN ('after_work', 'before_completion')) OR (delivery_scope IN ('any_boundary', 'next_turn') AND delivery_turn_id IS NULL AND delivery_min_boundary IS NULL)",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "session_ingress",
+            "ck_session_ingress_kind_delivery",
+            "kind = 'input' OR (kind = 'process_wake' AND delivery_scope = 'any_boundary') OR (kind = 'session_command' AND delivery_scope = 'next_turn')",
+        ),
+        rendered(
+            "lash_session_ingress",
+            "ck_session_ingress_kind_delivery",
+            "kind = 'input' OR (kind = 'process_wake' AND delivery_scope = 'any_boundary') OR (kind = 'session_command' AND delivery_scope = 'next_turn')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "session_ingress",
+            "ck_session_ingress_wake_source",
+            "(kind = 'process_wake' AND wake_process_id IS NOT NULL AND wake_sequence IS NOT NULL) OR (kind <> 'process_wake' AND wake_process_id IS NULL AND wake_sequence IS NULL)",
+        ),
+        rendered(
+            "lash_session_ingress",
+            "ck_session_ingress_wake_source",
+            "(kind = 'process_wake' AND wake_process_id IS NOT NULL AND wake_sequence IS NOT NULL) OR (kind <> 'process_wake' AND wake_process_id IS NULL AND wake_sequence IS NULL)",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "session_ingress",
+            "ck_session_ingress_claim",
+            "(state = 'accepted' AND claim_id IS NOT NULL AND claim_token IS NOT NULL AND claim_admission_id IS NOT NULL AND claim_drive_epoch IS NOT NULL) OR (state <> 'accepted' AND claim_id IS NULL AND claim_token IS NULL AND claim_admission_id IS NULL AND claim_drive_epoch IS NULL AND claim_turn_id IS NULL)",
+        ),
+        rendered(
+            "lash_session_ingress",
+            "ck_session_ingress_claim",
+            "(state = 'accepted' AND claim_id IS NOT NULL AND claim_token IS NOT NULL AND claim_admission_id IS NOT NULL AND claim_drive_epoch IS NOT NULL) OR (state <> 'accepted' AND claim_id IS NULL AND claim_token IS NULL AND claim_admission_id IS NULL AND claim_drive_epoch IS NULL AND claim_turn_id IS NULL)",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "session_ingress",
+            "ck_session_ingress_terminal",
+            "(state IN ('completed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL) OR (state IN ('open', 'accepted') AND terminal_cause_json IS NULL AND terminal_at_ms IS NULL)",
+        ),
+        rendered(
+            "lash_session_ingress",
+            "ck_session_ingress_terminal",
+            "(state IN ('completed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL) OR (state IN ('open', 'accepted') AND terminal_cause_json IS NULL AND terminal_at_ms IS NULL)",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
             "queued_work_batches",
             "ck_queued_work_batches_work_kind",
             "work_kind IN ('turn', 'control')",

@@ -150,6 +150,9 @@ const BINDING_SET_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const DIVERGENCE_PARK_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-118-83bda2477/postgres-expected.json",
 ];
+const SESSION_INGRESS_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-119-5b8e9512f/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -294,7 +297,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 125);
+    assert_eq!(PostgresStorage::schema_version(), 127);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -670,6 +673,24 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // Component 121 (FIG-3586) gives the effect journal's key columns `C`
     // collation and adds the parked-turn table.
     add_prior_fixture_replay_key_collation_and_parks(&pool).await;
+    // Component 127 (FIG-3540) adds the session ingress, empty in the
+    // refusal fixture, and the drive epoch on the session metadata row.
+    sqlx::query("DROP TABLE IF EXISTS lash_session_ingress")
+        .execute(&pool)
+        .await
+        .expect("discard an earlier refresh's session ingress");
+    sqlx::raw_sql(schema_table_ddl("lash_session_ingress"))
+        .execute(&pool)
+        .await
+        .expect("create the session ingress from the authoritative DDL");
+    sqlx::raw_sql(
+        "ALTER TABLE lash_session_meta
+             ADD COLUMN IF NOT EXISTS drive_epoch BIGINT NOT NULL DEFAULT 0,
+             ADD COLUMN IF NOT EXISTS drive_admission_id TEXT;",
+    )
+    .execute(&pool)
+    .await
+    .expect("add the drive epoch to the session metadata");
     // The enclosing catalog uses the current session-metadata constraints;
     // only the deliberately obsolete checkpoint component remains historical.
     for constraint in

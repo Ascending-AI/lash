@@ -408,6 +408,71 @@ pub enum StoreError {
         superseding_claim_id: Option<Box<str>>,
         superseding_session_lease_generation: Option<Box<u64>>,
     },
+    /// A session-ingress settlement named a row its claim no longer holds:
+    /// the row was settled, withdrawn, or re-claimed by another claim since
+    /// (ADR 0101 §7, ADR 0029). Settlement checks claim identity, not only
+    /// state, so nothing was written.
+    #[error(
+        "session ingress claim `{claim_id}` for session `{session_id}` no longer holds item `{item_id}`"
+    )]
+    IngressClaimSuperseded {
+        session_id: SessionId,
+        claim_id: String,
+        item_id: String,
+    },
+    /// A session-ingress settlement was refused before any write because it
+    /// is not a settlement its claims can make: a completion of an item the
+    /// committing turn did not render, of a command by a turn, or of a turn
+    /// item by a command drain (ADR 0101 §7).
+    #[error(
+        "session ingress settlement for session `{session_id}` refused at item `{item_id}`: {reason}"
+    )]
+    IngressSettlementRefused {
+        session_id: SessionId,
+        item_id: String,
+        reason: &'static str,
+    },
+    /// A storage operation fenced by a drive presented a fence that is not
+    /// the session's current drive epoch: a later admission superseded it
+    /// (ADR 0105 §2). Nothing was written.
+    #[error(
+        "drive fence epoch {fence_epoch} for session `{session_id}` is stale; the session is at drive epoch {current_epoch}"
+    )]
+    StaleDriveFence {
+        session_id: SessionId,
+        fence_epoch: u64,
+        current_epoch: u64,
+    },
+    /// A drive-fenced storage operation found no `session_meta` row for its
+    /// session, so the session has no drive epoch to fence against (ADR 0105
+    /// §2). Nothing was written.
+    #[error("session `{session_id}` has no drive epoch: no session_meta row")]
+    DriveEpochUnavailable { session_id: SessionId },
+    /// A drive-fenced storage operation named a session other than the one
+    /// its drive fence authorizes. Nothing was written.
+    #[error("drive fence for session `{fence_session_id}` cannot act on session `{session_id}`")]
+    DriveFenceSessionMismatch {
+        session_id: SessionId,
+        fence_session_id: SessionId,
+    },
+    /// A turn-addressed item named a turn that is neither the session's
+    /// running turn nor one of its ended turns. Nothing was stored: no row,
+    /// no tombstone and no sequence number (ADR 0101 §5.1).
+    #[error("session `{session_id}` has no running or ended turn `{turn_id}` to address")]
+    IngressTurnAddressUnknown {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+    },
+    /// A submission used a source key reserved for another kind (ADR 0101
+    /// §8). Nothing was stored.
+    #[error(
+        "session `{session_id}` refused {kind} source key `{source_key}`: the prefix is reserved for another kind"
+    )]
+    IngressReservedSourceKey {
+        session_id: SessionId,
+        kind: &'static str,
+        source_key: String,
+    },
     /// An unclaimed turn-input settlement lost the head CAS.
     ///
     /// The settling turn accepted `input_id` itself and drove it without the
@@ -746,6 +811,13 @@ impl StoreError {
             Self::UnclaimedTurnInputSettlementSuperseded { .. } => {
                 "UnclaimedTurnInputSettlementSuperseded"
             }
+            Self::IngressClaimSuperseded { .. } => "IngressClaimSuperseded",
+            Self::IngressSettlementRefused { .. } => "IngressSettlementRefused",
+            Self::IngressTurnAddressUnknown { .. } => "IngressTurnAddressUnknown",
+            Self::StaleDriveFence { .. } => "StaleDriveFence",
+            Self::DriveEpochUnavailable { .. } => "DriveEpochUnavailable",
+            Self::DriveFenceSessionMismatch { .. } => "DriveFenceSessionMismatch",
+            Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",
             Self::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
             Self::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",
             Self::ForeignQueuedWorkCompletion { .. } => "ForeignQueuedWorkCompletion",

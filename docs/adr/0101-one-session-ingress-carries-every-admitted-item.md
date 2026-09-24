@@ -127,6 +127,9 @@ becomes `AnyBoundary`, and `NextTurn` / `AfterCurrentTurnCommit` become
 **One claim type:** `IngressClaim = WorkClaim<IngressClaimData { mode, items }>`
 with `ClaimMode::{ Idle, Checkpoint { turn_id, checkpoint }, Exact { item_ids }
 }`.
+*Amended (FIG-3540 S3, 2026-09-24):* `IngressClaim` is its own struct keyed by
+drive epoch and admission id (ADR 0105 §2), with a clock-free replay-stable
+token and no `WorkClaim` lease fields.
 It replaces `TurnInputClaimMode` and `QueuedWorkClaimBoundary`.
 An ingress drive is always a claimed drive: FIG-3532 removed the runtime
 unclaimed drive, so there is no `Unclaimed` variant. `WithheldTerminalWork`

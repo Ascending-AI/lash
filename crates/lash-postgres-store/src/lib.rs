@@ -497,7 +497,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // vocabulary with the engine-neutral `effect_replay_divergence`, a parking
 // code; the retired code is not aliased. No relation changes; component-124
 // catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 125;
+// Version 127 (FIG-3540, S3) adds `lash_session_ingress`, the one session
+// ingress of ADR 0101, with its CHECKs and partial open-row indexes.
+// Component-126 catalogs lack the table and are rejected and recreated. The
+// number is provisional: the ingress store merges with the FIG-3540 cutover,
+// which takes the next free component at its merge.
+const SCHEMA_VERSION: i32 = 127;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -1230,6 +1235,8 @@ mod session_blob_reclaim;
 mod session_catalog;
 #[path = "postgres/session_factory.rs"]
 mod session_factory;
+#[path = "postgres/session_ingress.rs"]
+mod session_ingress;
 #[path = "postgres/session_meta.rs"]
 mod session_meta;
 #[path = "postgres/session_sql.rs"]
