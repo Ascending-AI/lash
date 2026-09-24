@@ -143,7 +143,20 @@ pub(crate) fn fold_code_point(cu: u32, unicode: bool) -> u32 {
     if unicode {
         return fold(cu);
     }
-    uppercase(cu)
+    canonicalize_nonunicode(cu)
+}
+
+/// The Canonicalize operation for a pattern without either Unicode flag:
+/// toUppercase, except that a non-ASCII code unit never canonicalizes into
+/// the ASCII range (it maps to itself instead).
+/// [spec]: https://tc39.es/ecma262/#sec-runtime-semantics-canonicalize-ch
+fn canonicalize_nonunicode(cu: u32) -> u32 {
+    let mapped = uppercase(cu);
+    if cu >= 128 && mapped < 128 {
+        cu
+    } else {
+        mapped
+    }
 }
 
 #[expect(
@@ -319,11 +332,14 @@ pub fn unfold_char(c: u32) -> Vec<u32> {
     res
 }
 
+/// \return all the characters whose non-Unicode Canonicalize result equals
+/// c's. This is a linear search across all ranges.
+/// The result always contains c.
 pub(crate) fn unfold_uppercase_char(c: u32) -> Vec<u32> {
-    let mut res = vec![c];
-    let fcp = uppercase(c);
+    let fcp = canonicalize_nonunicode(c);
+    let mut res = vec![fcp];
     if fcp != c {
-        res.push(fcp);
+        res.push(c);
     }
     for tr in TO_UPPERCASE.iter() {
         if !tr.transformed_to().contains(fcp) {
@@ -331,7 +347,9 @@ pub(crate) fn unfold_uppercase_char(c: u32) -> Vec<u32> {
         }
         for cp in tr.transformed_from().codepoints() {
             let tcp = tr.apply(cp);
-            if tcp == fcp {
+            // A non-ASCII code point whose uppercase is ASCII canonicalizes
+            // to itself, not to fcp.
+            if tcp == fcp && !(cp >= 128 && tcp < 128) {
                 res.push(cp);
             }
         }
@@ -352,6 +370,112 @@ pub fn add_icase_code_points(mut input: CodePointSet) -> CodePointSet {
     input.clone_from(&folded);
     for iv in folded.intervals() {
         unfold_interval(*iv, &mut input);
+    }
+    input
+}
+
+// Add the non-Unicode Canonicalize image of every code point in \p iv to
+// \p recv. This skips characters which canonicalize to themselves.
+fn uppercase_image_interval(iv: Interval, recv: &mut CodePointSet) {
+    let overlaps = TO_UPPERCASE.equal_range_by(|tr| {
+        if tr.first() > iv.last {
+            Ordering::Greater
+        } else if tr.last() < iv.first {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
+    });
+    for tr in &TO_UPPERCASE[overlaps] {
+        debug_assert!(
+            tr.transformed_from().overlaps(iv),
+            "Interval does not overlap transform"
+        );
+        let first_trans = core::cmp::max(tr.first(), iv.first);
+        let last_trans = core::cmp::min(tr.last(), iv.last);
+
+        let modulo = tr.predicate_mask() + 1;
+        let mut process_cp = |cp| {
+            let tcp = tr.apply(cp);
+            if tcp != cp {
+                // A non-ASCII code point whose uppercase is ASCII canonicalizes
+                // to itself instead.
+                if cp >= 128 && tcp < 128 {
+                    recv.add_one(cp);
+                } else {
+                    recv.add_one(tcp);
+                }
+            }
+        };
+        if modulo == 1 {
+            // Optimization: when modulo is 1, every character in range gets transformed
+            for cp in first_trans..(last_trans + 1) {
+                process_cp(cp);
+            }
+        } else {
+            // Optimization: walk by modulo amount instead of checking every character
+            let offset_start = first_trans - tr.first();
+            let start_aligned = first_trans + ((modulo - (offset_start % modulo)) % modulo);
+            let mut cp = start_aligned;
+            while cp <= last_trans {
+                process_cp(cp);
+                cp += modulo;
+            }
+        }
+    }
+}
+
+// Find all characters whose non-Unicode Canonicalize result lies in \p iv and
+// add them to \p recv. This skips characters which canonicalize to themselves.
+fn uppercase_unfold_interval(iv: Interval, recv: &mut CodePointSet) {
+    for tr in TO_UPPERCASE.iter() {
+        if !iv.overlaps(tr.transformed_to()) {
+            continue;
+        }
+
+        let modulo = tr.predicate_mask() + 1;
+        let first_source = tr.first();
+        let last_source = tr.last();
+
+        let mut process_cp = |cp| {
+            let tcp = tr.apply(cp);
+            // A non-ASCII code point whose uppercase is ASCII canonicalizes to
+            // itself, so it is not a preimage of tcp.
+            if tcp != cp && iv.contains(tcp) && !(cp >= 128 && tcp < 128) {
+                recv.add_one(cp);
+            }
+        };
+
+        if modulo == 1 {
+            // Optimization: when modulo is 1, every character in range gets transformed
+            for cp in first_source..(last_source + 1) {
+                process_cp(cp);
+            }
+        } else {
+            // Walk by modulo amount instead of checking every character
+            let mut cp = first_source;
+            while cp <= last_source {
+                process_cp(cp);
+                cp += modulo;
+            }
+        }
+    }
+}
+
+/// The non-Unicode counterpart of `add_icase_code_points`: a code point is
+/// added iff its non-Unicode Canonicalize result is the Canonicalize of some
+/// set member.
+/// [spec]: https://tc39.es/ecma262/#sec-runtime-semantics-canonicalize-ch
+pub(crate) fn add_icase_code_points_nonunicode(mut input: CodePointSet) -> CodePointSet {
+    let mut canon_image = input.clone();
+    for iv in input.intervals() {
+        uppercase_image_interval(*iv, &mut canon_image)
+    }
+
+    // Reuse input storage.
+    input.clone_from(&canon_image);
+    for iv in canon_image.intervals() {
+        uppercase_unfold_interval(*iv, &mut input);
     }
     input
 }
