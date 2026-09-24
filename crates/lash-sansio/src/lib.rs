@@ -33,7 +33,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// v17 (FIG-3571): module artifacts carry the shared carrier IR — structural
 /// roles, process origins, binding visibility, source identity v4 and the
 /// canonical number rule — so every artifact hash moves.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v17";
+///
+/// v18 (FIG-3620): the builtin registry gains `__typescript_global_get`, the
+/// live root-global read every `globalThis.name` read lowers to.
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v18";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,

@@ -1505,6 +1505,90 @@ async fn nested_global_set_is_durable_across_function_park_and_state_restore() {
     );
 }
 
+/// `globalThis.name` read from a function (FIG-3620): the root frame's slot,
+/// read live when the read runs, including after the function parks at an
+/// effect and resumes from its encoded continuation, and against globals a
+/// snapshot restored. A slot the root holds nothing in reads `undefined`.
+#[tokio::test(flavor = "current_thread")]
+async fn global_get_reads_the_live_root_slot_across_function_park_and_state_restore() {
+    let reader = || {
+        Expr::Function(Box::new(crate::FunctionExpr {
+            name: None,
+            params: Vec::new(),
+            captures: Vec::new(),
+            body: Box::new(Expr::Block(vec![
+                Expr::Print(Box::new(Expr::String("park before global read".into()))),
+                Expr::Return(Box::new(Expr::List(vec![
+                    private_builtin("__typescript_global_get", vec![Expr::String("kept".into())]),
+                    private_builtin(
+                        "__typescript_global_get",
+                        vec![Expr::String("fresh".into())],
+                    ),
+                    private_builtin(
+                        "__typescript_global_get",
+                        vec![Expr::String("absent".into())],
+                    ),
+                ]))),
+            ])),
+        }))
+    };
+    let call_reader = || Expr::Call {
+        function: Box::new(reader()),
+        args: Vec::new(),
+    };
+    let program = Program::block(vec![
+        ts_assign("kept", Expr::Number(1.0)),
+        ts_assign("first", call_reader()),
+        private_builtin(
+            "__typescript_global_set",
+            vec![Expr::String("fresh".into()), Expr::Number(7.0)],
+        ),
+        ts_assign("kept", Expr::Number(2.0)),
+        ts_assign("second", call_reader()),
+        Expr::Finish(Box::new(Expr::List(vec![
+            Expr::Variable("first".into()),
+            Expr::Variable("second".into()),
+        ]))),
+    ]);
+    let reads = |kept: f64, fresh: Value| {
+        Value::List(vec![Value::Number(kept), fresh, Value::Undefined].into())
+    };
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![reads(1.0, Value::Undefined), reads(2.0, Value::Number(7.0))].into()
+        ))
+    );
+
+    let setup = Program::block(vec![
+        ts_assign("kept", Expr::Number(3.0)),
+        private_builtin(
+            "__typescript_global_set",
+            vec![Expr::String("fresh".into()), Expr::Number(8.0)],
+        ),
+        Expr::Finish(Box::new(Expr::Null)),
+    ]);
+    let setup = compile_ast(&setup).expect("compile global-read setup");
+    let mut state = State::new();
+    execute(&setup, &mut state, &Host)
+        .await
+        .expect("persist globals before the read");
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("encode global-read snapshot");
+    let snapshot = Snapshot::from_canonical_bytes(&bytes).expect("decode global-read snapshot");
+    let mut restored = State::from_snapshot(snapshot);
+    let query = Program::block(vec![Expr::Finish(Box::new(call_reader()))]);
+    let query = compile_ast(&query).expect("compile global-read query");
+    assert_eq!(
+        execute(&query, &mut restored, &Host)
+            .await
+            .expect("read restored globals from a function"),
+        ExecutionOutcome::Finished(reads(3.0, Value::Number(8.0)))
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn global_set_does_not_weaken_closure_session_persistence_policy() {
     let closure = Expr::Function(Box::new(crate::FunctionExpr {
@@ -1601,7 +1685,11 @@ async fn heap_member_delete_preserves_aliases_and_survives_continuation_round_tr
 
 #[tokio::test(flavor = "current_thread")]
 async fn reserved_global_names_are_rejected_by_all_root_intrinsics() {
-    for intrinsic in ["__typescript_global_delete", "__typescript_global_has"] {
+    for intrinsic in [
+        "__typescript_global_delete",
+        "__typescript_global_get",
+        "__typescript_global_has",
+    ] {
         for name in ["undefined", "NaN", "Infinity"] {
             let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
                 intrinsic,

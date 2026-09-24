@@ -774,6 +774,16 @@ impl<'p> Printer<'p> {
         {
             return Ok(Some(format!("sleep({})", self.expression(duration)?)));
         }
+        // `globalThis.name`, read live through the root-global read.
+        if let Expr::BuiltinCall { name, args } = expression
+            && name.as_str() == "__typescript_global_get"
+            && let [Expr::String(global)] = args.as_slice()
+        {
+            return Ok(Some(format!(
+                "globalThis.{}",
+                self.identifier("global", global.as_str())?
+            )));
+        }
         if let Some(sugared) = self.collection_transform(expression)? {
             return Ok(Some(sugared));
         }

@@ -211,6 +211,13 @@ fn typescript_lowering_intrinsics_link_through_the_production_registry_path() {
             )))]),
         ),
         (
+            "global read",
+            Program::block(vec![Expr::Finish(Box::new(builtin(
+                "__typescript_global_get",
+                vec![Expr::String("state".into())],
+            )))]),
+        ),
+        (
             "global presence",
             Program::block(vec![Expr::Finish(Box::new(builtin(
                 "__typescript_global_has",

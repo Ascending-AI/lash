@@ -121,8 +121,32 @@ pub(super) fn function_var_names(statements: &[Stmt]) -> Vec<String> {
 }
 
 impl Lowerer {
+    /// A process body runs apart from the cell that starts it and sees only
+    /// the values it was started with, so it has no session slot to read or
+    /// write live: every `globalThis.name` form inside one refuses, where
+    /// Node would reach the live global.
+    pub(super) fn refuse_global_this_in_process(&self, name: &str) -> Result<(), Diagnostic> {
+        if self.process_depth == 0 {
+            return Ok(());
+        }
+        Err(Diagnostic::with_repair(
+            DiagnosticCode::NonLiftableCapture,
+            format!(
+                "a process body cannot reach the session global `{name}` through `globalThis`: a process runs apart from the cell's session and sees only the values it was started with"
+            ),
+            "pass the value to the process through its `run` arguments, and return what the session should keep",
+            None,
+        ))
+    }
+
+    /// Declares the session slot `name` on the cell's root scope unless the
+    /// session or the cell's top level already binds it. A block binding of
+    /// the same name does not count: it is a different, block-private slot.
     fn ensure_global_binding(&mut self, name: &str) -> Result<bool, Diagnostic> {
-        if self.has_binding(name) {
+        if self.scopes[..self.root_scope_depth]
+            .iter()
+            .any(|scope| scope.bindings.contains_key(name))
+        {
             return Ok(false);
         }
         if matches!(name, "undefined" | "NaN" | "Infinity") {
@@ -132,7 +156,6 @@ impl Lowerer {
                 None,
             ));
         }
-        let nested_function = self.current_function() != 0;
         let id = self.declare_in_ledger(name, BindingKind::Var);
         let index = self.root_scope_depth.saturating_sub(1);
         #[expect(
@@ -151,12 +174,9 @@ impl Lowerer {
                 kind: BindingKind::Var,
                 initialized: true,
                 owner_function: 0,
-                role: BindingRole::Plain,
+                role: BindingRole::GlobalProperty,
             },
         );
-        if nested_function {
-            self.intrinsic_global_slots.insert(name.to_string());
-        }
         Ok(true)
     }
 
@@ -742,6 +762,7 @@ impl Lowerer {
             }
             TsAssignTarget::Member { object, property } => {
                 if let Some(global) = global_this_member_name(object, property) {
+                    self.refuse_global_this_in_process(global)?;
                     if self.current_function() != 0 {
                         return Err(Diagnostic::refusal(
                             DiagnosticCode::UnsupportedExpression,
@@ -824,6 +845,7 @@ impl Lowerer {
             && let TsAssignTarget::Member { object, property } = target
             && let Some(global) = global_this_member_name(object, property)
         {
+            self.refuse_global_this_in_process(global)?;
             self.ensure_global_binding(global)?;
             self.record_global_write(global);
             let result = self.temporary("global_assignment");
@@ -982,6 +1004,7 @@ impl Lowerer {
         property: &MemberProperty,
     ) -> Result<LashExpr, Diagnostic> {
         if let Some(global) = global_this_member_name(object, property) {
+            self.refuse_global_this_in_process(global)?;
             self.record_global_write(global);
             return Ok(LashExpr::BuiltinCall {
                 name: "__typescript_global_delete".into(),
@@ -1106,6 +1129,7 @@ impl Lowerer {
                         None,
                     ));
                 };
+                self.refuse_global_this_in_process(name)?;
                 return Ok(LashExpr::BuiltinCall {
                     name: "__typescript_global_has".into(),
                     args: vec![LashExpr::String(name.as_str().into())],

@@ -5,7 +5,7 @@
 //! workflow-graph fragment — and they differ only in the ambient root scope
 //! they install beneath the program's own.
 
-use lashlang::{AssignTarget, Expr as LashExpr, Program as LashProgram};
+use lashlang::{Expr as LashExpr, Program as LashProgram};
 
 use super::{Binding, BindingKind, BindingRole, Lowerer, Scope};
 use crate::Diagnostic;
@@ -102,6 +102,7 @@ fn lower_with_ambient_kind(
         root_scope_depth: 2,
         module_authority_roots: module_authority_roots.clone(),
         called_bindings: super::binding::called_binding_names(&program.statements),
+        global_this_names: super::binding::global_this_names(&program.statements),
         ..Lowerer::default()
     };
     let mut ambient_scope = Scope::default();
@@ -127,16 +128,7 @@ fn lower_with_ambient_kind(
     lowerer.scopes.push(Scope::default());
     let expressions = lowerer.lower_statements(&program.statements, true)?;
     lowerer.capture_ledger.refuse_stale_reads()?;
-    let mut root_global_initializers = lowerer
-        .intrinsic_global_slots
-        .iter()
-        .map(|name| LashExpr::Assign {
-            target: AssignTarget::variable(name.as_str().into()),
-            expr: Box::new(LashExpr::Undefined),
-        })
-        .collect::<Vec<_>>();
-    root_global_initializers.extend(expressions);
-    let main = LashExpr::Block(root_global_initializers);
+    let main = LashExpr::Block(expressions);
     let mut program = LashProgram {
         language: lashlang::SourceLanguage::new(crate::TYPESCRIPT_LANGUAGE),
         declarations: lowerer.declarations,

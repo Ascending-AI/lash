@@ -1338,6 +1338,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             IntrinsicOp::JavaScriptRegExp(argc) => self.execute_javascript_regexp(argc)?,
             IntrinsicOp::JavaScriptGlobalDelete => self.execute_javascript_global_delete()?,
+            IntrinsicOp::JavaScriptGlobalGet => self.execute_javascript_global_get()?,
             IntrinsicOp::JavaScriptGlobalHas => self.execute_javascript_global_has()?,
             IntrinsicOp::JavaScriptGlobalSet => self.execute_javascript_global_set()?,
             IntrinsicOp::JavaScriptUriCodec(codec) => self.execute_javascript_uri_codec(codec)?,

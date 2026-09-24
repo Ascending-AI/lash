@@ -138,7 +138,13 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// globals boundary, lifted process bodies compile from their `ProcessOrigin`,
 /// and node ids — and so every node-keyed occurrence counter and replay key —
 /// come from the canonical carrier paths. A v19 instruction stream is refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 20;
+///
+/// v21 (FIG-3620): `globalThis.name` reads compile to the `JavaScriptGlobalGet`
+/// intrinsic, which reads the root frame's slot live from any frame, instead
+/// of a load of the name, and a top-level block binding of a name the cell
+/// addresses through `globalThis` takes a generated private slot. A v20
+/// instruction stream is refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 21;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

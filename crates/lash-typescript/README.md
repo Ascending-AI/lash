@@ -378,10 +378,18 @@ no probe that fires it fails that test.
   every other ruling is indexed rather than living only in this list. That row
   indexes the deviation; the callback semantics themselves are pinned by the
   async-driver tests, not by the census.
-- Direct `globalThis.name` reads and writes, including replacement from inside
-  a function, plus nested-path mutation, membership, and deletion share the
-  same durable session slots as top-level bindings. Nested-function replacement
-  uses the root-global set intrinsic and returns the assigned value.
+- `globalThis.name` addresses the durable session slot `name` from anywhere in
+  a cell. A read at the top level, in a function or in a nested closure reads
+  the slot's current value live through the root-global read intrinsic: never
+  a copy a closure holds, and never a parameter or local of the same name. A
+  global nothing has written reads `undefined`. Writes (replacement from inside
+  a function uses the root-global set intrinsic and returns the assigned
+  value), nested-path mutation, membership and deletion address the same slot.
+  A top-level block binding is not a global, so it never answers
+  `globalThis.name`, and a global that only a function's write creates exists
+  once that write runs. A process body runs apart from the session and sees
+  only the values it started with, so every `globalThis` form inside one
+  refuses with `TS_NON_LIFTABLE_CAPTURE`.
 - The five accepted `console` methods are host-defined rather than ECMA-262 and
   share one print-observation channel, joining their arguments with a single
   space. Each argument is rendered for the observation rather than string-

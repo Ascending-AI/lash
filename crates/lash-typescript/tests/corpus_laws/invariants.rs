@@ -352,8 +352,23 @@ fn exported_names(ir: &lashlang::Program) -> BTreeSet<String> {
             walk(child, names);
         }
     }
+    // A `globalThis.name` write inside a function reaches the session through
+    // the root-global set intrinsic when it runs (FIG-3620), so it exports the
+    // name it spells from wherever it sits.
+    fn walk_global_sets(expr: &Expr, names: &mut BTreeSet<String>) {
+        if let Expr::BuiltinCall { name, args } = expr
+            && name.as_str() == "__typescript_global_set"
+            && let Some(Expr::String(global)) = args.first()
+        {
+            names.insert(global.to_string());
+        }
+        for child in expr.children() {
+            walk_global_sets(child, names);
+        }
+    }
     let mut names = BTreeSet::new();
     walk(&ir.main, &mut names);
+    walk_global_sets(&ir.main, &mut names);
     names
         .into_iter()
         .filter(|name| !ir.private_bindings.contains(name.as_str()))
