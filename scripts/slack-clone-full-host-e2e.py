@@ -731,7 +731,12 @@ class Journey:
             conversation = value.get("event", {}).get("Conversation", {})
             for part in conversation.get("parts", []):
                 if part.get("kind") == "ToolResult" and part.get("tool_name"):
-                    tool_results[part["tool_name"]] = json.loads(part["content"])
+                    text = "".join(
+                        block["text"]
+                        for block in part["blocks"]
+                        if block.get("type") == "text"
+                    )
+                    tool_results[part["tool_name"]] = json.loads(text)
         tools = (
             "mcp__slack_clone__sample_summary_jsravcec3hbi6h74ol3czagt3i",
             "mcp__slack_clone__elicit_confirmation_43iv5ippbzi6gmt6qpg5o4qley",
@@ -863,18 +868,21 @@ class Journey:
             expect(page.locator("#stream .msg.is-bot")).to_have_count(before_bots + 2, timeout=45_000)
         detached_row = self.wait_ledger("FIG1341-MCP-DETACHED", "replied")
 
-        # The binary half of the result is committed as its own typed
-        # `Attachment` part rather than inline JSON: the transcript carries a
-        # reference, and the bytes live in the host's attachment store.
+        # The binary half of the result is committed as a typed attachment
+        # block inside the call's one `ToolResult` part rather than inline
+        # JSON: the transcript carries a reference, and the bytes live in the
+        # host's attachment store.
         session = self.session_snapshot()
         attachments = []
         for node in session["nodes"]:
             value = json.loads(node["node_json"])
             conversation = value.get("event", {}).get("Conversation", {})
             for part in conversation.get("parts", []):
-                if part.get("kind") == "Attachment" and part.get("tool_name") == badge_tool:
-                    attachments.append(part["attachment"])
-        reference = attachments[0]["source"] if len(attachments) == 1 else {}
+                if part.get("kind") == "ToolResult" and part.get("tool_name") == badge_tool:
+                    attachments.extend(
+                        block for block in part["blocks"] if block.get("type") == "attachment"
+                    )
+        reference = attachments[0] if len(attachments) == 1 else {}
         stored = self.stored_attachment_bytes()
 
         self.gate("08-mcp-attach", "dom", "the attach turn and the post-detach turn each render exactly one reply in both contexts", all(len([r for r in self.dom_rows(p) if r["bot"]]) == before_bots + 2 and "workspace badge came back" in "\n".join(r["text"] for r in self.dom_rows(p)) for p in self.pages.values()), "08-mcp-attach-*.png")
