@@ -41,7 +41,7 @@ impl PerfBackend {
     /// its store set, as a deployment's do.
     pub(super) fn over_restate(backend: &lash_restate_test::RestateTestBackend) -> Self {
         let artifacts = backend.stores().lashlang_artifact_store();
-        let inner: Arc<dyn Backend> = Arc::new(backend.clone());
+        let inner = backend.lash_backend();
         Self {
             catalog: inner.session_store_factory(),
             effect_host: inner.effect_host(),

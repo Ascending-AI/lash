@@ -4,8 +4,11 @@ use super::*;
 use tokio_util::sync::CancellationToken;
 
 async fn benchmark_plugin_ids(scenario: RuntimePerfScenario) -> Vec<&'static str> {
-    let effect_host =
-        lash::Backend::effect_host(&restate_backend().await.expect("Restate test backend"));
+    let effect_host = restate_backend()
+        .await
+        .expect("Restate test backend")
+        .lash_backend()
+        .effect_host();
     let settlement_control = scenario
         .settlement_children()
         .map(|_| Arc::new(BenchmarkSettlementControl::new()));
@@ -166,4 +169,47 @@ async fn rlm_globals_keeps_fixed_session_projection_across_real_turns() {
     )
     .await
     .expect("RLM globals benchmark should reuse one fixed session projection");
+}
+
+/// A dropped benchmark runtime frees its in-process lane (FIG-3723): the
+/// server double, its store set and the core's process worker it serves
+/// segments with. Every measured run builds one, so a lane that outlived its
+/// run would grow the benchmark's memory by a whole runtime per run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_runtime_frees_its_in_process_lane() {
+    for scenario in [
+        RuntimePerfScenario::Standard,
+        RuntimePerfScenario::RlmProcessHandles,
+    ] {
+        let mut runtime = build_runtime(scenario, None)
+            .await
+            .expect("build the benchmark runtime");
+        let TurnEntry::RestateHandler(restate) = &runtime.turn_entry else {
+            panic!(
+                "{}: the in-process lane runs on the server double",
+                scenario.name()
+            );
+        };
+        let watch = restate.server().drop_watch();
+        seed_runtime_state(&mut runtime, scenario)
+            .await
+            .expect("seed the benchmark session");
+        for turn in 1..=2 {
+            let report = runtime
+                .run_turn(
+                    lash::TurnInput::text(benchmark_prompt(scenario, turn)),
+                    CancellationToken::new(),
+                )
+                .await
+                .expect("run a benchmark turn");
+            validate_runtime_perf_turn(scenario, turn, &report).expect("a valid benchmark turn");
+        }
+        drop(runtime);
+        assert!(
+            watch.freed_within(std::time::Duration::from_secs(5)).await,
+            "{}: the dropped runtime's server double is freed; {} task(s) left",
+            scenario.name(),
+            watch.live_tasks()
+        );
+    }
 }

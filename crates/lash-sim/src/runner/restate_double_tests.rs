@@ -24,7 +24,7 @@ async fn pending_tool_completion_on_the_restate_server_double(
     .expect("Restate test backend");
     let driver_backend = backend.clone();
     let proof = super::runtime_proofs::prove_pending_tool_completion_on(
-        Arc::new(backend.clone()),
+        backend.lash_backend(),
         seed,
         Box::new(move |session, events| {
             tokio::spawn(async move {
