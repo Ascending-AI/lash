@@ -140,7 +140,7 @@ impl lash_core::ToolProvider for CountingTool {
 /// One lash turn — a model call that asks for a tool, the tool as an effect
 /// group child, a model call that answers — on a fresh backend, which is
 /// dropped when the turn is done. Returns the watch on its server.
-async fn one_turn_run(seed: u64) -> lash_restate_test::DropWatch {
+async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
     let backend = lash_restate_test::backend(seed, ServerConfig::default())
         .await
         .expect("build the Restate test backend");
@@ -167,25 +167,34 @@ async fn one_turn_run(seed: u64) -> lash_restate_test::DropWatch {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(
-        Arc::new(backend.clone()) as Arc<dyn lash::Backend>,
-        lash::TurnBudget::Unbounded,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .provider(provider)
-    .model(
-        lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model spec"),
-    )
-    .tools(Arc::new(CountingTool) as Arc<dyn lash_core::ToolProvider>)
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "lash-restate-test",
-        "drop",
-    ))
-    .expect("build the lash core");
+    let core =
+        lash::LashCore::standard_builder(backend.lash_backend(), lash::TurnBudget::Unbounded)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .provider(provider)
+            .model(
+                lash_core::ModelSpec::builder("mock-model")
+                    .context_window_tokens(200_000)
+                    .build()
+                    .expect("model spec"),
+            )
+            .tools(Arc::new(CountingTool) as Arc<dyn lash_core::ToolProvider>)
+            .build(lash_core::LeaseOwnerIdentity::opaque(
+                "lash-restate-test",
+                "drop",
+            ))
+            .expect("build the lash core");
+    if worker {
+        // A deployment serves its process segments with the core's durable
+        // worker, which holds the core's configuration.
+        backend.install_process_worker(
+            lash::durability::DurableProcessWorker::new(
+                core.durable_process_worker_config()
+                    .expect("the core's process worker configuration"),
+            )
+            .expect("build the process worker"),
+        );
+    }
     let session = core.session("drop").open().await.expect("open the session");
     let turn_id = lash::TurnId::from("turn-1");
     let admitted = lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
@@ -222,8 +231,19 @@ async fn one_turn_run(seed: u64) -> lash_restate_test::DropWatch {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_backend_with_a_process_worker_frees_its_server() {
+    let watch = one_turn_run(8, true).await;
+    assert!(
+        watch.freed_within(Duration::from_secs(5)).await,
+        "the backend's server is freed with the core's process worker installed on it; \
+         {} task(s) left",
+        watch.live_tasks()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dropped_backend_frees_its_server_after_a_lash_turn() {
-    let watch = one_turn_run(7).await;
+    let watch = one_turn_run(7, false).await;
     assert!(
         watch.freed_within(Duration::from_secs(5)).await,
         "the backend's server is freed once the turn's core, session and backend are dropped; \
@@ -255,7 +275,7 @@ async fn resident_memory_stays_flat_over_sequential_backend_runs() {
         .unwrap_or(100);
     let mut samples = Vec::new();
     for run in 0..runs {
-        let watch = one_turn_run(run).await;
+        let watch = one_turn_run(run, true).await;
         assert!(
             watch.freed_within(Duration::from_secs(5)).await,
             "run {run}"

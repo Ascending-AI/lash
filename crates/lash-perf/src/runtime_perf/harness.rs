@@ -942,7 +942,7 @@ struct InProcessLane {
 async fn in_process_lane() -> anyhow::Result<InProcessLane> {
     let restate = restate_backend().await?;
     let stores = RuntimePerfStoreFactory::decorating_without_commit_measurement(
-        lash::Backend::session_store_factory(&restate),
+        restate.lash_backend().session_store_factory(),
     );
     let backend = PerfBackend::over_restate(&restate).with_catalog(Arc::new(stores.clone()));
     Ok(InProcessLane {

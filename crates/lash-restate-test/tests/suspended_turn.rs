@@ -131,28 +131,26 @@ async fn start_turn(config: ServerConfig, gate_open: bool) -> Turn {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(
-        Arc::new(backend.clone()) as Arc<dyn lash::Backend>,
-        lash::TurnBudget::Unbounded,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .provider(provider)
-    .model(
-        lash_core::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model spec"),
-    )
-    .tools(Arc::new(GatedTool {
-        executions: Arc::clone(&executions),
-        gate: Arc::clone(&gate),
-    }) as Arc<dyn lash_core::ToolProvider>)
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "lash-restate-test",
-        "suspended-turn",
-    ))
-    .expect("build the lash core");
+    let core =
+        lash::LashCore::standard_builder(backend.lash_backend(), lash::TurnBudget::Unbounded)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .provider(provider)
+            .model(
+                lash_core::ModelSpec::builder("mock-model")
+                    .context_window_tokens(200_000)
+                    .build()
+                    .expect("model spec"),
+            )
+            .tools(Arc::new(GatedTool {
+                executions: Arc::clone(&executions),
+                gate: Arc::clone(&gate),
+            }) as Arc<dyn lash_core::ToolProvider>)
+            .build(lash_core::LeaseOwnerIdentity::opaque(
+                "lash-restate-test",
+                "suspended-turn",
+            ))
+            .expect("build the lash core");
     let session = core
         .session("suspended-turn")
         .open()

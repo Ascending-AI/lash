@@ -51,11 +51,18 @@ pub enum BackendError {
     Authority(String),
 }
 
-/// A lash backend whose effect engine is lash-restate on the server double.
+/// A server double with lash-restate's engine wired to it: the handle a test
+/// owns.
 ///
-/// It is a [`lash_core::Backend`]: hand it to a runtime wherever a test used
-/// `SqliteBackend::memory()`. Effects that must run inside a Restate handler
-/// (a turn's) enter one through [`run_in_handler`](Self::run_in_handler).
+/// The handle owns the server; a runtime is built over
+/// [`lash_backend`](Self::lash_backend), the engine's own backend, which
+/// reaches the server only through its connection, the way a deployment's
+/// backend reaches `restate-server`. Building a core over the handle itself
+/// would let the core's process worker — which the handle's deployment
+/// serves segments with, and which holds the core's backend — keep the
+/// server alive forever, so the handle is not a backend (FIG-3723). Effects
+/// that must run inside a Restate handler (a turn's) enter one through
+/// [`run_in_handler`](Self::run_in_handler).
 #[derive(Clone)]
 pub struct RestateTestBackend {
     server: RestateTestServer,
@@ -137,6 +144,13 @@ impl RestateTestBackend {
     /// The server double: time, crashes, operator commands, introspection.
     pub fn server(&self) -> &RestateTestServer {
         &self.server
+    }
+
+    /// The backend a runtime runs on: lash-restate's engine over the store
+    /// set, connected to the server double. Hand it to a core wherever a
+    /// test used `SqliteBackend::memory()`.
+    pub fn lash_backend(&self) -> Arc<dyn lash_core::Backend> {
+        Arc::clone(&self.restate) as Arc<dyn lash_core::Backend>
     }
 
     /// lash-restate's own backend value, for APIs that name it.
@@ -269,52 +283,6 @@ impl RestateTestBackend {
                 ))
             }
         }
-    }
-}
-
-impl lash_core::Backend for RestateTestBackend {
-    fn binding_identity(&self) -> &str {
-        self.restate.binding_identity()
-    }
-
-    fn clock(&self) -> Arc<dyn lash_core::Clock> {
-        self.restate.clock()
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn lash_core::SessionStoreFactory> {
-        self.restate.session_store_factory()
-    }
-
-    fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
-        lash_core::Backend::effect_host(self.restate.as_ref())
-    }
-
-    fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
-        self.restate.process_registry()
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core::TriggerStore> {
-        self.restate.trigger_store()
-    }
-
-    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
-        self.restate.process_definition_registry()
-    }
-
-    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
-        self.restate.process_env_store()
-    }
-
-    fn attachment_store(&self) -> Arc<dyn lash_core::AttachmentStore> {
-        self.restate.attachment_store()
-    }
-
-    fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
-        self.restate.process_work()
-    }
-
-    fn queued_work(&self) -> lash_core::BackendQueuedWork {
-        self.restate.queued_work()
     }
 }
 
