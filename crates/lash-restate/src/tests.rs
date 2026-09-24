@@ -925,6 +925,10 @@ fn scoped_runtime_invocation(
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig779SuspendingProcessRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -983,6 +987,10 @@ struct Fig788TerminalRedriveRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig788TerminalRedriveRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1027,6 +1035,10 @@ struct Fig788SegmentBoundaryRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig788SegmentBoundaryRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1058,6 +1070,10 @@ struct Fig788OrdinalOneTerminalRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig788OrdinalOneTerminalRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1091,6 +1107,10 @@ struct Fig811EffectfulOrdinalOneTerminalRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,

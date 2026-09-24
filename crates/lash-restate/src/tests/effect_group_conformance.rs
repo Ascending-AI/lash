@@ -60,6 +60,10 @@ struct ToolChildProcessRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for ToolChildProcessRunner {
+    fn replay_key_grammar(&self, _registration: &lash_core::ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &crate::SegmentStarted,
@@ -115,6 +119,10 @@ impl LawProcessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for LawProcessRunner {
+    fn replay_key_grammar(&self, _registration: &lash_core::ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         started: &crate::SegmentStarted,
