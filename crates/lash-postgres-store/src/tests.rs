@@ -1556,11 +1556,18 @@ async fn postgres_statement_calls_by_name(
     pool: &sqlx::PgPool,
 ) -> std::collections::BTreeMap<&'static str, i64> {
     let mut calls_by_name = std::collections::BTreeMap::new();
+    // `pg_stat_statements` is database-scoped, not connection-scoped: on a
+    // shared server the autovacuum daemon's work on this freshly created
+    // database (`autovacuum: ANALYZE public.lash_*`) lands in a measured
+    // window alongside the operation's own statements. Those rows are the
+    // daemon's, not the operation's, so they are excluded here rather than
+    // classified — the pin counts what the client connection issued.
     for (query, calls) in sqlx::query_as::<_, (String, i64)>(
         "SELECT query, calls
          FROM pg_stat_statements
          WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
-           AND query NOT LIKE '%pg_stat_statements%'",
+           AND query NOT LIKE '%pg_stat_statements%'
+           AND query NOT LIKE 'autovacuum:%'",
     )
     .fetch_all(pool)
     .await
@@ -1591,7 +1598,17 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.contains("FROM lash_session_execution_leases") => "session-lease-lock",
         q if q.contains("FROM lash_pending_turn_inputs") => "pending-inputs-lock",
         q if q.starts_with("UPDATE lash_pending_turn_inputs") => "pending-input-claim-update",
-        q if q.starts_with("SELECT EXISTS( SELECT 1 FROM lash_deleted_sessions") => {
+        // pg_stat_statements stores this statement's own text when the row is
+        // created by a cached-plan execution, but its constant-normalized form
+        // (`SELECT EXISTS( SELECT $2 FROM lash_deleted_sessions ...)`) when an
+        // in-window re-analysis — e.g. after an autovacuum ANALYZE invalidated
+        // the cached plan — creates the row first. Match the relation the
+        // check is defined over; the `UNION ALL` exclusion keeps the
+        // admission-path materialized-or-deleted probe out of this name.
+        q if q.starts_with("SELECT EXISTS(")
+            && q.contains("FROM lash_deleted_sessions")
+            && !q.contains("UNION") =>
+        {
             "deleted-session-check"
         }
         q if q.starts_with("SELECT admission_json, status, revision FROM lash_queued_runs")
