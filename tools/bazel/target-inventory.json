@@ -9752,7 +9752,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_676c8c38",
+      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_1e128064",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9761,7 +9761,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_676c8c38",
+      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_1e128064",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9770,7 +9770,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_676c8c38",
+      "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_1e128064",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -13431,6 +13431,16 @@
     {
       "features": [
         "default",
+        "lashlang",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_b3e1eb58",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "default",
         "lashlang"
       ],
       "kind": "lib",
@@ -13441,15 +13451,6 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_c784279d",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d5fc9688",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -18262,6 +18263,7 @@
         "rusqlite",
         "serde",
         "serde_json",
+        "sha2",
         "tempfile",
         "thiserror",
         "tokio",
