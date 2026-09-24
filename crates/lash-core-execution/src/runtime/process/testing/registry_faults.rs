@@ -1,5 +1,5 @@
 //! A registry decorator that injects read faults and stale wake deliveries and
-//! counts lease reads, over any backend.
+//! counts point and lease reads, over any backend.
 
 // The delegation macros take each forwarding hook as a block, and these hooks
 // only forward.
@@ -22,7 +22,7 @@ use super::super::registry_delegate::{
 /// Wraps a registry so a test can make its point reads of one process fail,
 /// miss, or answer a stale record, can hand its wake-delivery driver a claimed
 /// delivery the registry no longer holds, and can count how its callers read
-/// leases.
+/// processes and leases.
 ///
 /// Only point reads are faulted —
 /// [`get_process`](super::super::registry_concerns::ProcessQuery::get_process)
@@ -34,6 +34,7 @@ pub struct ProcessRegistryFaults {
     inner: Arc<dyn ProcessRegistry>,
     faults: Arc<std::sync::Mutex<ReadFaultPlan>>,
     injected_wakes: Arc<std::sync::Mutex<Vec<crate::WakeDelivery>>>,
+    process_point_reads: Arc<AtomicUsize>,
     lease_point_reads: Arc<AtomicUsize>,
     lease_batch_reads: Arc<AtomicUsize>,
 }
@@ -44,6 +45,7 @@ struct ReadFaultPlan {
     error_after: Option<(usize, crate::PluginError)>,
     absent: bool,
     record_override: Option<crate::ProcessRecord>,
+    pinned: Option<crate::ProcessRecord>,
 }
 
 impl ProcessRegistryFaults {
@@ -52,6 +54,7 @@ impl ProcessRegistryFaults {
             inner,
             faults: Arc::default(),
             injected_wakes: Arc::default(),
+            process_point_reads: Arc::default(),
             lease_point_reads: Arc::default(),
             lease_batch_reads: Arc::default(),
         }
@@ -76,6 +79,19 @@ impl ProcessRegistryFaults {
     /// The next point read answers `record`, once.
     pub fn set_process_read_override(&self, record: crate::ProcessRecord) {
         self.faults.lock_recover().record_override = Some(record);
+    }
+
+    /// Every point read answers `record` until cleared with `None`, without
+    /// reaching the wrapped registry. A reader polling a pinned record does no
+    /// backend I/O, so a paused-clock test can step its cadence without that
+    /// I/O idling the runtime into auto-advancing the clock.
+    pub fn set_process_read_pinned(&self, record: Option<crate::ProcessRecord>) {
+        self.faults.lock_recover().pinned = record;
+    }
+
+    /// How many point reads reached this decorator, faulted or forwarded.
+    pub fn process_point_reads(&self) -> usize {
+        self.process_point_reads.load(Ordering::SeqCst)
     }
 
     /// The next claim of pending wake deliveries hands out `wake` first,
@@ -121,7 +137,10 @@ impl ProcessRegistryFaults {
         if plan.absent {
             return Some(Ok(None));
         }
-        plan.record_override.take().map(|record| Ok(Some(record)))
+        if let Some(record) = plan.record_override.take() {
+            return Some(Ok(Some(record)));
+        }
+        plan.pinned.clone().map(|record| Ok(Some(record)))
     }
 }
 
@@ -134,6 +153,7 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
         &self,
         process_id: &ProcessId,
     ) -> Result<Option<crate::ProcessRecord>, crate::PluginError> {
+        self.process_point_reads.fetch_add(1, Ordering::SeqCst);
         if let Some(faulted) = self.faulted_read() {
             return faulted;
         }
@@ -357,6 +377,7 @@ impl super::super::registry_concerns::ProcessClockRebind for ProcessRegistryFaul
                 inner,
                 faults: Arc::clone(&self.faults),
                 injected_wakes: Arc::clone(&self.injected_wakes),
+                process_point_reads: Arc::clone(&self.process_point_reads),
                 lease_point_reads: Arc::clone(&self.lease_point_reads),
                 lease_batch_reads: Arc::clone(&self.lease_batch_reads),
             }) as Arc<dyn ProcessRegistry>

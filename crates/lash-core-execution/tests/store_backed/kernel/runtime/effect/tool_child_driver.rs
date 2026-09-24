@@ -173,19 +173,22 @@ mod tests {
         request
     }
 
-    /// An executor resolver that opens a group without dispatching the real
-    /// child: `open` resolves every child through the registered resolver before
-    /// recording the group, and a resolver answering an executor that can never
-    /// run leaves the host's dispatched copy to fail fast while the caller's own
-    /// resolved runner remains the child's real execution.
-    struct UnrunnableGroupExecutors;
+    /// A resolver that hands the group the one runner the test already resolved,
+    /// once. The host's dispatch then claims the child's replay row and runs
+    /// that runner under the claim, which is the only way production runs a
+    /// tool child: a runner's nested admissions mint under the child's own row,
+    /// so the row must exist before the runner starts.
+    struct StagedGroupExecutor(std::sync::Mutex<Option<RuntimeEffectLocalExecutor<'static>>>);
 
-    impl crate::GroupExecutors for UnrunnableGroupExecutors {
+    impl crate::GroupExecutors for StagedGroupExecutor {
         fn executor_for(
             &self,
             _envelope: &RuntimeEffectEnvelope,
         ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-            Some(RuntimeEffectLocalExecutor::unavailable())
+            self.0
+                .lock()
+                .expect("the staged executor lock is never poisoned")
+                .take()
         }
     }
 
@@ -381,6 +384,10 @@ mod tests {
     /// registration guard between resolution and execution must neither stall the
     /// child on a re-registration nothing promised nor rebind it to a successor —
     /// the accepted child completes on the captured context.
+    ///
+    /// The resolved runner executes the way production executes it: the group's
+    /// host dispatch claims the child's replay row and then runs the runner, so
+    /// the child's nested admissions find the row they mint under.
     #[tokio::test]
     async fn a_resolved_child_executes_on_the_captured_opener_context() {
         let backend = crate::support::memory_backend().await;
@@ -419,36 +426,6 @@ mod tests {
             crate::GroupWakePolicy::All,
             crate::LoserPolicy::Cancel,
         );
-        // The child's admitted controller fences every effect under the group
-        // binding, so the group must exist on the host's controller before the
-        // claim — an unopened group refuses as a controller error, which under
-        // FIG-3528 aborts the child rather than laundering into a tool result.
-        crate::RuntimeEffectController::register_group_executors(
-            controller.as_ref(),
-            Arc::new(UnrunnableGroupExecutors),
-        )
-        .expect("the stub resolver registers once");
-        crate::RuntimeEffectController::open_effect_group(
-            controller.as_ref(),
-            crate::RuntimeEffectGroup::try_new(
-                crate::RuntimeEffectInvocation::new(
-                    crate::EffectAddress::new(
-                        ExecutionScope::turn("child-session", "turn"),
-                        "group:group",
-                    )
-                    .expect("a valid group address"),
-                    crate::RuntimeAttribution::none(),
-                    "group",
-                ),
-                "group",
-                vec![envelope.clone()],
-                crate::GroupWakePolicy::All,
-                crate::LoserPolicy::Cancel,
-            )
-            .expect("the one-child group assembles"),
-        )
-        .await
-        .expect("the child's group is open before it claims");
         let lent_dispatch = lent();
         let lent_controller = lent_dispatch
             .effect_controller
@@ -466,16 +443,50 @@ mod tests {
 
         // The opener's registration ends between resolution and execution: the
         // runner must still complete on the context it captured rather than wait
-        // for a re-registration nothing promises — the timeout is what makes a
-        // wait-for-reregistration regression a failure and not a hang.
+        // for a re-registration nothing promises.
         drop(guard);
-        let outcome = tokio::time::timeout(
+        crate::RuntimeEffectController::register_group_executors(
+            controller.as_ref(),
+            Arc::new(StagedGroupExecutor(std::sync::Mutex::new(Some(executor)))),
+        )
+        .expect("the staged resolver registers once");
+        let mut handle = crate::RuntimeEffectController::open_effect_group(
+            controller.as_ref(),
+            crate::RuntimeEffectGroup::try_new(
+                crate::RuntimeEffectInvocation::new(
+                    crate::EffectAddress::new(
+                        ExecutionScope::turn("child-session", "turn"),
+                        "group:group",
+                    )
+                    .expect("a valid group address"),
+                    crate::RuntimeAttribution::none(),
+                    "group",
+                ),
+                "group",
+                vec![envelope],
+                crate::GroupWakePolicy::All,
+                crate::LoserPolicy::Cancel,
+            )
+            .expect("the one-child group assembles"),
+        )
+        .await
+        .expect("the group opens and dispatches the resolved runner");
+        // The timeout is what makes a wait-for-reregistration regression a
+        // failure and not a hang.
+        let settlement = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            executor.execute(envelope),
+            crate::RuntimeEffectController::await_next_settlement(
+                controller.as_ref(),
+                &mut handle,
+                tokio_util::sync::CancellationToken::new(),
+            ),
         )
         .await
         .expect("a resolved child never waits for the opener to re-register")
-        .expect("the captured context executes the child");
+        .expect("the group settles its one child");
+        let outcome = settlement
+            .outcome
+            .expect("the captured context executes the child");
         assert!(
             matches!(outcome, crate::RuntimeEffectOutcome::ToolInvocation { .. }),
             "the child settles its own recorded work"

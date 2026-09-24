@@ -166,27 +166,19 @@ mod tests {
 
     /// ADR 0016 pins the default awaiter cadence while allowing native backends
     /// to tune both bounds through `WorkCadencePolicy`.
+    ///
+    /// The paused clock moves only when the test advances it. Every poll the
+    /// cadence is measured on reads a pinned pre-completion record, so no
+    /// backend I/O idles the runtime while a poll sleep is pending: a paused
+    /// runtime that idles on the store's connection thread auto-advances to the
+    /// next timer, which would fire the poll early.
     #[tokio::test(start_paused = true)]
     async fn polling_awaiter_uses_configured_work_cadence_floor() {
         let registry = memory_registry().await;
-        registry
+        let registered = registry
             .register_process(registration(&ProcessId::from("configured-cadence")))
             .await
             .expect("register");
-        let work_cadence = WorkCadencePolicy {
-            poll_initial: Duration::from_secs(2),
-            poll_max: Duration::from_secs(3),
-            ..WorkCadencePolicy::default()
-        };
-        let awaiter = NativeProcessAwaiter::for_registry(Arc::clone(&registry))
-            .with_work_cadence(work_cadence);
-        let waiter = crate::task::spawn(async move {
-            awaiter
-                .await_terminal(&ProcessId::from("configured-cadence"))
-                .await
-        });
-        tokio::task::yield_now().await;
-
         registry
             .complete_process(
                 &ProcessId::from("configured-cadence"),
@@ -195,14 +187,58 @@ mod tests {
             )
             .await
             .expect("complete");
-        tokio::time::advance(Duration::from_millis(1_999)).await;
+        let faults = ProcessRegistryFaults::new(Arc::clone(&registry));
+        faults.set_process_read_pinned(Some(registered.clone()));
+        let work_cadence = WorkCadencePolicy {
+            poll_initial: Duration::from_secs(2),
+            poll_max: Duration::from_secs(3),
+            ..WorkCadencePolicy::default()
+        };
+        let awaiter = NativeProcessAwaiter::for_registry(Arc::new(faults.clone()))
+            .with_work_cadence(work_cadence);
+        let process_ref = crate::ProcessRef::from_record(&registered);
+        let waiter =
+            crate::task::spawn(async move { awaiter.await_terminal_ref(&process_ref).await });
         tokio::task::yield_now().await;
+        let parked = faults.process_point_reads();
         assert!(
-            !waiter.is_finished(),
-            "the awaiter must not poll before the configured initial delay"
+            parked > 0 && !waiter.is_finished(),
+            "the awaiter read the pinned running record and parked on its poll"
         );
 
+        tokio::time::advance(Duration::from_millis(1_999)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            faults.process_point_reads(),
+            parked,
+            "the awaiter must not poll before the configured initial delay"
+        );
         tokio::time::advance(Duration::from_millis(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            faults.process_point_reads(),
+            parked + 1,
+            "the awaiter polls once the configured initial delay elapses"
+        );
+
+        // The doubled backoff (4s) is capped at the configured maximum.
+        tokio::time::advance(Duration::from_millis(2_999)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            faults.process_point_reads(),
+            parked + 1,
+            "the awaiter must not poll before the configured maximum delay"
+        );
+        tokio::time::advance(Duration::from_millis(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            faults.process_point_reads(),
+            parked + 2,
+            "the backoff is capped at the configured maximum delay"
+        );
+
+        faults.set_process_read_pinned(None);
+        tokio::time::advance(Duration::from_secs(3)).await;
         let output = waiter
             .await
             .expect("configured-cadence waiter joins")
