@@ -103,9 +103,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             } else {
                 (None, 0)
             };
+            // ECMA-262 installs `message` as an own property only when the
+            // argument is not `undefined`; an absent or `undefined` argument
+            // leaves the property absent (the read then answers
+            // `Error.prototype.message`, `""`). Any other value is ToString'ed.
             let message = match args.get(message_index) {
-                None | Some(Value::Undefined) => String::new(),
-                Some(value) => self.heap.javascript_to_string(value)?,
+                None | Some(Value::Undefined) => None,
+                Some(value) => Some(self.heap.javascript_to_string(value)?),
             };
             let cause = args
                 .get(message_index + 1)
@@ -456,6 +460,7 @@ fn javascript_error_cause(heap: &Heap, options: &Value) -> Option<Value> {
         Value::Record(record) => record.get("cause").cloned(),
         Value::Ref(id) => match heap.get(*id).ok()? {
             HeapObject::Record(record) => record.get("cause").cloned(),
+            HeapObject::Error(error) => error.cause.clone(),
             _ => None,
         },
         _ => None,

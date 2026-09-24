@@ -204,7 +204,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 {
                     let error = self.heap.allocate_error(
                         ErrorKind::TypeError,
-                        reason.trim_start_matches("TypeError: ").to_string(),
+                        Some(reason.trim_start_matches("TypeError: ").to_string()),
                         None,
                         None,
                     )?;
@@ -305,6 +305,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         || array_index_property(&key)
                             .is_some_and(|index| index < values.len() as u32)
                 }
+                // An error's own properties are exactly the slots its
+                // constructor installed or a write defined: `message` only
+                // when a non-`undefined` argument was given, `cause` only
+                // when `options` carried one, `errors` only on
+                // AggregateError. `name` answers from the brand, like the
+                // prototype property it stands in for, so it is never own.
+                HeapObject::Error(error) => match key.as_str() {
+                    "message" => error.message.is_some(),
+                    "cause" => error.cause.is_some(),
+                    "errors" => error.errors.is_some(),
+                    _ => false,
+                },
                 _ => false,
             };
             self.stack.push(Value::Bool(has));
@@ -471,7 +483,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if length > u32::MAX as f64 {
             let error = self.heap.allocate_error(
                 ErrorKind::RangeError,
-                "Invalid array length".to_string(),
+                Some("Invalid array length".to_string()),
                 None,
                 None,
             )?;
@@ -532,10 +544,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     unreachable!("Error receiver kind was checked")
                 };
                 Some(Value::String(
-                    if error.message.is_empty() {
-                        error.kind.name().to_string()
-                    } else {
-                        format!("{}: {}", error.kind.name(), error.message)
+                    match error
+                        .message
+                        .as_deref()
+                        .filter(|message| !message.is_empty())
+                    {
+                        None => error.kind.name().to_string(),
+                        Some(message) => format!("{}: {}", error.kind.name(), message),
                     }
                     .into(),
                 ))

@@ -1,8 +1,8 @@
 # test262-path	class	qualifier
-test/built-ins/AggregateError/cause-property.js	fail	FIG-3657
+test/built-ins/AggregateError/cause-property.js	pass	-
 test/built-ins/AggregateError/length.js	refused	TS_UNKNOWN_BINDING
-test/built-ins/AggregateError/message-method-prop-cast.js	fail	FIG-3657
-test/built-ins/AggregateError/message-method-prop.js	fail	FIG-3657
+test/built-ins/AggregateError/message-method-prop-cast.js	fail	FIG-3652
+test/built-ins/AggregateError/message-method-prop.js	pass	-
 test/built-ins/AggregateError/message-undefined-no-prop.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/AggregateError/name.js	refused	TS_UNKNOWN_BINDING
 test/built-ins/AggregateError/newtarget-is-undefined.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
@@ -3182,13 +3182,13 @@ test/built-ins/Date/prototype/valueOf/name.js	refused	TS_PROTOTYPE_MUTATION_UNSU
 test/built-ins/Date/prototype/valueOf/prop-desc.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Date/year-zero.js	pass	-
 test/built-ins/Error/cause_abrupt.js	refused	TS_ACCESSOR_UNSUPPORTED
-test/built-ins/Error/cause_property.js	fail	FIG-3657
+test/built-ins/Error/cause_property.js	pass	-
 test/built-ins/Error/constructor.js	refused	TS_ACCESSOR_UNSUPPORTED
 test/built-ins/Error/error-message-tostring-toprimitive.js	fail	FIG-3654
 test/built-ins/Error/instance-prototype.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Error/internal-prototype.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Error/length.js	refused	TS_UNKNOWN_BINDING
-test/built-ins/Error/message_property.js	fail	FIG-3657
+test/built-ins/Error/message_property.js	pass	-
 test/built-ins/Error/name.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Error/prop-desc.js	refused	TS_THIS_UNSUPPORTED
 test/built-ins/Error/prototype/S15.11.3.1_A1_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED

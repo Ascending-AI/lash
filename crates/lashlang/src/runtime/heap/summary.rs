@@ -153,9 +153,9 @@ impl Heap {
             }
             HeapObject::Error(error) => {
                 out.push_str(error.kind.name());
-                if !error.message.is_empty() {
+                if let Some(message) = error.message.as_deref().filter(|m| !m.is_empty()) {
                     out.push_str(": ");
-                    out.push_str(&error.message);
+                    out.push_str(message);
                 }
             }
             HeapObject::Closure { .. } => out.push_str("function"),

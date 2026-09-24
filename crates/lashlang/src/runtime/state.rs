@@ -39,7 +39,11 @@ pub use canonical_messagepack::{
 // while deserializing — before it ever reads `version` — and would report a
 // corrupt snapshot rather than a version boundary. The bump is what makes the
 // refusal honest.
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 9;
+/// v10 carries an error's own `message` as `Option<String>`: absent stays
+/// absent and an explicitly empty message stays empty, where v9 encoded both
+/// as `""`. A v9 wire would decode but resurrect `new Error('')` with no own
+/// `message`; the bump refuses it instead (FIG-3657).
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 10;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 /// The longest summary [`State::opaque_bindings`] renders, in characters.
 pub const BINDING_SUMMARY_MAX_CHARS: usize = super::heap::SUMMARY_MAX_CHARS;
@@ -595,7 +599,7 @@ enum CanonicalHeapObject {
     },
     Error {
         error_kind: ErrorKind,
-        message: String,
+        message: Option<String>,
         cause: Option<CanonicalValue>,
         errors: Option<CanonicalValue>,
     },

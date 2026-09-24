@@ -157,7 +157,7 @@ impl HeapObject {
                     .saturating_add(value_logical_bytes(value))
             }),
             Self::Date(_) => VALUE_SLOT_BYTES.saturating_add(8),
-            Self::Error(error) => (error.message.len() as u64)
+            Self::Error(error) => (error.message.as_deref().map_or(0, |m| m.len() as u64))
                 .saturating_add(VALUE_SLOT_BYTES)
                 .saturating_add(error.cause.as_ref().map_or(0, value_logical_bytes))
                 .saturating_add(error.errors.as_ref().map_or(0, value_logical_bytes)),
