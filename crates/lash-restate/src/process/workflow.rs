@@ -684,6 +684,7 @@ where
             &self.continuations,
             &process_id,
             input.segment_ordinal,
+            self.runner.replay_key_grammar(&input.registration),
         )
         .await?
         {

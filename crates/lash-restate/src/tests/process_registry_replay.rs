@@ -768,6 +768,10 @@ pub(super) struct RecordingRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for RecordingRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -812,7 +816,7 @@ pub(super) struct AlreadyStartedRunner {
 
 pub(super) struct TerminalFailureRunner;
 
-pub(super) struct ReplacementThenSuccessRunner {
+pub(super) struct DivergenceThenSuccessRunner {
     pub(super) runs: AtomicUsize,
 }
 
@@ -821,7 +825,11 @@ pub(super) struct OpaqueFailureThenSuccessRunner {
 }
 
 #[async_trait::async_trait]
-impl RestateProcessRunner for ReplacementThenSuccessRunner {
+impl RestateProcessRunner for DivergenceThenSuccessRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -834,7 +842,7 @@ impl RestateProcessRunner for ReplacementThenSuccessRunner {
         if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
             return Err(PluginError::RuntimeEffectController(
                 lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                    lash_core::RuntimeErrorCode::EffectReplayDivergence,
                     "recorded runtime effect did not match the reconstructed envelope",
                 )
                 .with_summary(lash_core::RuntimeEffectReplayMismatchReport {
@@ -857,6 +865,10 @@ impl RestateProcessRunner for ReplacementThenSuccessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -884,6 +896,10 @@ impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for TerminalFailureRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -909,6 +925,10 @@ impl RestateProcessRunner for TerminalFailureRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for AlreadyStartedRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1065,6 +1085,10 @@ impl HttpTransport for BlockingCancelSignalTransport {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for CancellationAwareRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1095,6 +1119,10 @@ impl RestateProcessRunner for CancellationAwareRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for SegmentedRecordingRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,

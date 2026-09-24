@@ -64,7 +64,7 @@ pub(crate) use protocol::protocol_refusal_in;
 #[cfg(test)]
 pub(crate) use protocol::protocol_retired_error;
 use protocol::{load_index, load_index_shared};
-pub(crate) use reopen::content_checked_shape_mismatch;
+pub(crate) use reopen::{content_checked_shape_mismatch, content_mismatch};
 pub(crate) use wire::btree_map_as_pairs;
 pub use wire::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupPhase,
@@ -447,6 +447,12 @@ pub struct EffectGroupRecordSettlementRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupReadRankRequest {
     pub rank: u64,
+    /// The read is the group caller's own await. A caller is refused a
+    /// closed group's ranks until it reopens the group, as the SQL engines'
+    /// caller path refuses (FIG-3676); the host's own readers (drain,
+    /// finalization, the settlement reader) see every recorded rank.
+    #[serde(default)]
+    pub for_caller: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1195,6 +1201,18 @@ impl EffectGroupIndex {
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
             return Ok(Json(EffectGroupReadRankResponse::Retired));
         }
+        let closed_to_caller = matches!(
+            &record.lifecycle,
+            EffectGroupLifecycle::Closed {
+                effective,
+                reopened,
+                ..
+            } if !reopened || matches!(effective, EffectGroupCloseDisposition::Refused { .. })
+        );
+        // A caller is refused its closed group whether or not the rank settled.
+        if request.for_caller && closed_to_caller {
+            return Ok(Json(EffectGroupReadRankResponse::Closed));
+        }
         let settlement = record.live()?.settlements.get(&request.rank).cloned();
         if let Some(settlement) = settlement {
             let child_replay_key = record
@@ -1207,20 +1225,14 @@ impl EffectGroupIndex {
                 child_replay_key,
             }));
         }
-        Ok(Json(match &record.lifecycle {
-            // `Closed` answers a caller whose interest predates the close —
-            // a restored cursor — and any rank read on a refused close. A
-            // reopened caller parks like a live group: an RTC loser still
-            // lands, and a committed child under Cancel seats its rank when
-            // the drain finishes (FIG-3481).
-            EffectGroupLifecycle::Closed {
-                effective,
-                reopened,
-                ..
-            } if !reopened || matches!(effective, EffectGroupCloseDisposition::Refused { .. }) => {
-                EffectGroupReadRankResponse::Closed
-            }
-            _ => EffectGroupReadRankResponse::NotSettled,
+        // An unsettled rank of a group closed to its caller answers `Closed`
+        // to every reader. A reopened caller parks like a live group: an RTC
+        // loser still lands, and a committed child under Cancel seats its
+        // rank when the drain finishes (FIG-3481).
+        Ok(Json(if closed_to_caller {
+            EffectGroupReadRankResponse::Closed
+        } else {
+            EffectGroupReadRankResponse::NotSettled
         }))
     }
 

@@ -474,6 +474,24 @@ impl DurableProcessWorker {
             .expect("native substrate config was validated when the worker was built")
     }
 
+    /// The replay-key grammar `registration`'s engine journals under
+    /// (FIG-3586): what the incarnation's start record must name. A durable
+    /// substrate that records the start itself, before this worker runs the
+    /// segment, stamps it from here so the record matches the one this worker
+    /// would write (FIG-3588).
+    pub fn replay_key_grammar(&self, registration: &ProcessRegistration) -> Option<u32> {
+        match registration.input.as_ref() {
+            crate::ProcessInput::Engine { kind, .. } => self
+                .config
+                .runtime_host
+                .process_engines
+                .require(kind)
+                .ok()
+                .and_then(|engine| engine.replay_key_grammar()),
+            _ => None,
+        }
+    }
+
     /// Durable substrates use this method so a non-terminal boundary can end the current
     /// substrate invocation; the native worker's lease-fenced drive loops over segment
     /// boundaries internally.
@@ -556,16 +574,7 @@ impl DurableProcessWorker {
         // engine that keys its journal by grammar.
         let replay_grammar = match current.first_started.as_deref() {
             Some(started) => started.replay_grammar,
-            None => match registration.input.as_ref() {
-                crate::ProcessInput::Engine { kind, .. } => self
-                    .config
-                    .runtime_host
-                    .process_engines
-                    .require(kind)
-                    .ok()
-                    .and_then(|engine| engine.replay_key_grammar()),
-                _ => None,
-            },
+            None => self.replay_key_grammar(&registration),
         };
         let admitted = self
             .config

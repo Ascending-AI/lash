@@ -896,6 +896,8 @@ async fn run_scenario(
                     )
                     .await;
                     let _ = observed_tx.send(observed);
+                    // The observations carry the scenario's outcome.
+                    crate::ConformanceTurnEnd::Settled
                 })
             }),
         )

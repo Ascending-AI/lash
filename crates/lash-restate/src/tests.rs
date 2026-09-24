@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::controller::context::guard_restate_context_future;
-use crate::controller::journal_budget::JournaledEffectRecord;
+use crate::controller::effect_journal::JournaledEffectRecord;
 use crate::controller::{
     RecordedRuntimeEffect, RestateEffectExecution, restate_await_event_turn_cancel_wait_request,
     restate_effect_execution, restate_effect_name, restate_timer_turn_cancel_wait_request,
@@ -96,11 +96,13 @@ pub(super) async fn memory_host_config() -> lash_core::facade_support::RuntimeHo
 }
 
 mod bindings;
+mod determinism;
 mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
 mod effect_group_session_gate;
 mod effect_group_shape;
 mod endpoint_protocol;
+mod endpoint_turn_runner;
 mod live_turn_probe;
 mod process_effect_summary;
 mod process_tool_replay;
@@ -923,6 +925,10 @@ fn scoped_runtime_invocation(
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig779SuspendingProcessRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -981,6 +987,10 @@ struct Fig788TerminalRedriveRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig788TerminalRedriveRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1025,6 +1035,10 @@ struct Fig788SegmentBoundaryRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig788SegmentBoundaryRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1056,6 +1070,10 @@ struct Fig788OrdinalOneTerminalRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig788OrdinalOneTerminalRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1089,6 +1107,10 @@ struct Fig811EffectfulOrdinalOneTerminalRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
+    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+        None
+    }
+
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
@@ -1183,6 +1205,13 @@ struct Fig793LlmGateRedriveInput;
 #[restate_sdk::workflow]
 trait Fig793LlmGateRedrive {
     async fn run(input: Json<Fig793LlmGateRedriveInput>) -> HandlerResult<Json<bool>>;
+}
+
+/// A recorded effect as its `ctx.run` journal entry holds it: stamped with
+/// this build's effect-journal generation.
+fn journal_entry_value(recorded: RecordedRuntimeEffect) -> serde_json::Value {
+    serde_json::to_value(JournaledEffectRecord::Recorded(recorded))
+        .expect("encode a recorded effect's journal entry")
 }
 
 fn fig793_llm_envelope() -> RuntimeEffectEnvelope {
@@ -1441,6 +1470,8 @@ trait Fig1142ReplayDivergence {
 
 struct Fig1142ReplayDivergenceImpl {
     model_version: Arc<AtomicUsize>,
+    /// How many times the model call actually ran.
+    executions: Arc<AtomicUsize>,
 }
 
 fn fig1142_llm_envelope(model_version: usize) -> RuntimeEffectEnvelope {
@@ -1471,10 +1502,22 @@ impl Fig1142ReplayDivergence for Fig1142ReplayDivergenceImpl {
         RestateRuntimeEffectController::new_for_test(ctx)
             .execute_effect(
                 fig1142_llm_envelope(model_version),
-                RuntimeEffectLocalExecutor::testing(|_| async { Ok(fig793_llm_outcome()) }),
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    self.executions.fetch_add(1, Ordering::SeqCst);
+                    Ok(fig793_llm_outcome())
+                }),
             )
             .await
-            .map_err(TerminalError::from_error)?;
+            .map_err(|error| -> HandlerError {
+                // A turn handler's contract (lash_restate::turn_service): a
+                // divergence parks, so the attempt fails retryably and the
+                // invocation keeps its journal.
+                if error.turn_failure_cause() == lash_core::TurnFailureCause::Parked {
+                    HandlerError::from(std::io::Error::other(error.to_string()))
+                } else {
+                    TerminalError::from_error(error).into()
+                }
+            })?;
         Ok(Json(true))
     }
 }

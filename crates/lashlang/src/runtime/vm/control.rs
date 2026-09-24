@@ -487,6 +487,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     ) && matches!(
                         &self.stack[index],
                         Value::Ref(id) if self.heap.is_javascript_vm_object(*id)?
+                            // A loop over an array reads the array itself, so
+                            // it sees what its body changes (FIG-3625).
+                            || matches!(instruction, super::Instruction::BeginIter(_))
+                                && matches!(self.heap.get(*id)?, crate::runtime::heap::HeapObject::List(_))
                     ) {
                         self.stack[index].clone()
                     } else {
@@ -657,7 +661,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmValueHolder::IteratorCursor { iterator, member } => {
                 match &self.iter_stack[iterator].cursor {
                     IterCursor::List { values, .. } => &values[member],
-                    IterCursor::Range { .. } => {
+                    IterCursor::Live { .. } | IterCursor::Range { .. } => {
                         unreachable!("iterator cursor holders only enumerate List cursors")
                     }
                 }
@@ -689,7 +693,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmValueHolder::IteratorCursor { iterator, member } => {
                 match &mut self.iter_stack[iterator].cursor {
                     IterCursor::List { values, .. } => &mut values.make_mut()[member],
-                    IterCursor::Range { .. } => {
+                    IterCursor::Live { .. } | IterCursor::Range { .. } => {
                         unreachable!("iterator cursor holders only enumerate List cursors")
                     }
                 }
@@ -781,6 +785,7 @@ mod tests {
             cursor: IterCursor::List {
                 values: vec![cursor_member.clone(), Value::Number(5.0)].into(),
                 index: 0,
+                collection: None,
             },
             binding: 0,
             restore: LoopRestore {
@@ -794,6 +799,7 @@ mod tests {
             cursor: IterCursor::List {
                 values: vec![Value::List(vec![].into())].into(),
                 index: 0,
+                collection: None,
             },
             binding: 1,
             restore: LoopRestore { previous: None },

@@ -274,13 +274,23 @@ fn fixture_path(scenario: Scenario) -> PathBuf {
 }
 
 fn fixture_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/replay-corpus")
+    crate_dir().join("testdata/replay-corpus")
+}
+
+/// The crate's source directory: the checkout's own under `kiln run`, whose
+/// working directory is the runfiles tree, and the manifest directory
+/// otherwise.
+fn crate_dir() -> PathBuf {
+    std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf(),
+        |root| PathBuf::from(root).join("crates/lash-restate"),
+    )
 }
 
 fn recorded_at_git_sha() -> String {
     let output = Command::new("git")
         .args(["rev-parse", "HEAD"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .current_dir(crate_dir())
         .output()
         .expect("run git rev-parse for replay corpus metadata");
     assert!(output.status.success(), "git rev-parse HEAD must succeed");

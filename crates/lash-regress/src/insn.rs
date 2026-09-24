@@ -93,7 +93,16 @@ pub enum Insn {
     ResetCaptureGroup(CaptureGroupID),
 
     /// Perform a backreference match.
-    BackRef(u32),
+    /// `groups` holds the 0-based candidate capture groups; a `\k<name>`
+    /// shared by disjoint alternatives lists all of them. Groups that did not
+    /// participate in the match are skipped; if none participated the
+    /// backreference matches the empty string.
+    /// `icase` records the ignoreCase modifier in force at the reference site,
+    /// which may differ from the regex's global flag inside a modifier group.
+    BackRef {
+        groups: Box<[u32]>,
+        icase: bool,
+    },
 
     /// Match the next character against the bracket contents, stored at the given index in the CompiledRegex.
     Bracket(usize),

@@ -30,23 +30,23 @@ pub(super) async fn fig779_sdk_pending_durable_timer_suspends_cleanly_without_gu
 }
 
 #[derive(Debug, Serialize, serde::Deserialize)]
-pub(super) struct Fig790TurnEventPumpInput {
+pub(super) struct Fig790TurnObservationPublisherInput {
     process_id: ProcessId,
     prequeue_event: bool,
 }
 
 #[restate_sdk::workflow]
-trait Fig790TurnEventPump {
-    async fn run(input: Json<Fig790TurnEventPumpInput>) -> HandlerResult<Json<()>>;
+trait Fig790TurnObservationPublisher {
+    async fn run(input: Json<Fig790TurnObservationPublisherInput>) -> HandlerResult<Json<()>>;
 }
 
-pub(super) struct Fig790TurnEventPumpImpl;
+pub(super) struct Fig790TurnObservationPublisherImpl;
 
-impl Fig790TurnEventPump for Fig790TurnEventPumpImpl {
+impl Fig790TurnObservationPublisher for Fig790TurnObservationPublisherImpl {
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
-        Json(input): Json<Fig790TurnEventPumpInput>,
+        Json(input): Json<Fig790TurnObservationPublisherInput>,
     ) -> HandlerResult<Json<()>> {
         let request: restate_sdk::context::Request<
             '_,
@@ -67,46 +67,39 @@ impl Fig790TurnEventPump for Fig790TurnEventPumpImpl {
             let Json(_output) = request.call().await?;
             Ok::<(), TerminalError>(())
         });
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
+        let (observer, mut observations) = tokio::sync::mpsc::unbounded_channel();
         if input.prequeue_event {
-            event_tx
+            observer
                 .send(())
-                .await
-                .expect("queue the event that makes the pump branch ready");
+                .expect("queue the observation that makes the publication ready");
         }
-        drop(event_tx);
+        drop(observer);
 
-        let mut handler_state = ();
-        lash_core::drive_with_event_pump(
-            run_future.as_mut(),
-            &mut event_rx,
-            &mut handler_state,
-            |(), _| Box::pin(async {}),
-        )
-        .await?;
+        lash_core::drive_with_observations(run_future.as_mut(), &mut observations, |_| async {})
+            .await?;
         Ok(Json(()))
     }
 }
 
-pub(super) async fn assert_fig790_turn_event_pump_suspends_cleanly(
+pub(super) async fn assert_fig790_turn_observation_publisher_suspends_cleanly(
     invocation_id: &str,
     prequeue_event: bool,
 ) {
     let endpoint = Endpoint::builder()
-        .bind(Fig790TurnEventPumpImpl.serve())
+        .bind(Fig790TurnObservationPublisherImpl.serve())
         .build();
     let output = invoke_endpoint(
         &endpoint,
-        "Fig790TurnEventPump",
+        "Fig790TurnObservationPublisher",
         "run",
         invocation_id,
-        &Fig790TurnEventPumpInput {
+        &Fig790TurnObservationPublisherInput {
             process_id: ProcessId::from(format!("{invocation_id}-process")),
             prequeue_event,
         },
     )
     .await
-    .expect("the event pump must let the substrate consume its suspension");
+    .expect("the observation publisher must let the substrate consume its suspension");
     assert_eq!(
         restate_message_types(&output).expect("decode process-await suspension frames"),
         vec![
@@ -117,13 +110,22 @@ pub(super) async fn assert_fig790_turn_event_pump_suspends_cleanly(
 }
 
 #[tokio::test]
-pub(super) async fn fig790_turn_event_pump_does_not_repoll_a_suspending_durable_future() {
-    assert_fig790_turn_event_pump_suspends_cleanly("fig790-turn-event-pump", true).await;
+pub(super) async fn fig790_turn_observation_publisher_does_not_repoll_a_suspending_durable_future()
+{
+    assert_fig790_turn_observation_publisher_suspends_cleanly(
+        "fig790-turn-observation-publisher",
+        true,
+    )
+    .await;
 }
 
 #[tokio::test]
-pub(super) async fn fig790_turn_event_pump_with_empty_channel_suspends_cleanly() {
-    assert_fig790_turn_event_pump_suspends_cleanly("fig790-turn-event-pump-empty", false).await;
+pub(super) async fn fig790_turn_observation_publisher_with_empty_channel_suspends_cleanly() {
+    assert_fig790_turn_observation_publisher_suspends_cleanly(
+        "fig790-turn-observation-publisher-empty",
+        false,
+    )
+    .await;
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
@@ -217,14 +219,14 @@ pub(super) async fn fig790_pre_pr_suspended_process_call(
     process_id: &ProcessId,
 ) -> endpoint_protocol::RestateCallFrame {
     let endpoint = Endpoint::builder()
-        .bind(Fig790TurnEventPumpImpl.serve())
+        .bind(Fig790TurnObservationPublisherImpl.serve())
         .build();
     let suspended = invoke_endpoint(
         &endpoint,
-        "Fig790TurnEventPump",
+        "Fig790TurnObservationPublisher",
         "run",
         &format!("{process_id}-pre-pr-fixture"),
-        &Fig790TurnEventPumpInput {
+        &Fig790TurnObservationPublisherInput {
             process_id: ProcessId::from(process_id.to_string()),
             prequeue_event: false,
         },

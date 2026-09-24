@@ -1598,7 +1598,7 @@
               ],
               "probes": {
                 "level": "number 1",
-                "readLevel": "unbound"
+                "readLevel": "dropped"
               }
             },
             "restart": {
@@ -1608,7 +1608,7 @@
               ],
               "probes": {
                 "level": "number 1",
-                "readLevel": "unbound"
+                "readLevel": "dropped"
               }
             }
           }
@@ -2147,7 +2147,7 @@
           "source": "const items = [1, 2];\nfor (const item of items) {\n  const items = [item];\n  console.log(items.length);\n}\n",
           "reject": null,
           "deviation": null,
-          "defect": "for-of-shadowed-iterable",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
@@ -2159,26 +2159,6 @@
               "item": "unbound"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "rejected",
-              "diagnostic": "TS_FOR_OF_UNSUPPORTED",
-              "prints": [],
-              "probes": {
-                "item": "unbound",
-                "items": "unbound"
-              }
-            },
-            "restart": {
-              "outcome": "rejected",
-              "diagnostic": "TS_FOR_OF_UNSUPPORTED",
-              "prints": [],
-              "probes": {
-                "item": "unbound",
-                "items": "unbound"
-              }
-            }
           }
         }
       ]
@@ -2315,81 +2295,52 @@
       "deviations": [],
       "cells": [
         {
-          "source": "const items = [3, 1];\nconsole.log(Math.max(...items));\n",
+          "source": "const items = [3, 1];\nconsole.log(Math.max(...items), Math.min(...items, 0), String.fromCharCode(...[104, 105]));\n",
           "reject": null,
           "deviation": null,
-          "defect": "builtin-call-spread",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
-              "3"
+              "3 0 hi"
             ],
             "probes": {
               "items": "object [3,1]"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "rejected",
-              "diagnostic": "TS_METHOD_UNSUPPORTED",
-              "prints": [],
-              "probes": {
-                "items": "unbound"
-              }
-            },
-            "restart": {
-              "outcome": "rejected",
-              "diagnostic": "TS_METHOD_UNSUPPORTED",
-              "prints": [],
-              "probes": {
-                "items": "unbound"
-              }
-            }
           }
         }
       ]
     },
     {
       "id": "builtin-method-call-spread",
-      "about": "a spread argument to a builtin method passes the array's items (FIG-3627)",
+      "about": "a spread argument to a builtin method passes the array's items, among fixed ones and nested (FIG-3627)",
       "probe": [
-        "items"
+        "items",
+        "rows",
+        "count",
+        "row"
       ],
       "deviations": [],
       "cells": [
         {
-          "source": "const items = [3, 1];\nitems.push(...[4, 5]);\nconsole.log(items);\n",
+          "source": "const items = [3, 1];\nitems.push(...[4, 5]);\nconst rows = [[9, 2], [6]];\nconst count = items.push(0, ...rows.map((row) => Math.max(...row)));\nconsole.log(items, count);\nconsole.log(...items);\n",
           "reject": null,
           "deviation": null,
-          "defect": "builtin-call-spread",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
-              "[3,1,4,5]"
+              "[3,1,4,5,0,9,6] 7",
+              "3 1 4 5 0 9 6"
             ],
             "probes": {
-              "items": "object [3,1,4,5]"
+              "items": "object [3,1,4,5,0,9,6]",
+              "rows": "object [[9,2],[6]]",
+              "count": "number 7",
+              "row": "unbound"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "throw",
-              "error": "RuntimeError",
-              "prints": [],
-              "probes": {
-                "items": "object [3,1]"
-              }
-            },
-            "restart": {
-              "outcome": "throw",
-              "error": "RuntimeError",
-              "prints": [],
-              "probes": {
-                "items": "object [3,1]"
-              }
-            }
           }
         }
       ]
@@ -2475,7 +2426,7 @@
           "source": "const items = [1];\nconst same = items;\nfor (const item of items) {\n  if (same.length < 3) {\n    same.push(item + 1);\n  }\n}\nconsole.log(same);\n",
           "reject": null,
           "deviation": null,
-          "defect": "for-of-aliased-iterable",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
@@ -2487,30 +2438,93 @@
               "item": "unbound"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "normal",
-              "prints": [
-                "[1,2]"
-              ],
-              "probes": {
-                "item": "unbound",
-                "items": "object [1,2]",
-                "same": "object [1,2]"
-              }
+          }
+        }
+      ]
+    },
+    {
+      "id": "for-of-appends-during-the-loop",
+      "about": "a for...of loop visits what its body appends, and stops short of what it removes (FIG-3625)",
+      "probe": [
+        "queue",
+        "seen",
+        "item"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const queue = [1];\nconst seen = [];\nfor (const item of queue) {\n  seen.push(item);\n  if (item < 4) {\n    queue.push(item * 2);\n  }\n}\nconsole.log(seen, queue);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[1,2,4] [1,2,4]"
+            ],
+            "probes": {
+              "queue": "object [1,2,4]",
+              "seen": "object [1,2,4]",
+              "item": "unbound"
             },
-            "restart": {
-              "outcome": "normal",
-              "prints": [
-                "[1,2]"
-              ],
-              "probes": {
-                "item": "unbound",
-                "items": "object [1,2]",
-                "same": "object [1,2]"
-              }
-            }
+            "closures": []
+          }
+        },
+        {
+          "source": "for (const item of queue) {\n  queue.pop();\n  seen.push(item);\n}\nconsole.log(seen, queue);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[1,2,4,1,2] [1]"
+            ],
+            "probes": {
+              "queue": "object [1]",
+              "seen": "object [1,2,4,1,2]",
+              "item": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "for-of-map-and-set-are-live",
+      "about": "a for...of over a Map or a Set visits entries added during the loop and skips ones deleted before their turn (FIG-3625)",
+      "probe": [
+        "counts",
+        "tags",
+        "key",
+        "value",
+        "tag"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const counts = new Map([['a', 1], ['b', 2], ['c', 3]]);\nfor (const [key, value] of counts) {\n  if (key === 'a') {\n    counts.delete('b');\n    counts.set('d', 4);\n    counts.set('c', 30);\n  }\n  console.log(key, value);\n}\nconst tags = new Set(['x']);\nfor (const tag of tags) {\n  if (tags.size < 3) {\n    tags.add(tag + 'y');\n  }\n  console.log(tag);\n}\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "a 1",
+              "c 30",
+              "d 4",
+              "x",
+              "xy",
+              "xyy"
+            ],
+            "probes": {
+              "counts": "object {}",
+              "tags": "object {}",
+              "key": "unbound",
+              "value": "unbound",
+              "tag": "unbound"
+            },
+            "closures": []
           }
         }
       ]
@@ -2614,6 +2628,91 @@
               "alias": "object {\"doc\":{\"n\":1,\"title\":\"t\"},\"n\":12}"
             },
             "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "closure-refused-in-a-later-cell",
+      "about": "a later cell's use of a function an earlier cell bound is refused by name, live and after a reload (FIG-3608)",
+      "probe": [
+        "helper",
+        "twice",
+        "box",
+        "n"
+      ],
+      "deviations": [
+        "closure-boundary"
+      ],
+      "cells": [
+        {
+          "source": "const helper = (n) => n + 1;\nfunction twice(n) { return n * 2; }\nconst box = { run: helper, n: 2 };\nconsole.log(helper(1), twice(2), box.n);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "2 4 2"
+            ],
+            "probes": {
+              "helper": "function undefined",
+              "twice": "function undefined",
+              "box": "object {\"n\":2}",
+              "n": "unbound"
+            },
+            "closures": [
+              "helper",
+              "twice",
+              "box"
+            ]
+          }
+        },
+        {
+          "source": "console.log(typeof helper, twice(3), box.n);\n",
+          "reject": null,
+          "deviation": "closure-boundary",
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "function 6 2"
+            ],
+            "probes": {
+              "helper": "function undefined",
+              "twice": "function undefined",
+              "box": "object {\"n\":2}",
+              "n": "unbound"
+            },
+            "closures": [
+              "helper",
+              "twice",
+              "box"
+            ]
+          },
+          "lash": {
+            "resident": {
+              "outcome": "rejected",
+              "diagnostic": "TS_FUNCTION_NOT_PERSISTED",
+              "prints": [],
+              "probes": {
+                "box": "dropped",
+                "helper": "dropped",
+                "n": "unbound",
+                "twice": "dropped"
+              }
+            },
+            "restart": {
+              "outcome": "rejected",
+              "diagnostic": "TS_FUNCTION_NOT_PERSISTED",
+              "prints": [],
+              "probes": {
+                "box": "dropped",
+                "helper": "dropped",
+                "n": "unbound",
+                "twice": "dropped"
+              }
+            }
           }
         }
       ]

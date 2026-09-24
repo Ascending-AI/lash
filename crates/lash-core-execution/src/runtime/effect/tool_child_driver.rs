@@ -59,7 +59,6 @@
 
 use std::sync::Arc;
 
-use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 use lash_sansio::sync::MutexExt;
 use tokio_util::sync::CancellationToken;
 
@@ -268,6 +267,16 @@ impl std::fmt::Debug for ToolChildHost {
 }
 
 impl super::group_drain::GroupExecutors for ToolChildHost {
+    /// Every tool child is this resolver's, whether or not its opener is live
+    /// in this process: the process whose opener is live runs it. Every other
+    /// command routes exactly when [`executor_for`](Self::executor_for) answers.
+    fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
+        matches!(
+            envelope.command,
+            RuntimeEffectCommand::ToolInvocation { .. }
+        ) || super::group_drain::GroupExecutors::executor_for(self, envelope).is_some()
+    }
+
     /// Routes a tool child to this host's driver, and answers `None` for
     /// everything else.
     ///
@@ -695,7 +704,7 @@ pub(crate) async fn run_tool_child<'run>(
     // The orchestrating-start sink the context carries: an orchestrating body
     // runs outside an attempt frame, so its realized starts have no intent
     // outcome to ride and are captured here instead (ADR 0099 §6).
-    let orchestrating_starts = crate::tool_dispatch::OrchestratingStartsBuffer::default();
+    let orchestrating_sinks = crate::tool_dispatch::OrchestratingChildSinks::default();
     // The cancellation trio is computed once, here, from the *recorded*
     // authority the validator just authenticated — and carried whole into the
     // child's context so every retry sleep and deferred wait inside it,
@@ -708,7 +717,7 @@ pub(crate) async fn run_tool_child<'run>(
         request,
         child,
         turn_cancel_wait,
-        orchestrating_starts.clone(),
+        orchestrating_sinks.clone(),
     ))
     .await?;
     // The settlement is aggregated from the journaled outcome by the one
@@ -716,7 +725,7 @@ pub(crate) async fn run_tool_child<'run>(
     // `outcome.captures` and its `triggers`; what the orchestrating lane wrote
     // outside any attempt frame still drains from the child-local buffers.
     let model_return =
-        resolve_model_return(&dispatch, request, &outcome, &outcome.intent_outcomes).await;
+        resolve_model_return(&dispatch, request, &outcome, &outcome.intent_outcomes).await?;
     let mut settlement = ToolSettlement::from_dispatch(&outcome, model_return);
     settlement
         .checkpoint_messages
@@ -725,7 +734,7 @@ pub(crate) async fn run_tool_child<'run>(
         .triggers
         .extend(dispatch.trigger_outcomes.drain());
     settlement.usage.extend(usage_ledger.take());
-    for process_id in orchestrating_starts.drain() {
+    for process_id in orchestrating_sinks.drain() {
         if !settlement.possession.contains(&process_id) {
             settlement.possession.push(process_id);
         }
@@ -904,13 +913,13 @@ async fn drive(
     request: &ToolChildRequest,
     child: crate::EffectAddress,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
-    orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
+    orchestrating_sinks: crate::tool_dispatch::OrchestratingChildSinks,
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
     let tool_context = child_tool_context(
         dispatch,
         request,
         turn_cancel_wait.clone(),
-        orchestrating_starts,
+        orchestrating_sinks.clone(),
     );
     // The orchestrating lane is a catalog lane: only a child the Tool Catalog
     // itself admitted may run a handler-level body with no attempt frame. A
@@ -923,12 +932,18 @@ async fn drive(
         super::tool_child::ToolChildAdmission::Catalog { .. }
     ) && dispatch.is_orchestrating_tool(&request.call.tool_id)
     {
-        return Ok(Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
+        let outcome = Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
             dispatch.as_ref(),
             request.call.clone(),
             tool_context,
         ))
-        .await);
+        .await;
+        // A nested call the body issued was refused: the child is refused with
+        // it rather than settling what the body made of the failure.
+        return match orchestrating_sinks.take_refusal() {
+            Some(refusal) => Err(refusal),
+            None => Ok(outcome),
+        };
     }
 
     let executor_context = tool_context.clone();
@@ -972,7 +987,7 @@ async fn drive(
         // drain to admit behind the barrier: the discharge seats the rank.
         ToolCallLaunch::Pending(pending) => {
             let mut outcome =
-                await_child_completion(dispatch, request, *pending, &turn_cancel_wait).await;
+                await_child_completion(dispatch, request, *pending, &turn_cancel_wait).await?;
             let mut recorded_call_id = outcome.record.call_id.clone();
             crate::tool_dispatch::commit_group_child_boundary(
                 dispatch.as_ref(),
@@ -1000,13 +1015,13 @@ fn child_tool_context<'run>(
     dispatch: &Arc<ToolDispatchContext<'run>>,
     request: &ToolChildRequest,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
-    orchestrating_starts: crate::tool_dispatch::OrchestratingStartsBuffer,
+    orchestrating_sinks: crate::tool_dispatch::OrchestratingChildSinks,
 ) -> crate::ToolContext<'run> {
     let mut builder = crate::ToolContext::from_dispatch(Arc::clone(dispatch))
         .prepared_call(&request.call)
         .cancellation_token(Some(turn_cancel_wait.cancellation().clone()))
         .parent_invocation(request.attempt_identity.parent_invocation().cloned())
-        .orchestrating_starts(orchestrating_starts)
+        .orchestrating_sinks(orchestrating_sinks)
         .turn_cancel_wait(turn_cancel_wait);
     if let Some(process_ref) = request.enclosing_process.as_ref() {
         builder = builder.enclosing_process(Some(process_ref.process_id.clone()));
@@ -1069,7 +1084,7 @@ async fn await_child_completion(
     request: &ToolChildRequest,
     pending: crate::tool_dispatch::PendingToolDispatchOutcome,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
-) -> ToolDispatchOutcome {
+) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
     await_journaled_tool_completion(
         dispatch,
         request.attempt_identity.parent_invocation(),
@@ -1100,7 +1115,7 @@ pub(crate) async fn await_journaled_tool_completion(
     call_id: &str,
     pending: crate::tool_dispatch::PendingToolDispatchOutcome,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
-) -> ToolDispatchOutcome {
+) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
     if let Err(error) = crate::tool_dispatch::arm_pending_resolver(
         dispatch.processes.as_ref(),
         &pending.pending,
@@ -1109,15 +1124,15 @@ pub(crate) async fn await_journaled_tool_completion(
     )
     .await
     {
-        return unarmed_child_outcome(pending, &error.to_string());
+        return Ok(unarmed_child_outcome(pending, &error.to_string()));
     }
     let Some(invocation) =
         parent_invocation.map(|parent| journaled_await_invocation(dispatch, parent, call_id))
     else {
-        return unarmed_child_outcome(
+        return Ok(unarmed_child_outcome(
             pending,
             "the caller's lineage names no invocation to hang an await on",
-        );
+        ));
     };
     let resolver = pending.pending.resolved_by.clone();
     let deadline = pending
@@ -1143,7 +1158,14 @@ pub(crate) async fn await_journaled_tool_completion(
         .await;
     let resolution = match outcome.and_then(RuntimeEffectOutcome::into_await_event) {
         Ok(resolution) => resolution,
-        Err(error) => return failed_child_outcome(pending, &error.to_string()),
+        // The await's recorded `Failed` terminal replaying is the call's
+        // result. Anything else — a replay divergence against its record, a
+        // live journal fault — is a refusal, returned so the caller refuses
+        // the call rather than settling the error as its result (FIG-3679).
+        Err(error) if error.journaled => {
+            return Ok(failed_child_outcome(pending, &error.to_string()));
+        }
+        Err(error) => return Err(error),
     };
     let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
         dispatch,
@@ -1166,7 +1188,7 @@ pub(crate) async fn await_journaled_tool_completion(
     let mut triggers = pending.triggers;
     triggers.extend(outcome.triggers);
     outcome.triggers = triggers;
-    outcome
+    Ok(outcome)
 }
 
 /// The invocation a journaled await is recorded under: a child of the
@@ -1245,13 +1267,16 @@ fn failed_child_outcome(
 /// a record instead of re-running the steps: a step that changed between
 /// execution and replay cannot change what the child settled. A step *error*
 /// resolves to the same recorded fallback the session path uses, so a broken
-/// step settles a refusal rather than aborting the settlement.
+/// step settles a refusal rather than aborting the settlement. A failure of the
+/// presentation *effect* — a replay divergence against its recorded envelope, a
+/// journal fault — is no presentation at all: it refuses the child, exactly as
+/// a failed attempt effect does, and never settles as the model-facing return.
 async fn resolve_model_return(
     dispatch: &ToolDispatchContext<'_>,
     request: &ToolChildRequest,
     outcome: &ToolDispatchOutcome,
     intent_outcomes: &[crate::ToolIntentExecutionOutcome],
-) -> crate::ModelToolReturn {
+) -> Result<crate::ModelToolReturn, RuntimeEffectControllerError> {
     let baseline = crate::ModelToolReturn::from_output(
         request.call.call_id.clone(),
         outcome.record.tool.clone(),
@@ -1279,7 +1304,6 @@ async fn resolve_model_return(
                             tool_name: outcome.record.tool.clone(),
                             args: outcome.record.args.clone(),
                             output: Box::new(outcome.record.output.clone()),
-                            duration_ms: outcome.record.duration_ms,
                         },
                     ),
                     crate::RuntimeEffectLocalExecutor::presentation(
@@ -1293,20 +1317,14 @@ async fn resolve_model_return(
                             .capability
                             .attachment_acceptance)
                             .clone(),
+                        outcome.record.duration_ms,
                     ),
                 )
                 .await
                 .and_then(crate::RuntimeEffectOutcome::into_tool_presentation),
             Err(error) => Err(error.into()),
         };
-    let mut model_return = match presented {
-        Ok(presentation) => presentation.model_return,
-        Err(error) => crate::ModelToolReturn::text(
-            request.call.call_id.clone(),
-            outcome.record.tool.clone(),
-            error.to_string(),
-        ),
-    };
+    let mut model_return = presented?.model_return;
     // The same addenda the session path appends in `complete_tool_call`: the
     // realized intents are part of the presentation the model sees, so the
     // recorded return carries them rather than leaving incorporation to
@@ -1316,7 +1334,7 @@ async fn resolve_model_return(
             intent_outcome.model_addendum(),
         ));
     }
-    model_return
+    Ok(model_return)
 }
 
 /// The opener an admitted execution scope names, or `None` when the scope is

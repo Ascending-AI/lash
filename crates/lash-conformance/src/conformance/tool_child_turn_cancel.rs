@@ -120,7 +120,9 @@ fn spawn_turn(
                                 ),
                             )
                             .await;
+                        let end = crate::ConformanceTurnEnd::of(&turn);
                         let _ = turn_tx.send(turn);
+                        end
                     })
                 }),
             )

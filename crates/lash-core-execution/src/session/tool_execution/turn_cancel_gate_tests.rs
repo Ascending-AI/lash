@@ -169,7 +169,8 @@ async fn deferred_tool_await_shape(
             pending_tool(),
             None,
         )
-        .await;
+        .await
+        .expect("the recorded wait settles");
     assert_eq!(outcome.record.tool, "deferred");
     let waits = recorder.waits.lock_recover().clone();
     assert_eq!(waits.len(), 1, "exactly one durable wait per deferred tool");

@@ -372,7 +372,7 @@ async fn async_main() -> Result<()> {
     }
 
     let attachment_store = s3_store_from_env()?;
-    wait_for_minio(&attachment_store).await?;
+    wait_for_s3(&attachment_store).await?;
     let mock_provider_base_url = env("MOCK_PROVIDER_BASE_URL", "http://mock-provider:18001");
     wait_for_mock_provider(&mock_provider_base_url).await?;
 

@@ -183,6 +183,11 @@ impl AgentPrimitive {
     }
 }
 
+/// Whether an unbound global `name` is a builtin the dialect lowers itself.
+pub(super) fn is_global_builtin(name: &str) -> bool {
+    GlobalBuiltin::classify(name).is_some()
+}
+
 fn normalize_call_args(args: &[CallArg]) -> Option<Vec<Expr>> {
     args.iter()
         .map(|argument| match argument {
@@ -241,6 +246,9 @@ impl Lowerer {
         args: &[CallArg],
     ) -> Result<LashExpr, Diagnostic> {
         let Some(args) = normalize_call_args(args) else {
+            if let Some(applied) = self.lower_builtin_spread_call(callee, args)? {
+                return Ok(applied);
+            }
             let callee = self.lower_expr(callee)?;
             return self.lower_dynamic_call_value(callee, args);
         };

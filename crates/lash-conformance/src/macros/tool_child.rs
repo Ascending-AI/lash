@@ -6,8 +6,8 @@
 
 /// Register the laws that drive a real turn through the tier's
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner): the public
-/// signal-intent wake and the turn-cancel laws for tool calls running as
-/// effect-group children.
+/// signal-intent wake, the turn-cancel laws for tool calls running as
+/// effect-group children, and the presentation-divergence park law (FIG-3679).
 ///
 /// The fixture hands back a guard, a session prefix, the tier's effect host, a
 /// process registry, the process-work substrate, the tier's turn runner and a
@@ -22,6 +22,8 @@ macro_rules! turn_runner_tests {
             (an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration, "tool-child-after-step-retry-sleep"));
         $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
             (a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate, "tool-child-follow-on-cancel-gate"));
+        $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
+            (a_diverged_tool_presentation_parks_the_turn, "presentation-divergence-park"));
     };
 }
 

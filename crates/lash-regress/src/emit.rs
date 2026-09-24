@@ -328,17 +328,24 @@ impl Emitter {
                         });
                         stack.push(Emitter::Node(contents));
                     }
-                    &Node::WordBoundary { invert } => {
-                        if self.result.flags.unicode && self.result.flags.icase {
+                    &Node::WordBoundary { invert, icase } => {
+                        if self.result.flags.unicode && icase {
                             self.emit_insn(Insn::WordBoundaryUnicodeICase { invert })
                         } else {
                             self.emit_insn(Insn::WordBoundary { invert })
                         }
                     }
-                    &Node::BackRef(group) => {
-                        debug_assert!(group >= 1, "Group should not be zero");
+                    Node::BackRef { groups, icase } => {
+                        debug_assert!(
+                            groups.iter().all(|group| *group >= 1),
+                            "Group should not be zero"
+                        );
                         // -1 because \1 matches the first capture group, which has index 0.
-                        self.emit_insn(Insn::BackRef(group - 1))
+                        let groups = groups.iter().map(|group| group - 1).collect();
+                        self.emit_insn(Insn::BackRef {
+                            groups,
+                            icase: *icase,
+                        })
                     }
 
                     Node::ByteSet(bytes) => self.emit_byte_set_insn(bytes),

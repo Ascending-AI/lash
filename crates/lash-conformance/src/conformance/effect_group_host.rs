@@ -1,13 +1,10 @@
 //! The durable effect-group contract, as a suite every host answers the same
 //! way (FIG-1564, ADR 0065).
 //!
-//! FIG-1535 wrote these semantics against the in-memory reference host, in
-//! lash-core's own tests, where they could reach that host's internals. This
-//! module is the same matrix expressed through the *contract surface alone* —
+//! The matrix is expressed through the *contract surface alone* —
 //! `EffectHost::scoped`, the four `RuntimeEffectController` group methods, and
-//! the `GroupExecutors` resolver the host is registered with — so the native
-//! tier and the two SQL tiers can be held to one set of laws instead of three
-//! copies that drift.
+//! the `GroupExecutors` resolver the host is registered with — so every tier
+//! is held to one set of laws instead of copies that drift.
 //!
 //! # What is asserted here and what is not
 //!
@@ -15,9 +12,7 @@
 //! that are *durable* rather than observable — a child row carrying its
 //! `group_key`, the unsettled-children read being the exact complement of the
 //! rank read — are asserted in each store's own effect-replay tests, against
-//! the journal, because that is where the fact lives. A suite that tried to
-//! assert them through the contract would be asserting them against the native
-//! tier too, which journals nothing and is honest about it. The one durable law
+//! the journal, because that is where the fact lives. The one durable law
 //! that *is* expressible through the contract, because a second host instance
 //! can be asked to read it back, lives here as
 //! [`effect_group_cancelled_child_terminal_is_durable`] — run by the stores,
@@ -45,7 +40,9 @@ use crate::{
 };
 use pretty_assertions::assert_eq;
 
+mod settlement_races;
 mod wait;
+pub use settlement_races::*;
 pub use wait::*;
 
 /// A caller's whole interaction with one group: open, await, close.
@@ -365,10 +362,9 @@ pub async fn wrong_scope_groups_are_refused_before_any_child_runs<F: Fn() -> Hos
 
 /// The durable-tier law: a cancelled child's terminal is a *journaled* fact.
 ///
-/// Separate from the shared host laws because it is not answerable
-/// by every host. The native substrate journals nothing, so "the cancellation
-/// survived the host that issued it" has no meaning there; a durable tier owes
-/// it, and owes it in the only way that proves it — a second host instance,
+/// Separate from the shared host laws because it needs a second host instance
+/// over the same substrate. A durable tier owes "the cancellation survived the
+/// host that issued it", and owes it in the only way that proves it — a second host instance,
 /// carrying none of the first's memory, reading the terminal back at its rank.
 ///
 /// Run it from each store's own tests, alongside that store's journal
@@ -800,14 +796,12 @@ pub async fn an_unregistered_host_refuses_all_three_from_wiring<F: Fn() -> Host>
 /// so a wired host over the same substrate opens it as a first open.
 ///
 /// Expressed the way this suite can express a durable fact — through the
-/// contract, by asking a second host — rather than by counting rows, which only
-/// two of the three tiers have. The refused open therefore declares a *different
+/// contract, by asking a second host — rather than by counting rows, which not
+/// every tier has. The refused open therefore declares a *different
 /// child count* than the open that follows it: a group row left behind by the
 /// refusal is a recorded group of three children, and the two-child open after
 /// it trips the durable reopen fence rather than succeeding. A child row left
-/// behind shows up as rank 1 already allocated. On the native substrate, which
-/// journals nothing, both halves are true by construction and the law still pins
-/// the refusal.
+/// behind shows up as rank 1 already allocated.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1191,9 +1185,7 @@ pub async fn a_proxied_controller_serves_all_three_group_methods<F: Fn() -> Host
 /// row, one claim and one rank: the second child would replay the first's
 /// terminal, the last rank would never be allocated, and the caller would park
 /// on it forever. That is a silent permanent hang, which is exactly the shape
-/// this seam refuses rather than trusts, so the law is answered by every host —
-/// including the native substrate, where the same lookup would mis-attribute the one
-/// settlement that did land.
+/// this seam refuses rather than trusts, so the law is answered by every host.
 ///
 /// The second half is what makes this a law about hosts rather than about a
 /// constructor: the same key opens cleanly afterwards, so the refusal happened
@@ -1436,9 +1428,8 @@ pub async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(
 
 /// ADR 0099 §14's "unclaimed tasks are counted": a group closed under
 /// `RunToCompletion` still has a draining loser, and that loser keeps its
-/// scope live on every tier — SQL counts the unsettled membership, Restate
-/// asks the index's `unsettled_children`, and native counts its supervisor's
-/// unsettled children. This is what protects a loser's intent drain from a
+/// scope live on every tier — SQL counts the unsettled membership and Restate
+/// asks the index's `unsettled_children`. This is what protects a loser's intent drain from a
 /// retirement fence landing mid-drain.
 #[expect(
     clippy::expect_used,
@@ -1633,6 +1624,105 @@ pub async fn every_child_is_delivered_once_in_rank_order<F: Fn() -> Host>(make: 
     close(&scoped, handle, RUN).await.expect("the group closes");
 }
 
+/// A closed group serves its caller nothing further: a replayed frame that
+/// awaits a rank of a group its caller already closed is refused by shape,
+/// and its cursor stays where it was.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_closed_group_serves_its_caller_no_further_settlements<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let host = make();
+    let scoped = host
+        .scoped(admit(scope(prefix, "closed-caller")))
+        .expect("a scope binds");
+    let key = group_key(prefix, "closed-caller");
+    let handle = open(
+        &scoped,
+        &key,
+        2,
+        GroupWakePolicy::All,
+        LoserPolicy::Cancel,
+        vec![settles(0), never()],
+    )
+    .await;
+    close(&scoped, handle, LoserPolicy::Cancel)
+        .await
+        .expect("the caller closes");
+
+    let mut replayed = EffectGroupHandle::restored(&key, 2, 0).expect("a handle restores");
+    let error = next(&scoped, &mut replayed)
+        .await
+        .expect_err("a closed group is closed to its caller");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+        "awaiting a closed group is a shape refusal, not a wait"
+    );
+    assert_eq!(
+        replayed.consumed(),
+        0,
+        "a refused await leaves the cursor of record where it was"
+    );
+}
+
+/// The wake rule is journaled identity, not host behaviour: the host serves
+/// every settlement by rank under every rule, and which one ends the caller's
+/// loop is the caller's decision.
+///
+/// Written against `FirstSuccess`, the rule most likely to tempt a host into
+/// filtering: a host that skipped the failed child would make its outcome
+/// unreachable through the only method that reports it, and `any`'s
+/// accumulated failures are program-visible.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn the_wake_rule_is_identity_and_the_host_filters_nothing<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let host = make();
+    let scoped = host
+        .scoped(admit(scope(prefix, "first-success")))
+        .expect("a scope binds");
+    let key = group_key(prefix, "first-success");
+    let (slow, gate) = gated(1);
+    let mut handle = open(
+        &scoped,
+        &key,
+        2,
+        GroupWakePolicy::FirstSuccess,
+        RUN,
+        vec![fails(0), slow],
+    )
+    .await;
+
+    let first = next(&scoped, &mut handle)
+        .await
+        .expect("the first settlement arrives");
+    assert_eq!(first.position, 0);
+    let error = first
+        .outcome
+        .expect_err("the first child rejected, and the host reports that verbatim");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+        "a failed settlement carries its own error, so `any` can accumulate it"
+    );
+
+    gate.release();
+    let second = next(&scoped, &mut handle)
+        .await
+        .expect("the successful arm settles at rank 2");
+    assert_eq!(second.position, 1);
+    assert!(second.outcome.is_ok());
+    close(&scoped, handle, RUN).await.expect("the group closes");
+}
+
 /// Exhaustion is the caller's arithmetic; awaiting past it is a shape refusal
 /// rather than a hang.
 #[expect(
@@ -1796,10 +1886,9 @@ pub async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() ->
 /// `Cancel`: the losers stop.
 ///
 /// The journaled half — each cancelled child holding its cancellation as its
-/// *terminal* — is a durable fact, asserted by
-/// [`effect_group_cancelled_child_terminal_is_durable`] from each store's own
-/// tests. What every tier owes here is that the loser does not go on to
-/// complete.
+/// *terminal* — is asserted by
+/// [`cancel_gives_every_unsettled_child_a_cancellation_terminal`]. What every
+/// tier owes here is that the loser does not go on to complete.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1839,6 +1928,91 @@ pub async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
         0,
         "a cancelled child must not go on to complete"
     );
+}
+
+/// `Cancel` gives every child that had not settled a cancellation as its
+/// terminal: a cancelled group of three holds exactly three terminals, the
+/// winner's own outcome at rank 1 and each loser's cancellation after it, and
+/// a release arriving after the cancellation seats nothing. The ranks are read
+/// back through a second host instance, so what is asserted is what the
+/// substrate recorded.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn cancel_gives_every_unsettled_child_a_cancellation_terminal<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let host = make();
+    let scoped = host
+        .scoped(admit(scope(prefix, "cancel-terminals")))
+        .expect("a scope binds");
+    let key = group_key(prefix, "cancel-terminals");
+    let (slow, loser) = gated(1);
+    let mut handle = open(
+        &scoped,
+        &key,
+        3,
+        GroupWakePolicy::First,
+        LoserPolicy::Cancel,
+        vec![settles(0), slow, never()],
+    )
+    .await;
+    next(&scoped, &mut handle)
+        .await
+        .expect("the winner settles");
+    loser.wait_until_waiting().await;
+    close(&scoped, handle, LoserPolicy::Cancel)
+        .await
+        .expect("the caller closes under the declared disposition");
+    loser.wait_until_exited().await;
+    loser.release();
+
+    // The recorded ranks, read back through a host with no memory of the
+    // close: the winner's own outcome at rank 1 and each loser's cancellation
+    // after it. Every child holds exactly one terminal, so the late release
+    // seated nothing: it neither replaced a cancellation nor took a rank of
+    // its own.
+    let recorded = read_back_ranks(
+        make,
+        prefix,
+        "cancel-terminals",
+        &key,
+        3,
+        GroupWakePolicy::First,
+        LoserPolicy::Cancel,
+    )
+    .await;
+    assert_eq!(
+        recorded
+            .iter()
+            .map(|settlement| settlement.sequence)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3],
+        "a cancelled group of three children holds exactly three terminals"
+    );
+    assert_eq!(recorded[0].position, 0);
+    assert!(
+        recorded[0].outcome.is_ok(),
+        "the winner's terminal is its own outcome"
+    );
+    let mut losers = recorded[1..]
+        .iter()
+        .map(|settlement| {
+            let error = settlement
+                .outcome
+                .as_ref()
+                .expect_err("each loser's terminal is its cancellation");
+            assert_eq!(
+                error.code,
+                crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
+            );
+            settlement.position
+        })
+        .collect::<Vec<_>>();
+    losers.sort_unstable();
+    assert_eq!(losers, vec![1, 2], "each loser holds exactly one terminal");
 }
 
 /// Close may narrow the declared disposition and may never widen it: a
@@ -2222,9 +2396,8 @@ fn group_with_scopes(
 /// under the children's replay keys, registers this resolver on the host it
 /// builds, and opens the group the staging returned.
 ///
-/// Crate-visible because every tier's tests inside lash-core need the same seam
-/// — the shared suite below and the native reference tests — while a store's own
-/// tests get the resolver handed to them by the suite factory.
+/// Crate-visible because the shared suite below needs the same seam, while a
+/// store's own tests get the resolver handed to them by the suite factory.
 pub(crate) struct StagedGroupExecutors {
     staged: std::sync::Mutex<HashMap<String, RuntimeEffectLocalExecutor<'static>>>,
 }
@@ -2517,6 +2690,49 @@ async fn close(
         .controller()
         .close_effect_group(handle, disposition)
         .await
+}
+
+/// Every rank a closed group recorded, read back in rank order through a
+/// second host instance over the same substrate. The reader stages children
+/// that never settle, so anything it reads came out of the substrate.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn read_back_ranks<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+    label: &str,
+    key: &str,
+    children: usize,
+    wake: GroupWakePolicy,
+    disposition: LoserPolicy,
+) -> Vec<GroupSettlement> {
+    let reader = make();
+    let resumed = reader
+        .scoped(admit(scope(prefix, label)))
+        .expect("a scope binds on the reading host");
+    let mut reopened = open(
+        &resumed,
+        key,
+        children,
+        wake,
+        disposition,
+        (0..children).map(|_| never()).collect(),
+    )
+    .await;
+    let mut recorded = Vec::new();
+    while !reopened.is_exhausted() {
+        recorded.push(
+            next(&resumed, &mut reopened)
+                .await
+                .expect("every recorded rank reads back"),
+        );
+    }
+    close(&resumed, reopened, disposition)
+        .await
+        .expect("the reading host closes the group");
+    recorded
 }
 
 /// Waits for a condition a host reaches on its own tasks, so a law never

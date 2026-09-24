@@ -58,7 +58,7 @@ portable default-feature run.
 | Command | Coverage |
 | --- | --- |
 | `kiln test` | `//:dev_tests`: the deterministic developer suite; `//:workspace_tests` adds the dev-deferred binaries for the PR partition. |
-| `scripts/ci/with-service.sh <pg14\|pg16\|pg18\|s3\|all> -- bash scripts/ci/store-tests.sh <suite>` | One PostgreSQL or MinIO suite, against a container this command starts and removes. |
+| `scripts/ci/with-service.sh <pg14\|pg16\|pg18\|s3\|all> -- bash scripts/ci/store-tests.sh <suite>` | One PostgreSQL or S3 (Garage) suite, against a container this command starts and removes. |
 | `python3 scripts/dev-test.py` | `//:dev_tests` narrowed to the changed package directories (`:all` each); a shared input widens to the whole suite. Refuses live store URLs. |
 | Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
 
@@ -136,8 +136,8 @@ reconciled against Cargo, and the one faithfulness limitation that remains.
 Nothing heavy runs automatically on a push to `main`. `ci.yml` has no `push`
 trigger at all: the queue already validated the exact tree that main
 fast-forwards to, so a second automatic run over the same tree bought nothing.
-The heavy families — `Test heavy suites`, `Test S3 store against MinIO`, both
-`Functional E2E` jobs, `Restate + Postgres + MinIO Workers` and its coverage
+The heavy families — `Test heavy suites`, `Test S3 store against Garage`, both
+`Functional E2E` jobs, `Restate + Postgres + S3 Workers` and its coverage
 summary, `Fuzz smoke`, `Stack budget`, `Test deferred Unicode suites`,
 `Feature lanes`, `Lashlang Git consumer` and `Build worker release artifacts` —
 run on a manual `workflow_dispatch` of `ci.yml`, which is exactly the full
@@ -180,15 +180,15 @@ offsets are stable:
 
 - `+0..+9` attachment/usage workbench PostgreSQL, selected by the workbench
   port's last decimal digit;
-- `+10` push/confidence PostgreSQL, `+11` push MinIO, `+12` mutation PostgreSQL;
+- `+10` push/confidence PostgreSQL, `+11` push S3, `+12` mutation PostgreSQL;
 - `+20..+23` agent-service Restate and endpoint;
 - `+30..+34` agent-workbench Restate, endpoint, and PostgreSQL;
 - `+35..+37` slack-clone full-host platform, bot, and HTTP MCP server;
 - `+35..+39` effect-group-conformance Restate (admin, ingress, node, two
   endpoints); it shares `+35..+37` with slack-clone and is serialized by the
   checkout lock;
-- `+40` distributed-worker MinIO;
-- `+41..+46` process-operations MinIO, Restate, and PostgreSQL;
+- `+40` distributed-worker S3;
+- `+41`, `+43..+46` process-operations S3, Restate, and PostgreSQL;
 - `+47` version-bump recreation PostgreSQL.
 - `+48` slack-clone live-model platform.
 
@@ -208,7 +208,7 @@ upload and summary paths are unchanged.
 Every checkout uses a fixed external network named `lash-e2e-<worktree-slug>`.
 Scripts create it idempotently and never delete it, because host network
 watchers treat Docker network add/remove as interface churn. Compose projects
-are fixed per checkout rather than per run. Their repeated `postgres`, `minio`,
+are fixed per checkout rather than per run. Their repeated `postgres`, `s3`,
 and `restate` aliases are safe only because the worktree lock and labeled
 leftover check prevent two lane projects from sharing this network at once. A
 nonblocking worktree lock rejects a second same-checkout battery with exit 73.
@@ -228,7 +228,8 @@ remove the old distributed-worker project with the current Compose file's
 required values supplied only for configuration parsing:
 
 ```sh
-LASH_GATE_WORKTREE_SLUG=legacy LASH_E2E_MINIO_PORT=1 \
+source scripts/ci/s3-service.sh  # the S3 service values the Compose file reads
+LASH_GATE_WORKTREE_SLUG=legacy LASH_E2E_S3_PORT=1 \
 LASH_E2E_BIN_DIR=/tmp LASH_E2E_NETWORK=lash-e2e \
   docker compose -p restate-postgres-workers \
   -f runbooks/restate-postgres-workers/docker-compose.yml \
@@ -247,7 +248,7 @@ just gate-worktree-concurrency-check /path/to/peer-kiln-fork/merged
 ```
 
 For two Kiln forks, pass the peer's `/merged` path. The check runs PostgreSQL,
-MinIO, and Restate smokes concurrently in both checkouts, then proves a second
+S3, and Restate smokes concurrently in both checkouts, then proves a second
 same-checkout run refuses cleanly. Evidence is written below
 `target/gate-concurrency-proof/<worktree-slug>/` unless
 `LASH_GATE_PROOF_OUT_DIR` overrides it.

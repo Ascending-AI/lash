@@ -145,12 +145,28 @@ pub struct VmIteratorContinuation {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum VmIteratorCursor {
+    /// A snapshot, or the pending keys of a live `Map` or values of a live
+    /// `Set` (`collection`), whose mutations keep the tail current.
     List {
         #[serde(
             serialize_with = "continuation_serde::serialize_values",
             deserialize_with = "continuation_serde::deserialize_values"
         )]
         values: Vec<Value>,
+        next_index: usize,
+        #[serde(
+            serialize_with = "continuation_serde::serialize_optional_value",
+            deserialize_with = "continuation_serde::deserialize_optional_value"
+        )]
+        collection: Option<Value>,
+    },
+    /// An array or a `URLSearchParams`, read at `next_index` on every step.
+    Live {
+        #[serde(
+            serialize_with = "continuation_serde::serialize_value",
+            deserialize_with = "continuation_serde::deserialize_value"
+        )]
+        source: Value,
         next_index: usize,
     },
     Range {

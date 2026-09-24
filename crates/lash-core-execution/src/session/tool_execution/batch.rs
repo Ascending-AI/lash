@@ -80,7 +80,7 @@ impl RuntimeExecutionContext<'_> {
                 triggers: Vec::new(),
             };
             let completed = context
-                .complete_undispatched_tool_call(call.id, None, outcome)
+                .complete_language_tool_call(call.id, None, outcome, true)
                 .await;
             return ToolLeafPreparation::Completed(Box::new(
                 ToolInvocationReply::from_output(completed.completed.output)
@@ -107,7 +107,7 @@ impl RuntimeExecutionContext<'_> {
             }
             ToolPreparationOutcome::Completed(outcome) => {
                 let completed = context
-                    .complete_undispatched_tool_call(call.id, None, *outcome)
+                    .complete_language_tool_call(call.id, None, *outcome, true)
                     .await;
                 ToolLeafPreparation::Completed(Box::new(
                     ToolInvocationReply::from_output(completed.completed.output)

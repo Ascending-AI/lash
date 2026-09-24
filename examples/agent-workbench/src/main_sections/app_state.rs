@@ -1296,7 +1296,10 @@ pub(crate) fn fail_session_delete_retention_once(session_id: &SessionId, turn_id
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AppErrorVerdict {
     Retryable,
-    ReplacementAbort,
+    /// The turn parked (a replay divergence): its park is written and its
+    /// claims are held. The handler keeps the invocation's journal by failing
+    /// retryably, and neither settles the turn nor records a failure.
+    Parked,
     Terminal,
     Ambiguous,
 }
@@ -1446,12 +1449,12 @@ impl AppError {
     }
 
     pub(crate) fn runtime(error: lash::EmbedError) -> Self {
-        if let Some(message) = replay_divergence_abort_message(&error) {
-            eprintln!("agent-workbench replay divergence aborted turn: {error}");
+        if let Some(message) = parked_turn_message(&error) {
+            eprintln!("agent-workbench turn parked: {error}");
             return Self {
                 status: StatusCode::CONFLICT,
                 message,
-                verdict: AppErrorVerdict::ReplacementAbort,
+                verdict: AppErrorVerdict::Parked,
                 retirement: None,
             };
         }
@@ -1492,21 +1495,23 @@ impl AppError {
     }
 }
 
-pub(crate) fn replay_divergence_abort_message(error: &lash::EmbedError) -> Option<String> {
+/// The redacted message of an error that parked its turn, naming only its
+/// code: the refusal's own message carries envelope hashes.
+pub(crate) fn parked_turn_message(error: &lash::EmbedError) -> Option<String> {
     let code = match error {
-        lash::EmbedError::Runtime(error) if error.code.is_worker_replacement_abort() => &error.code,
+        lash::EmbedError::Runtime(error)
+            if error.turn_failure_cause() == lash::runtime::TurnFailureCause::Parked =>
+        {
+            &error.code
+        }
         lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error))
-            if error.code.is_worker_replacement_abort() =>
+            if error.turn_failure_cause() == lash::runtime::TurnFailureCause::Parked =>
         {
             &error.code
         }
         _ => return None,
     };
-    Some(format!(
-        "{}: {}",
-        code.as_str(),
-        crate::REPLAY_DIVERGENCE_TURN_FAILURE_MESSAGE
-    ))
+    Some(format!("{}: {}", code.as_str(), crate::PARKED_TURN_MESSAGE))
 }
 
 pub(crate) fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&str>)> {
@@ -1699,12 +1704,12 @@ mod app_error_tests {
         let error = AppError::runtime(lash::EmbedError::Plugin(
             lash::plugins::PluginError::RuntimeEffectController(
                 lash::runtime::RuntimeEffectControllerError::new(
-                    lash::runtime::RuntimeErrorCode::WorkerReplacementAbort,
+                    lash::runtime::RuntimeErrorCode::EffectReplayDivergence,
                     "recorded hash raw-old-hash did not match reconstructed hash raw-new-hash",
                 ),
             ),
         ));
-        assert_eq!(error.verdict, AppErrorVerdict::ReplacementAbort);
+        assert_eq!(error.verdict, AppErrorVerdict::Parked);
         let response = error.into_response();
 
         assert_eq!(response.status(), StatusCode::CONFLICT);
@@ -1716,8 +1721,8 @@ mod app_error_tests {
             body,
             json!({
                 "error": format!(
-                    "worker_replacement_abort: {}",
-                    crate::REPLAY_DIVERGENCE_TURN_FAILURE_MESSAGE
+                    "effect_replay_divergence: {}",
+                    crate::PARKED_TURN_MESSAGE
                 ),
             })
         );

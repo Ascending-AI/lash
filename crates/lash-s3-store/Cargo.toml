@@ -9,7 +9,7 @@ homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 description = "S3-compatible attachment storage adapter for the lash agent runtime."
-keywords = ["lash", "agent", "s3", "minio", "attachments"]
+keywords = ["lash", "agent", "s3", "garage", "attachments"]
 categories = ["database", "asynchronous"]
 
 [lib]
@@ -34,4 +34,4 @@ url = "2"
 lash-conformance.workspace = true
 lash-core = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt"] }

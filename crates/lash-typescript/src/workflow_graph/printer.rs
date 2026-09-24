@@ -33,7 +33,7 @@ use lashlang::{
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessLiteralExpr,
     Program, ResourceRefExpr, StructuralRole, TypeExpr, UnaryOp,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
@@ -98,7 +98,7 @@ pub fn typescript_expression_source(expression: &Expr) -> Printed {
 pub fn typescript_statement_source(expression: &Expr, bound: &[String]) -> Printed {
     let mut bound = bound.to_vec();
     Ok(Printer::PLAIN
-        .statement(expression, 0, &mut bound)?
+        .statement(expression, 0, &mut bound, &BTreeSet::new())?
         .trim_end()
         .to_string())
 }
@@ -167,12 +167,14 @@ impl<'p> Printer<'p> {
             }
         }
 
-        let statements = match &program.main {
-            Expr::Block(statements) => statements.as_slice(),
-            statement => std::slice::from_ref(statement),
+        let statements: Vec<&Expr> = match &program.main {
+            Expr::Block(statements) => statements.iter().collect(),
+            statement => std::slice::from_ref(statement).iter().collect(),
         };
+        let mut vars = BTreeSet::new();
+        let hoisted = self.hoisted_vars(&statements, 0, &mut bound, &mut vars, &mut out)?;
         let mut emitted_processes = Vec::new();
-        for statement in statements {
+        for statement in statements[hoisted..].iter().copied() {
             if let Expr::Assign { target, expr } = statement
                 && target.is_simple()
                 && let Expr::ProcessRef { process } = expr.as_ref()
@@ -189,7 +191,7 @@ impl<'p> Printer<'p> {
                 )?);
                 continue;
             }
-            out.push_str(&self.statement(statement, 0, &mut bound)?);
+            out.push_str(&self.statement(statement, 0, &mut bound, &vars)?);
         }
 
         for process in &processes {
@@ -216,7 +218,12 @@ impl<'p> Printer<'p> {
         );
         out.push_str(&params.join(", "));
         out.push_str(") ");
-        out.push_str(&self.block(&function.body, 0, &mut Vec::new())?);
+        let mut bound: Vec<String> = function
+            .params
+            .iter()
+            .map(|param| param.name.to_string())
+            .collect();
+        out.push_str(&self.rooted_block(&function.body, 0, &mut bound)?);
         out.push('\n');
         Ok(out)
     }
@@ -253,38 +260,125 @@ impl<'p> Printer<'p> {
             .iter()
             .map(|param| param.name.to_string())
             .collect::<Vec<_>>();
-        out.push_str(&self.block(body, 0, &mut run_bound)?);
+        out.push_str(&self.rooted_block(body, 0, &mut run_bound)?);
         out.push_str(";\n");
         bound.push(binding.to_string());
         Ok(out)
     }
 
-    fn block(&self, expression: &Expr, level: usize, bound: &mut Vec<String>) -> Printed {
+    fn block(
+        &self,
+        expression: &Expr,
+        level: usize,
+        bound: &mut Vec<String>,
+        vars: &BTreeSet<String>,
+    ) -> Printed {
         let statements = statement_block_contents(expression);
         if statements.is_empty() {
             return Ok("{}".to_string());
         }
         let mut out = String::from("{\n");
         for statement in statements {
-            out.push_str(&self.statement(statement, level + 1, bound)?);
+            out.push_str(&self.statement(statement, level + 1, bound, vars)?);
         }
         out.push_str(&indent(level));
         out.push('}');
         Ok(out)
     }
 
-    fn statement(&self, expression: &Expr, level: usize, bound: &mut Vec<String>) -> Printed {
+    /// The block of a function-rooted body — a function's or a process's run
+    /// body, where the module's own root list is [`Self::program`]'s.
+    fn rooted_block(&self, expression: &Expr, level: usize, bound: &mut Vec<String>) -> Printed {
+        let statements = statement_block_contents(expression);
+        if statements.is_empty() {
+            return Ok("{}".to_string());
+        }
+        let mut out = String::from("{\n");
+        let mut vars = BTreeSet::new();
+        let hoisted = self.hoisted_vars(&statements, level + 1, bound, &mut vars, &mut out)?;
+        for statement in &statements[hoisted..] {
+            out.push_str(&self.statement(statement, level + 1, bound, &vars)?);
+        }
+        out.push_str(&indent(level));
+        out.push('}');
+        Ok(out)
+    }
+
+    /// Print the `name = undefined` assignments a root statement list opens
+    /// with as `var name;`, collecting the hoisted names into `vars` and
+    /// returning how many leading statements they are.
+    ///
+    /// The lowerer hoists every `var` a root list — the module's `main`, a
+    /// function body, a process's run body — declares to such an assignment
+    /// at its head, ahead of the assignments hoisted function declarations
+    /// flush to. Spelled `let name = undefined;` the assignment stays where
+    /// it was printed, behind those declarations, and the reparsed program is
+    /// a different one; `var name;` lowers back to the head. A leading
+    /// `name = undefined` that no `var` produced — a first statement
+    /// `let name = undefined;` is one — re-lowers identically either way, so
+    /// the spelling is safe. An already-bound name (a function's parameter)
+    /// is never a hoist and prints as an ordinary assignment.
+    fn hoisted_vars(
+        &self,
+        statements: &[&Expr],
+        level: usize,
+        bound: &mut Vec<String>,
+        vars: &mut BTreeSet<String>,
+        out: &mut String,
+    ) -> Result<usize, TypeScriptSourceError> {
+        let mut count = 0;
+        while let Some(Expr::Assign { target, expr }) = statements.get(count).copied() {
+            let hoist = target.is_simple()
+                && matches!(expr.as_ref(), Expr::Undefined)
+                && !bound
+                    .iter()
+                    .any(|name| name.as_str() == target.root.as_str());
+            if !hoist {
+                break;
+            }
+            out.push_str(&format!(
+                "{}var {};\n",
+                indent(level),
+                self.identifier("var binding", target.root.as_str())?
+            ));
+            bound.push(target.root.to_string());
+            vars.insert(target.root.to_string());
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    fn statement(
+        &self,
+        expression: &Expr,
+        level: usize,
+        bound: &mut Vec<String>,
+        vars: &BTreeSet<String>,
+    ) -> Printed {
         let prefix = indent(level);
         match expression {
             // A statement the front end closed with a completion value prints
-            // as the statements it wraps.
+            // as the statements it wraps — unless it is a `var` initializer:
+            // `var name = init` lowers to the assignment `name = init` closed
+            // by `name`, which only the `var` spelling lowers back into. A
+            // `var` binding is not one a bare `name = init` may assign, and
+            // `let name = init` declares a second, lexical `name`.
             Expr::Role {
                 role: StructuralRole::Completion,
                 ..
             } => {
+                if let Some((target, init)) = var_initialization(expression)
+                    && vars.contains(target.root.as_str())
+                {
+                    return Ok(format!(
+                        "{prefix}var {} = {};\n",
+                        self.identifier("var binding", target.root.as_str())?,
+                        self.expression(init)?
+                    ));
+                }
                 let mut out = String::new();
                 for statement in statement_block_contents(expression) {
-                    out.push_str(&self.statement(statement, level, bound)?);
+                    out.push_str(&self.statement(statement, level, bound, vars)?);
                 }
                 Ok(out)
             }
@@ -295,7 +389,7 @@ impl<'p> Printer<'p> {
                 let mut inner = bound.clone();
                 Ok(format!(
                     "{prefix}{}\n",
-                    self.block(expr, level, &mut inner)?
+                    self.block(expr, level, &mut inner, vars)?
                 ))
             }
             // The lowerer's unit completion value. It is not something a user
@@ -305,7 +399,7 @@ impl<'p> Printer<'p> {
                 // The label is a one-line doc comment on the statement it
                 // names, which is exactly what a parse reads back into this
                 // node (FIG-3047).
-                let statement = self.statement(expr, level, bound)?;
+                let statement = self.statement(expr, level, bound, vars)?;
                 if statement.is_empty() {
                     // Nothing was printed, so there is no statement for the
                     // comment to attach to; a dangling comment would re-parse
@@ -327,7 +421,7 @@ impl<'p> Printer<'p> {
                 inner.push(classic.binding.to_string());
                 Ok(format!(
                     "{prefix}for (let {binding} = {start}; {binding} < {end}; {binding}++) {}\n",
-                    self.block(classic.body, level, &mut inner)?,
+                    self.block(classic.body, level, &mut inner, vars)?,
                     binding = self.identifier("loop binding", classic.binding)?,
                     start = self.expression(classic.start)?,
                     end = self.expression(classic.end)?,
@@ -337,7 +431,7 @@ impl<'p> Printer<'p> {
                 let mut inner = bound.clone();
                 Ok(format!(
                     "{prefix}{}\n",
-                    self.block(expression, level, &mut inner)?
+                    self.block(expression, level, &mut inner, vars)?
                 ))
             }
             // A function bound to its own name is its declaration.
@@ -353,6 +447,17 @@ impl<'p> Printer<'p> {
                 ))
             }
             Expr::Assign { target, expr } => {
+                // A `var` initializer is this assignment wearing the
+                // declaration, and a graph carries it as the bare assign the
+                // completion unwraps to. Only `var` spells it back: the
+                // binding is not one `name = ..` may assign.
+                if target.is_simple() && vars.contains(target.root.as_str()) {
+                    return Ok(format!(
+                        "{prefix}var {} = {};\n",
+                        self.identifier("var binding", target.root.as_str())?,
+                        self.expression(expr)?
+                    ));
+                }
                 let rendered = format!(
                     "{} = {};\n",
                     self.assign_target(target)?,
@@ -383,7 +488,7 @@ impl<'p> Printer<'p> {
             } if is_statement_body(then_block) => {
                 let mut out = format!("{prefix}if ({}) ", self.expression(condition)?);
                 let mut then_bound = bound.clone();
-                out.push_str(&self.block(then_block, level, &mut then_bound)?);
+                out.push_str(&self.block(then_block, level, &mut then_bound, vars)?);
                 match else_block.as_ref() {
                     // An absent `else` is the lowerer's unit value, and an
                     // authored `else {}` is a block whose only element is that
@@ -401,11 +506,13 @@ impl<'p> Printer<'p> {
                         // the chain the author wrote rather than a nested block.
                         match lashlang::else_if_chain(other) {
                             Some(chain) => out.push_str(
-                                self.statement(chain, level, &mut else_bound)?
+                                self.statement(chain, level, &mut else_bound, vars)?
                                     .trim_start()
                                     .trim_end_matches('\n'),
                             ),
-                            None => out.push_str(&self.block(other, level, &mut else_bound)?),
+                            None => {
+                                out.push_str(&self.block(other, level, &mut else_bound, vars)?)
+                            }
                         }
                     }
                 }
@@ -419,9 +526,12 @@ impl<'p> Printer<'p> {
                 body,
             } => {
                 let header = loop_header(binding.as_str(), iterable, bind.as_deref())?;
-                // An element binding already in scope is assigned by the loop
-                // (a `var` head, or a head with no declaration), not declared.
-                let declaration = if bound.iter().any(|name| name == header.binding) {
+                // An element binding already in scope is assigned by the
+                // loop, not declared — but a `var` head keeps its `var`: the
+                // binding is not one a bare `for (x of ..)` may assign.
+                let declaration = if vars.contains(header.binding) {
+                    "var"
+                } else if bound.iter().any(|name| name == header.binding) {
                     ""
                 } else {
                     element_binding_kind(&statement_block_contents(body), header.binding)
@@ -435,7 +545,7 @@ impl<'p> Printer<'p> {
                     self.identifier("loop binding", header.binding)?,
                     if header.keys { "in" } else { "of" },
                     self.expression(header.source)?,
-                    self.block(body, level, &mut body_bound)?
+                    self.block(body, level, &mut body_bound, vars)?
                 ))
             }
             Expr::While { condition, body } => {
@@ -443,27 +553,27 @@ impl<'p> Printer<'p> {
                 Ok(format!(
                     "{prefix}while ({}) {}\n",
                     self.expression(condition)?,
-                    self.block(body, level, &mut body_bound)?
+                    self.block(body, level, &mut body_bound, vars)?
                 ))
             }
             Expr::Try(try_expr) => {
                 let mut out = format!("{prefix}try ");
                 let mut body_bound = bound.clone();
-                out.push_str(&self.block(&try_expr.body, level, &mut body_bound)?);
+                out.push_str(&self.block(&try_expr.body, level, &mut body_bound, vars)?);
                 if let Some(catch) = &try_expr.catch {
                     let mut catch_bound = bound.clone();
                     catch_bound.push(catch.binding.to_string());
                     out.push_str(&format!(
                         " catch ({}) {}",
                         self.identifier("catch binding", catch.binding.as_str())?,
-                        self.block(&catch.body, level, &mut catch_bound)?
+                        self.block(&catch.body, level, &mut catch_bound, vars)?
                     ));
                 }
                 if let Some(finally) = &try_expr.finally {
                     let mut finally_bound = bound.clone();
                     out.push_str(&format!(
                         " finally {}",
-                        self.block(finally, level, &mut finally_bound)?
+                        self.block(finally, level, &mut finally_bound, vars)?
                     ));
                 }
                 out.push('\n');
@@ -557,7 +667,7 @@ impl<'p> Printer<'p> {
                     Ok(format!(
                         "async ({}) => {}",
                         printed.join(", "),
-                        self.block(body, 0, &mut bound)?
+                        self.rooted_block(body, 0, &mut bound)?
                     ))
                 }
                 None => self.identifier("process", process.as_str()),
@@ -641,7 +751,7 @@ impl<'p> Printer<'p> {
                 Ok(format!(
                     "async ({}) => {}",
                     params.join(", "),
-                    self.block(body, 0, &mut bound)?
+                    self.rooted_block(body, 0, &mut bound)?
                 ))
             }
             Expr::Field { target, field } => Ok(format!(
@@ -869,7 +979,7 @@ impl<'p> Printer<'p> {
             Expr::Block(items) if let [Expr::Return(value)] = items.as_slice() => {
                 format!("({})", self.expression(value)?)
             }
-            body => self.block(body, 0, &mut bound)?,
+            body => self.rooted_block(body, 0, &mut bound)?,
         };
         Ok(format!(
             "{}({}) => {body}",
@@ -901,7 +1011,7 @@ impl<'p> Printer<'p> {
             },
             self.identifier("function", name)?,
             params.join(", "),
-            self.block(&function.body, 0, &mut bound)?
+            self.rooted_block(&function.body, 0, &mut bound)?
         ))
     }
 
@@ -1030,6 +1140,25 @@ pub(super) fn statement_block_contents(expression: &Expr) -> Vec<&Expr> {
             .filter(|statement| !matches!(statement, Expr::Undefined))
             .collect(),
     }
+}
+
+/// The `var name = init` shape: a completion list whose one visible statement
+/// assigns `name` and whose completion value reads `name` back.
+fn var_initialization(expression: &Expr) -> Option<(&AssignTarget, &Expr)> {
+    let Expr::Role {
+        role: StructuralRole::Completion,
+        expr,
+    } = expression
+    else {
+        return None;
+    };
+    let Expr::Block(items) = expr.as_ref() else {
+        return None;
+    };
+    let [Expr::Assign { target, expr: init }, Expr::Variable(name)] = items.as_slice() else {
+        return None;
+    };
+    (target.is_simple() && target.root.as_str() == name.as_str()).then_some((target, init))
 }
 
 /// A body position that holds statements rather than one value expression.

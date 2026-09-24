@@ -19044,7 +19044,7 @@
         },
         {
           "cargo": "lash_postgres_store",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "unit-test",
           "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test",
           "tags": [
@@ -19054,7 +19054,7 @@
         },
         {
           "cargo": "postgres-await-event-helper",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "example",
           "label": "//crates/lash-postgres-store:postgres-await-event-helper__example",
           "tags": [
@@ -19064,7 +19064,7 @@
         },
         {
           "cargo": "integration",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:integration__test",
           "shard_count": 2,
@@ -19075,7 +19075,7 @@
         },
         {
           "cargo": "conformance",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:conformance__test",
           "shard_count": 6,
@@ -19086,7 +19086,7 @@
         },
         {
           "cargo": "durable_read_fixture",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:durable_read_fixture__test",
           "tags": [
@@ -19096,7 +19096,7 @@
         },
         {
           "cargo": "preflight_durable_walk",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_durable_walk__test",
           "tags": [
@@ -19106,7 +19106,7 @@
         },
         {
           "cargo": "preflight_schema_status",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_schema_status__test",
           "tags": [
@@ -19116,7 +19116,7 @@
         },
         {
           "cargo": "schema_drift",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_drift__test",
           "tags": [
@@ -19126,7 +19126,7 @@
         },
         {
           "cargo": "host_provisioned_rollout",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:host_provisioned_rollout__test",
           "tags": [
@@ -19136,7 +19136,7 @@
         },
         {
           "cargo": "schema_constraints",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_constraints__test",
           "tags": [
@@ -19778,7 +19778,7 @@
         },
         {
           "cargo": "lash_s3_store",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "unit-test",
           "label": "//crates/lash-s3-store:lash-s3-store__unit_test",
           "tags": [
@@ -19900,7 +19900,7 @@
         },
         {
           "cargo": "cross_backend_active_turn_divergence",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_active_turn_divergence__test",
           "tags": [
@@ -19910,7 +19910,7 @@
         },
         {
           "cargo": "cross_backend_store_differential",
-          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_store_differential__test",
           "tags": [

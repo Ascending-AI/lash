@@ -59,8 +59,9 @@ impl ToolTriggerOutcomeBuffer {
     }
 }
 
-/// The processes an orchestrating tool realized, captured at the start's
-/// journal boundary (ADR 0099 §6).
+/// What an orchestrating group child's body leaves for its driver outside any
+/// attempt frame: the processes it realized, captured at the start's journal
+/// boundary (ADR 0099 §6), and the refusal a nested call met.
 ///
 /// An orchestrating child runs *outside* an attempt frame, so a process its
 /// body starts never appears in a `ToolIntentExecutionOutcome` — the channel
@@ -69,12 +70,20 @@ impl ToolTriggerOutcomeBuffer {
 /// the moment the durable start succeeds, and the child's driver drains it
 /// into the settlement's possession, so replay serves the same possession set
 /// the live run produced.
+///
+/// A nested call the body issued whose attempt or deferred await a controller
+/// refused — a replay divergence against its record, a live journal fault —
+/// answers the body a failure, but the refusal is kept here too: the driver
+/// refuses the child with it instead of settling whatever the body made of
+/// that failure, so neither the divergence nor the fault reaches the model as
+/// the child's result (FIG-3679).
 #[derive(Clone, Default)]
-pub struct OrchestratingStartsBuffer {
+pub struct OrchestratingChildSinks {
     queue: Arc<Mutex<Vec<crate::ProcessId>>>,
+    refusal: Arc<Mutex<Option<crate::RuntimeEffectControllerError>>>,
 }
 
-impl OrchestratingStartsBuffer {
+impl OrchestratingChildSinks {
     pub(crate) fn enqueue(&self, process_id: crate::ProcessId) {
         let mut queue = self.queue.lock_recover();
         queue.push(process_id);
@@ -83,6 +92,16 @@ impl OrchestratingStartsBuffer {
     pub(crate) fn drain(&self) -> Vec<crate::ProcessId> {
         let mut queue = self.queue.lock_recover();
         queue.drain(..).collect()
+    }
+
+    /// Keeps the first refusal a nested call met.
+    pub(crate) fn refuse(&self, error: crate::RuntimeEffectControllerError) {
+        self.refusal.lock_recover().get_or_insert(error);
+    }
+
+    /// The refusal a nested call met, if any.
+    pub(crate) fn take_refusal(&self) -> Option<crate::RuntimeEffectControllerError> {
+        self.refusal.lock_recover().take()
     }
 }
 

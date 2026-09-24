@@ -603,30 +603,99 @@ findings	314	accept	"'x-x'.replaceAll('x', '|$1|')"	"|$1|-|$1|"	-
 findings	315	accept	"'foo-x-bar'.replace(/(x)|(y)/, '|$2|')"	"foo-||-bar"	-
 findings	316	accept	"'foo-x-bar'.replace(/(?<n>x)/, '|$<n>|$<miss>|')"	"foo-|x||-bar"	-
 findings	317	accept	"'foo-x-bar'.replace(/(x)/, \"|$$|$&|$`|$'|\")"	"foo-|$|x|foo-|-bar|-bar"	-
-findings	318	accept	"[0,,2].indexOf(undefined)"	"-1"	-
-findings	319	accept	"[0,,2].lastIndexOf(undefined)"	"-1"	-
-findings	320	accept	"1 in [0,,2]"	"false"	-
-findings	321	accept	"2 in [0,,2]"	"true"	-
-findings	322	accept	"(25).toExponential(0)"	"3e+1"	-
-findings	323	accept	"(12345).toExponential(3)"	"1.235e+4"	-
-findings	324	accept	"(123.456).toExponential(20)"	"1.23456000000000003070e+2"	-
-findings	325	accept	"'word'.includes.length"	"1"	-
-findings	326	accept	"typeof ('word'.includes)"	"function"	-
-findings	327	accept	"parseFloat('infinity')"	"NaN"	-
-findings	328	accept	"parseFloat('5.e3')"	"5000"	-
-findings	329	accept	"({[1e55]:1})['1e+55']"	"1"	-
-findings	330	accept	"({[1e55]:'a',[1e55]:'b'})['1e+55']"	"b"	-
-findings	331	accept	"'valueOf' in {}"	"true"	-
-findings	332	accept	"'x' in {}"	"false"	-
-findings	333	accept	"(()=>{try{'toString' in true;return 'no'}catch(e){return e.name}})()"	"TypeError"	-
-findings	334	accept	"JSON.stringify({a:1,b:2},function(k,v){return k==='b'?undefined:v})"	"{\"a\":1}"	-
-findings	335	accept	"JSON.stringify({h:9},function(k,v){return k==='h'&&this.h===9?v:v})"	"{\"h\":9}"	-
-findings	336	accept	"JSON.stringify({v:{toJSON:function(){return 42}}})"	"{\"v\":42}"	-
-findings	337	accept	"[...(new Set([3,2,1,0])).intersection(new Set([1,3,5]))].join(',')"	"1,3"	-
-findings	338	accept	"[...(new Set([3,1,5,2])).intersection(new Set([5,3,1]))].join(',')"	"5,3,1"	-
-findings	339	accept	"'xAByABz'.split({toString:function(){return 'AB'}}).join('|')"	"x|y|z"	-
-findings	340	accept	"'abc'.split('',{valueOf:function(){return 2}}).join('|')"	"a|b"	-
-findings	341	accept	"'abc'.split('',NaN).length"	"0"	-
-findings	342	accept	"(()=>{const [...{length}]=[1,2,3];return length})()"	"3"	-
-findings	343	accept	"(()=>{const [...{0:a,length:b}]=[7,8,9];return a+'|'+b})()"	"7|3"	-
-findings	344	accept	"(()=>{const a=[];a.push(a);try{JSON.stringify(a);return 'no'}catch(e){return e.name}})()"	"TypeError"	-
+findings	318	accept	"(() => { const e = new Error('x'); return Object.hasOwn(e, 'message'); })()"	"true"	-
+findings	319	accept	"(() => { const e = new Error(); return Object.hasOwn(e, 'message'); })()"	"false"	-
+findings	320	accept	"(() => { const e = new Error(undefined); return Object.hasOwn(e, 'message'); })()"	"false"	-
+findings	321	accept	"(() => { const e = new Error(''); return Object.hasOwn(e, 'message'); })()"	"true"	-
+findings	322	accept	"(() => { const e = new Error('m', { cause: 7 }); return `${Object.hasOwn(e, 'cause')}|${e.cause}`; })()"	"true|7"	-
+findings	323	accept	"(() => { const e = new Error('m', { cause: undefined }); return `${Object.hasOwn(e, 'cause')}|${e.cause}`; })()"	"true|undefined"	-
+findings	324	accept	"(() => { const e = new Error('m'); return `${Object.hasOwn(e, 'cause')}|${e.cause}`; })()"	"false|undefined"	-
+findings	325	accept	"(() => { const e = new Error('m', {}); return Object.hasOwn(e, 'cause'); })()"	"false"	-
+findings	326	accept	"(() => { const c = { t: 1 }; return new Error('m', { cause: c }).cause === c; })()"	"true"	-
+findings	327	accept	"(() => { const e = new Error('x'); e.message = 'y'; return e.message; })()"	"y"	-
+findings	328	accept	"(() => { const e = new Error('x'); delete e.message; return `${Object.hasOwn(e, 'message')}|${e.message}`; })()"	"false|"	-
+findings	329	accept	"(() => { const e = new Error('x', { cause: 1 }); delete e.cause; return `${Object.hasOwn(e, 'cause')}|${e.cause}`; })()"	"false|undefined"	-
+findings	330	accept	"(() => Object.keys(new Error('x', { cause: 1 })).length)()"	"0"	-
+findings	331	accept	"(() => { const e = new AggregateError([1], 'm', { cause: 2 }); return `${Object.hasOwn(e, 'errors')}|${Object.hasOwn(e, 'message')}|${Object.hasOwn(e, 'cause')}|${e.errors.length}`; })()"	"true|true|true|1"	-
+findings	332	accept	"(() => { const e = new AggregateError([]); return `${Object.hasOwn(e, 'message')}|${Object.hasOwn(e, 'cause')}|${e.errors.length}`; })()"	"false|false|0"	-
+findings	333	accept	"('message' in new Error('x'))"	"true"	-
+findings	334	accept	"('cause' in new Error('m'))"	"false"	-
+findings	335	accept	"(() => { let n = 0; for (const k in new Error('x', { cause: 1 })) { n++; } return n; })()"	"0"	-
+findings	336	accept	"(() => { const e = new Error(42); return e.message; })()"	"42"	-
+findings	337	accept	"(() => { const e = new Error(null); return e.message; })()"	"null"	-
+findings	338	accept	"(() => { const p=/a./gi; const r=new RegExp(p); return r.source+'|'+r.flags; })()"	"a.|gi"	-
+findings	339	accept	"(() => { const p=/a./gi; const r=new RegExp(p,'y'); return r.source+'|'+r.flags; })()"	"a.|y"	-
+findings	340	accept	"(() => { const p=/a./gi; const r=new RegExp(p,undefined); return r.source+'|'+r.flags; })()"	"a.|gi"	-
+findings	341	accept	"(() => { const r=new RegExp(undefined,undefined); return r.source+'|'+r.flags; })()"	"(?:)|"	-
+findings	342	accept	"(() => { try { /x/(); return 'uncaught'; } catch(e) { return e instanceof TypeError ? 'TypeError' : e.name; } })()"	"TypeError"	-
+findings	343	accept	"/(?:(?<x>a)|(?<x>b))\\k<x>/.test('aa')"	"true"	-
+findings	344	accept	"/(?:(?<x>a)|(?<x>b))\\k<x>/.test('bb')"	"true"	-
+findings	345	accept	"/(?:(?<x>a)|(?<x>b))\\k<x>/.test('ab')"	"false"	-
+findings	346	accept	"/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.test('xz')"	"true"	-
+findings	347	accept	"/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.test('xzx')"	"false"	-
+findings	348	accept	"(() => { const m=/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('bb'); return m.slice(0,3).join('|'); })()"	"bb||b"	-
+findings	349	accept	"(() => { const m=/(?:(?:(?<x>a)|(?<x>b))\\k<x>){2}/.exec('aabb'); return m.groups.x; })()"	"b"	-
+findings	350	accept	"/(a)(?i:\\1)/.test('aA')"	"true"	-
+findings	351	accept	"/(a)(?i:\\1)/.test('Aa')"	"false"	-
+findings	352	accept	"/(a)(?-i:\\1)/i.test('aA')"	"false"	-
+findings	353	accept	"/(a)(?-i:\\1)/i.test('AA')"	"true"	-
+findings	354	accept	"/(?i:\\b)/u.test('\\u017f')"	"true"	-
+findings	355	accept	"/(?i:\\b)/u.test('\\u212a')"	"true"	-
+findings	356	accept	"/(?-i:\\b)/ui.test('\\u017f')"	"false"	-
+findings	357	accept	"/(?-i:\\b)/ui.test('\\u212a')"	"false"	-
+findings	358	accept	"/(?i:Z\\B)/u.test('Z\\u017f')"	"true"	-
+findings	359	accept	"/(?i:Z\\B)/u.test('Z\\u212a')"	"true"	-
+findings	360	accept	"/(?-i:Z\\B)/ui.test('Z\\u017f')"	"false"	-
+findings	361	accept	"/(?-i:Z\\B)/ui.test('Z\\u212a')"	"false"	-
+findings	362	accept	"/(?i:\\w)/u.test('\\u017f')"	"true"	-
+findings	363	accept	"/(?-i:\\w)/iu.test('\\u017f')"	"false"	-
+findings	364	accept	"/(?i:\\p{Lu})/u.test('a')"	"true"	-
+findings	365	accept	"/(?i:\\p{Lu})/u.test('\\u03c3')"	"true"	-
+findings	366	accept	"/(?-i:\\p{Lu})/iu.test('a')"	"false"	-
+findings	367	accept	"/(?i:\\P{Lu})/u.test('A')"	"true"	-
+findings	368	accept	"/(?i:\\P{Lu})/u.test('a')"	"true"	-
+findings	369	accept	"/(?-s:^.$)/s.dotAll"	"true"	-
+findings	370	accept	"/(?s:.)/.test('\\n')"	"true"	-
+findings	371	accept	"/(?s:.)/.dotAll"	"false"	-
+findings	372	accept	"/(?m:^b$)/.test('a\\nb')"	"true"	-
+findings	373	accept	"/(?-m:^b$)/m.test('a\\nb')"	"false"	-
+findings	374	accept	"'gnulluna'.match(null)[0]"	"null"	-
+findings	375	accept	"'gnulluna'.search(null)"	"1"	-
+findings	376	accept	"String('undefined').search(undefined)"	"0"	-
+findings	377	accept	"'1234567890'.match(3)[0]"	"3"	-
+findings	378	accept	"'abc'.match().length"	"1"	-
+findings	379	accept	"'abc'.search('b','ignored')"	"1"	-
+findings	380	accept	"'xBy'.match(/b/i)[0]"	"B"	-
+findings	381	accept	"(() => { const r=/x/; return [0,true,r,3,false].lastIndexOf(r,2); })()"	"2"	-
+findings	382	accept	"(() => { const r=/x/; return [0,true,3,r,false].lastIndexOf(r,2); })()"	"-1"	-
+findings	383	accept	"[0,/x/,3].indexOf(/x/)"	"-1"	-
+findings	384	accept	"(() => { const r=/x/; return [[r],r].includes(r); })()"	"true"	-
+findings	385	runtime-reject	"'AB'.match({ toString: function() { return 'AB'; } })"	"AB"	TS_OBJECT_STRING_COERCION
+findings	386	runtime-reject	"[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	"2"	TS_OBJECT_STRING_COERCION
+findings	387	accept	"[0,,2].indexOf(undefined)"	"-1"	-
+findings	388	accept	"[0,,2].lastIndexOf(undefined)"	"-1"	-
+findings	389	accept	"1 in [0,,2]"	"false"	-
+findings	390	accept	"2 in [0,,2]"	"true"	-
+findings	391	accept	"(25).toExponential(0)"	"3e+1"	-
+findings	392	accept	"(12345).toExponential(3)"	"1.235e+4"	-
+findings	393	accept	"(123.456).toExponential(20)"	"1.23456000000000003070e+2"	-
+findings	394	accept	"'word'.includes.length"	"1"	-
+findings	395	accept	"typeof ('word'.includes)"	"function"	-
+findings	396	accept	"parseFloat('infinity')"	"NaN"	-
+findings	397	accept	"parseFloat('5.e3')"	"5000"	-
+findings	398	accept	"({[1e55]:1})['1e+55']"	"1"	-
+findings	399	accept	"({[1e55]:'a',[1e55]:'b'})['1e+55']"	"b"	-
+findings	400	accept	"'valueOf' in {}"	"true"	-
+findings	401	accept	"'x' in {}"	"false"	-
+findings	402	accept	"(()=>{try{'toString' in true;return 'no'}catch(e){return e.name}})()"	"TypeError"	-
+findings	403	accept	"JSON.stringify({a:1,b:2},function(k,v){return k==='b'?undefined:v})"	"{\"a\":1}"	-
+findings	404	accept	"JSON.stringify({h:9},function(k,v){return k==='h'&&this.h===9?v:v})"	"{\"h\":9}"	-
+findings	405	accept	"JSON.stringify({v:{toJSON:function(){return 42}}})"	"{\"v\":42}"	-
+findings	406	accept	"[...(new Set([3,2,1,0])).intersection(new Set([1,3,5]))].join(',')"	"1,3"	-
+findings	407	accept	"[...(new Set([3,1,5,2])).intersection(new Set([5,3,1]))].join(',')"	"5,3,1"	-
+findings	408	accept	"'xAByABz'.split({toString:function(){return 'AB'}}).join('|')"	"x|y|z"	-
+findings	409	accept	"'abc'.split('',{valueOf:function(){return 2}}).join('|')"	"a|b"	-
+findings	410	accept	"'abc'.split('',NaN).length"	"0"	-
+findings	411	accept	"(()=>{const [...{length}]=[1,2,3];return length})()"	"3"	-
+findings	412	accept	"(()=>{const [...{0:a,length:b}]=[7,8,9];return a+'|'+b})()"	"7|3"	-
+findings	413	accept	"(()=>{const a=[];a.push(a);try{JSON.stringify(a);return 'no'}catch(e){return e.name}})()"	"TypeError"	-

@@ -1806,16 +1806,18 @@ fn the_selected_rejection_is_replay_deterministic() {
 /// carries the consumer mode, timer leaves and the immediate-prefix boundary,
 /// and its reply is the four-way response algebra instead of a settlement
 /// order. The consumer mode did not move the snapshot: nothing about an
-/// aggregate is persisted in a session snapshot. It is at v8 for an unrelated
-/// reason, record property order (FIG-3606). The continuation moved
+/// aggregate is persisted in a session snapshot. It is at v10 for unrelated
+/// reasons: record property order (FIG-3606, v8), the functions a cell
+/// boundary dropped (FIG-3608, v9), and an error's own `message` presence
+/// (FIG-3657, v10). The continuation moved
 /// separately, for the timer entries in its pending-request map and the
 /// refusals it can carry.
 #[test]
 fn the_consumer_mode_moves_the_vm_abi_and_not_the_snapshot() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        8,
-        "snapshot v8 keeps record property order; no aggregate state rides it"
+        10,
+        "snapshot v10 keeps property order, the dropped functions, and error message presence; no aggregate state rides it"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
@@ -1882,160 +1884,116 @@ fn for_of_bodies_accept_effects_and_unrelated_assignment() {
     }
 }
 
-/// Genuine iterable mutation stays rejected, and says which shape reached it.
+/// `for...of` follows its iterable live, as ECMA-262's iterators do
+/// (FIG-3625): what the body appends, removes or replaces, through the
+/// iterable's own name, an alias made before or inside the loop, a function,
+/// a pattern default or a shadowing binding, is what the loop visits next.
+/// Every shape the retired snapshot check refused runs to Node's answer.
 #[test]
-fn for_of_bodies_still_reject_reaching_the_iterable() {
-    let environment = two_leaf_web_environment();
-    let mut unexpectedly_accepted = Vec::new();
-    for (source, needle) in [
+fn for_of_follows_its_iterable_live() {
+    for (source, node) in [
         (
-            "const xs = [1, 2]; for (const x of xs) { xs[0] = 9; } finish('done');",
-            "assigns through `xs`",
+            "const xs = [1, 2]; const seen = []; for (const x of xs) { if (xs.length < 4) xs.push(x * 10); seen.push(x); } finish(seen.join(','));",
+            "1,2,10,20",
         ),
         (
-            "const xs = [1, 2]; for (const x of xs) { xs.pop(); } finish('done');",
-            "calls `xs.pop()`",
+            "const xs = [1, 2, 3]; const seen = []; for (const x of xs) { xs.pop(); seen.push(x); } finish(seen.join(','));",
+            "1,2",
         ),
         (
-            "const xs = [1, 2]; for (const x of xs) { await web.fetch({ url: xs }); } finish('done');",
-            "passes `xs`",
+            "const xs = [1, 2, 3]; const seen = []; for (const x of xs) { xs[1] = 9; seen.push(x); } finish(seen.join(','));",
+            "1,9,3",
         ),
         (
-            "const xs = [1, 2]; for (const x of xs) { xs?.pop(); } finish('done');",
-            "calls an optional member through `xs`",
+            "const xs = [1, 2, 3]; const seen = []; for (const x of xs) { if (x === 1) xs.splice(0, 1); seen.push(x); } finish(seen.join(','));",
+            "1,3",
         ),
         (
-            "const xs = [1, 2]; for (const x of xs) { delete xs[0]; } finish('done');",
-            "deletes through `xs`",
+            "const items = [1]; const same = items; for (const item of items) { if (same.length < 3) same.push(item + 1); } finish(JSON.stringify(same));",
+            "[1,2,3]",
         ),
         (
-            "const xs = [1, 2]; for (const x of xs) { xs[0]++; } finish('done');",
-            "updates through `xs`",
+            "const items = [1, 2]; const out = []; for (const item of items) { const items = [item]; out.push(items.length); } finish(out.join(','));",
+            "1,1",
         ),
         (
-            "const xs = [1, 2]; for (const x of xs) { new Set(xs); } finish('done');",
-            "constructs with `xs`",
+            "const urls = ['a', 'b', 'c']; let out = ''; for (const u of urls) { const alias = urls; alias[1] = 'MUT'; out = out + u; } finish(out);",
+            "aMUTc",
         ),
         (
-            "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { [xs[0]] = ys; } finish('done');",
-            "assigns through `xs`",
+            "const urls = ['a', 'b']; let out = ''; for (const u of urls) { const box = { inner: urls }; if (box.inner.length < 3) box.inner.push('c'); out = out + u; } finish(out);",
+            "abc",
         ),
         (
-            "const xs = [1, 2]; for (const x of xs) { for (const y of [xs]) { y.pop(); } } finish('done');",
-            "binds `xs`",
+            "const data = { items: ['a', 'b'] }; let out = ''; for (const u of data.items) { if (out.length > 3) break; data.items.push('z'); out = out + u; } finish(out);",
+            "abzz",
         ),
         (
-            "const xs = [1, 2]; for (const x of xs) { function f(a = xs) { a.pop(); } f(); } finish('done');",
-            "binds `xs`",
-        ),
-    ] {
-        match lash_typescript::link(source, &environment) {
-            Ok(_) => unexpectedly_accepted.push(source),
-            Err(error) => {
-                assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{source}");
-                assert!(
-                    error.to_string().contains(needle),
-                    "the rejection names the shape that reached the iterable: {error}"
-                );
-            }
-        }
-    }
-    assert!(
-        unexpectedly_accepted.is_empty(),
-        "iterable mutation rows accepted before fix ({}): {unexpectedly_accepted:?}",
-        unexpectedly_accepted.len()
-    );
-
-    for source in [
-        "const xs = [1, 2]; for (const x of xs) { const ys = [3, 4]; ys?.pop(); } finish('done');",
-        "const xs = [1, 2]; const other = [3, 4]; for (const x of xs) { delete other[0]; } finish('done');",
-        "const xs = [1, 2]; const other = [3, 4]; for (const x of xs) { other[0]++; } finish('done');",
-        "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { new Set(ys); } finish('done');",
-        "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { const [other] = ys; } finish('done');",
-        "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { for (const y of [ys]) { y.pop(); } } finish('done');",
-        "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { function f(a = ys) { a.pop(); } f(); } finish('done');",
-    ] {
-        lash_typescript::link(source, &environment).unwrap_or_else(|error| {
-            panic!("legal counterpart must link: {error}\n  source: {source}")
-        });
-    }
-}
-
-#[test]
-fn for_of_bodies_reject_mutation_in_patterns_without_rejecting_legal_patterns() {
-    let environment = two_leaf_web_environment();
-    for (shape, rejected, accepted, needle) in [
-        (
-            "destructuring default",
-            "const urls = ['a', 'b']; const xs = []; for (const u of urls) { const [a = urls.pop()] = xs; } finish('done');",
-            "const urls = ['a', 'b']; const xs = []; for (const u of urls) { const [a = u] = xs; } finish('done');",
-            "calls `urls.pop()`",
+            "function grow(a) { if (a.length < 3) a.push(a.length); } const xs = [0]; const seen = []; for (const x of xs) { grow(xs); seen.push(x); } finish(seen.join(','));",
+            "0,1,2",
         ),
         (
-            "parameter default",
-            "const urls = ['a', 'b']; for (const u of urls) { function choose(a = urls.pop()) { return a; } } finish('done');",
-            "const urls = ['a', 'b']; for (const u of urls) { function choose(a = u) { return a; } } finish('done');",
-            "calls `urls.pop()`",
+            "const urls = ['a', 'b']; const out = []; for (const u of urls) { const [a = urls.pop()] = []; out.push(u + a); } finish(out.join(','));",
+            "ab",
         ),
         (
-            "computed pattern key",
-            "const urls = ['a', 'b']; for (const u of urls) { const { [urls.pop()]: value } = {}; } finish('done');",
-            "const urls = ['a', 'b']; for (const u of urls) { const { [u]: value } = {}; } finish('done');",
-            "calls `urls.pop()`",
+            "const xs = [1, 2, 3]; const seen = []; for (const x of xs) { if (x === 2) continue; if (xs.length < 5) xs.push(x + 10); seen.push(x); } finish(seen.join(','));",
+            "1,3,11,13",
         ),
         (
-            "expression-function parameter default alias",
-            "const xs = [1, 2]; for (const x of xs) { const f = (a = xs) => { a.pop(); }; f(); } finish('done');",
-            "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { const f = (a = ys) => { a.pop(); }; f(); } finish('done');",
-            "binds `xs`",
+            "const m = new Map([['a', 1]]); const seen = []; for (const [k, v] of m) { seen.push(k + v); if (k === 'a') { m.set('b', 2); m.set('a', 5); } } finish(seen.join(','));",
+            "a1,b2",
         ),
         (
-            "function-expression parameter default alias",
-            "const xs = [1, 2]; for (const x of xs) { const f = function(a = xs) { a.pop(); }; f(); } finish('done');",
-            "const xs = [1, 2]; const ys = [3, 4]; for (const x of xs) { const f = function(a = ys) { a.pop(); }; f(); } finish('done');",
-            "binds `xs`",
+            "const m = new Map([['a', 1], ['b', 2], ['c', 3]]); const seen = []; for (const [k] of m) { seen.push(k); if (k === 'a') m.delete('b'); } finish(seen.join(','));",
+            "a,c",
         ),
         (
-            "array declaration default alias",
-            "const xs = [1, 2]; const ys = []; for (const x of xs) { const [a = xs] = ys; a.pop(); } finish('done');",
-            "const xs = [1, 2]; const ys = [3, 4]; const zs = []; for (const x of xs) { const [a = ys] = zs; a.pop(); } finish('done');",
-            "binds `xs`",
+            "const m = new Map([['a', 1], ['b', 2]]); const seen = []; for (const [k, v] of m) { seen.push(k + v); if (k === 'a') m.set('b', 20); } finish(seen.join(','));",
+            "a1,b20",
         ),
         (
-            "object declaration default alias",
-            "const xs = [1, 2]; const o = {}; for (const x of xs) { const { a = xs } = o; a.pop(); } finish('done');",
-            "const xs = [1, 2]; const ys = [3, 4]; const o = {}; for (const x of xs) { const { a = ys } = o; a.pop(); } finish('done');",
-            "binds `xs`",
+            "const m = new Map([['a', 1], ['b', 2]]); const seen = []; for (const [k] of m) { seen.push(k); if (k === 'a') m.clear(); } finish(seen.join(','));",
+            "a",
         ),
         (
-            "inner for-of declaration default alias",
-            "const xs = [1, 2]; const ys = [[]]; for (const x of xs) { for (const [a = xs] of ys) { a.pop(); } } finish('done');",
-            "const xs = [1, 2]; const ys = [3, 4]; const zs = [[]]; for (const x of xs) { for (const [a = ys] of zs) { a.pop(); } } finish('done');",
-            "binds `xs`",
+            "const m = new Map([['a', 1], ['b', 2]]); const seen = []; for (const [k] of m) { seen.push(k); if (k === 'a') { m.delete('a'); m.set('a', 9); } if (seen.length > 4) break; } finish(seen.join(','));",
+            "a,b,a,a,a",
         ),
         (
-            "inner for-of assignment target mutation",
-            "const xs = [1, 2]; for (const x of xs) { for (xs[1] of [9]) { } } finish('done');",
-            "const xs = [1, 2]; const other = [3, 4]; for (const x of xs) { for (other[0] of [9]) { } } finish('done');",
-            "assigns through `xs`",
+            "const s = new Set([1]); const seen = []; for (const v of s) { seen.push(v); if (v < 3) s.add(v + 1); } finish(seen.join(','));",
+            "1,2,3",
         ),
         (
-            "inner for-in assignment target mutation",
-            "const xs = [1, 2]; const o = { a: 1 }; for (const x of xs) { for (xs[0] in o) { } } finish('done');",
-            "const xs = [1, 2]; const other = [3, 4]; const o = { a: 1 }; for (const x of xs) { for (other[0] in o) { } } finish('done');",
-            "assigns through `xs`",
+            "const s = new Set([1, 2, 3]); const seen = []; for (const v of s) { seen.push(v); if (v === 1) { s.delete(2); s.add(2); } } finish(seen.join(','));",
+            "1,3,2",
+        ),
+        (
+            "const s = new Set([1, 2]); const seen = []; for (const v of s) { seen.push(v); s.add(1); } finish(seen.join(','));",
+            "1,2",
+        ),
+        (
+            "const p = new URLSearchParams('a=1&b=2'); const seen = []; for (const [k, v] of p) { seen.push(k + v); if (k === 'a') p.append('c', '3'); } finish(seen.join(','));",
+            "a1,b2,c3",
+        ),
+        (
+            "const p = new URLSearchParams('a=1&b=2&c=3'); const seen = []; for (const [k] of p) { seen.push(k); if (k === 'a') p.delete('a'); } finish(seen.join(','));",
+            "a,c",
+        ),
+        (
+            "let out = ''; for (const c of 'a😀b') { out = out + c + '|'; } finish(out);",
+            "a|😀|b|",
+        ),
+        (
+            "const xs = [[1], [2]]; const seen = []; for (const [x] of xs) { if (xs.length < 3) xs.push([x + 2]); seen.push(x); } finish(seen.join(','));",
+            "1,2,3",
         ),
     ] {
-        let error = lash_typescript::link(rejected, &environment)
-            .expect_err("pattern-carried iterable mutation must reject");
-        assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{shape}");
-        assert!(
-            error.to_string().contains(needle),
-            "{shape} names how the iterable was reached: {error}"
+        assert_eq!(
+            run_typescript(source),
+            Value::String(node.into()),
+            "{source}"
         );
-
-        lash_typescript::link(accepted, &environment)
-            .unwrap_or_else(|error| panic!("legal {shape} must link: {error}"));
     }
 }
 
@@ -2204,54 +2162,6 @@ fn array_map_accepts_ecma_callback_shapes_and_rejects_a_missing_callback() {
         let error = lash_typescript::link(source, &environment)
             .expect_err("a missing callback must reject at link time");
         assert_eq!(error.code.as_str(), "TS_METHOD_UNSUPPORTED", "{source}");
-    }
-}
-
-/// Giving the iterable a second name inside the body defeats root tracking:
-/// the alias is written through, the snapshot iterator hides it, and the loop
-/// diverges from ECMA. Both escapes the verification found reject by name.
-#[test]
-fn for_of_bodies_reject_aliasing_the_iterable() {
-    let environment = two_leaf_web_environment();
-    for source in [
-        "const urls = ['a','b','c']; let out = ''; for (const u of urls) { const alias = urls; alias[1] = 'MUT'; out = out + u; } finish(out);",
-        "const urls = ['a','b']; for (const u of urls) { const box = { inner: urls }; box.inner[0] = 'MUT'; } finish('done');",
-        "const urls = ['a','b']; for (const u of urls) { const boxed = [urls]; boxed[0][0] = 'MUT'; } finish('done');",
-    ] {
-        let error = lash_typescript::link(source, &environment)
-            .expect_err("aliasing the iterable must reject");
-        assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{source}");
-        assert!(
-            error.to_string().contains("urls"),
-            "the rejection names the iterable: {error}"
-        );
-    }
-    // A member-rooted iterable is the same hazard: `data.items` roots at
-    // `data`, and the mutation half of the filter already tracks that root, so
-    // the aliasing half has to agree or the alias escapes through the gap.
-    for source in [
-        "const data = { items: ['a','b'] }; let out = ''; for (const u of data.items) { const alias = data.items; alias[1] = 'MUT'; out = out + u; } finish(out);",
-        "const data = { items: ['a','b'] }; for (const u of data.items) { const b = { x: data.items }; b.x[1] = 'MUT'; } finish('done');",
-        "const data = { items: ['a','b'] }; for (const u of data.items) { const b = [data.items]; b[0][1] = 'MUT'; } finish('done');",
-        "const data = { items: ['a','b'] }; for (const u of data.items) { const alias = data; alias.items[1] = 'MUT'; } finish('done');",
-    ] {
-        let error = lash_typescript::link(source, &environment)
-            .expect_err("aliasing a member-rooted iterable must reject");
-        assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{source}");
-        assert!(
-            error.to_string().contains("data"),
-            "the rejection names the root the loop is walking: {error}"
-        );
-    }
-    // Binding something else entirely stays fine.
-    for source in [
-        "const urls = ['a']; const other = ['b']; for (const u of urls) { const alias = other; alias[0] = 'ok'; } finish('done');",
-        "const data = { items: ['a'] }; const other = ['b']; for (const u of data.items) { const alias = other; alias[0] = 'ok'; } finish('done');",
-        "const urls = ['a','b']; let out = ''; for (const u of urls) { const upper = u + '!'; out = out + upper; } finish(out);",
-        "const data = { items: ['a','b'] }; let n = 0; for (const u of data.items) { n = n + 1; } finish('done');",
-    ] {
-        lash_typescript::link(source, &environment)
-            .unwrap_or_else(|error| panic!("legal body must still compile: {source}: {error}"));
     }
 }
 

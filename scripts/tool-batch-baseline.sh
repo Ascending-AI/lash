@@ -46,7 +46,7 @@
 set -euo pipefail
 
 readonly PROGRAM="scripts/tool-batch-baseline.sh"
-readonly RESTATE_IMAGE="${TOOL_BATCH_RESTATE_IMAGE:-restatedev/restate:1.7.0}"
+readonly RESTATE_IMAGE="${TOOL_BATCH_RESTATE_IMAGE:-restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

@@ -16,7 +16,7 @@ fn replay_mismatch_classification_covers_every_durable_controller_code() {
     for code in [
         "sqlite_effect_replay_hash_conflict",
         "postgres_effect_replay_hash_conflict",
-        "worker_replacement_abort",
+        "effect_replay_divergence",
         "tool_intent_replay_key_format_cutover",
         "lashlang_cell_replay_divergence",
         "lashlang_cell_replay_key_format_cutover",
@@ -32,18 +32,26 @@ fn replay_mismatch_classification_covers_every_durable_controller_code() {
     }
 }
 
+/// The retired replacement-abort codes are not aliased (clean cutover): a
+/// stored error carrying one decodes as a foreign code, never as the
+/// engine-neutral divergence.
 #[test]
-fn retired_restate_hash_mismatch_wire_code_decodes_to_the_current_classification() {
-    let code = RuntimeErrorCode::from_wire_code("restate_effect_hash_mismatch");
-
-    assert_eq!(code, RuntimeErrorCode::WorkerReplacementAbort);
-    assert_eq!(code.as_str(), "worker_replacement_abort");
-    assert!(code.is_replay_mismatch());
-    // A replaced worker's journal disagreeing is live: a fresh drive succeeds
-    // (FIG-3575).
-    assert!(!code.is_terminal());
-    let encoded = serde_json::to_value(&code).expect("serialize retired wire code");
-    assert_eq!(encoded, serde_json::json!("worker_replacement_abort"));
+fn retired_replacement_abort_wire_codes_are_not_aliased() {
+    for retired in ["worker_replacement_abort", "restate_effect_hash_mismatch"] {
+        let code = RuntimeErrorCode::from_wire_code(retired);
+        assert!(
+            matches!(code, RuntimeErrorCode::ForeignCode(_)),
+            "{retired}: {code:?}"
+        );
+        assert!(!code.is_replay_mismatch(), "{retired}");
+        assert!(!code.parks_turn(), "{retired}");
+    }
+    let code = RuntimeErrorCode::from_wire_code("effect_replay_divergence");
+    assert_eq!(code, RuntimeErrorCode::EffectReplayDivergence);
+    assert_eq!(
+        serde_json::to_value(&code).expect("serialize divergence code"),
+        serde_json::json!("effect_replay_divergence")
+    );
 }
 
 #[test]
@@ -344,6 +352,7 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
             RuntimeErrorCode::LashlangCellReplayDivergence,
             RuntimeErrorCode::LashlangCellReplayKeyFormatCutover,
             RuntimeErrorCode::LashlangCellBindingDrift,
+            RuntimeErrorCode::EffectReplayDivergence,
             RuntimeErrorCode::SqliteEffectReplayHashConflict,
             RuntimeErrorCode::PostgresEffectReplayHashConflict,
         ]
@@ -393,7 +402,6 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
         RuntimeErrorCode::RuntimeEffectAttachmentStore,
         RuntimeErrorCode::RestateEffectController,
         RuntimeErrorCode::RestateProcessAwait,
-        RuntimeErrorCode::WorkerReplacementAbort,
         RuntimeErrorCode::RuntimeEffectSleepCancelled,
         RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
     ] {
@@ -445,7 +453,8 @@ fn an_aborted_turn_error_carries_its_acceptance_receipt() {
 /// outcome — nothing about the turn failed, and a redeploy of the build that
 /// wrote the journal serves it — nor a live fault a queued run may spend its
 /// retry budget on, since every redrive by this build refuses again. FIG-3587
-/// widens it to any recorded effect's replay hash conflict on the SQL hosts.
+/// widens it to any recorded effect's replay hash conflict on the SQL hosts,
+/// and an engine-journal divergence parks the same way.
 #[test]
 fn replay_refusals_park_the_turn() {
     use crate::runtime_error::TurnFailureCause;
@@ -454,6 +463,7 @@ fn replay_refusals_park_the_turn() {
         RuntimeErrorCode::LashlangCellReplayDivergence,
         RuntimeErrorCode::LashlangCellReplayKeyFormatCutover,
         RuntimeErrorCode::LashlangCellBindingDrift,
+        RuntimeErrorCode::EffectReplayDivergence,
         RuntimeErrorCode::SqliteEffectReplayHashConflict,
         RuntimeErrorCode::PostgresEffectReplayHashConflict,
     ] {
@@ -484,6 +494,7 @@ fn replay_refusals_park_the_turn() {
                 RuntimeErrorCode::LashlangCellReplayDivergence
                     | RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
                     | RuntimeErrorCode::LashlangCellBindingDrift
+                    | RuntimeErrorCode::EffectReplayDivergence
                     | RuntimeErrorCode::SqliteEffectReplayHashConflict
                     | RuntimeErrorCode::PostgresEffectReplayHashConflict
             ),

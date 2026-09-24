@@ -155,7 +155,7 @@ impl<'run> OrchestrationContext<'run> {
         // child's — only the tool-child driver sets one. Any other context
         // without a runtime execution context is the pre-cutover product
         // path, which keeps its refusal.
-        let dispatch = if self.context.orchestrating_starts.is_some() {
+        let dispatch = if self.context.orchestrating_sinks.is_some() {
             self.context.runtime_dispatch.clone()
         } else {
             None
@@ -177,6 +177,29 @@ impl<'run> OrchestrationContext<'run> {
         ))
         .await
     }
+}
+
+/// The body's reply for a nested call a controller refused.
+///
+/// The calls are already in flight together, so the body hears only a
+/// failure for the call that was refused. The refusal itself is kept in the
+/// child's sinks: its driver refuses the child with it, exactly as the group
+/// path refuses a child whose own attempt was refused, so whatever the body
+/// makes of the failure never settles as the child's result (FIG-3679).
+fn refused_nested_reply(
+    sinks: Option<&crate::tool_dispatch::OrchestratingChildSinks>,
+    error: crate::RuntimeEffectControllerError,
+) -> crate::ToolInvocationReply {
+    if let Some(sinks) = sinks {
+        sinks.refuse(error.clone());
+    }
+    crate::ToolInvocationReply::from_output(crate::ToolCallOutput::failure(
+        crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Internal,
+            "tool_call_controller_aborted",
+            error.to_string(),
+        ),
+    ))
 }
 
 /// One settled dispatch outcome as the body's reply for its call: the
@@ -233,11 +256,15 @@ async fn coordinate_nested_tool_batch<'run>(
     // `ToolCallStarted`/`ToolCallCompleted` activities carry, the same
     // `batch_parent_call_id` a turn-dispatched batch stamps.
     let parent_call_id = body_context.tool_call_id.clone();
+    // Where a refused nested call is kept for the child's driver, which
+    // refuses the child with it (FIG-3679).
+    let sinks = body_context.orchestrating_sinks.clone();
 
     let run_call = {
         let dispatch = Arc::clone(dispatch);
         move |mut call: crate::ToolInvocation| {
             let dispatch = Arc::clone(&dispatch);
+            let sinks = sinks.clone();
             let turn_cancel_wait = turn_cancel_wait.clone();
             let cancellation_token = cancellation_token.clone();
             let enclosing_process = enclosing_process.clone();
@@ -410,31 +437,26 @@ async fn coordinate_nested_tool_batch<'run>(
                                 dispatch_outcome_reply(*outcome)
                             }
                             crate::tool_dispatch::ToolCallLaunch::Pending(pending) => {
-                                let mut outcome =
-                                    crate::runtime::effect::await_journaled_tool_completion(
-                                        dispatch.as_ref(),
-                                        dispatch.parent_invocation.as_ref(),
-                                        &call_id,
-                                        *pending,
-                                        &turn_cancel_wait,
-                                    )
-                                    .await;
-                                for trigger in std::mem::take(&mut outcome.triggers) {
-                                    dispatch.trigger_outcomes.enqueue(trigger);
+                                match crate::runtime::effect::await_journaled_tool_completion(
+                                    dispatch.as_ref(),
+                                    dispatch.parent_invocation.as_ref(),
+                                    &call_id,
+                                    *pending,
+                                    &turn_cancel_wait,
+                                )
+                                .await
+                                {
+                                    Ok(mut outcome) => {
+                                        for trigger in std::mem::take(&mut outcome.triggers) {
+                                            dispatch.trigger_outcomes.enqueue(trigger);
+                                        }
+                                        dispatch_outcome_reply(outcome)
+                                    }
+                                    Err(error) => refused_nested_reply(sinks.as_ref(), error),
                                 }
-                                dispatch_outcome_reply(outcome)
                             }
                             crate::tool_dispatch::ToolCallLaunch::ControllerAborted(error) => {
-                                // The calls are already in flight together, so the
-                                // refusal reaches only the call it aborted — the same
-                                // answer the group path gives a refused child.
-                                crate::ToolInvocationReply::from_output(
-                                    crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                                        crate::ToolFailureClass::Internal,
-                                        "tool_call_controller_aborted",
-                                        error.to_string(),
-                                    )),
-                                )
+                                refused_nested_reply(sinks.as_ref(), error)
                             }
                         },
                         Some(tool_name),

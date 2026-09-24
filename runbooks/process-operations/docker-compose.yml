@@ -17,30 +17,26 @@ services:
       timeout: 2s
       retries: 30
 
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+  # lash's S3 test service: Garage, as figments runs it. The image, the
+  # credentials and the bucket come from scripts/ci/s3-service.sh, which the
+  # e2e script sources; `--default-bucket` creates the key and the bucket at
+  # startup, so there is no init container.
+  s3:
+    image: ${LASH_S3_IMAGE:?run via the e2e script}
     labels: *gate-labels
-    command: server /data --console-address ":9001"
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      GARAGE_RPC_SECRET: ${LASH_S3_RPC_SECRET:?run via the e2e script}
+      GARAGE_DEFAULT_ACCESS_KEY: ${LASH_S3_ACCESS_KEY:?run via the e2e script}
+      GARAGE_DEFAULT_SECRET_KEY: ${LASH_S3_SECRET_KEY:?run via the e2e script}
+      GARAGE_DEFAULT_BUCKET: ${LASH_S3_BUCKET:?run via the e2e script}
+    volumes:
+      - ${LASH_S3_CONFIG:?run via the e2e script}:/etc/garage.toml:ro
     ports:
-      - "127.0.0.1:${LASH_PROCESS_OPERATIONS_MINIO_PORT:?run via the e2e script}:9000"
-      - "127.0.0.1:${LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT:?run via the e2e script}:9001"
-
-  minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
-    labels: *gate-labels
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done &&
-      mc mb --ignore-existing local/lash-attachments
-      "
+      - "127.0.0.1:${LASH_PROCESS_OPERATIONS_S3_PORT:?run via the e2e script}:3900"
 
   restate:
-    image: restatedev/restate:1.7.0
+    image: restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
     labels: *gate-labels
     environment:
       RESTATE_ADMIN__BIND_PORT: "9070"

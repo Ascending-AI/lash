@@ -30,6 +30,7 @@ mod backend;
 pub use backend::{Backend, BackendQueuedWork, StoreSet};
 pub mod direct;
 pub mod direct_completion_client;
+pub mod engine;
 pub(crate) use lash_core_ids::identity_json;
 pub use lash_core_llm::llm;
 pub(crate) use lash_core_llm::model;

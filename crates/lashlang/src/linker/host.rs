@@ -320,6 +320,11 @@ pub struct LashlangHostEnvironment {
     /// from membership because an ordinary restored value is not awaitable.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub process_handles: BTreeSet<String>,
+    /// Session globals a cell boundary dropped for holding a function
+    /// (`State::expired_functions`). None of them is in `globals`; a dialect
+    /// refuses a reference to one by name rather than as an unknown name.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub expired_functions: BTreeSet<String>,
     #[serde(default)]
     pub abilities: LashlangAbilities,
     #[serde(default)]
@@ -332,6 +337,7 @@ impl LashlangHostEnvironment {
             resources,
             globals: BTreeSet::new(),
             process_handles: BTreeSet::new(),
+            expired_functions: BTreeSet::new(),
             abilities,
             language_features: LashlangLanguageFeatures::default(),
         }
@@ -339,6 +345,15 @@ impl LashlangHostEnvironment {
 
     pub fn with_globals(mut self, globals: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.globals.extend(globals.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn with_expired_functions(
+        mut self,
+        expired_functions: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.expired_functions
+            .extend(expired_functions.into_iter().map(Into::into));
         self
     }
 

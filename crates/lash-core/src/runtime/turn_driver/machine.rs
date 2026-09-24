@@ -68,16 +68,16 @@ impl RuntimeTurnDriver<'_> {
     /// before returning, on every exit.
     ///
     /// The release cannot wait for the driver's own drop: the registered
-    /// context's event forwarder holds a sender on the very channel the caller
-    /// drains next (`drive_turn_to_completion`), so an opener still registered
-    /// when the run ends would keep that drain — and the turn — open forever.
+    /// context's forwarder publishes a child's events into this turn's
+    /// observer, and an opener still registered when the run ends would keep
+    /// publishing into a turn whose observation stream has closed.
     /// This is still "registered until the opener settles" in ADR 0099 §2's
     /// sense: on today's path the effect loop *is* the turn, and the durable
     /// live-to-closing transition of §7 does not exist yet.
     pub(in crate::runtime) async fn run(
         &mut self,
         messages: crate::MessageSequence,
-        event_tx: mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: TurnObserver,
         cancel: CancellationToken,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
@@ -98,7 +98,7 @@ impl RuntimeTurnDriver<'_> {
     async fn run_effect_loop(
         &mut self,
         messages: crate::MessageSequence,
-        event_tx: mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: TurnObserver,
         cancel: CancellationToken,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
@@ -117,15 +117,10 @@ impl RuntimeTurnDriver<'_> {
     async fn run_machine(
         &mut self,
         mut machine: TurnMachine,
-        event_tx: mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: TurnObserver,
         cancel: CancellationToken,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
-        macro_rules! emit {
-            ($event:expr) => {
-                send_session_event(&event_tx, $event).await
-            };
-        }
         loop {
             let Some(effect) = machine.poll_effect() else {
                 break;
@@ -139,7 +134,7 @@ impl RuntimeTurnDriver<'_> {
                         self.turn_pipeline.state_mut().token_usage = cumulative.clone();
                         self.latest_prompt_usage = nonzero_usage(usage.clone());
                     }
-                    emit!(event)
+                    self.emit_recorded(&event_tx, event);
                 }
                 Effect::Progress {
                     messages,
@@ -193,6 +188,7 @@ impl RuntimeTurnDriver<'_> {
                 }
                 Effect::Log { event } => self.handle_log_event(event),
                 Effect::ExecCode { id, language, code } => {
+                    self.recorded_assembly.note_code_execution();
                     self.handle_exec_code_effect(
                         &mut machine,
                         id,

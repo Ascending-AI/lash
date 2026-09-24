@@ -153,6 +153,13 @@ impl GroupExecutors for RestateHostGroupExecutors {
             .get()?
             .executor_for(envelope)
     }
+
+    fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
+        self.controller
+            .group_executors
+            .get()
+            .is_some_and(|executors| executors.routes(envelope))
+    }
 }
 
 #[async_trait::async_trait]
@@ -1206,17 +1213,10 @@ impl RuntimeEffectController for RestateEffectHostController {
             EffectGroupOpenResponse::ShapeMismatch => Err(group_shape_error(format!(
                 "effect group {group_key} was reopened with a different durable shape"
             ))),
-            // The engine tier's replay-mismatch code, exactly as a recorded
-            // run whose envelope drifted reports it.
+            // The engine-neutral divergence, exactly as a recorded run whose
+            // envelope drifted reports it: the turn parks.
             EffectGroupOpenResponse::ContentMismatch { position } => {
-                Err(RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
-                    format!(
-                        "effect group {group_key} was reopened with a child at position \
-                         {position} that is not the retained one; the group head refuses a \
-                         redrive whose aggregate differs from the recorded one"
-                    ),
-                ))
+                Err(crate::effect_group::content_mismatch(&group_key, position))
             }
         }
     }
@@ -1242,7 +1242,10 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "EffectGroupIndex",
                 handle.group_key(),
                 "read_rank",
-                &EffectGroupReadRankRequest { rank },
+                &EffectGroupReadRankRequest {
+                    rank,
+                    for_caller: true,
+                },
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
@@ -1292,7 +1295,10 @@ impl RuntimeEffectController for RestateEffectHostController {
                     "EffectGroupIndex",
                     handle.group_key(),
                     "read_rank",
-                    &EffectGroupReadRankRequest { rank },
+                    &EffectGroupReadRankRequest {
+                        rank,
+                        for_caller: true,
+                    },
                 )
                 .await
                 .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
@@ -1373,7 +1379,10 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "EffectGroupIndex",
                 group_key,
                 "read_rank",
-                &EffectGroupReadRankRequest { rank },
+                &EffectGroupReadRankRequest {
+                    rank,
+                    for_caller: false,
+                },
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;

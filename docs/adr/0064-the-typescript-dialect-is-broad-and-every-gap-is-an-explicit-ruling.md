@@ -31,6 +31,11 @@ not a type checker: it refuses nothing a closed literal could hold at run
 time. Each open trigger has a law, and the refusal names the missing field
 and the literal's fields so a model can repair the program.
 
+Amended 2026-09-24 (FIG-3625): `for...of` follows its iterable live, as
+ECMA-262 does, and the name-based snapshot-safety refusal is retired with ADR
+0062 register entry 16. Runtime semantics are exactly ECMA's; the only static
+refusal of an otherwise accepted program is the closed-shape field guard.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves
@@ -79,10 +84,13 @@ than by construct list:
   Restricted `globalThis` member paths work the same way: any depth rooted at
   an identifier member, with reserved value identifiers (`undefined`, `NaN`,
   `Infinity`) that can never name a session global.
-- **For-of snapshot safety** refuses a loop body that may mutate the iterable,
-  including calls carried by destructuring defaults, parameter defaults, and
-  computed pattern keys; the v1 iterator snapshots rather than observes live
-  mutation.
+- **For-of follows its iterable live** (FIG-3625). The v1 iterator walked a
+  snapshot and refused, by the iterable's name, a body that might mutate it;
+  that check refused shadowing bindings that never touched the iterable and
+  missed aliases made before the loop, so it is gone. An array or a
+  `URLSearchParams` is read at the iterator's index on every step, and a `Map`
+  or a `Set` visits entries added during the loop, exactly as ECMA-262's
+  iterators do.
 - **Async helpers** are accepted by moving the restriction from where `await`
   may appear to what it may await: operands must ground transitively in the
   durable agent surface. The async array driver executes callbacks

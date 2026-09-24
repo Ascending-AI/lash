@@ -95,7 +95,7 @@ source of truth for the CI split:
 For the old attached process style, use `just agent-workbench-foreground 3000`.
 
 The entrypoint checks for Restate ingress/admin on the configured ports. If
-they are not already running, it starts `restatedev/restate:1.7.0` in Docker,
+they are not already running, it starts `restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b` in Docker,
 waits for ingress/admin, starts the workbench and its in-process Restate
 endpoint, registers the endpoint through Restate Admin, then opens the browser.
 It writes PID, log, and run metadata under `.agent-workbench/run/`; stale PID
@@ -144,7 +144,7 @@ Configuration is read from `.env` or the process environment:
   Docker Restate container started by the entrypoint.
 - `AGENT_WORKBENCH_OPEN`: set to `0` to skip opening the browser.
 - `AGENT_WORKBENCH_RESTATE_IMAGE`: Restate Docker image for the entrypoint,
-  default `restatedev/restate:1.7.0`.
+  default `restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b`.
 - `AGENT_WORKBENCH_RESTATE_CONTAINER`: Restate Docker container name for the
   entrypoint, default `lash-agent-workbench-dev-restate`.
 - `AGENT_WORKBENCH_TOKIO_STACK_BYTES`: Tokio worker thread stack for the

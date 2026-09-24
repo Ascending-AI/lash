@@ -555,6 +555,7 @@ macro_rules! effect_group_host_tests {
     (@catalogue [$($attr:tt)*] $fixture:block) => {
         $crate::effect_group_host_tests!(@expand [$($attr)*] $fixture; [
             (cancel_stops_the_losers, "group-cancel", wired),
+            (cancel_gives_every_unsettled_child_a_cancellation_terminal, "group-cancel-terminals", wired),
             (an_unregistered_host_refuses_all_three_from_wiring, "group-unwired", unwired),
             (a_refused_open_journals_nothing, "group-refused-open", mixed),
             (a_child_with_no_runner_refuses_the_open_and_refuses_the_retry, "group-no-runner", wired),
@@ -569,6 +570,10 @@ macro_rules! effect_group_host_tests {
             (a_closed_group_with_a_draining_loser_is_not_quiescent, "group-closed-draining-loser", wired),
             (settlement_n_is_stable_across_re_reads, "group-reread", wired),
             (every_child_is_delivered_once_in_rank_order, "group-order", wired),
+            (siblings_settling_together_get_distinct_sequences, "group-concurrent-ranks", wired),
+            (a_close_racing_its_children_seats_one_terminal_per_child, "group-close-race", wired),
+            (a_closed_group_serves_its_caller_no_further_settlements, "group-closed-caller", wired),
+            (the_wake_rule_is_identity_and_the_host_filters_nothing, "group-wake-identity", wired),
             (awaiting_past_the_last_child_is_refused, "group-past-last", wired),
             (a_cancelled_await_leaves_the_rank_to_be_read_again, "group-cancelled-await", wired),
             (run_to_completion_losers_settle_after_the_caller_is_gone, "group-run-to-completion", wired),
@@ -1428,6 +1433,39 @@ macro_rules! session_store_factory_tests {
                 $crate::registration_macro_support::$law(make()).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
+        )*
+    };
+}
+
+/// Register one session-config settlement law.
+#[macro_export]
+macro_rules! __session_config_settlement_register {
+    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_fixture_guard, make) = $fixture;
+            let _ = $label;
+            Box::pin($crate::registration_macro_support::$law(make)).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
+/// Register the session-config settlement laws. The fixture hands back a guard
+/// and a maker of fresh backends; each law builds its runtime over one.
+#[macro_export]
+macro_rules! session_config_settlement_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::session_config_settlement_tests!(@catalogue [$(#[$attr])*] $fixture; [
+            (session_config_settlement_timeout_is_typed, "config-settlement-timeout"),
+            (cancelled_session_config_settlement_is_typed, "config-settlement-cancelled"),
+            (superseded_config_settlement_adopts_the_newer_head, "config-settlement-superseded"),
+        ]);
+    };
+    (@catalogue $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            $crate::__session_config_settlement_register!($attrs $fixture; $law, $label);
         )*
     };
 }

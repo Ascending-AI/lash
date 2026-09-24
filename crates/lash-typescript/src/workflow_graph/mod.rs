@@ -375,7 +375,7 @@ fn validated_source(
     graph: &WorkflowGraph,
     globals: &BTreeSet<String>,
 ) -> Result<String, GraphRenderError> {
-    let program = validated_program(graph)?;
+    let program = validated_program(graph, globals)?;
     let source = typescript_program_source(&program)?;
     crate::parse_with_globals(&source, globals).map_err(|error| {
         GraphRenderError::RenderedSourceInvalid {
@@ -385,9 +385,12 @@ fn validated_source(
     Ok(source)
 }
 
-fn validated_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> {
+fn validated_program(
+    graph: &WorkflowGraph,
+    globals: &BTreeSet<String>,
+) -> Result<Program, GraphRenderError> {
     validate_graph(graph)?;
-    graph_to_program(graph)
+    graph_to_program(graph, globals)
 }
 
 #[cfg(test)]
@@ -413,7 +416,7 @@ mod validation_tests {
     fn final_parse_fixture_passes_every_preceding_check() {
         let graph = final_parse_failure_graph();
         validate_graph(&graph).expect("graph invariants hold");
-        let program = graph_to_program(&graph).expect("graph converts to IR");
+        let program = graph_to_program(&graph, &BTreeSet::new()).expect("graph converts to IR");
         let source = typescript_program_source(&program).expect("IR prints");
         assert_eq!(source, "return 1;\n");
         assert!(
@@ -666,7 +669,10 @@ fn invalid_payload<T>(node: &WorkflowNode, message: &str) -> Result<T, GraphRend
     })
 }
 
-fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> {
+fn graph_to_program(
+    graph: &WorkflowGraph,
+    globals: &BTreeSet<String>,
+) -> Result<Program, GraphRenderError> {
     let process_names = graph
         .declarations
         .iter()
@@ -710,6 +716,7 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
                             RenderContext {
                                 scope: RenderScope::Process,
                                 processes: &process_names,
+                                globals,
                             },
                         )?,
                     ),
@@ -720,6 +727,7 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
     let context = RenderContext {
         scope: RenderScope::Main,
         processes: &process_names,
+        globals,
     };
     let mut main = subgraph_to_block(&graph.main, context)?;
     splice_lifted_bodies(&mut main, lifted, context)?;
@@ -872,6 +880,7 @@ fn splice_at(
             RenderContext {
                 scope: RenderScope::Process,
                 processes: context.processes,
+                globals: context.globals,
             },
         )? {
             Expr::Block(statements) => statements,
@@ -915,6 +924,7 @@ fn splice_at(
             RenderContext {
                 scope: RenderScope::Process,
                 processes: context.processes,
+                globals: context.globals,
             },
         )? {
             Expr::Block(statements) => statements,
@@ -958,6 +968,10 @@ struct RenderContext<'a> {
     /// bound by the very statement that reads it — so it is rebuilt from the
     /// declaration list instead of parsed.
     processes: &'a [String],
+    /// The session's globals: names earlier cells of the session bound, which
+    /// the cell's own link admitted and an opaque statement may therefore
+    /// read.
+    globals: &'a BTreeSet<String>,
 }
 
 impl RenderContext<'_> {

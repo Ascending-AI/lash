@@ -835,7 +835,7 @@ macro_rules! impl_restate_controller_context {
                         // synchronously and returns `Pending` so its outer
                         // `HandlerStateAwareFuture` can consume that state. The
                         // already-resolved run future must never be re-entered,
-                        // and pollers above this seam (the turn event pump, the
+                        // and pollers above this seam (the turn observation publisher, the
                         // effect races) can poll their enclosing future again,
                         // so fuse it here rather than trusting every caller.
                         guard_restate_run_future(run, closure_relay).await

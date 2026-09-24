@@ -202,7 +202,9 @@ async fn run_turn(
                             ),
                         )
                         .await;
+                    let end = crate::ConformanceTurnEnd::of(&turn);
                     let _ = result_tx.send(turn);
+                    end
                 })
             }),
         )

@@ -147,6 +147,9 @@ const DRAIN_WAIT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const BINDING_SET_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-117-2a5ea5306/postgres-expected.json",
 ];
+const DIVERGENCE_PARK_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-118-83bda2477/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -291,7 +294,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 124);
+    assert_eq!(PostgresStorage::schema_version(), 125);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -1137,6 +1140,12 @@ fn assert_fixture_version() {
     );
 }
 
+/// PostgreSQL runs process leases on the database clock, so the seed claims a
+/// term a slow runner cannot outlive while it writes under the lease; the row
+/// is normalized to the pinned term afterwards
+/// (`normalize_server_authoritative_fixture_rows`).
+const WALL_CLOCK_PROCESS_LEASE_TTL_MS: u64 = 600_000;
+
 fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::FixtureHandles {
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
     let runtime = Arc::new(
@@ -1170,6 +1179,7 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
     );
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+        process_lease_ttl_ms: WALL_CLOCK_PROCESS_LEASE_TTL_MS,
         runtime: runtime as Arc<dyn RuntimePersistence>,
         session_factory: session_factory as Arc<dyn SessionStoreFactory>,
         processes: Arc::clone(&processes)

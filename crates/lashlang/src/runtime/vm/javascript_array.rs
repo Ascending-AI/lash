@@ -1,11 +1,13 @@
 use super::super::javascript::javascript_to_number;
 use super::javascript::js_stdlib_error;
 use super::javascript_stdlib::{
-    clamp_relative_index, last_index_exclusive, normalized_instance_arguments,
+    array_includes, array_index_of, array_last_index_of, clamp_relative_index,
+    last_index_exclusive, normalized_instance_arguments, search_index_argument,
 };
 use super::*;
 
 pub(super) fn javascript_array_method_for_value(
+    heap: &Heap,
     method: &str,
     target: &Value,
     items: &[Value],
@@ -16,13 +18,14 @@ pub(super) fn javascript_array_method_for_value(
         // guest code.
         return Ok(target.clone());
     }
-    super::javascript::javascript_array_method(method, items, args)
+    super::javascript::javascript_array_method(heap, method, items, args)
 }
 
 /// A regexp match is array-shaped to JavaScript, so its method dispatch lives
 /// beside ordinary array methods while this helper preserves heap identity for
 /// `valueOf`.
 pub(super) fn javascript_regexp_match_method(
+    heap: &Heap,
     method: &str,
     receiver: HeapId,
     items: &[Value],
@@ -31,7 +34,7 @@ pub(super) fn javascript_regexp_match_method(
     if method == "valueOf" && args.is_empty() {
         return Ok(Value::Ref(receiver));
     }
-    super::javascript::javascript_array_method(method, items, args)
+    super::javascript::javascript_array_method(heap, method, items, args)
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -44,6 +47,42 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let HeapObject::List(current) = self.heap.get(receiver)? else {
             return Ok(false);
         };
+        // The search trio only read the vector, so they run on the live heap
+        // values: a needle or member that is a reference — a RegExp, say —
+        // compares by heap identity here where the value path would have to
+        // detach it across the host boundary (FIG-3658).
+        if matches!(method, "indexOf" | "includes" | "lastIndexOf") {
+            // A literal elision leaves a hole: `indexOf`/`lastIndexOf` run a
+            // HasProperty check before comparing, so an `undefined`-valued
+            // hole does not match a search for `undefined`. `includes` reads
+            // the slot without that check, so a hole answers `undefined`.
+            let holes = self.heap.list_holes(receiver);
+            let argument_count = args.len();
+            let args = normalized_instance_arguments(method, args);
+            let (needle, from) = (args[0].clone(), args[1].clone());
+            let result = if method == "lastIndexOf" && argument_count < 2 {
+                sparse_last_index_of(current, holes, &needle, current.len())
+            } else {
+                let from = search_index_argument(&self.heap, &from)?;
+                match method {
+                    "includes" => {
+                        array_includes(current, &needle, clamp_relative_index(from, current.len()))
+                    }
+                    "indexOf" => sparse_index_of(
+                        current,
+                        holes,
+                        &needle,
+                        clamp_relative_index(from, current.len()),
+                    ),
+                    _ => last_index_exclusive(from, current.len())
+                        .map_or(Ok(Value::Number(-1.0)), |end| {
+                            sparse_last_index_of(current, holes, &needle, end)
+                        }),
+                }
+            }?;
+            self.stack.push(result);
+            return Ok(true);
+        }
         // `push` is the one array method a program runs once per loop
         // iteration, so it is the one that must not rebuild the array. It
         // grows the vector the heap already owns instead of cloning it, and
@@ -54,59 +93,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Ok(true);
         }
         let mut values = current.clone();
-        // A literal elision leaves a hole: `indexOf`/`lastIndexOf` run a
-        // HasProperty check before comparing, so an `undefined`-valued hole
-        // does not match a search for `undefined`. Dense arrays keep the
-        // shared value-path below.
-        if matches!(method, "indexOf" | "lastIndexOf")
-            && let Some(holes) = self.heap.list_holes(receiver)
-        {
-            let holes = holes.clone();
-            let argument_count = args.len();
-            let args = normalized_instance_arguments(method, args);
-            let needle = args.first().cloned().unwrap_or(Value::Undefined);
-            let result = if method == "indexOf" {
-                let start = clamp_relative_index(
-                    javascript_to_number(args.get(1).unwrap_or(&Value::Undefined)),
-                    values.len(),
-                );
-                values
-                    .iter()
-                    .enumerate()
-                    .skip(start)
-                    .find(|(index, item)| {
-                        !holes.contains(index)
-                            && crate::runtime::javascript::javascript_strict_equal(item, &needle)
-                    })
-                    .map_or(-1.0, |(index, _)| index as f64)
-            } else {
-                let end = if argument_count < 2 {
-                    values.len()
-                } else {
-                    match last_index_exclusive(
-                        javascript_to_number(args.get(1).unwrap_or(&Value::Undefined)),
-                        values.len(),
-                    ) {
-                        Some(end) => end,
-                        None => {
-                            self.stack.push(Value::Number(-1.0));
-                            return Ok(true);
-                        }
-                    }
-                };
-                values[..end.min(values.len())]
-                    .iter()
-                    .enumerate()
-                    .rev()
-                    .find(|(index, item)| {
-                        !holes.contains(index)
-                            && crate::runtime::javascript::javascript_strict_equal(item, &needle)
-                    })
-                    .map_or(-1.0, |(index, _)| index as f64)
-            };
-            self.stack.push(Value::Number(result));
-            return Ok(true);
-        }
         let result = match method {
             "fill" => {
                 let value = args.first().cloned().unwrap_or(Value::Undefined);
@@ -281,4 +267,44 @@ fn relative_index(value: f64, len: usize) -> Option<usize> {
         value
     };
     (index >= 0.0 && index < len as f64).then_some(index as usize)
+}
+
+fn sparse_index_of(
+    items: &[Value],
+    holes: Option<&std::collections::BTreeSet<usize>>,
+    needle: &Value,
+    start: usize,
+) -> Result<Value, RuntimeError> {
+    use crate::runtime::javascript::javascript_strict_equal;
+    let Some(holes) = holes else {
+        return array_index_of(items, needle, start);
+    };
+    Ok(Value::Number(
+        items
+            .iter()
+            .enumerate()
+            .skip(start)
+            .find(|(index, item)| !holes.contains(index) && javascript_strict_equal(item, needle))
+            .map_or(-1.0, |(index, _)| index as f64),
+    ))
+}
+
+fn sparse_last_index_of(
+    items: &[Value],
+    holes: Option<&std::collections::BTreeSet<usize>>,
+    needle: &Value,
+    end: usize,
+) -> Result<Value, RuntimeError> {
+    use crate::runtime::javascript::javascript_strict_equal;
+    let Some(holes) = holes else {
+        return array_last_index_of(items, needle, end);
+    };
+    Ok(Value::Number(
+        items[..end.min(items.len())]
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(index, item)| !holes.contains(index) && javascript_strict_equal(item, needle))
+            .map_or(-1.0, |(index, _)| index as f64),
+    ))
 }

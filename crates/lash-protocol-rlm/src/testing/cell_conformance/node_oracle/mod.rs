@@ -34,7 +34,8 @@
 //! entry or open defect, and a named divergence that closes fails until its
 //! name is deleted (the ratchet). The session-wide probe rule of register
 //! entry `closure-boundary` turns a binding whose value reaches a function
-//! into `unbound` after its cell (ADR 0076).
+//! into `dropped` after its cell (ADR 0076): a later cell's reference to it is
+//! refused by name.
 //!
 //! After every cell the session's live globals must also be names the
 //! session's own probes answer as bound: a generated slot or a block binding
@@ -59,6 +60,10 @@ const PINNED_NODE: &str = "v25.2.1";
 
 /// The session-wide probe rule of register entry `closure-boundary`.
 const CLOSURE_BOUNDARY: &str = "closure-boundary";
+
+/// A probe's answer for a name the `closure-boundary` rule dropped: a later
+/// cell's reference to it is refused by name (`TS_FUNCTION_NOT_PERSISTED`).
+const DROPPED: &str = "dropped";
 
 /// What one cell observably did, in the one shape both engines are reduced to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -175,17 +180,23 @@ fn numbers_as_floats(value: &serde_json::Value) -> serde_json::Value {
 fn static_rejection(session: &Session, source: &str) -> Option<(String, String)> {
     let mut globals = session.global_names();
     globals.extend(session.host_binding_names());
-    link_rejection(source, globals)
+    link_rejection(source, globals, session.expired_functions())
 }
 
-/// The diagnostic `source` is refused with when linked against `globals` on
-/// the default surface, as the executor links a cell.
-fn link_rejection(source: &str, mut globals: BTreeSet<String>) -> Option<(String, String)> {
+/// The diagnostic `source` is refused with when linked against `globals`, and
+/// the `expired` functions a cell boundary dropped, on the default surface,
+/// as the executor links a cell.
+fn link_rejection(
+    source: &str,
+    mut globals: BTreeSet<String>,
+    expired: BTreeSet<String>,
+) -> Option<(String, String)> {
     globals.insert("history".to_string());
     let environment = lash_lashlang_runtime::LashlangSurface::default()
         .host_environment(&lash_core::ToolCatalog::default())
         .expect("the default surface builds a host environment")
-        .with_globals(globals);
+        .with_globals(globals)
+        .with_expired_functions(expired);
     lash_typescript::link(source, &environment)
         .err()
         .map(|diagnostic| {
@@ -272,7 +283,9 @@ fn probe_source(name: &str) -> String {
 ///
 /// A probe answers `unbound` exactly where Node's ReferenceError does: the
 /// dialect refuses an unbound name statically (`TS_UNKNOWN_BINDING`), its
-/// counterpart of the runtime `ReferenceError` (ADR 0062). The probes of the
+/// counterpart of the runtime `ReferenceError` (ADR 0062). A name a cell
+/// boundary dropped for holding a function answers `dropped`: the dialect
+/// refuses it by name (`TS_FUNCTION_NOT_PERSISTED`). The probes of the
 /// bound names read and never write, so they run as one cell, whose lines
 /// are theirs in order; if that cell does not print one line per probe, each
 /// probe runs as its own cell instead.
@@ -283,6 +296,9 @@ fn probes(session: &mut Session, names: &[String]) -> BTreeMap<String, String> {
         match static_rejection(session, &probe_source(name)) {
             Some((code, _)) if code == "TS_UNKNOWN_BINDING" => {
                 answers.insert(name.clone(), "unbound".to_string());
+            }
+            Some((code, _)) if code == "TS_FUNCTION_NOT_PERSISTED" => {
+                answers.insert(name.clone(), DROPPED.to_string());
             }
             Some(rejection) => {
                 answers.insert(name.clone(), format!("probe failed: {rejection:?}"));

@@ -132,6 +132,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             values.push(self.pop_stack()?);
         }
         values.reverse();
+        if let Some(Value::String(method)) = values.first()
+            && method.as_str() == "Lash.Apply"
+        {
+            values = self.applied_stdlib_arguments(values)?;
+        }
         if let [Value::String(method), value] = values.as_slice()
             && method.as_str() == "__jsonContainerKind"
         {
@@ -224,7 +229,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 {
                     let error = self.heap.allocate_error(
                         ErrorKind::TypeError,
-                        reason.trim_start_matches("TypeError: ").to_string(),
+                        Some(reason.trim_start_matches("TypeError: ").to_string()),
                         None,
                         None,
                     )?;
@@ -258,12 +263,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         || is_array_prototype_key(&key)
                 }
                 _ => {
+                    let message = format!(
+                        "Cannot use 'in' operator to search for '{key}' in {}",
+                        javascript_to_string(&receiver)
+                    );
                     let error = self.heap.allocate_error(
                         ErrorKind::TypeError,
-                        format!(
-                            "Cannot use 'in' operator to search for '{key}' in {}",
-                            javascript_to_string(&receiver)
-                        ),
+                        Some(message),
                         None,
                         None,
                     )?;
@@ -281,27 +287,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
             && method.as_str() == "Lash.SparseArray"
         {
             let indices = match indices {
-                Value::List(values) | Value::Tuple(values) => values.to_vec(),
+                Value::List(values) | Value::Tuple(values) => Some(values.to_vec()),
                 Value::Ref(id) => match self.heap.get(*id)? {
-                    HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
-                    _ => {
-                        return Err(js_stdlib_error(
-                            "sparse array hole indices must be an array",
-                        ));
-                    }
+                    HeapObject::List(values) | HeapObject::Tuple(values) => Some(values.clone()),
+                    _ => None,
                 },
-                _ => {
-                    return Err(js_stdlib_error(
-                        "sparse array hole indices must be an array",
-                    ));
-                }
+                _ => None,
             }
-            .iter()
-            .map(|value| match value {
-                Value::Number(index) => Ok(*index as usize),
-                _ => Err(js_stdlib_error("sparse array hole index is not a number")),
-            })
-            .collect::<Result<BTreeSet<usize>, RuntimeError>>()?;
+            .ok_or_else(|| js_stdlib_error("sparse array hole indices must be an array"))?;
+            let indices = indices
+                .iter()
+                .map(|value| match value {
+                    Value::Number(index) => Ok(*index as usize),
+                    _ => Err(js_stdlib_error("sparse array hole index is not a number")),
+                })
+                .collect::<Result<BTreeSet<usize>, RuntimeError>>()?;
             let id = match list {
                 Value::Ref(id) => *id,
                 Value::List(items) => {
@@ -422,6 +422,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         || array_index_property(&key)
                             .is_some_and(|index| index < values.len() as u32)
                 }
+                // An error's own properties are exactly the slots its
+                // constructor installed or a write defined: `message` only
+                // when a non-`undefined` argument was given, `cause` only
+                // when `options` carried one, `errors` only on
+                // AggregateError. `name` answers from the brand, like the
+                // prototype property it stands in for, so it is never own.
+                HeapObject::Error(error) => match key.as_str() {
+                    "message" => error.message.is_some(),
+                    "cause" => error.cause.is_some(),
+                    "errors" => error.errors.is_some(),
+                    _ => false,
+                },
                 _ => false,
             };
             self.stack.push(Value::Bool(has));
@@ -538,7 +550,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.stack.push(Value::List(elements.into()));
             return Ok(());
         }
-        let result = javascript_stdlib(&values)?;
+        let result = javascript_stdlib(&self.heap, &values)?;
         if let Value::String(value) = &result {
             ensure_javascript_string_size(value.len())?;
         }
@@ -555,6 +567,26 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// under the limit but over the heap budget it is the typed memory
     /// diagnostic. Neither is a clamp: silently truncating to `u32::MAX` would
     /// hand the guest an array of a length it did not ask for.
+    /// `Lash.Apply(method, fixed..., arguments)`: a call with a spread
+    /// argument (FIG-3627). The arguments array, built by the caller from its
+    /// argument list, supplies the call's trailing arguments one by one, so
+    /// `Math.max(...xs)` dispatches exactly as `Math.max(x0, x1, ...)` does.
+    /// Its elements are read in place, so an object passed through a spread
+    /// keeps its identity.
+    fn applied_stdlib_arguments(&self, mut values: Vec<Value>) -> Result<Vec<Value>, RuntimeError> {
+        let arguments = match values.pop() {
+            Some(Value::List(items) | Value::Tuple(items)) => items.to_vec(),
+            Some(Value::Ref(id)) => match self.heap.get(id)? {
+                HeapObject::List(items) | HeapObject::Tuple(items) => items.clone(),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        values.remove(0);
+        values.extend(arguments);
+        Ok(values)
+    }
+
     fn array_like_elements(&mut self, record: &Record) -> Result<Vec<Value>, RuntimeError> {
         let length = record
             .get("length")
@@ -568,7 +600,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if length > u32::MAX as f64 {
             let error = self.heap.allocate_error(
                 ErrorKind::RangeError,
-                "Invalid array length".to_string(),
+                Some("Invalid array length".to_string()),
                 None,
                 None,
             )?;
@@ -629,10 +661,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     unreachable!("Error receiver kind was checked")
                 };
                 Some(Value::String(
-                    if error.message.is_empty() {
-                        error.kind.name().to_string()
-                    } else {
-                        format!("{}: {}", error.kind.name(), error.message)
+                    match error
+                        .message
+                        .as_deref()
+                        .filter(|message| !message.is_empty())
+                    {
+                        None => error.kind.name().to_string(),
+                        Some(message) => format!("{}: {}", error.kind.name(), message),
                     }
                     .into(),
                 ))
@@ -876,7 +911,7 @@ fn javascript_json_has_cycle(
     Ok(false)
 }
 
-fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
+fn javascript_stdlib(heap: &Heap, values: &[Value]) -> Result<Value, RuntimeError> {
     let Some(Value::String(method)) = values.first() else {
         return Err(js_stdlib_error("missing method discriminator"));
     };
@@ -895,7 +930,7 @@ fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
     match target {
         Value::String(value) => javascript_string_method(method, value, args),
         Value::List(items) | Value::Tuple(items) => {
-            javascript_array_method_for_value(method, target, items.as_ref(), args)
+            javascript_array_method_for_value(heap, method, target, items.as_ref(), args)
         }
         Value::Number(value) => javascript_number_method(method, *value, args),
         // Reading a member of `null`/`undefined` is an ECMA `TypeError` about
@@ -1367,6 +1402,7 @@ pub(super) fn javascript_string_method(
 }
 
 pub(super) fn javascript_array_method(
+    heap: &Heap,
     method: &str,
     items: &[Value],
     args: &[Value],
@@ -1401,18 +1437,18 @@ pub(super) fn javascript_array_method(
         ("includes", [needle, from]) => array_includes(
             items,
             needle,
-            clamp_relative_index(javascript_to_number(from), items.len()),
+            clamp_relative_index(search_index_argument(heap, from)?, items.len()),
         ),
         ("indexOf", [needle, from]) => array_index_of(
             items,
             needle,
-            clamp_relative_index(javascript_to_number(from), items.len()),
+            clamp_relative_index(search_index_argument(heap, from)?, items.len()),
         ),
         ("lastIndexOf", [needle, Value::Undefined]) if argument_count < 2 => {
             array_last_index_of(items, needle, items.len())
         }
         ("lastIndexOf", [needle, from]) => {
-            last_index_exclusive(javascript_to_number(from), items.len())
+            last_index_exclusive(search_index_argument(heap, from)?, items.len())
                 .map_or(Ok(Value::Number(-1.0)), |end| {
                     array_last_index_of(items, needle, end)
                 })

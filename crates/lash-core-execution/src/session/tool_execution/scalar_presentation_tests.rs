@@ -196,3 +196,210 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
         "replay served the recorded presentation; the step did not re-run"
     );
 }
+
+/// Records every envelope's stable hash and runs it locally.
+///
+/// The stable hash is the replay identity every durable substrate keys a
+/// recorded effect by; on Restate it is also the `x-lash-replay-key` header
+/// of the scope index's `begin_effect`/`end_effect` calls around the effect
+/// (`ScopeRecordingController::execute_effect`).
+#[derive(Default)]
+struct StableHashRecorder {
+    hashes: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+impl crate::AwaitEventResolver for StableHashRecorder {}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for StableHashRecorder {
+    async fn execute_effect(
+        &self,
+        envelope: crate::RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        self.hashes.lock_recover().push((
+            envelope.invocation.effect_id().to_string(),
+            envelope.stable_hash()?,
+        ));
+        local_executor.execute(envelope).await
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("StableHashRecorder"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("StableHashRecorder"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("StableHashRecorder"))
+    }
+}
+
+/// A fast and a slow live run of the same call present under one replay
+/// identity: the presentation's stable hash — and so Restate's
+/// `x-lash-replay-key` on the calls around it — never carries how long the
+/// call took (FIG-3672 P3, FIG-3666).
+#[tokio::test]
+async fn a_fast_and_a_slow_run_present_under_one_replay_identity() {
+    let recorder = Arc::new(StableHashRecorder::default());
+    for duration_ms in [2, 46_000] {
+        let context = crate::testing::TestExecutionContextBuilder::over_controller(
+            crate::ScopedEffectController::shared(
+                Arc::clone(&recorder) as Arc<dyn crate::RuntimeEffectController>,
+                crate::AdmittedScope::turn("root", "presentation-identity"),
+            )
+            .expect("valid turn scope"),
+        )
+        .plugin_factories(Vec::new())
+        .build()
+        .into_runtime();
+        context
+            .complete_tool_call(
+                "timed-call".to_string(),
+                None,
+                crate::tool_dispatch::ToolDispatchOutcome {
+                    record: crate::ToolCallRecord {
+                        call_id: Some("timed-call".to_string()),
+                        tool: "timed".to_string(),
+                        args: serde_json::json!({}),
+                        output: crate::ToolCallOutput::success(serde_json::json!("timed")),
+                        duration_ms,
+                    },
+                    attempts: Vec::new(),
+                    intents: crate::ToolIntents::default(),
+                    intent_outcomes: Vec::new(),
+                    captures: Vec::new(),
+                    triggers: Vec::new(),
+                },
+            )
+            .await
+            .expect("the call presents");
+    }
+    let hashes = recorder.hashes.lock_recover().clone();
+    assert_eq!(hashes.len(), 2, "one presentation per run: {hashes:?}");
+    assert!(
+        hashes
+            .iter()
+            .all(|(effect_id, _)| effect_id.ends_with("timed-call:present")),
+        "both effects are the call's presentation: {hashes:?}"
+    );
+    assert_eq!(
+        hashes[0].1, hashes[1].1,
+        "the fast and the slow run present under one replay identity"
+    );
+}
+
+/// Runs every effect locally except the presentation, which it refuses the
+/// way a durable journal refuses a presentation whose redriven envelope no
+/// longer hashes as recorded.
+#[derive(Default)]
+struct DivergedPresentation;
+
+impl crate::AwaitEventResolver for DivergedPresentation {}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for DivergedPresentation {
+    async fn execute_effect(
+        &self,
+        envelope: crate::RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        if matches!(
+            envelope.command,
+            crate::RuntimeEffectCommand::PresentToolResult { .. }
+        ) {
+            return Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+                "presentation-conflict: recorded runtime effect hash did not match",
+            ));
+        }
+        local_executor.execute(envelope).await
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("DivergedPresentation"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("DivergedPresentation"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("DivergedPresentation"))
+    }
+}
+
+/// A language runtime's call (a code cell's `call_tool`) whose presentation
+/// diverged is refused: the divergence is the run's nested replay mismatch,
+/// which stops the cell at this command and parks the turn, and nothing of
+/// the conflict is presented as the call's result (FIG-3679).
+#[tokio::test]
+async fn a_cell_call_whose_presentation_diverged_stops_the_run() {
+    let definition = crate::ToolDefinition::raw(
+        "tool:scalar-echo",
+        "scalar_echo",
+        "scalar echo",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object"}),
+    );
+    let context = crate::testing::TestExecutionContextBuilder::over_controller(
+        crate::ScopedEffectController::shared(
+            Arc::new(DivergedPresentation) as Arc<dyn crate::RuntimeEffectController>,
+            crate::AdmittedScope::turn("root", "diverged-presentation"),
+        )
+        .expect("valid turn scope"),
+    )
+    .plugin_factories(Vec::new())
+    .provider(Arc::new(EchoTool {
+        definition: definition.clone(),
+    }))
+    .tool_catalog(crate::ToolCatalog::from_tool_definitions(vec![
+        definition.clone(),
+    ]))
+    .build()
+    .into_runtime();
+    let executed = Box::pin(context.execute_command_tool(
+        &crate::CommandReplayKey::new("diverged-1"),
+        crate::session::ToolInvocation::new(
+            "diverged-1",
+            definition.manifest.id.clone(),
+            serde_json::json!({"value": "sample"}),
+        ),
+    ))
+    .await;
+    let mismatch = context
+        .nested_replay_mismatch()
+        .expect("the diverged presentation is the run's nested replay mismatch");
+    assert_eq!(
+        mismatch.code,
+        crate::RuntimeErrorCode::SqliteEffectReplayHashConflict
+    );
+    assert!(
+        !executed.completed.output.is_success(),
+        "the refused call settles no success"
+    );
+}

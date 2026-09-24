@@ -570,7 +570,7 @@ confidence_schedule_table=(
   "full|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres replay|focused_sqlite_seed_tail_repro,backend_contention,generated_postgres_dynamic_replay,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "full|store|postgres-conformance|full Postgres conformance and dynamic backend differential|generated_postgres_dynamic_replay"
   "full|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
-  "full|process|restate-workers|Restate/Postgres/MinIO worker e2e|restate_postgres_workers_e2e"
+  "full|process|restate-workers|Restate/Postgres/S3 worker e2e|restate_postgres_workers_e2e"
   "full|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "full|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "full|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
@@ -1940,7 +1940,7 @@ write_restate_postgres_workers_e2e_lane_status() {
   "schema": "lash.confidence.restate-postgres-workers-e2e.v1",
   "status": "not_run",
   "lane": "${lane}",
-  "reason": "distributed Restate/Postgres/MinIO worker e2e is full-lane-only",
+  "reason": "distributed Restate/Postgres/S3 worker e2e is full-lane-only",
   "script": "scripts/restate-postgres-workers-e2e.sh",
   "full_lane_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full"
 }
@@ -1951,14 +1951,14 @@ run_restate_postgres_workers_e2e() {
   if [ "$lane" != "full" ]; then
     return
   fi
-  step "Restate/Postgres/MinIO workers e2e"
-  local artifact log_dir minio_port exit_code
+  step "Restate/Postgres/S3 workers e2e"
+  local artifact log_dir s3_port exit_code
   artifact="${out_dir}/sim/restate-postgres-workers-e2e.json"
   log_dir="${out_dir}/sim/restate-postgres-workers-e2e"
-  minio_port="${LASH_CONFIDENCE_RESTATE_WORKERS_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
+  s3_port="${LASH_CONFIDENCE_RESTATE_WORKERS_S3_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
   mkdir -p "$log_dir"
   set +e
-  LASH_E2E_MINIO_PORT="$minio_port" \
+  LASH_E2E_S3_PORT="$s3_port" \
     bash scripts/restate-postgres-workers-e2e.sh \
     >"${log_dir}/stdout.log" 2>"${log_dir}/stderr.log"
   exit_code=$?
@@ -1970,10 +1970,10 @@ run_restate_postgres_workers_e2e() {
   "status": "passed",
   "lane": "full",
   "script": "scripts/restate-postgres-workers-e2e.sh",
-  "minio_port": "${minio_port}",
+  "s3_port": "${s3_port}",
   "stdout": "sim/restate-postgres-workers-e2e/stdout.log",
   "stderr": "sim/restate-postgres-workers-e2e/stderr.log",
-  "evidence": "two Restate workers behind proxy with Postgres state, MinIO attachments, host-built worker binaries, and runner-owned end-to-end assertions"
+  "evidence": "two Restate workers behind proxy with Postgres state, S3 (Garage) attachments, host-built worker binaries, and runner-owned end-to-end assertions"
 }
 EOF
     return
@@ -1985,7 +1985,7 @@ EOF
   "lane": "full",
   "script": "scripts/restate-postgres-workers-e2e.sh",
   "exit_code": ${exit_code},
-  "minio_port": "${minio_port}",
+  "s3_port": "${s3_port}",
   "stdout": "sim/restate-postgres-workers-e2e/stdout.log",
   "stderr": "sim/restate-postgres-workers-e2e/stderr.log",
   "exact_retry_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full"

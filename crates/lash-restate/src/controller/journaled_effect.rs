@@ -10,15 +10,16 @@ use std::sync::Arc;
 
 use lash_core::{
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectOutcome, RuntimeErrorCode, facade_support::CanonicalRuntimeEffectEnvelope,
+    RuntimeEffectOutcome, facade_support::CanonicalRuntimeEffectEnvelope,
 };
 use restate_sdk::serde::Json;
 
 use super::context::RestateControllerContext;
+use super::effect_journal::JournaledEffectRecord;
 use super::journal_budget::{
-    JournaledBudgetVerdict, JournaledEffectRecord, budget_verdict, gave_up_over_budget_entry,
-    group_open_budget_verdict, group_open_gave_up_over_budget, journalable_recorded_effect,
-    recorded_effect_from_journal, unjournalable_envelope_give_up,
+    JournaledBudgetVerdict, budget_verdict, gave_up_over_budget_entry, group_open_budget_verdict,
+    group_open_gave_up_over_budget, journalable_recorded_effect, recorded_effect_from_journal,
+    unjournalable_envelope_give_up,
 };
 use super::{
     RecordedRuntimeEffect, RestateEffectError, RestateRuntimeEffectController, restate_effect_name,
@@ -110,13 +111,14 @@ where
             // effect, so a give-up still occupies exactly one journal slot -
             // there is no second entry to write, and nothing left that could
             // depend on the budget in force at replay.
-            JournaledBudgetVerdict::GaveUpOverBudget { budget } => {
-                Some(Ok(recorded_effect_from_journal(
+            JournaledBudgetVerdict::GaveUpOverBudget { budget } => Some(
+                recorded_effect_from_journal(
                     envelope,
                     &effect_name,
                     gave_up_over_budget_entry(budget),
-                )))
-            }
+                )
+                .map_err(RestateEffectError::Refused),
+            ),
         }
     }
 
@@ -151,10 +153,7 @@ where
             Ok(JournaledBudgetVerdict::GaveUpOverBudget { budget }) => {
                 Err(group_open_gave_up_over_budget(&group_name, budget))
             }
-            Err(error) => Err(RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RestateEffectController,
-                error.to_string(),
-            )),
+            Err(error) => Err(error.into()),
         }
     }
 
@@ -257,12 +256,7 @@ where
                 .await
             }
         }
-        .map_err(|error| {
-            RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RestateEffectController,
-                error.to_string(),
-            )
-        })?;
+        .map_err(RuntimeEffectControllerError::from)?;
         validate_recorded_effect_envelope(recorded, &reconstructed_envelope, None)?
     }
 
@@ -286,6 +280,7 @@ where
                 effect: effect_name.clone(),
                 terminal: source,
             })?;
-        Ok(recorded_effect_from_journal(envelope, &effect_name, entry))
+        recorded_effect_from_journal(envelope, &effect_name, entry)
+            .map_err(RestateEffectError::Refused)
     }
 }

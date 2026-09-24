@@ -195,12 +195,19 @@ async fn read_record(
 ///
 /// These are the handler's first journaled commands; nothing may precede
 /// them, and no effect may follow them except under the proof they return.
+///
+/// `replay_grammar` is the replay-key grammar the process's engine journals
+/// under (FIG-3586). Segment 0's start marker *is* the incarnation's start
+/// record, which every later attempt and segment inherits, so it must name
+/// that grammar exactly as the runner would; an unstamped record is refused
+/// by an engine that keys its journal by grammar, before its body runs.
 pub(crate) async fn admit_segment(
     ctx: &WorkflowContext<'_>,
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn lash_core::ProcessContinuationStore>,
     process_id: &lash_sansio::ProcessId,
     segment_ordinal: u64,
+    replay_grammar: Option<u32>,
 ) -> Result<SegmentAdmission, HandlerError> {
     let Json(verdict) = {
         let registry = Arc::clone(registry);
@@ -271,7 +278,7 @@ pub(crate) async fn admit_segment(
             let nonce = nonce.clone();
             async move {
                 if segment_ordinal == 0 {
-                    start_root_segment(&registry, &process_id, nonce).await
+                    start_root_segment(&registry, &process_id, nonce, replay_grammar).await
                 } else {
                     start_later_segment(
                         &registry,
@@ -307,6 +314,7 @@ async fn start_root_segment(
     registry: &Arc<dyn ProcessRegistry>,
     process_id: &lash_sansio::ProcessId,
     nonce: String,
+    replay_grammar: Option<u32>,
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
     if record.disposition == lash_core::RecoveryContract::ExternallyOwned {
@@ -339,6 +347,7 @@ async fn start_root_segment(
         )))
     })?;
     started.started_at_ms = super::restate_now_ms();
+    started.replay_grammar = replay_grammar;
     match registry
         .record_first_started_with_authority(process_id, started, &authority)
         .await

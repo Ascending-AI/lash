@@ -24,13 +24,13 @@ impl Lowerer {
                 ))
             }
             "match" | "search" => {
-                let [regexp] = args else {
-                    return Err(regex_arity(method, "one RegExp argument"));
+                // ECMA-262 reads only the first argument; extras are ignored
+                // and an absent argument is `undefined` (the empty pattern).
+                let regexp = match args.first() {
+                    Some(regexp) => self.lower_expr(regexp)?,
+                    None => LashExpr::Undefined,
                 };
-                Ok(regexp_call(
-                    method,
-                    vec![self.lower_expr(object)?, self.lower_expr(regexp)?],
-                ))
+                Ok(regexp_call(method, vec![self.lower_expr(object)?, regexp]))
             }
             "matchAll" => {
                 let [regexp] = args else {

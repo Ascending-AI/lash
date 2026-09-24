@@ -1,7 +1,7 @@
 //! S3-compatible attachment storage for Lash.
 //!
 //! This crate stores attachment bytes in any S3-compatible object store,
-//! including AWS S3 and MinIO. Runtime metadata and attachment manifests remain
+//! including AWS S3 and Garage. Runtime metadata and attachment manifests remain
 //! in the configured [`lash_core::RuntimePersistence`] backend.
 
 use futures_util::TryStreamExt;
@@ -332,13 +332,23 @@ async fn get_at_path(
     Ok(StoredAttachment { bytes })
 }
 
+/// Deletes the object at `path`; an object that is already absent is a no-op.
+///
+/// S3 deletes go through DeleteObjects, whose answer for a key that never
+/// existed differs by implementation: AWS S3 reports it `<Deleted>`,
+/// Garage reports a per-key `<Error><Code>NoSuchKey</Code>`, which
+/// `object_store` surfaces as an opaque per-key failure rather than
+/// `NotFound`. A delete promises only that the object is absent afterwards,
+/// so a failed delete is re-checked with a HEAD: an object that is absent is
+/// the no-op the delete would have been, and anything else is the failure.
 async fn delete_at_path(store: &dyn ObjectStore, path: Path) -> Result<(), AttachmentStoreError> {
     match store.delete(&path).await {
-        Ok(()) => {}
-        Err(object_store::Error::NotFound { .. }) => {}
-        Err(err) => return Err(backend_error("delete", err)),
+        Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+        Err(err) => match store.head(&path).await {
+            Err(object_store::Error::NotFound { .. }) => Ok(()),
+            _ => Err(backend_error("delete", err)),
+        },
     }
-    Ok(())
 }
 
 fn backend_error(operation: &'static str, err: object_store::Error) -> AttachmentStoreError {
@@ -622,9 +632,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn minio_attachment_store_satisfies_conformance_when_configured() {
-        let Some(config) = minio_config_for_ci() else {
-            eprintln!("skipping MinIO conformance: LASH_REQUIRE_MINIO is not set");
+    async fn live_s3_attachment_store_satisfies_conformance_when_configured() {
+        let Some(config) = live_s3_config() else {
+            eprintln!("skipping live S3 conformance: LASH_REQUIRE_S3 is not set");
             return;
         };
         lash_conformance::attachment_store_reopenable(
@@ -656,9 +666,9 @@ mod tests {
     // bytes from two sessions dedup to one object, reads resolve across session
     // boundaries, and GC collects the blob only after its final root disappears.
     #[tokio::test]
-    async fn shared_bytes_isolation_and_gc_when_minio_configured() {
-        let Some(mut config) = minio_config_for_ci() else {
-            eprintln!("skipping MinIO shared-bytes isolation: LASH_REQUIRE_MINIO is not set");
+    async fn shared_bytes_isolation_and_gc_when_live_s3_configured() {
+        let Some(mut config) = live_s3_config() else {
+            eprintln!("skipping live S3 shared-bytes isolation: LASH_REQUIRE_S3 is not set");
             return;
         };
         // The GC narrative asserts exact scanned/reclaimed counts, so this
@@ -682,9 +692,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn duplicate_puts_are_content_addressed_when_minio_configured() {
-        let Some(config) = minio_config_for_ci() else {
-            eprintln!("skipping MinIO duplicate-put test: LASH_REQUIRE_MINIO is not set");
+    async fn duplicate_puts_are_content_addressed_when_live_s3_configured() {
+        let Some(config) = live_s3_config() else {
+            eprintln!("skipping live S3 duplicate-put test: LASH_REQUIRE_S3 is not set");
             return;
         };
         let store = S3AttachmentStore::from_config(config).expect("store");
@@ -702,9 +712,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_removes_content_and_is_idempotent_when_minio_configured() {
-        let Some(config) = minio_config_for_ci() else {
-            eprintln!("skipping MinIO delete test: LASH_REQUIRE_MINIO is not set");
+    async fn delete_removes_content_and_is_idempotent_when_live_s3_configured() {
+        let Some(config) = live_s3_config() else {
+            eprintln!("skipping live S3 delete test: LASH_REQUIRE_S3 is not set");
             return;
         };
         let store = S3AttachmentStore::from_config(config).expect("store");
@@ -736,29 +746,28 @@ mod tests {
             .expect("delete of absent content is a no-op");
     }
 
-    fn minio_config_for_ci() -> Option<S3AttachmentStoreConfig> {
-        if std::env::var("LASH_REQUIRE_MINIO").as_deref() != Ok("1") {
+    /// The live S3 server `scripts/ci/with-service.sh s3` stands up (Garage),
+    /// named entirely by its `LASH_S3_*` environment; `None` when
+    /// `LASH_REQUIRE_S3` is unset.
+    fn live_s3_config() -> Option<S3AttachmentStoreConfig> {
+        if std::env::var("LASH_REQUIRE_S3").as_deref() != Ok("1") {
             return None;
         }
+        let required = |name: &str| {
+            std::env::var(name).unwrap_or_else(|_| panic!("LASH_REQUIRE_S3=1 requires {name}"))
+        };
         let prefix = format!(
             "tests/{}",
-            std::env::var("LASH_MINIO_PREFIX").unwrap_or_else(|_| uuid_like_suffix())
+            std::env::var("LASH_S3_PREFIX").unwrap_or_else(|_| uuid_like_suffix())
         );
         Some(S3AttachmentStoreConfig {
-            endpoint_url: Some(
-                std::env::var("LASH_MINIO_ENDPOINT")
-                    .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string()),
-            ),
-            region: std::env::var("LASH_MINIO_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
-            bucket: std::env::var("LASH_MINIO_BUCKET")
+            endpoint_url: Some(required("LASH_S3_ENDPOINT")),
+            region: std::env::var("LASH_S3_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+            bucket: std::env::var("LASH_S3_BUCKET")
                 .unwrap_or_else(|_| "lash-attachments".to_string()),
             prefix: Some(prefix),
-            access_key_id: Some(
-                std::env::var("LASH_MINIO_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
-            ),
-            secret_access_key: Some(Redacted::new(
-                std::env::var("LASH_MINIO_SECRET_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
-            )),
+            access_key_id: Some(required("LASH_S3_ACCESS_KEY")),
+            secret_access_key: Some(Redacted::new(required("LASH_S3_SECRET_KEY"))),
             path_style: true,
         })
     }
@@ -834,6 +843,9 @@ mod tests {
         )
     }
 }
+
+#[cfg(test)]
+mod delete_response_tests;
 
 #[cfg(test)]
 mod redaction_tests {

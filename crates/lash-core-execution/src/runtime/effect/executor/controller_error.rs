@@ -206,7 +206,7 @@ mod tests {
             effect_kind: None,
         };
         let mut runtime_error = RuntimeError::new(
-            crate::RuntimeErrorCode::WorkerReplacementAbort,
+            crate::RuntimeErrorCode::EffectReplayDivergence,
             "replacement reconstructed a different turn index",
         );
         runtime_error.summary = Some(Box::new(summary.clone()));
@@ -215,7 +215,7 @@ mod tests {
 
         assert_eq!(
             controller_error.code,
-            crate::RuntimeErrorCode::WorkerReplacementAbort
+            crate::RuntimeErrorCode::EffectReplayDivergence
         );
         assert_eq!(
             controller_error.summary.map(|summary| *summary),

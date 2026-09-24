@@ -840,12 +840,8 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
             .with_globals(["text"]);
 
     let shadowed_source = "text.sha256({});";
-    let shadowed = lash_typescript::parse_with_globals_and_process_handles(
-        shadowed_source,
-        &environment.globals,
-        &environment.process_handles,
-    )
-    .expect_err("the cache parse does not carry the module catalog");
+    let shadowed = lash_typescript::parse_cell(shadowed_source, &environment)
+        .expect_err("the cache parse does not carry the module catalog");
     let shadowed = refine_typescript_method_diagnostic(shadowed_source, &environment, shadowed);
     assert_eq!(
         shadowed.message,
@@ -853,12 +849,8 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
     );
 
     let ordinary_source = "const s = 'a,b'; s.notAMethod(',');";
-    let ordinary = lash_typescript::parse_with_globals_and_process_handles(
-        ordinary_source,
-        &environment.globals,
-        &environment.process_handles,
-    )
-    .expect_err("an ordinary local method remains unsupported");
+    let ordinary = lash_typescript::parse_cell(ordinary_source, &environment)
+        .expect_err("an ordinary local method remains unsupported");
     let ordinary = refine_typescript_method_diagnostic(ordinary_source, &environment, ordinary);
     assert_eq!(
         ordinary.message,

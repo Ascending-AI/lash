@@ -33,6 +33,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
         let mut runtime_globals = Record::new();
         runtime_globals.insert("f".to_string(), closure);
         let snapshot = Snapshot {
+            expired_functions: BTreeSet::new(),
             mode: StateMode::HeapBacked(Box::new(HeapBackedState {
                 runtime_globals,
                 projected: Record::new(),
@@ -65,6 +66,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
     let mut runtime_globals = Record::new();
     runtime_globals.insert("f".to_string(), closure);
     let bytes = Snapshot {
+        expired_functions: BTreeSet::new(),
         mode: StateMode::HeapBacked(Box::new(HeapBackedState {
             runtime_globals,
             projected: Record::new(),
@@ -203,6 +205,7 @@ fn canonical_decode_rejects_integer_encoded_runtime_number() {
 #[test]
 fn canonical_decode_rejects_sequence_form_structs() {
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "root".to_string(),
@@ -228,6 +231,7 @@ fn canonical_decode_rejects_sequence_form_structs() {
 fn canonical_decode_rejects_unsorted_and_duplicate_dynamic_keys() {
     for names in [["z", "a"], ["same", "same"]] {
         let wire = CanonicalSnapshot {
+            expired_functions: Vec::new(),
             version: LASHLANG_SNAPSHOT_VERSION,
             globals: Some(
                 names
@@ -302,6 +306,7 @@ fn heapless_snapshot_encode_refuses_a_heap_reference() {
 #[test]
 fn heapless_snapshot_decode_refuses_a_heap_reference() {
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "dangling".to_string(),
@@ -323,6 +328,7 @@ fn heapless_snapshot_decode_refuses_a_heap_reference() {
 #[test]
 fn snapshot_try_from_refuses_a_heap_reference_without_the_raw_wire_validator() {
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "wrapper".to_string(),
@@ -346,6 +352,7 @@ fn snapshot_try_from_refuses_a_heap_reference_without_the_raw_wire_validator() {
 #[test]
 fn heapless_snapshot_fixed_point_cannot_launder_a_heap_reference() {
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "wrapper".to_string(),
@@ -381,6 +388,7 @@ fn canonical_decode_rejects_a_depth_bomb_before_deserializing() {
         value = CanonicalValue::List { items: vec![value] };
     }
     let bomb = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "bomb".to_string(),
@@ -459,9 +467,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x9b, 0x46, 0x10, 0x85, 0xe7, 0xad, 0xea, 0xc1, 0x11, 0x56, 0xe3, 0x2b, 0x99, 0xe8,
-            0x58, 0xf2, 0xb2, 0xe5, 0x89, 0x13, 0x21, 0xe2, 0xa8, 0x84, 0x90, 0xbe, 0xa7, 0x65,
-            0xe8, 0x49, 0xf0, 0x96,
+            0x15, 0xe5, 0x72, 0xf1, 0x73, 0x55, 0x3c, 0x46, 0x71, 0x9d, 0x76, 0x92, 0x5d, 0xa2,
+            0x2b, 0x9b, 0x69, 0x89, 0x3f, 0xb3, 0x9b, 0x5f, 0x0d, 0x30, 0xd0, 0x8f, 0xe2, 0x18,
+            0x46, 0x64, 0xc5, 0x3b,
         ]
     );
 }
@@ -514,6 +522,7 @@ fn snapshot_round_trip_preserves_undefined_cell_global() {
 fn canonical_decode_rejects_extra_fields_on_undefined_value() {
     // A malformed canonical wire where undefined has extra fields
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "root".to_string(),
@@ -558,6 +567,7 @@ fn canonical_decode_rejects_extra_fields_on_undefined_value() {
 fn canonical_runtime_value_validator_covers_every_canonical_value_variant() {
     fn validate_wire_value(value: CanonicalValue) -> Result<Snapshot, SnapshotDecodeError> {
         let wire = CanonicalSnapshot {
+            expired_functions: Vec::new(),
             version: LASHLANG_SNAPSHOT_VERSION,
             globals: Some(vec![CanonicalBinding {
                 name: "root".to_string(),
@@ -649,7 +659,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e08a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e0aa7676c6f62616c7390");
 }
 
 #[test]
@@ -708,6 +718,7 @@ fn canonical_heap_with(
     live_logical_bytes: u64,
 ) -> CanonicalSnapshot {
     CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: None,
         heap: Some(CanonicalHeap {
@@ -763,11 +774,12 @@ fn a_snapshot_one_version_behind_is_refused_by_the_fence() {
 fn a_snapshot_one_version_ahead_with_unknown_variant_is_refused_as_version_mismatch() {
     let mut heap = Heap::default();
     let error = heap
-        .allocate_error(ErrorKind::EffectError, "boom".to_string(), None, None)
+        .allocate_error(ErrorKind::EffectError, Some("boom".to_string()), None, None)
         .expect("EffectError");
     let mut roots = Record::new();
     roots.insert("rejection".to_string(), error);
     let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
         mode: StateMode::HeapBacked(Box::new(HeapBackedState {
             runtime_globals: roots,
             projected: Record::new(),
@@ -829,7 +841,7 @@ fn a_minted_error_brand_ships_by_name_and_round_trips_at_the_current_version() {
     let error = heap
         .allocate_error(
             ErrorKind::EffectError,
-            "boom".to_string(),
+            Some("boom".to_string()),
             Some(cause),
             None,
         )
@@ -837,6 +849,7 @@ fn a_minted_error_brand_ships_by_name_and_round_trips_at_the_current_version() {
     let mut roots = Record::new();
     roots.insert("rejection".to_string(), error);
     let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
         mode: StateMode::HeapBacked(Box::new(HeapBackedState {
             runtime_globals: roots,
             projected: Record::new(),
@@ -859,6 +872,72 @@ fn a_minted_error_brand_ships_by_name_and_round_trips_at_the_current_version() {
         bytes,
         "the brand survives the decode as itself, byte for byte"
     );
+}
+
+/// FIG-3657: an error's own `message` presence is heap state, so the wire
+/// carries `Option<String>` and an absent message stays absent while an
+/// explicitly empty one stays empty. `Object.hasOwn(e, "message")` reads the
+/// same slot, so these assertions are the round-trip's ownness contract.
+#[test]
+fn error_message_presence_round_trips_through_the_snapshot_wire() {
+    let mut heap = Heap::default();
+    let absent = heap
+        .allocate_error(ErrorKind::Error, None, None, None)
+        .expect("new Error()");
+    let empty = heap
+        .allocate_error(ErrorKind::Error, Some(String::new()), None, None)
+        .expect("new Error('')");
+    let message = heap
+        .allocate_error(ErrorKind::Error, Some("m".to_string()), None, None)
+        .expect("new Error('m')");
+    let caused = heap
+        .allocate_error(
+            ErrorKind::Error,
+            Some("m".to_string()),
+            Some(Value::String("why".into())),
+            None,
+        )
+        .expect("new Error('m', { cause })");
+    let mut roots = Record::new();
+    roots.insert("absent".to_string(), absent);
+    roots.insert("empty".to_string(), empty);
+    roots.insert("message".to_string(), message);
+    roots.insert("caused".to_string(), caused);
+    let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
+        mode: StateMode::HeapBacked(Box::new(HeapBackedState {
+            runtime_globals: roots,
+            projected: Record::new(),
+            heap,
+        })),
+    };
+
+    let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
+    let restored = Snapshot::from_canonical_bytes(&bytes).expect("decode snapshot");
+    assert_eq!(
+        restored.to_canonical_bytes().expect("re-encode"),
+        bytes,
+        "the snapshot re-encodes byte for byte"
+    );
+
+    let StateMode::HeapBacked(backed) = &restored.mode else {
+        panic!("a rooted error heap restores heap-backed");
+    };
+    let restored_error = |name: &str| -> &ErrorObject {
+        let Some(Value::Ref(id)) = backed.runtime_globals.get(name) else {
+            panic!("{name} should restore as a heap reference");
+        };
+        let HeapObject::Error(error) = backed.heap.get(*id).expect("restored object") else {
+            panic!("{name} should restore as an error");
+        };
+        error
+    };
+    assert_eq!(restored_error("absent").message, None);
+    assert_eq!(restored_error("empty").message.as_deref(), Some(""));
+    assert_eq!(restored_error("message").message.as_deref(), Some("m"));
+    let caused = restored_error("caused");
+    assert_eq!(caused.message.as_deref(), Some("m"));
+    assert_eq!(caused.cause, Some(Value::String("why".into())));
 }
 
 #[test]
@@ -1272,7 +1351,7 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     let error = heap
         .allocate_error(
             ErrorKind::TypeError,
-            "bad".to_string(),
+            Some("bad".to_string()),
             Some(shared.clone()),
             None,
         )
@@ -1286,6 +1365,7 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     roots.insert("date".to_string(), date);
     roots.insert("error".to_string(), error);
     let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
         mode: StateMode::HeapBacked(Box::new(HeapBackedState {
             runtime_globals: roots,
             projected: Record::new(),
@@ -1401,7 +1481,7 @@ fn lashlang_forest_validation_rejects_every_typescript_exotic_kind() {
         HeapObject::Date(DateObject { milliseconds: 0.0 }),
         HeapObject::Error(ErrorObject {
             kind: ErrorKind::Error,
-            message: String::new(),
+            message: None,
             cause: None,
             errors: None,
         }),

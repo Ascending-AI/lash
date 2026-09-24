@@ -24,6 +24,10 @@ pub use queued_run::{
 mod attachment_fence;
 #[path = "session_store_factory_config_commands.rs"]
 mod config_commands;
+pub use config_commands::{
+    cancelled_session_config_settlement_is_typed, session_config_settlement_timeout_is_typed,
+    superseded_config_settlement_adopts_the_newer_head,
+};
 mod state_version;
 mod turn_cancel;
 
@@ -114,21 +118,6 @@ pub async fn session_store_factory<F>(
     session_store_factory_unbound_vacuum_is_typed_error(backend, unbound_store).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
-}
-
-#[cfg(test)]
-pub(crate) async fn session_config_settlement_timeout_is_typed() {
-    Box::pin(config_commands::session_config_settlement_timeout_is_typed()).await;
-}
-
-#[cfg(test)]
-pub(crate) async fn cancelled_session_config_settlement_is_typed() {
-    config_commands::cancelled_session_config_settlement_is_typed().await;
-}
-
-#[cfg(test)]
-pub(crate) async fn superseded_config_settlement_adopts_the_newer_head() {
-    Box::pin(config_commands::superseded_config_settlement_adopts_the_newer_head()).await;
 }
 
 /// Hold a backend to the read-only session-view contract.

@@ -408,8 +408,12 @@ pub(crate) fn javascript_heap_has_property(
             ) || is_object_prototype_key(key)
         }
         HeapObject::Error(error) => {
-            matches!(key, "name" | "message" | "cause" | "stack" | "toString")
-                || (error.kind == ErrorKind::AggregateError && key == "errors")
+            matches!(key, "name" | "stack" | "toString")
+                || (key == "message" && error.message.is_some())
+                || (key == "cause" && error.cause.is_some())
+                || (error.kind == ErrorKind::AggregateError
+                    && key == "errors"
+                    && error.errors.is_some())
                 || is_object_prototype_key(key)
         }
         HeapObject::Url(_) => {
@@ -550,6 +554,7 @@ pub(crate) fn read_javascript_heap_field(
             "global" => Value::Bool(regexp.flags.contains('g')),
             "ignoreCase" => Value::Bool(regexp.flags.contains('i')),
             "multiline" => Value::Bool(regexp.flags.contains('m')),
+            "dotAll" => Value::Bool(regexp.flags.contains('s')),
             "sticky" => Value::Bool(regexp.flags.contains('y')),
             "unicode" => Value::Bool(regexp.flags.contains('u')),
             _ => Value::Undefined,
@@ -569,7 +574,12 @@ pub(crate) fn read_javascript_heap_field(
         }
         HeapObject::Error(error) => match field.text.as_ref() {
             "name" => Value::String(error.kind.name().into()),
-            "message" => Value::String(error.message.as_str().into()),
+            // An absent own `message` reads `""`, `Error.prototype.message`'s
+            // value in Node; the prototype is not a slot this model carries.
+            "message" => error
+                .message
+                .as_deref()
+                .map_or_else(|| Value::String("".into()), |m| Value::String(m.into())),
             "cause" => error.cause.clone().unwrap_or(Value::Undefined),
             "errors" if error.kind == ErrorKind::AggregateError => {
                 error.errors.clone().unwrap_or(Value::Undefined)
@@ -613,6 +623,7 @@ pub(crate) fn read_javascript_heap_index(
             "global" => Value::Bool(regexp.flags.contains('g')),
             "ignoreCase" => Value::Bool(regexp.flags.contains('i')),
             "multiline" => Value::Bool(regexp.flags.contains('m')),
+            "dotAll" => Value::Bool(regexp.flags.contains('s')),
             "sticky" => Value::Bool(regexp.flags.contains('y')),
             "unicode" => Value::Bool(regexp.flags.contains('u')),
             _ => Value::Undefined,
@@ -630,7 +641,10 @@ pub(crate) fn read_javascript_heap_index(
         HeapObject::Set(set) if key == "size" => Value::Number(set.values.len() as f64),
         HeapObject::Error(error) => match key.as_str() {
             "name" => Value::String(error.kind.name().into()),
-            "message" => Value::String(error.message.as_str().into()),
+            "message" => error
+                .message
+                .as_deref()
+                .map_or_else(|| Value::String("".into()), |m| Value::String(m.into())),
             "cause" => error.cause.clone().unwrap_or(Value::Undefined),
             "errors" if error.kind == ErrorKind::AggregateError => {
                 error.errors.clone().unwrap_or(Value::Undefined)

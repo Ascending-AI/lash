@@ -15,6 +15,7 @@ use lash_core::llm::types::{
 };
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_sansio::sync::MutexExt;
+mod commit_pins;
 mod fig1127;
 mod fig1416;
 

@@ -44,6 +44,20 @@ pub(crate) const SPAN_NAMED_NESTED_REPEATED: &str = r#"const worker=async()=>{aw
 /// is a registered trigger source constructor, so a host admits it.
 pub(crate) const SPAN_LIFTED_INLINE: &str = r#"await triggers.register({source:timer.Schedule({expr:"0 8 * * *"}),target:async(event)=>{await tools.echo({value:"inline"});return event;}});"#;
 
+/// FIG-3635's shape: top-level `var` declarations hoisted ahead of the
+/// hoisted function declarations, so the round trip only holds when the
+/// canonical print spells the hoist `var`.
+pub(crate) const VAR_HOIST_FUNCTION: &str = r#"var x = function () {
+  return 1;
+};
+var y = function () {
+  return 2;
+};
+function f_arg() {}
+f_arg();
+finish(x);
+"#;
+
 /// The carrier laws' corpus (FIG-3571 L3/L4): sources that exercise every
 /// structure the ownership walk distinguishes.
 pub(crate) const CARRIER_LAWS: &[&str] = &[
@@ -113,4 +127,5 @@ pub(crate) const ALL: &[(&str, &str)] = &[
     ("with-facets", WITH_FACETS),
     ("span-named-nested-repeated", SPAN_NAMED_NESTED_REPEATED),
     ("span-lifted-inline", SPAN_LIFTED_INLINE),
+    ("var-hoist-function", VAR_HOIST_FUNCTION),
 ];

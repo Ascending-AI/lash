@@ -265,6 +265,11 @@ mod tests {
             crate::GroupExecutors::executor_for(tool_children.as_ref(), &envelope).is_none(),
             "an unregistered opener is a routing fact, not an executor and not a failure"
         );
+        assert!(
+            crate::GroupExecutors::routes(tool_children.as_ref(), &envelope),
+            "a tool child is routed wherever its opener is live, so a preflight answered \
+             by another worker must not refuse its group"
+        );
 
         let lent_dispatch = lent();
         let lent_controller = lent_dispatch
@@ -312,6 +317,10 @@ mod tests {
             RuntimeEffectCommand::SyncExecutionEnvironment,
         );
         assert!(crate::GroupExecutors::executor_for(tool_children.as_ref(), &envelope).is_none());
+        assert!(
+            !crate::GroupExecutors::routes(tool_children.as_ref(), &envelope),
+            "a command the resolver never runs is not routed from any worker"
+        );
     }
     /// §3's cancellation line, wrong direction: a recorded binding this host did
     /// not mint for the admitted scope is a foreign authority — the cooperative

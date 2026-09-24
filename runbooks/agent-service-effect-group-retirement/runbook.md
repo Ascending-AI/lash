@@ -19,7 +19,7 @@ named here. Any provider request invalidates the rehearsal.
 
 ## Safety and stop conditions
 
-1. Use `restatedev/restate:1.7.0`, a unique container name, fresh explicit ports, and a
+1. Use `restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b`, a unique container name, fresh explicit ports, and a
    fresh run ID. Abort if any name or port is already owned; do not take it over.
 2. Record the exact agent-service PID at boot and confirm that PID is `agent-service`
    before every signal. Never use `pkill`, `killall`, a process-name match, a service name,
@@ -80,7 +80,7 @@ docker run -d --name "$container" --network host \
   -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
   -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
   -e RESTATE_BIND_PORT="$node_port" \
-  restatedev/restate:1.7.0 | tee "$run_root/container-id.txt"
+  restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b | tee "$run_root/container-id.txt"
 ```
 
 Poll the admin and ingress TCP ports with a 60-second deadline. On failure, save only
@@ -254,8 +254,8 @@ for the new deployment ID. That is the signal to gate on. `restate deployments l
 carries the same fact only as a bracketed suffix on each service's continuation line
 (`- EffectGroupIndex [2]`), and its `CREATED-AT` column holds a bare year, so scanning that
 table for a number finds `2026` on both deployments and the comparison passes on nothing.
-Neither rendering is a product surface: both come from `restate-cli 1.7.0`, matching the
-`restatedev/restate:1.7.0` server pinned in safety rule 1. Use the list output for the
+Neither rendering is a product surface: both come from `restate-cli 1.7.12`, matching the
+`restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b` server pinned in safety rule 1. Use the list output for the
 inventory half only — both URLs still present.
 
 ```sh

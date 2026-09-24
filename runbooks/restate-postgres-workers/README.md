@@ -11,7 +11,7 @@ Budget for a cold build the first time: the harness builds its own binaries with
 plain Cargo, not through kiln, so it does not share the Bazel cache and a release
 profile build is paid in full.
 
-That starts Postgres, MinIO, Restate, a mock OpenAI-compatible provider, two
+That starts Postgres, S3 (Garage), Restate, a mock OpenAI-compatible provider, two
 workers, the h2c proxy, and the runner. Alongside the process, durable-wait,
 frame-switch, and storage gates, the runner verifies first-party turn control:
 

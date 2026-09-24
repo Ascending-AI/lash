@@ -149,6 +149,21 @@ pub(super) fn normalized_arguments(args: &[Value], arity: usize) -> Vec<Value> {
     normalized
 }
 
+/// The `fromIndex` argument of `indexOf`/`includes`/`lastIndexOf`. ECMA
+/// reaches a number through ToIntegerOrInfinity, which invokes an object's own
+/// `toString`/`valueOf` when they exist — guest functions this value model
+/// cannot run, so a record carrying either is refused rather than silently
+/// coerced to NaN (FIG-3658). Objects without them follow the dialect's
+/// documented answer: their only ECMA string is a type tag, hence NaN.
+pub(super) fn search_index_argument(heap: &Heap, value: &Value) -> Result<f64, RuntimeError> {
+    if heap.javascript_object_coercion_needs_guest(value)? {
+        return Err(RuntimeError::ValidationFailed {
+            reason: "TS_OBJECT_STRING_COERCION: ToIntegerOrInfinity on an object with its own toString or valueOf would run guest code; pass a number or a primitive that converts".to_string(),
+        });
+    }
+    heap.javascript_to_number(value)
+}
+
 pub(super) fn ecma_record_entries(record: &Record) -> Vec<(&str, &Value)> {
     let mut indices = Vec::new();
     let mut names = Vec::new();

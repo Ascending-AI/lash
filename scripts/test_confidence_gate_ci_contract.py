@@ -95,7 +95,7 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
     rendered from one table instead of written twice, so there is no `else` to
     split on -- and reading what the script actually invokes is the stronger
     check for the three shaped arms too: `pg-store` and `s3-store` expand a
-    generated label file that text-splitting could only see as `labels minio`.
+    generated label file that text-splitting could only see as `labels s3`.
     """
     rendered = []
     for trusted in ("true", "false"):
@@ -1851,7 +1851,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             '"restate_postgres_workers_e2e_status": "$(restate_postgres_workers_e2e_status)"',
             "run_restate_postgres_workers_e2e",
             '"status": "not_run"',
-            '"reason": "distributed Restate/Postgres/MinIO worker e2e is full-lane-only"',
+            '"reason": "distributed Restate/Postgres/S3 worker e2e is full-lane-only"',
         ]
 
         for snippet in required_snippets:
@@ -2414,26 +2414,29 @@ derive_mutation_jobs() {{
                         rendered,
                     )
 
-    def test_minio_ci_lane_requires_storage_configuration(self) -> None:
+    def test_s3_ci_lane_requires_storage_configuration(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         s3_store_job = workflow_job_block(workflow, "s3-store")
 
-        self.assertNotIn("LASH_MINIO_ENDPOINT:", s3_store_job)
-        self.assertIn('LASH_REQUIRE_MINIO: "1"', s3_store_job)
+        self.assertNotIn("LASH_S3_ENDPOINT:", s3_store_job)
+        self.assertIn('LASH_REQUIRE_S3: "1"', s3_store_job)
 
         # The require flag is supplied once at job level, so an unavailable
         # service fails instead of skipping for every suite in the job and no
         # step can lose it on its own. A Bazel test spawn inherits nothing from
         # the client environment, so `bazel_test` forwards it by name.
         s3_job_env = yaml.safe_load(workflow)["jobs"]["s3-store"]["env"]
-        self.assertEqual("1", str(s3_job_env["LASH_REQUIRE_MINIO"]))
-        self.assertNotIn("LASH_MINIO_ENDPOINT", s3_job_env)
-        # The endpoint follows the port `with-service.sh` chose, and every
-        # suite in this job runs inside that wrapper.
+        self.assertEqual("1", str(s3_job_env["LASH_REQUIRE_S3"]))
+        self.assertNotIn("LASH_S3_ENDPOINT", s3_job_env)
+        # The endpoint follows the port `with-service.sh` chose (the shared
+        # S3 service renders it), and every suite in this job runs inside
+        # that wrapper.
         wrapper = (ROOT / "scripts" / "ci" / "with-service.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn("LASH_MINIO_ENDPOINT=http://", wrapper)
+        self.assertIn('lash_s3_test_env "$port"', wrapper)
+        s3_service = (ROOT / "scripts" / "ci" / "s3-service.sh").read_text(encoding="utf-8")
+        self.assertIn('"LASH_S3_ENDPOINT=http://127.0.0.1:$1"', s3_service)
         for step_name in (
             "Test S3 store conformance",
             "Test attachment blob-store differential",
@@ -2446,7 +2449,7 @@ derive_mutation_jobs() {{
         bazel_helper = STORE_TESTS.read_text(encoding="utf-8").split(
             "bazel_test() {", 1
         )[1].split("\n}", 1)[0]
-        self.assertIn("--test_env=LASH_REQUIRE_MINIO", bazel_helper)
+        self.assertIn("--test_env=LASH_REQUIRE_S3", bazel_helper)
 
         conformance_bazel, conformance_cargo = store_suite_branches(
             store_suite_for_step(
@@ -2454,15 +2457,15 @@ derive_mutation_jobs() {{
             )
         )
         self.assertIn("cargo test -p lash-internal-s3-store --locked", conformance_cargo)
-        # The Bazel half runs the generated label set, so a new MinIO-gated
+        # The Bazel half runs the generated label set, so a new S3-gated
         # binary joins this job without a hand edit. The generated file is what
         # has to name the crate, and the rendered command is what has to carry
         # every label in it.
-        minio_labels = (ROOT / "tools" / "bazel" / "minio_test_labels.txt").read_text(
+        s3_labels = (ROOT / "tools" / "bazel" / "s3_test_labels.txt").read_text(
             encoding="utf-8"
         )
-        self.assertIn("//crates/lash-s3-store:", minio_labels)
-        for label in minio_labels.split():
+        self.assertIn("//crates/lash-s3-store:", s3_labels)
+        for label in s3_labels.split():
             self.assertIn(label, conformance_bazel, label)
 
         differential_bazel, differential_cargo = store_suite_branches(

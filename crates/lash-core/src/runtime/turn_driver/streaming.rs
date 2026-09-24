@@ -71,7 +71,7 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         request: Arc<LlmRequest>,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
         let invocation = self.turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)?;
@@ -138,8 +138,7 @@ impl RuntimeTurnDriver<'_> {
             if emitted.value.abort_stream {
                 abort_requested = true;
             }
-            emit_plugin_runtime_events_runtime(forwarder, &emitted.plugin_id, emitted.value.events)
-                .await;
+            emit_plugin_runtime_events_runtime(forwarder, &emitted.plugin_id, emitted.value.events);
         }
         let chunk = if first { original } else { current };
         Ok(StreamChunkOutcome {
@@ -192,7 +191,7 @@ impl RuntimeTurnDriver<'_> {
         request: Arc<LlmRequest>,
         protocol_iteration: usize,
         invocation: crate::RuntimeInvocation,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> RuntimeLlmCallOutcome {
         let mut request = (*request).clone();
@@ -614,11 +613,15 @@ impl RuntimeTurnDriver<'_> {
                 Err(_) => {}
             }
         }
-        let cancelled = matches!(
+        if matches!(
             &result,
             Err(err) if err.terminal_reason == crate::LlmTerminalReason::Cancelled
-        );
-        host_forwarder.finish(cancelled).await;
+        ) {
+            // Deltas are non-authoritative provider-wire volume: a cancelled
+            // call's backlog behind a lagging host is discarded rather than
+            // delaying the cancelled result.
+            event_tx.discard_lagging_deltas();
+        }
         if clamped_output_token_cap {
             record_clamped_output_token_cap(&mut result, call_record.as_mut());
         }
@@ -1013,9 +1016,7 @@ impl RuntimeTurnDriver<'_> {
             state.reasoning_attempt_correlations,
             &TurnActivityId::new(block.id.clone()),
         );
-        forwarder
-            .forward_block_start(ProviderDeltaClass::Reasoning, block.clone())
-            .await;
+        forwarder.forward_block_start(ProviderDeltaClass::Reasoning, block.clone());
         let mut block_text = String::new();
         for delta in reasoning_deltas {
             if delta.is_empty() {
@@ -1032,9 +1033,7 @@ impl RuntimeTurnDriver<'_> {
             );
             forwarder.forward_delta(ProviderDeltaClass::Reasoning, block.clone(), delta);
         }
-        forwarder
-            .forward_block_end(ProviderDeltaClass::Reasoning, block, block_text)
-            .await;
+        forwarder.forward_block_end(ProviderDeltaClass::Reasoning, block, block_text);
     }
 
     async fn forward_provider_stream_event(
@@ -1056,15 +1055,13 @@ impl RuntimeTurnDriver<'_> {
                 // The reset observes the provider generation boundary itself,
                 // even when the discarded attempt produced no output. Empty
                 // correlation lists are therefore meaningful host evidence.
-                forwarder
-                    .send_semantic_turn_activity(
-                        TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
-                        TurnEvent::ModelAttemptReset {
-                            assistant_prose_correlation_ids,
-                            reasoning_correlation_ids,
-                        },
-                    )
-                    .await;
+                forwarder.send_semantic_turn_activity(
+                    TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
+                    TurnEvent::ModelAttemptReset {
+                        assistant_prose_correlation_ids,
+                        reasoning_correlation_ids,
+                    },
+                );
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
@@ -1089,9 +1086,7 @@ impl RuntimeTurnDriver<'_> {
                     state.assistant_prose_attempt_correlations,
                     &TurnActivityId::new(block.id.clone()),
                 );
-                forwarder
-                    .forward_block_start(ProviderDeltaClass::AssistantProse, block)
-                    .await;
+                forwarder.forward_block_start(ProviderDeltaClass::AssistantProse, block);
             }
             LlmStreamEvent::Delta { block, text } => {
                 self.emit_visible_assistant_text(forwarder, text, &block, "delta", state)
@@ -1162,9 +1157,7 @@ impl RuntimeTurnDriver<'_> {
                     state.assistant_prose_attempt_correlations,
                     &TurnActivityId::new(block.id.clone()),
                 );
-                forwarder
-                    .forward_block_end(ProviderDeltaClass::AssistantProse, block, sealed)
-                    .await;
+                forwarder.forward_block_end(ProviderDeltaClass::AssistantProse, block, sealed);
             }
             LlmStreamEvent::ReasoningBlockStart { block } => {
                 state.reasoning_publication.record_streamed_block(&block);
@@ -1179,9 +1172,7 @@ impl RuntimeTurnDriver<'_> {
                     state.reasoning_attempt_correlations,
                     &TurnActivityId::new(block.id.clone()),
                 );
-                forwarder
-                    .forward_block_start(ProviderDeltaClass::Reasoning, block)
-                    .await;
+                forwarder.forward_block_start(ProviderDeltaClass::Reasoning, block);
             }
             LlmStreamEvent::ReasoningDelta { block, text } => {
                 state.reasoning_publication.record_streamed_block(&block);
@@ -1245,9 +1236,7 @@ impl RuntimeTurnDriver<'_> {
                     state.reasoning_attempt_correlations,
                     &TurnActivityId::new(block.id.clone()),
                 );
-                forwarder
-                    .forward_block_end(ProviderDeltaClass::Reasoning, block, text)
-                    .await;
+                forwarder.forward_block_end(ProviderDeltaClass::Reasoning, block, text);
             }
             LlmStreamEvent::Part(LlmOutputPart::Text {
                 text,
@@ -1354,17 +1343,13 @@ impl RuntimeTurnDriver<'_> {
                         state.reasoning_attempt_correlations,
                         &TurnActivityId::new(block.id.clone()),
                     );
-                    forwarder
-                        .forward_block_start(ProviderDeltaClass::Reasoning, block.clone())
-                        .await;
+                    forwarder.forward_block_start(ProviderDeltaClass::Reasoning, block.clone());
                     forwarder.forward_delta(
                         ProviderDeltaClass::Reasoning,
                         block.clone(),
                         block_text.clone(),
                     );
-                    forwarder
-                        .forward_block_end(ProviderDeltaClass::Reasoning, block, block_text)
-                        .await;
+                    forwarder.forward_block_end(ProviderDeltaClass::Reasoning, block, block_text);
                 }
                 fold_llm_stream_event(
                     state.stream_accumulator,
@@ -1415,15 +1400,13 @@ impl RuntimeTurnDriver<'_> {
                 max_attempts,
                 reason,
             } => {
-                forwarder
-                    .send_semantic_session_event(SessionStreamEvent::RetryStatus {
-                        wait_seconds,
-                        attempt,
-                        max_attempts,
-                        reason,
-                        envelope: None,
-                    })
-                    .await;
+                forwarder.send_semantic_session_event(SessionStreamEvent::RetryStatus {
+                    wait_seconds,
+                    attempt,
+                    max_attempts,
+                    reason,
+                    envelope: None,
+                });
             }
         }
         Ok(())

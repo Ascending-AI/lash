@@ -288,6 +288,13 @@ pub trait RestateProcessRunner: Send + Sync + 'static {
         &self,
         request: RestateProcessCancelRequest,
     ) -> Result<(), PluginError>;
+
+    /// The replay-key grammar the engine running `registration` journals
+    /// under (FIG-3586). Admission stamps it on segment 0's start marker,
+    /// which is the incarnation's start record, so the record names the
+    /// grammar the runner's engine requires before any body runs. A runner
+    /// whose engine keys no journal by grammar answers `None`.
+    fn replay_key_grammar(&self, registration: &ProcessRegistration) -> Option<u32>;
 }
 
 #[derive(Clone)]
@@ -307,6 +314,10 @@ impl RestateCoreProcessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for RestateCoreProcessRunner {
+    fn replay_key_grammar(&self, registration: &ProcessRegistration) -> Option<u32> {
+        self.worker.replay_key_grammar(registration)
+    }
+
     async fn run_process_segment(
         &self,
         started: &SegmentStarted,

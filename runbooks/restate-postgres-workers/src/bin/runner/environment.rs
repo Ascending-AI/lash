@@ -550,7 +550,7 @@ pub(super) async fn drive_frame_switch_crash_process(
     clippy::expect_used,
     reason = "the literal `image/png` is a valid MediaType by the attachments grammar"
 )]
-pub(super) async fn wait_for_minio(store: &impl lash::persistence::AttachmentStore) -> Result<()> {
+pub(super) async fn wait_for_s3(store: &impl lash::persistence::AttachmentStore) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(90);
     let meta = lash_core::AttachmentCreateMeta::new(
         lash_core::MediaType::parse("image/png").expect("literal image/png is a valid MediaType"),
@@ -559,13 +559,10 @@ pub(super) async fn wait_for_minio(store: &impl lash::persistence::AttachmentSto
     );
     let mut last_error = None;
     while Instant::now() < deadline {
-        match store
-            .put(b"runner-minio-health".to_vec(), meta.clone())
-            .await
-        {
+        match store.put(b"runner-s3-health".to_vec(), meta.clone()).await {
             Ok(reference) => match store.get(&reference.id).await {
-                Ok(stored) if stored.bytes == b"runner-minio-health" => return Ok(()),
-                Ok(_) => last_error = Some("MinIO health attachment bytes changed".to_string()),
+                Ok(stored) if stored.bytes == b"runner-s3-health" => return Ok(()),
+                Ok(_) => last_error = Some("S3 health attachment bytes changed".to_string()),
                 Err(err) => last_error = Some(err.to_string()),
             },
             Err(err) => last_error = Some(err.to_string()),
@@ -573,7 +570,7 @@ pub(super) async fn wait_for_minio(store: &impl lash::persistence::AttachmentSto
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     anyhow::bail!(
-        "MinIO did not become ready: {}",
+        "S3 did not become ready: {}",
         last_error.unwrap_or_else(|| "unknown error".to_string())
     )
 }

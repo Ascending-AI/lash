@@ -146,6 +146,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
         value: Value,
         existed: bool,
     ) {
+        if !existed {
+            update_live_cursors(
+                self.all_iterators(),
+                receiver,
+                &CollectionMutation::Added(key.clone()),
+            );
+        }
         for callback in live_collection_callbacks(&mut self.frames, receiver) {
             if existed {
                 if let Some(call) = callback.calls[callback.next_index..]
@@ -164,12 +171,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn map_for_each_delete(&mut self, receiver: HeapId, key: &Value) {
+        update_live_cursors(
+            self.all_iterators(),
+            receiver,
+            &CollectionMutation::Deleted(key),
+        );
         for callback in live_collection_callbacks(&mut self.frames, receiver) {
             retain_pending_calls(callback, |call| !callback_argument_matches(call, 1, key));
         }
     }
 
     pub(super) fn map_for_each_clear(&mut self, receiver: HeapId) {
+        update_live_cursors(self.all_iterators(), receiver, &CollectionMutation::Cleared);
         clear_pending_calls(&mut self.frames, receiver);
     }
 
@@ -177,6 +190,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if existed {
             return;
         }
+        update_live_cursors(
+            self.all_iterators(),
+            receiver,
+            &CollectionMutation::Added(value.clone()),
+        );
         for callback in live_collection_callbacks(&mut self.frames, receiver) {
             callback.calls.push(collection_callback(
                 vec![value.clone(), value.clone()],
@@ -186,12 +204,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn set_for_each_delete(&mut self, receiver: HeapId, value: &Value) {
+        update_live_cursors(
+            self.all_iterators(),
+            receiver,
+            &CollectionMutation::Deleted(value),
+        );
         for callback in live_collection_callbacks(&mut self.frames, receiver) {
             retain_pending_calls(callback, |call| !callback_argument_matches(call, 0, value));
         }
     }
 
     pub(super) fn set_for_each_clear(&mut self, receiver: HeapId) {
+        update_live_cursors(self.all_iterators(), receiver, &CollectionMutation::Cleared);
         clear_pending_calls(&mut self.frames, receiver);
     }
 

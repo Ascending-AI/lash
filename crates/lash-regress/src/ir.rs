@@ -69,8 +69,12 @@ pub enum Node {
     },
 
     /// Word boundary (\b or \B).
+    /// The `icase` is the ignoreCase modifier in force where the boundary was
+    /// parsed; it may differ from the regex's global icase flag inside a
+    /// `(?i:...)` or `(?-i:...)` group.
     WordBoundary {
         invert: bool,
+        icase: bool,
     },
 
     /// A capturing group.
@@ -84,9 +88,17 @@ pub enum Node {
 
     /// Indices are 1-based.
     /// That is, it matches JS syntax: \1 is the first capture group, not everything.
-    /// A backreference that logically may match multiple capture groups (through shared names)
-    /// are emitted through alternations of backreferences.
-    BackRef(u32),
+    /// A backreference to a name shared by multiple groups (in disjoint
+    /// alternations) carries every candidate group; at match time only groups
+    /// that actually participated are tried, and if none did the backreference
+    /// matches the empty string.
+    /// `icase` is the ignoreCase modifier in force where the reference was
+    /// parsed, which may differ from the regex's global icase flag inside a
+    /// `(?i:...)` or `(?-i:...)` group.
+    BackRef {
+        groups: Vec<u32>,
+        icase: bool,
+    },
 
     Bracket(BracketContents),
 
@@ -227,8 +239,11 @@ impl Node {
             Node::CaptureGroup { .. } => {
                 panic!("Refusing to duplicate a capture group");
             }
-            &Node::WordBoundary { invert } => Node::WordBoundary { invert },
-            &Node::BackRef(idx) => Node::BackRef(idx),
+            &Node::WordBoundary { invert, icase } => Node::WordBoundary { invert, icase },
+            Node::BackRef { groups, icase } => Node::BackRef {
+                groups: groups.clone(),
+                icase: *icase,
+            },
             Node::Bracket(bc) => Node::Bracket(bc.clone()),
             // Do not reverse into lookarounds, they already have the right sense.
             Node::LookaroundAssertion {
@@ -535,12 +550,12 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
                 writeln!(f, "CaptureGroup {:?}", id)?;
             }
         }
-        &Node::WordBoundary { invert } => {
+        &Node::WordBoundary { invert, icase } => {
             let kind = if invert { "\\B" } else { "\\b" };
-            writeln!(f, "WordBoundary {:?} ", kind)?;
+            writeln!(f, "WordBoundary {:?} icase={}", kind, icase)?;
         }
-        &Node::BackRef(group) => {
-            writeln!(f, "BackRef {:?} ", group)?;
+        Node::BackRef { groups, icase } => {
+            writeln!(f, "BackRef {:?} icase={}", groups, icase)?;
         }
         Node::Bracket(contents) => {
             writeln!(f, "Bracket {:?}", contents)?;

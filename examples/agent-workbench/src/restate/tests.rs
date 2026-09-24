@@ -332,8 +332,11 @@ fn runtime_shape_uses_the_shared_terminal_classifier() {
     );
 }
 
+/// A turn that parked on a replay divergence keeps its invocation's journal:
+/// the attempt fails retryably, nothing settles, no failure is recorded, and
+/// the turn stays in flight for the restored deployment to complete.
 #[tokio::test]
-async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable() {
+async fn a_parked_turn_fails_its_attempt_retryably_without_settling() {
     let data_dir = tempfile::tempdir().expect("tempdir");
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
@@ -341,53 +344,44 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
     )
     .await;
     let session_id = state.current_session_id();
-    state.track_turn(&session_id, &TurnId::from("replacement-aborted-turn"));
+    let turn_id = TurnId::from("parked-turn");
+    state.track_turn(&session_id, &turn_id);
     let error = super::terminalize_turn_execution(
         &state,
         &session_id,
-        &TurnId::from("replacement-aborted-turn"),
-        "replacement.aborted",
+        &turn_id,
+        "replay.parked",
         Ok(Err(AppError::runtime(lash::EmbedError::Plugin(
             lash::plugins::PluginError::RuntimeEffectController(
                 lash::runtime::RuntimeEffectControllerError::new(
-                    lash::runtime::RuntimeErrorCode::WorkerReplacementAbort,
+                    lash::runtime::RuntimeErrorCode::EffectReplayDivergence,
                     "recorded hash raw-old-hash did not match reconstructed hash raw-new-hash",
                 ),
             ),
         )))),
     )
     .await
-    .expect_err("replacement must abort the in-flight invocation");
+    .expect_err("a parked turn fails its attempt");
     let rendered =
         <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&error)
             .to_string();
 
     assert!(
-        rendered.contains("worker_replacement_abort"),
-        "replacement abort must retain its typed code: {rendered}"
+        !rendered.starts_with("Terminal error"),
+        "a parked turn must fail retryably so its journal survives: {rendered}"
     );
     assert!(
-        !rendered.contains("internal server error"),
-        "replacement abort must not cross the generic internal-error projection: {rendered}"
+        rendered.contains("effect_replay_divergence"),
+        "the parked attempt keeps its typed code: {rendered}"
     );
     assert!(
         !rendered.contains("raw-old-hash") && !rendered.contains("raw-new-hash"),
-        "replacement abort must redact envelope hashes at the conflict boundary: {rendered}"
+        "the parked attempt redacts envelope hashes at the conflict boundary: {rendered}"
     );
     assert!(
-        state.active_turns.for_session(&session_id).is_none(),
-        "replacement abort must retire the active turn before returning"
+        state.active_turns.for_session(&session_id).is_some(),
+        "a parked turn is not settled: it stays in flight"
     );
-    let session = state
-        .open_session(&session_id, "test")
-        .await
-        .expect("the settled replacement abort must leave the session reopenable");
-    session
-        .turn(lash::TurnInput::text("run after worker replacement"))
-        .turn_id("post-replacement-turn")
-        .run()
-        .await
-        .expect("the same session must accept and complete its next turn");
 }
 
 #[test]

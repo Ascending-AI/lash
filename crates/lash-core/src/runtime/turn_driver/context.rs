@@ -19,7 +19,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     pub(super) fn execution_context(
         &self,
         event_tx: mpsc::Sender<SessionStreamEvent>,
-        stream_event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        stream_event_tx: &TurnObserver,
         chronological_projection: Arc<crate::ChronologicalProjection>,
     ) -> Result<crate::RuntimeExecutionContext<'run>, PluginError> {
         let manager = self.session_services.clone();
@@ -106,8 +106,8 @@ impl<'run> RuntimeTurnDriver<'run> {
     /// Children instead emit on a channel the registration owns, forwarded to
     /// the turn's stream for exactly the entry's lifetime: the registry's
     /// `ended` token fires on supersede and on the release [`run`](super::machine)
-    /// performs before the stream drain, so a `RunToCompletion` child that
-    /// outlives its opener cannot pin the turn's event channel either.
+    /// performs before it returns, so a `RunToCompletion` child that outlives
+    /// its opener stops publishing into the turn's observer.
     ///
     /// Three ways this registers nothing, all of them conservative — the child
     /// stays accepted rather than running under a context that cannot serve it:
@@ -121,7 +121,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     fn register_live_opener(
         &self,
         dispatch: &std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
-        stream_event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        stream_event_tx: &TurnObserver,
     ) {
         let Some(tool_children) = self.host.core.control.tool_children.as_ref() else {
             return;
@@ -161,13 +161,11 @@ impl<'run> RuntimeTurnDriver<'run> {
                     () = ended.cancelled() => break,
                     event = child_event_rx.recv() => {
                         let Some(event) = event else { break };
-                        send_session_event(&stream_event_tx, event).await;
+                        stream_event_tx.session(event);
                     }
                     activity = child_activity_rx.recv() => {
                         let Some(activity) = activity else { break };
-                        let _ = stream_event_tx
-                            .send(RuntimeStreamEvent::Turn(activity))
-                            .await;
+                        stream_event_tx.publish(RuntimeStreamEvent::Turn(activity));
                     }
                 }
             }

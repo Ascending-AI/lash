@@ -101,9 +101,10 @@ the answer decided FIG-526, and it will decide the next one.
   is recorded, and no retry budget is spent, because every redrive by the same
   build refuses again with zero dispatch. A hash conflict was recorded as a
   failed turn before FIG-3587; it now parks on every SQL host. Restate's
-  envelope mismatch (`WorkerReplacementAbort`) still aborts as a live fault;
-  parking it is deferred to S7. Otherwise every host settles the same failure
-  the same way.
+  envelope or group-reopen mismatch parks too, as the engine-neutral
+  `effect_replay_divergence`: its handler fails the attempt retryably, so the
+  invocation keeps its journal. Every host settles the same failure the same
+  way.
 - Decided 2026-09-24, not yet implemented (FIG-3600, [ADR 0101's
   amendment](0101-one-session-ingress-carries-every-admitted-item.md#amendment-fig-3600-2026-09-24-one-send-ingress-the-driver-runs-every-turn)):
   continuation is the substrate's for **every** turn, because no caller-driven

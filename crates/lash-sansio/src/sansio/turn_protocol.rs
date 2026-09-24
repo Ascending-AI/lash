@@ -514,6 +514,10 @@ pub struct ProjectorContext<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub projector_turn_inputs: &'a ProjectorTurnInputs,
 }
 
+/// **Purity contract (ADR 0105 §6).** Every method is synchronous, takes
+/// `&self` and has no side effects: a replay calls it again over the same
+/// recorded inputs and must reach the same decision. Interior mutability in
+/// an implementor is a contract violation.
 pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
     fn project(&self, ctx: ProjectorContext<'_, M>) -> Arc<LlmRequest>;
 }
@@ -589,6 +593,10 @@ fn render_messages_for_projector(
     render_prompt(filtered.as_slice())
 }
 
+/// **Purity contract (ADR 0105 §6).** Every method is synchronous, takes
+/// `&self` and has no side effects: a replay calls it again over the same
+/// recorded inputs and must reach the same decision. Interior mutability in
+/// an implementor is a contract violation.
 pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
     /// Project raw provider text onto the assistant-visible prose surface.
     /// Protocols that embed executable markup override this so terminal

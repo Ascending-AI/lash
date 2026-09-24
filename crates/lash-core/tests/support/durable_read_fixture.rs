@@ -260,7 +260,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 118;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 119;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -342,6 +342,14 @@ pub async fn assert_prior_component_encoding_is_refused(store: &dyn RuntimePersi
 
 pub struct FixtureHandles {
     pub clock: Arc<dyn Clock>,
+    /// The term the seed claims its process lease for. A backend whose process
+    /// leases run on `clock` claims the pinned term (`expected_process_lease`),
+    /// which its artifact records. PostgreSQL runs process leases on the
+    /// database clock and normalizes the row afterwards, so it claims a term a
+    /// slow runner cannot outlive while the seed writes under the lease: at
+    /// 100 ms of wall time, a loaded CI host saw the lease superseded between
+    /// the fixture's own writes.
+    pub process_lease_ttl_ms: u64,
     pub runtime: Arc<dyn RuntimePersistence>,
     pub session_factory: Arc<dyn SessionStoreFactory>,
     pub processes: Arc<dyn lash_core::ConformanceProcessRegistry>,
@@ -637,6 +645,11 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (
             crate::BINDING_SET_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             117,
+            118,
+        ),
+        (
+            crate::DIVERGENCE_PARK_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            118,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -858,7 +871,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .claim_process_lease(
             &ProcessId::from(PROCESS_ID),
             &LeaseOwnerIdentity::opaque("durable-read-owner", "durable-read-incarnation"),
-            100,
+            handles.process_lease_ttl_ms,
         )
         .await
         .expect("claim fixture process lease")
@@ -2168,9 +2181,12 @@ pub fn expected_process_lease() -> lash_core::ProcessLease {
         &LeaseOwnerIdentity::opaque("durable-read-owner", "durable-read-incarnation"),
         1,
         FIXTURE_WRITE_MS,
-        100,
+        PINNED_PROCESS_LEASE_TTL_MS,
     )
 }
+
+/// The process-lease term the committed artifacts record.
+pub const PINNED_PROCESS_LEASE_TTL_MS: u64 = 100;
 
 fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegistration {
     ProcessRegistration::new(
