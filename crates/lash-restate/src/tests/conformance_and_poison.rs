@@ -476,6 +476,16 @@ lash_conformance::effect_group_host_tests!(
     }
 );
 
+// A close racing its own children's settlements seats one terminal per child.
+lash_conformance::effect_group_close_race_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+        let factory = harness.group_host_factory();
+        (harness, factory)
+    }
+);
+
 // The session-config settlement laws on the Restate backend: its engine host
 // over one SQLite memory store set per law.
 lash_conformance::session_config_settlement_tests!(
@@ -620,6 +630,12 @@ mod on_the_server_double {
     use super::*;
 
     lash_conformance::effect_group_host_tests!({
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        let factory = harness.group_host_factory();
+        (harness, factory)
+    });
+
+    lash_conformance::effect_group_close_race_tests!({
         let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
         let factory = harness.group_host_factory();
         (harness, factory)

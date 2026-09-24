@@ -83,6 +83,15 @@ receipt_artifact = "target/functional-e2e-artifacts/effect-group-conformance/law
 [[deferred]]
 file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
 claimant = "lash_restate::tests::conformance_and_poison"
+suite = "effect_group_close_race_tests"
+recipe = "effect-group-conformance-e2e"
+ci_job = "functional-e2e"
+ci_matrix_name = "effect-group-conformance"
+receipt_artifact = "target/functional-e2e-artifacts/effect-group-conformance/law-receipts.txt"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison"
 suite = "turn_crash_recovery_tests"
 recipe = "parked"
 ticket = "FIG-3561"
@@ -95,3 +104,11 @@ suite = "cell_binding_drift_tests"
 recipe = "parked"
 ticket = "FIG-3719"
 reason = "a drifted cell binding is served only from settled keys, and Restate's positional journal has none, so a redrive whose probe result was recorded refuses instead of completing"
+
+[[deferred]]
+file = "crates/lash-postgres-store/tests/conformance/effect_host.rs"
+claimant = "conformance::effect_host"
+suite = "effect_group_close_race_tests"
+recipe = "parked"
+ticket = "FIG-3667"
+reason = "flakes Contended on the Postgres effect engine; the engine is deleted by FIG-3667"

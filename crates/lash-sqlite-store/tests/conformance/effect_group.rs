@@ -47,6 +47,15 @@ lash_conformance::effect_group_host_tests!({
     })
 });
 
+// A close racing its own children's settlements seats one terminal per child.
+lash_conformance::effect_group_close_race_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let hosts = backend.clone();
+    (backend, move |executors| {
+        host(&hosts, executors) as Arc<dyn EffectHost>
+    })
+});
+
 // A cancelled child's cancellation is journaled as its terminal, and a host
 // that was not running when the close happened reads it back (FIG-1564).
 lash_conformance::effect_group_cancelled_child_terminal_tests!({

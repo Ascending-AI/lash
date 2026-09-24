@@ -572,7 +572,6 @@ macro_rules! effect_group_host_tests {
             (settlement_n_is_stable_across_re_reads, "group-reread", wired),
             (every_child_is_delivered_once_in_rank_order, "group-order", wired),
             (siblings_settling_together_get_distinct_sequences, "group-concurrent-ranks", wired),
-            (a_close_racing_its_children_seats_one_terminal_per_child, "group-close-race", wired),
             (a_closed_group_serves_its_caller_no_further_settlements, "group-closed-caller", wired),
             (the_wake_rule_is_identity_and_the_host_filters_nothing, "group-wake-identity", wired),
             (awaiting_past_the_last_child_is_refused, "group-past-last", wired),
@@ -586,6 +585,30 @@ macro_rules! effect_group_host_tests {
             (a_reopen_reissues_each_childs_original_identity, "group-w2-identity", wired),
             (a_losing_wait_stays_admitted_until_the_group_releases_it, "group-losing-wait", wired),
             (a_wait_cancelled_before_it_parks_is_still_released, "group-unparked-wait", wired),
+        ]);
+    };
+    (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
+        $(
+            $crate::__effect_group_host_register!($attrs $fixture; $law, $label, $mode);
+        )*
+    };
+}
+
+/// Register the close-race law: a close racing its own children's settlements
+/// seats exactly one terminal per child. Its own suite so a tier can park it
+/// apart from the rest of the effect-group catalogue; the fixture is the
+/// `effect_group_host_tests!` one.
+#[macro_export]
+macro_rules! effect_group_close_race_tests {
+    ($fixture:block) => {
+        $crate::effect_group_close_race_tests!(@catalogue [] $fixture);
+    };
+    ($(#[$attr:meta])+ $fixture:block) => {
+        $crate::effect_group_close_race_tests!(@catalogue [$(#[$attr])*] $fixture);
+    };
+    (@catalogue [$($attr:tt)*] $fixture:block) => {
+        $crate::effect_group_close_race_tests!(@expand [$($attr)*] $fixture; [
+            (a_close_racing_its_children_seats_one_terminal_per_child, "group-close-race", wired),
         ]);
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
