@@ -723,3 +723,42 @@ findings	434	reject	"(() => `\\8`)()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
 findings	435	reject	"(async () => { var \\u0061wait; })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
 findings	436	reject	"(() => { function f() { return 1; } function f() { return 2; } return f(); })()"	"2"	TS_FUNCTION_REDECLARATION_UNSUPPORTED
 findings	437	reject	"(() => delete 1)()"	"true"	TS_DELETE_NON_REFERENCE_UNSUPPORTED
+findings	438	accept	"Number.POSITIVE_INFINITY"	"Infinity"	-
+findings	439	accept	"Number.NEGATIVE_INFINITY"	"-Infinity"	-
+findings	440	accept	"Number.MIN_VALUE"	"5e-324"	-
+findings	441	accept	"Number.MIN_VALUE > 0"	"true"	-
+findings	442	accept	"RegExp('a+', 'gi').source"	"a+"	-
+findings	443	accept	"RegExp('a+', 'gi').flags"	"gi"	-
+findings	444	accept	"RegExp().source"	"(?:)"	-
+findings	445	accept	"(() => { const r = /x+/y; return RegExp(r) === r; })()"	"true"	-
+findings	446	accept	"(() => { const r = /x+/y; return RegExp(r, 'g') === r; })()"	"false"	-
+findings	447	accept	"RegExp(/a+/).flags"	""	-
+findings	448	accept	"[1,2,3,4,5].copyWithin(0,3).join(',')"	"4,5,3,4,5"	-
+findings	449	accept	"[1,2,3,4,5].copyWithin(-2).join(',')"	"1,2,3,1,2"	-
+findings	450	accept	"[1,2,3,4,5].copyWithin(1,-2,-1).join(',')"	"1,4,3,4,5"	-
+findings	451	accept	"[1,2,3,4,5].copyWithin(2,0,4).join(',')"	"1,2,1,2,3"	-
+findings	452	accept	"(() => { const a = [1,2,3]; return a.copyWithin(0,1) === a; })()"	"true"	-
+findings	453	accept	"[1,2,3].copyWithin(0, NaN).join(',')"	"1,2,3"	-
+findings	454	accept	"String.raw({raw:['a','b','c']},1,2)"	"a1b2c"	-
+findings	455	accept	"String.raw({raw:['x']},1,2)"	"x"	-
+findings	456	accept	"String.raw({raw:{length:0}})"	""	-
+findings	457	accept	"String.raw({raw:['a',undefined,'b']})"	"aundefinedb"	-
+findings	458	accept	"JSON.parse('{\"a\":1,\"b\":2}',(k,v)=>k==='b'?undefined:v).b"	"undefined"	-
+findings	459	accept	"JSON.parse('[1,2,3]',(k,v)=>k==='1'?undefined:v).length"	"3"	-
+findings	460	accept	"JSON.parse('{\"n\":5}',(k,v)=>typeof v==='number'?v*2:v).n"	"10"	-
+findings	461	accept	"JSON.parse('{\"a\":{\"b\":1}}',(k,v)=>typeof v==='object'&&v!==null?v:v+1).a.b"	"2"	-
+findings	462	accept	"(() => { const log=[]; JSON.parse('{\"x\":{\"y\":1}}',(k,v)=>{log.push(k);return v;}); return log.join(','); })()"	"y,x,"	-
+findings	463	accept	"JSON.parse('4',7)"	"4"	-
+findings	464	accept	"new Date(0).toUTCString()"	"Thu, 01 Jan 1970 00:00:00 GMT"	-
+findings	465	accept	"new Date(0).toString()"	"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"	-
+findings	466	accept	"new Date(NaN).toUTCString()"	"Invalid Date"	-
+findings	467	accept	"String(new Date(0))"	"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"	-
+findings	468	accept	"new Date(0) + ''"	"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"	-
+findings	469	accept	"[...new Set([1,2]).union(new Map([[2,'a'],[3,'b']]))].join(',')"	"1,2,3"	-
+findings	470	accept	"[...new Set([3,2,1,0]).intersection(new Set([1,3,5]))].join(',')"	"1,3"	-
+findings	471	accept	"new Set([2]).isSubsetOf(new Map([[2,'a']]))"	"true"	-
+findings	472	accept	"(() => { try { new Set([1]).union([3]); return 'no'; } catch(e) { return e.name; } })()"	"TypeError"	-
+findings	473	accept	"(() => { const o={size:2,has:()=>true,keys:undefined}; try { new Set([1]).union(o); return 'no'; } catch(e) { return e.name; } })()"	"TypeError"	-
+findings	474	accept	"(() => { const o={size:2,has:()=>true,keys:()=>[9]}; return new Set().isSubsetOf(o); })()"	"true"	-
+findings	475	runtime-reject	"(() => { const o={size:1,has:()=>true,keys:()=>[9]}; return [...new Set([1]).union(o)].join(','); })()"	"ERR<TypeError>"	TS_METHOD_UNSUPPORTED
+findings	476	accept	"[0,0].fill(1,0,undefined).join(',')"	"1,1"	-

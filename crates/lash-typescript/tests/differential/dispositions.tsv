@@ -73,3 +73,8 @@
 "(async () => { var \\u0061wait; })()"	reject	TS_SYNTAX_ERROR
 "(() => { function f() { return 1; } function f() { return 2; } return f(); })()"	reject	TS_FUNCTION_REDECLARATION_UNSUPPORTED
 "(() => delete 1)()"	reject	TS_DELETE_NON_REFERENCE_UNSUPPORTED
+# FIG-3704: a GetSetRecord-valid set-like object still cannot be a Set
+# argument — its `has`/`keys` are guest closures and a synchronous builtin
+# cannot invoke them — so the method refuses by name rather than silently
+# computing the wrong set.
+"(() => { const o={size:1,has:()=>true,keys:()=>[9]}; return [...new Set([1]).union(o)].join(','); })()"	runtime-reject	TS_METHOD_UNSUPPORTED
