@@ -222,13 +222,17 @@ typescript	async-array-callbacks
 typescript	async-calls-unawaited
 typescript	binding-reassignment
 typescript	builtin-arity
+typescript	builtin-member-read
+typescript	builtin-member-write
 typescript	classic-for-forms
 typescript	closed-shape-field-guard
 typescript	comma-operator
+typescript	constructor-arity
 typescript	date-mutation
 typescript	date-string-coercion
 typescript	debugger
 typescript	decorators
+typescript	destructuring-non-iterable
 typescript	direct-eval
 typescript	enum
 typescript	function-constructor
@@ -238,6 +242,7 @@ typescript	interfaces
 typescript	labels
 typescript	lone-surrogate-values
 typescript	matchall-iterator-position
+typescript	method-arity
 typescript	mutable-captures
 typescript	namespaces
 typescript	new-arbitrary
@@ -245,6 +250,7 @@ typescript	non-null-assertion
 typescript	object-string-coercion
 typescript	private-names-outside-classes
 typescript	Promise.race
+typescript	regexp-pattern-argument
 typescript	reserved-identifiers
 typescript	satisfies
 typescript	source-nesting

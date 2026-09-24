@@ -223,13 +223,17 @@ typescript	async-array-callbacks	skip	registered-deviation:TS_ASYNC_MAP_SEQUENTI
 typescript	async-calls-unawaited	rejected	TS_AWAIT_REQUIRED	async function f() { return 1; } f();
 typescript	binding-reassignment	rejected	TS_ASSIGN_CONST	var v = 1; v = 2;
 typescript	builtin-arity	rejected	TS_EXPRESSION_UNSUPPORTED	isNaN(1, 2);
+typescript	builtin-member-read	rejected	TS_METHOD_UNSUPPORTED	const x = Math.extra;
+typescript	builtin-member-write	rejected	TS_UNKNOWN_BINDING	Math.extra = 1;
 typescript	classic-for-forms	rejected	TS_FOR_UNSUPPORTED	for (let i = 0; i < 3; i += 2) { }
 typescript	closed-shape-field-guard	rejected	TS_LINK_ERROR	const o = { a: 1 }; const c = o.c;
 typescript	comma-operator	rejected	TS_SEQUENCE_UNSUPPORTED	const x = (1, 2);
+typescript	constructor-arity	rejected	TS_CONSTRUCTOR_UNSUPPORTED	new Map(1, 2);
 typescript	date-mutation	rejected	TS_DATE_IMMUTABLE	const d = new Date(0); d.setUTCHours(1);
 typescript	date-string-coercion	rejected	TS_DATE_STRING_COERCION_PENDING	const s = '' + new Date(0);
 typescript	debugger	rejected	TS_DEBUGGER_UNSUPPORTED	debugger;
 typescript	decorators	rejected	TS_DECORATOR_UNSUPPORTED	@dec class A { }
+typescript	destructuring-non-iterable	rejected	TS_METHOD_UNSUPPORTED	const [a] = null;
 typescript	direct-eval	rejected	TS_EVAL_UNSUPPORTED	eval('1');
 typescript	enum	accepted	-	-
 typescript	function-constructor	rejected	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED	const f = Function('return 1');
@@ -239,6 +243,7 @@ typescript	interfaces	accepted	-	-
 typescript	labels	rejected	TS_LABEL_UNSUPPORTED	outer: while (true) { break outer; }
 typescript	lone-surrogate-values	rejected	TS_LONE_SURROGATE_UNSUPPORTED	const s = '😀'[0];
 typescript	matchall-iterator-position	rejected	TS_REGEX_ITERATOR_POSITION	const it = 'a'.matchAll(/a/g);
+typescript	method-arity	rejected	TS_METHOD_UNSUPPORTED	[1].map();
 typescript	mutable-captures	rejected	TS_MUTABLE_CAPTURE_UNSUPPORTED	let n = 0; const f = () => { n = 1; };
 typescript	namespaces	rejected	TS_NAMESPACE_UNSUPPORTED	namespace N { }
 typescript	new-arbitrary	rejected	TS_NEW_UNSUPPORTED	function F() { } const o = new F();
@@ -246,6 +251,7 @@ typescript	non-null-assertion	accepted	-	-
 typescript	object-string-coercion	rejected	TS_OBJECT_STRING_COERCION	const s = '' + { a: 1 };
 typescript	private-names-outside-classes	rejected	TS_PRIVATE_NAME_UNSUPPORTED	function f(o: any) { return #x in o; }
 typescript	Promise.race	accepted	-	-
+typescript	regexp-pattern-argument	rejected	TS_NEW_UNSUPPORTED	const r = new RegExp(null);
 typescript	reserved-identifiers	rejected	TS_RESERVED_IDENTIFIER	const __typescript_x = 1;
 typescript	satisfies	accepted	-	-
 typescript	source-nesting	rejected	TS_SOURCE_NESTING_LIMIT	const x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]];
