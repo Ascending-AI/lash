@@ -318,6 +318,9 @@ impl EffectGroupDispatch {
                 )
                 .await;
             }
+            EffectGroupAdmissionResponse::CancelDecided => {
+                return Ok(Json(()));
+            }
             EffectGroupAdmissionResponse::Refused => {
                 release_unadmitted_wait(ctx, self.authority_id.clone(), &request).await?;
                 return Ok(Json(()));
@@ -366,6 +369,9 @@ impl EffectGroupDispatch {
                     },
                 )
                 .await;
+            }
+            EffectGroupAdmissionResponse::CancelDecided => {
+                return Ok(Json(()));
             }
             EffectGroupAdmissionResponse::Refused => {
                 release_unadmitted_wait(ctx, self.authority_id.clone(), &request).await?;
@@ -523,10 +529,6 @@ impl EffectGroupDispatch {
                 group: None,
                 ..request.envelope.clone()
             };
-            let wait_key = match &envelope.command {
-                RuntimeEffectCommand::AwaitEvent { key } => Some(key.clone()),
-                _ => None,
-            };
             let outcome = {
                 let wait = lash_core::RuntimeEffectController::execute_effect(
                     &controller,
@@ -545,25 +547,10 @@ impl EffectGroupDispatch {
                     outcome = &mut wait => EffectGroupChildRunOutcome::Completed { outcome },
                 }
             };
-            // A cancel-decided wait child releases its own promise: dropping
-            // the wait never resolves it, so the release arm writes the
-            // cancellation terminal, the same release the native and store
-            // tiers write (ADR 0099 §12). An already-resolved promise answers
-            // the same way, so the release is idempotent across a replay.
-            if let (EffectGroupChildRunOutcome::Cancelled, Some(key)) = (&outcome, &wait_key) {
-                lash_core::AwaitEventResolver::resolve_await_event(
-                    &controller,
-                    key,
-                    lash_core::Resolution::Cancelled,
-                )
-                .await
-                .map_err(|error| {
-                    std::io::Error::other(format!(
-                        "release the cancelled wait child of effect group {} position {}: {error}",
-                        request.group_key, request.position
-                    ))
-                })?;
-            }
+            // A cancelled wait child does not release its own promise: the
+            // index handler that decided the cancel, the close or the
+            // retirement, released it before it resolved this cancel wait
+            // (ADR 0099 §12, FIG-3630).
             return record_child_settlement(controller.context(), &request, outcome).await;
         }
 
@@ -944,12 +931,13 @@ async fn record_child_settlement(
     }
 }
 
-/// A wait child whose admission the index refused — the close decided it
-/// `Cancel` before this invocation got as far as admitting — never runs the
-/// release arm a parked wait's cancellation takes, yet §12 still has the close
-/// release its wait (FIG-3567). Released here, idempotently: a wait that
-/// already holds a terminal answers the same way on a replay. A retired group
-/// is not released through this: its scope's waits went with the retirement.
+/// A wait child whose admission the index refused for a reason other than a
+/// cancel decision (an unknown group, an unrecorded invocation, a refused
+/// group) releases its own wait, since no deciding handler did (FIG-3567). A
+/// child the close or the retirement decided is answered `CancelDecided` and
+/// releases nothing: the deciding handler already did (FIG-3630). The release
+/// is idempotent: a wait that already holds a terminal answers the same way
+/// on a replay.
 async fn release_unadmitted_wait(
     ctx: SharedWorkflowContext<'_>,
     authority_id: crate::ingress::RestateAuthorityId,

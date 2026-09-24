@@ -241,9 +241,10 @@ pub async fn a_losing_wait_stays_admitted_until_the_group_releases_it<F: Fn() ->
         "the loser is released as a cancelled child terminal"
     );
 
-    // The release was the wait's own terminal, written by the cancelled
-    // child's release arm — asynchronous to the close that issued it, so the
-    // law waits for it to land rather than asserting the instant. A revoked
+    // The release is the wait's own terminal. Restate's close writes it in
+    // its own journal (FIG-3630); on the other tiers the cancelled child's
+    // release arm writes it, asynchronous to the close, so the law waits for
+    // it to land rather than asserting the instant. A revoked
     // promise is released the same way: the peek error is also an answer.
     let released = tokio::time::timeout(AWAIT_BUDGET, async {
         loop {

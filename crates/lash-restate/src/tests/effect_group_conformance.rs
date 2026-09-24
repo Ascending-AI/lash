@@ -242,6 +242,20 @@ fn staged_executor(
     })
 }
 
+/// Routes every `AwaitEvent` group child to the durable-wait executor, which
+/// the Restate controller parks on the wait's own promise.
+struct AwaitEventChildren;
+
+impl GroupExecutors for AwaitEventChildren {
+    fn executor_for(
+        &self,
+        envelope: &RuntimeEffectEnvelope,
+    ) -> Option<RuntimeEffectLocalExecutor<'static>> {
+        matches!(envelope.command, RuntimeEffectCommand::AwaitEvent { .. })
+            .then(|| RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None))
+    }
+}
+
 #[derive(Default)]
 struct WitnessExecutors {
     staged: Mutex<HashMap<String, WitnessRoute>>,
@@ -566,6 +580,283 @@ impl LiveConformanceHarness {
             matches!(probe, crate::EffectGroupProbeResponse::Absent),
             "the give-up must precede every group-index write: {probe:?}"
         );
+    }
+
+    /// ADR 0099 §12 under the cancel race (FIG-3630): the close releases a
+    /// cancel-decided wait child's wait itself. The Restate cancel the close
+    /// issues can stop a child while it awaits its admission, or before it
+    /// runs at all, and such a child reaches no release arm of its own. This
+    /// witness takes the extreme of that race: the child's recorded
+    /// invocation never runs, so only the close can answer the wait.
+    pub(super) async fn run_unstarted_wait_child_release_witness(&self) {
+        use lash_core::AwaitEventResolver as _;
+        let ingress = RestateIngressClient::new(self.ingress_url.clone());
+        let group_key = witness_key("unstarted-wait");
+        let scope = ExecutionScope::runtime_operation(group_key.clone());
+        let wait_key = self
+            .host
+            .await_event_key(
+                &scope,
+                lash_core::AwaitEventWaitIdentity::tool_completion("unstarted-wait-child"),
+            )
+            .await
+            .expect("mint the wait child's key");
+        let child = RuntimeEffectEnvelope::new(
+            lash_core::RuntimeEffectInvocation::new(
+                lash_core::EffectAddress::new(scope, format!("{group_key}:child:0"))
+                    .expect("valid wait child address"),
+                lash_core::RuntimeAttribution::none(),
+                "effect",
+            ),
+            RuntimeEffectCommand::AwaitEvent {
+                key: wait_key.clone(),
+            },
+        );
+        let shape = witness_shape(&group_key, std::slice::from_ref(&child));
+        let opened: EffectGroupOpenResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "open",
+                &EffectGroupOpenRequest {
+                    shape,
+                    content_checked: false,
+                },
+            )
+            .await
+            .expect("the wait group opens");
+        assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+        let adopted: EffectGroupProbeAdoptResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "probe_and_adopt",
+                &EffectGroupAdoptRequest {
+                    invocation_id: "inv_unstarted_wait_dispatcher".to_owned(),
+                },
+            )
+            .await
+            .expect("the wait group adopts its dispatcher");
+        assert!(
+            matches!(adopted, EffectGroupProbeAdoptResponse::Adopted { .. }),
+            "the wait group adopts its dispatcher: {adopted:?}"
+        );
+        // The recorded child invocation is a real invocation that is not the
+        // child: a finished preflight. The close's cancel of it is a no-op,
+        // and no line of the child handler ever runs.
+        let child_invocation = ingress
+            .send_workflow_json(
+                "EffectGroupDispatch",
+                &format!("{group_key}-stand-in"),
+                "preflight",
+                &Vec::<RuntimeEffectEnvelope>::new(),
+            )
+            .await
+            .expect("a stand-in invocation is accepted")
+            .as_str()
+            .to_owned();
+        let recorded: EffectGroupRecordDispatchResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "record_dispatch",
+                &EffectGroupRecordDispatchRequest {
+                    position: 0,
+                    invocation_id: child_invocation.clone(),
+                },
+            )
+            .await
+            .expect("the dispatch records the child");
+        assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
+        let registered: crate::EffectGroupRegisterResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "register_children",
+                &crate::EffectGroupRegisterRequest {
+                    addresses: [(0, child_invocation)].into_iter().collect(),
+                },
+            )
+            .await
+            .expect("the dispatch registers the child");
+        assert_eq!(registered, crate::EffectGroupRegisterResponse::Registered);
+        assert_eq!(
+            self.host
+                .peek_await_event(&wait_key)
+                .await
+                .expect("peek the parked wait"),
+            None,
+            "nothing has answered the wait before the close"
+        );
+
+        let closed: crate::EffectGroupCloseResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "close",
+                &crate::EffectGroupCloseRequest {
+                    disposition: LoserPolicy::Cancel,
+                },
+            )
+            .await
+            .expect("the close decides the wait child");
+        assert_eq!(closed, crate::EffectGroupCloseResponse::Closed);
+        // The close's own journal holds the release, so it is answered when
+        // the close returns: no wait, no poll.
+        assert_eq!(
+            self.host
+                .peek_await_event(&wait_key)
+                .await
+                .expect("peek the released wait"),
+            Some(Resolution::Cancelled),
+            "the close released the wait of the child it cancel-decided"
+        );
+        let late = self
+            .host
+            .resolve_await_event(&wait_key, Resolution::Ok(serde_json::json!("late-exit")))
+            .await
+            .expect("the late resolution is answered");
+        assert!(
+            !matches!(late, lash_core::ResolveOutcome::Accepted),
+            "a late resolution after the close is not accepted: {late:?}"
+        );
+        let _: EffectGroupRetireResponse = ingress
+            .call_object_empty_json("EffectGroupIndex", &group_key, "retire")
+            .await
+            .expect("the wait group tombstones");
+        println!("EFFECT_GROUP_WITNESS unstarted-wait-child-release PASS");
+
+        // The race itself: a real child invocation parked on its admission
+        // when the dispatch records it and the close lands at once. Whether
+        // the close's cancel reaches the child at its fresh `admit_child`, at
+        // its admission wait, or after it parked on the wait, the release is
+        // already in the close's journal when the close returns.
+        self.executors.install(Arc::new(AwaitEventChildren));
+        let group_key = witness_key("admitting-wait");
+        let scope = ExecutionScope::runtime_operation(group_key.clone());
+        let wait_key = self
+            .host
+            .await_event_key(
+                &scope,
+                lash_core::AwaitEventWaitIdentity::tool_completion("admitting-wait-child"),
+            )
+            .await
+            .expect("mint the admitting child's key");
+        let child = RuntimeEffectEnvelope::new(
+            lash_core::RuntimeEffectInvocation::new(
+                lash_core::EffectAddress::new(scope, format!("{group_key}:child:0"))
+                    .expect("valid wait child address"),
+                lash_core::RuntimeAttribution::none(),
+                "effect",
+            ),
+            RuntimeEffectCommand::AwaitEvent {
+                key: wait_key.clone(),
+            },
+        );
+        let shape = witness_shape(&group_key, std::slice::from_ref(&child));
+        let opened: EffectGroupOpenResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "open",
+                &EffectGroupOpenRequest {
+                    shape: shape.clone(),
+                    content_checked: false,
+                },
+            )
+            .await
+            .expect("the admitting group opens");
+        assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+        let _: EffectGroupProbeAdoptResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "probe_and_adopt",
+                &EffectGroupAdoptRequest {
+                    invocation_id: "inv_admitting_wait_dispatcher".to_owned(),
+                },
+            )
+            .await
+            .expect("the admitting group adopts its dispatcher");
+        let parked_on_admission = arm_admission_witness(&group_key);
+        let child_invocation = ingress
+            .send_workflow_json(
+                "EffectGroupDispatch",
+                &group_key,
+                "child",
+                &EffectGroupChildRequest {
+                    group_key: group_key.clone(),
+                    shape,
+                    position: 0,
+                    envelope: child,
+                },
+            )
+            .await
+            .expect("the child is accepted before it is recorded");
+        tokio::time::timeout(Duration::from_secs(10), parked_on_admission.notified())
+            .await
+            .expect("the child parks on its admission before the dispatch records it");
+        let recorded: EffectGroupRecordDispatchResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "record_dispatch",
+                &EffectGroupRecordDispatchRequest {
+                    position: 0,
+                    invocation_id: child_invocation.as_str().to_owned(),
+                },
+            )
+            .await
+            .expect("the dispatch records the admitting child");
+        assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
+        let registered: crate::EffectGroupRegisterResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "register_children",
+                &crate::EffectGroupRegisterRequest {
+                    addresses: [(0, child_invocation.as_str().to_owned())]
+                        .into_iter()
+                        .collect(),
+                },
+            )
+            .await
+            .expect("the dispatch registers the admitting child");
+        assert_eq!(registered, crate::EffectGroupRegisterResponse::Registered);
+        let closed: crate::EffectGroupCloseResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "close",
+                &crate::EffectGroupCloseRequest {
+                    disposition: LoserPolicy::Cancel,
+                },
+            )
+            .await
+            .expect("the close decides the admitting child");
+        assert_eq!(closed, crate::EffectGroupCloseResponse::Closed);
+        assert_eq!(
+            self.host
+                .peek_await_event(&wait_key)
+                .await
+                .expect("peek the released wait"),
+            Some(Resolution::Cancelled),
+            "the close released the admitting child's wait whatever the cancel interrupted"
+        );
+        let late = self
+            .host
+            .resolve_await_event(&wait_key, Resolution::Ok(serde_json::json!("late-exit")))
+            .await
+            .expect("the late resolution is answered");
+        assert!(
+            !matches!(late, lash_core::ResolveOutcome::Accepted),
+            "a late resolution after the close is not accepted: {late:?}"
+        );
+        let _: EffectGroupRetireResponse = ingress
+            .call_object_empty_json("EffectGroupIndex", &group_key, "retire")
+            .await
+            .expect("the admitting group tombstones");
+        println!("EFFECT_GROUP_WITNESS admitting-wait-child-release PASS");
     }
 
     pub(super) async fn run_design_witnesses(&self) {
