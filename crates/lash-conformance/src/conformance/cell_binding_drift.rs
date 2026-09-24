@@ -2,9 +2,9 @@
 //! pass journaled, whatever the live registry now offers.
 //!
 //! One RLM turn runs a cell that calls `tools.probe` once and finishes with
-//! its reply. The first attempt is cut down by a journal fault, and the
-//! redrive runs under a registry that removed `tools.probe` or reworded its
-//! descriptor under the same name:
+//! its reply. The tier's runner cuts the first attempt down at a journal
+//! point the law names by replay key, and the redrive runs under a registry
+//! that removed `tools.probe` or reworded its descriptor under the same name:
 //!
 //! - cut after the probe's result was recorded (the cell's seal could not be
 //!   journaled), the redrive replays the model call and the cell from the
@@ -19,9 +19,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::ToolDefinitionBindingExt as _;
-use lash_core::runtime::effect::effect_replay_driver::{
-    EffectJournalFaultPoint, EffectJournalFaults,
-};
 use lash_core::store::SessionCommitStore as _;
 use lash_sansio::{SessionId, TurnId};
 
@@ -170,54 +167,70 @@ async fn build_runtime(
     .expect("build the binding-drift conformance runtime")
 }
 
-/// Runs `session_id`'s turn once under `probe` and returns what it answered.
-async fn run_turn(
+/// What a redrive of the law's turn saw: its answer, and the model calls and
+/// tool dispatches counted when it started (all the cut attempt made).
+type Answer = (
+    Result<crate::AssembledTurn, crate::RuntimeError>,
+    (usize, usize),
+);
+
+/// One attempt at `session_id`'s turn under `probe`. It reports its answer,
+/// with the counters it started from, on `answers` when there is one: a cut
+/// attempt never answers.
+fn attempt(
     world: &DriftWorld,
-    runner: &Arc<dyn crate::ConformanceTurnRunner>,
     session_id: &SessionId,
     turn_id: &TurnId,
     store: &Arc<crate::InMemorySessionStore>,
     probe: Probe,
-) -> Result<crate::AssembledTurn, crate::RuntimeError> {
-    let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
-    let world_for_job = world.clone();
-    let session_for_job = session_id.clone();
-    let turn_for_job = turn_id.clone();
-    let store_for_job = Arc::clone(store) as Arc<dyn crate::RuntimePersistence>;
-    runner
-        .run_turn(
-            admit(crate::ExecutionScope::turn(session_id, turn_id)),
-            Box::new(move |scope| {
-                Box::pin(async move {
-                    let mut runtime =
-                        build_runtime(&world_for_job, &session_for_job, store_for_job, probe).await;
-                    let mut input = crate::TurnInput::text("call the probe");
-                    input.trace_turn_id = Some(turn_for_job);
-                    let turn = runtime
-                        .stream_turn(
-                            input,
-                            crate::TurnOptions::new(
-                                tokio_util::sync::CancellationToken::new(),
-                                scope,
-                            ),
-                        )
-                        .await;
-                    let end = crate::ConformanceTurnEnd::of(&turn);
-                    let _ = result_tx.send(turn);
-                    end
-                })
-            }),
-        )
-        .await;
-    result_rx.recv().await.unwrap_or_else(|| {
-        panic!("the tier's runner ran {session_id}'s turn");
+    answers: Option<tokio::sync::mpsc::UnboundedSender<Answer>>,
+) -> crate::ConformanceTurnAttempt {
+    let world = world.clone();
+    let session_id = session_id.clone();
+    let turn_id = turn_id.clone();
+    let store = Arc::clone(store) as Arc<dyn crate::RuntimePersistence>;
+    Arc::new(move |scope| {
+        let world = world.clone();
+        let session_id = session_id.clone();
+        let turn_id = turn_id.clone();
+        let store = Arc::clone(&store);
+        let answers = answers.clone();
+        Box::pin(async move {
+            let started = (
+                world.model_calls.load(Ordering::SeqCst),
+                world.executions.load(Ordering::SeqCst),
+            );
+            let mut runtime = build_runtime(&world, &session_id, store, probe).await;
+            let mut input = crate::TurnInput::text("call the probe");
+            input.trace_turn_id = Some(turn_id);
+            let turn = runtime
+                .stream_turn(
+                    input,
+                    crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
+                )
+                .await;
+            let end = crate::ConformanceTurnEnd::of(&turn);
+            if let Some(answers) = answers {
+                let _ = answers.send((turn, started));
+            }
+            end
+        })
     })
+}
+
+/// The next answer a redrive reported.
+async fn answer(answers: &mut tokio::sync::mpsc::UnboundedReceiver<Answer>) -> Answer {
+    answers
+        .recv()
+        .await
+        .unwrap_or_else(|| panic!("the tier's runner ran the redrive"))
 }
 
 /// The replay key of the probe's first attempt in `session_id`'s turn, found
 /// by running the same turn to completion in a same-length probe session and
-/// reading its journal: keys spell the session id, so the probe's key names
-/// the real one once its session id is substituted.
+/// reading the replay keys the tier journaled for it: keys spell the session
+/// id, so the probe's key names the real one once its session id is
+/// substituted.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -235,33 +248,27 @@ async fn first_attempt_key(
         "same-length session ids"
     );
     let store = Arc::new(crate::InMemorySessionStore::new());
-    run_turn(
+    let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
+    let probe = attempt(
         world,
-        runner,
         probe_session,
         turn_id,
         &store,
         Probe::Registered,
-    )
-    .await
-    .expect("the probe turn completes");
-    let scoped = world
-        .effect_host
-        .scoped(admit(crate::ExecutionScope::turn(probe_session, turn_id)))
-        .expect("scope the probe turn's journal");
-    let crate::RecordedJournal::Keys(keys) = scoped
-        .controller()
-        .read_recorded_journal(&crate::RecordedKeyRange {
-            lower: String::new(),
-            upper: "\u{10FFFF}".to_string(),
-            group_key_prefix: String::new(),
-        })
+        Some(answers),
+    );
+    let scope = crate::ExecutionScope::turn(probe_session, turn_id);
+    runner
+        .run_turn(admit(scope.clone()), Box::new(move |scoped| probe(scoped)))
+        .await;
+    answer(&mut answered)
         .await
-        .expect("read the probe turn's journal")
-    else {
-        panic!("a key-range journal answers with its keys");
-    };
-    keys.replay_keys
+        .0
+        .expect("the probe turn completes");
+    runner
+        .recorded_replay_keys(&scope)
+        .await
+        .expect("the tier reads the replay keys it journaled")
         .into_iter()
         .find(|key| key.ends_with(":lk2:0000000000:attempt:1"))
         .expect("the probe's cell journaled its tool attempt")
@@ -271,6 +278,10 @@ async fn first_attempt_key(
 /// Law: a redriven cell completes from its journal when the drifted tool's
 /// result was recorded, and parks with the binding-drift refusal when the
 /// call would reach the drifted tool live.
+///
+/// The first attempt is cut down by the tier's runner at a journal point the
+/// law names by replay key: before the cell's seal is journaled (the probe's
+/// result was recorded), or before the probe's result is.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -278,7 +289,6 @@ async fn first_attempt_key(
 pub async fn redriven_cell_links_against_its_journaled_binding_set(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
-    faults: EffectJournalFaults,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
@@ -301,30 +311,46 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
         let attempt_key =
             first_attempt_key(&world, &runner, &probe_session, &session_id, &turn_id).await;
         let store = Arc::new(crate::InMemorySessionStore::new());
-        if recorded {
-            let seal_key = attempt_key.replace(":lk2:0000000000:attempt:1", ":lk2:~seal");
-            faults.fail_next(EffectJournalFaultPoint::Claim, &seal_key);
+        let cut = if recorded {
+            crate::JournalCut {
+                replay_key: attempt_key.replace(":lk2:0000000000:attempt:1", ":lk2:~seal"),
+                at: crate::JournalCutPoint::BeforeEffect,
+            }
         } else {
-            faults.fail_next(EffectJournalFaultPoint::Finalize, &attempt_key);
-        }
-        run_turn(
-            &world,
-            &runner,
-            &session_id,
-            &turn_id,
-            &store,
-            Probe::Registered,
-        )
-        .await
-        .expect_err("the journal fault aborts the first attempt");
-        assert!(faults.fired(), "{case}: the armed fault fired");
-        let asked = world.model_calls.load(Ordering::SeqCst);
-        let dispatched = world.executions.load(Ordering::SeqCst);
+            crate::JournalCut {
+                replay_key: attempt_key,
+                at: crate::JournalCutPoint::BeforeResult,
+            }
+        };
+        let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
+        let admitted = admit(crate::ExecutionScope::turn(&session_id, &turn_id));
+        runner
+            .run_cut_then_redriven_turn(
+                admitted.clone(),
+                cut,
+                attempt(
+                    &world,
+                    &session_id,
+                    &turn_id,
+                    &store,
+                    Probe::Registered,
+                    None,
+                ),
+                attempt(
+                    &world,
+                    &session_id,
+                    &turn_id,
+                    &store,
+                    drift,
+                    Some(answers.clone()),
+                ),
+            )
+            .await;
+        let (turn, (asked, dispatched)) = answer(&mut answered).await;
 
         if recorded {
-            let turn = run_turn(&world, &runner, &session_id, &turn_id, &store, drift)
-                .await
-                .unwrap_or_else(|error| panic!("{case}: the redrive completes: {error:?}"));
+            let turn =
+                turn.unwrap_or_else(|error| panic!("{case}: the redrive completes: {error:?}"));
             assert!(
                 matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
                 "{case}: redriven outcome {:?}; errors {:?}",
@@ -340,14 +366,16 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
                 "{case}: a completed redrive leaves no park"
             );
         } else {
-            for _ in 0..2 {
-                let error = run_turn(&world, &runner, &session_id, &turn_id, &store, drift)
-                    .await
+            let mut turn = Some(turn);
+            for redrive in ["first", "second"] {
+                let error = turn
+                    .take()
+                    .expect("each redrive answered")
                     .expect_err("a call that would reach a drifted tool live refuses");
                 assert_eq!(
                     error.code,
                     crate::RuntimeErrorCode::LashlangCellBindingDrift,
-                    "{case}: {error:?}"
+                    "{case}, {redrive} redrive: {error:?}"
                 );
                 let park = store
                     .load_turn_park(&session_id)
@@ -363,6 +391,20 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
                         && message.contains(word),
                     "{case}: the park names the binding and how it drifted: {message}"
                 );
+                if redrive == "first" {
+                    let again = attempt(
+                        &world,
+                        &session_id,
+                        &turn_id,
+                        &store,
+                        drift,
+                        Some(answers.clone()),
+                    );
+                    runner
+                        .run_turn(admitted.clone(), Box::new(move |scoped| again(scoped)))
+                        .await;
+                    turn = Some(answer(&mut answered).await.0);
+                }
             }
         }
         assert_eq!(
@@ -384,28 +426,34 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
     let attempt_key =
         first_attempt_key(&world, &runner, &probe_session, &session_id, &turn_id).await;
     let store = Arc::new(crate::InMemorySessionStore::new());
-    faults.fail_next(EffectJournalFaultPoint::Finalize, &attempt_key);
-    run_turn(
-        &world,
-        &runner,
-        &session_id,
-        &turn_id,
-        &store,
-        Probe::Registered,
-    )
-    .await
-    .expect_err("the journal fault aborts the first attempt");
-    let dispatched = world.executions.load(Ordering::SeqCst);
-    let turn = run_turn(
-        &world,
-        &runner,
-        &session_id,
-        &turn_id,
-        &store,
-        Probe::Described("Reworded at length."),
-    )
-    .await
-    .unwrap_or_else(|error| panic!("a redescribed tool never parks: {error:?}"));
+    let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
+    runner
+        .run_cut_then_redriven_turn(
+            admit(crate::ExecutionScope::turn(&session_id, &turn_id)),
+            crate::JournalCut {
+                replay_key: attempt_key,
+                at: crate::JournalCutPoint::BeforeResult,
+            },
+            attempt(
+                &world,
+                &session_id,
+                &turn_id,
+                &store,
+                Probe::Registered,
+                None,
+            ),
+            attempt(
+                &world,
+                &session_id,
+                &turn_id,
+                &store,
+                Probe::Described("Reworded at length."),
+                Some(answers),
+            ),
+        )
+        .await;
+    let (turn, (_, dispatched)) = answer(&mut answered).await;
+    let turn = turn.unwrap_or_else(|error| panic!("a redescribed tool never parks: {error:?}"));
     assert!(
         matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
         "{:?}",

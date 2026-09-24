@@ -116,20 +116,34 @@ async fn drive(
         // Report an empty read of the response body before parking on it:
         // the server counts the attempt idle only once everything it wrote
         // has been applied.
+        // The handler runs inside this poll: a panic in it ends the stream
+        // the way a deployment whose handler died ends it, instead of
+        // killing the attempt task and leaving the attempt running forever.
         let next = std::future::poll_fn(|cx| {
             // Not drained while the poll runs: the handler polled inside it
             // may write a frame and block on its input before the poll
             // returns that frame, and a starved probe beside a stale
             // "drained" would read as blocked on the server.
             probe.set_response_drained(false);
-            let polled = http_body::Body::poll_frame(body.as_mut(), cx);
-            probe.set_response_drained(polled.is_pending());
-            if polled.is_pending() {
+            let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                http_body::Body::poll_frame(body.as_mut(), cx)
+            }));
+            let pending = matches!(polled, Ok(std::task::Poll::Pending));
+            probe.set_response_drained(pending);
+            if pending {
                 shared.activity.notify_waiters();
             }
-            polled
+            match polled {
+                Ok(std::task::Poll::Ready(frame)) => std::task::Poll::Ready(Ok(frame)),
+                Ok(std::task::Poll::Pending) => std::task::Poll::Pending,
+                Err(_) => std::task::Poll::Ready(Err(())),
+            }
         })
         .await;
+        let Ok(next) = next else {
+            shared.stream_ended(key, number, "the handler panicked".to_owned());
+            return;
+        };
         let Some(frame) = next else {
             break;
         };

@@ -530,6 +530,8 @@ class ParkedEntryTests(unittest.TestCase):
                 "tests::conformance_and_poison::turn_crash_matrix_error_return_fail_stop",
                 "--skip",
                 "tests::conformance_and_poison::turn_crash_matrix_level_1",
+                "--skip",
+                "tests::journal_cut_runner::on_the_server_double::redriven_cell_links_against_its_journaled_binding_set",
             ],
         )
         self.assertEqual(MODULE.parked_skips("no_such_crate", MODULE.load_macros()), [])
@@ -646,7 +648,7 @@ class RealTreeTests(unittest.TestCase):
         errors: list[str] = []
         manifest_set = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
-        self.assertEqual(len(manifest_set), 9)
+        self.assertEqual(len(manifest_set), 10)
         self.assertIn(
             (
                 "crates/lash-restate/src/tests/conformance_and_poison.rs",
