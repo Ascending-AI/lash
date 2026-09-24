@@ -848,8 +848,18 @@ impl LifecycleActor {
             .map_or(self.reconnect_backoff, |entry| {
                 (entry.reconnect_jitter.read_recover())(self.reconnect_backoff)
             });
-        self.reconnect_at = Some(Instant::now() + jittered);
+        let deadline = Instant::now() + jittered;
+        self.reconnect_at = Some(deadline);
         self.set_reconnect_exhausted(false);
+        #[cfg(test)]
+        if let Some(observer) = self
+            .entry
+            .upgrade()
+            .and_then(|entry| entry.lifecycle_observer())
+        {
+            let _ = observer
+                .send(crate::service_lifecycle::LifecycleEvent::ReconnectScheduled { deadline });
+        }
     }
 
     fn advance_reconnect_backoff(&mut self) {

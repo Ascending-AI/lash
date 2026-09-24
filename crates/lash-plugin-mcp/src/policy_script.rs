@@ -208,6 +208,17 @@ impl Lifecycle {
             }
         }
     }
+
+    /// The deadline of the next reconnect attempt the actor armed. Crossing it
+    /// with [`Clock::expire`] starts that attempt; its handshake then runs in
+    /// real time while the startup timeout stays frozen.
+    pub(super) async fn reconnect_scheduled(&mut self) -> Instant {
+        loop {
+            if let LifecycleEvent::ReconnectScheduled { deadline } = self.next().await {
+                return deadline;
+            }
+        }
+    }
 }
 
 /// The control channel is a Unix socket inside the test's own temporary
@@ -238,8 +249,8 @@ impl Mock {
         let pool = McpConnectionPool::connect(BTreeMap::from([("mock".into(), config)]))
             .await
             .unwrap();
+        assert_connected(&pool);
         let (stream, _) = listener.accept().await.unwrap();
-        assert!(pool.server_statuses()[0].connected);
         (
             pool,
             Self {
@@ -291,6 +302,22 @@ import json, os, signal, socket, sys, threading
 # The mock ignores SIGTERM so scripted tests deterministically reach the
 # SIGKILL stage of forced shutdown; graceful stdin-EOF exit is unchanged.
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
+behavior = os.environ['BEHAVIOR']
+starts_path = os.environ['STARTS_PATH']
+try:
+    with open(starts_path, 'r', encoding='utf-8') as f:
+        starts = int(f.read())
+except (FileNotFoundError, ValueError):
+    starts = 0
+with open(starts_path, 'w', encoding='utf-8') as f:
+    f.write(str(starts + 1))
+if behavior == 'unanswered_ping_once' and starts > 0:
+    sys.exit(1)
+# Behaviors that report every liveness ping on the control channel, so a test
+# learns the probe (and its frozen timeout) is armed before it moves time.
+probed = ('answered_ping', 'ping_error', 'ping_meta', 'unanswered_ping',
+          'unanswered_ping_once', 'silent_ping_ignore_eof')
+unanswered = ('unanswered_ping', 'unanswered_ping_once', 'silent_ping_ignore_eof')
 control = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 control.connect(os.environ['CONTROL_SOCKET'])
 output_lock = threading.Lock()
@@ -329,7 +356,7 @@ for line in sys.stdin:
     method = message.get('method')
     if method == 'initialize':
         send({'jsonrpc':'2.0','id':message['id'],'result':{
-            'protocolVersion':'2025-11-25','capabilities':{'tools':{}},
+            'protocolVersion':os.environ['PROTOCOL'],'capabilities':{'tools':{}},
             'serverInfo':{'name':'scripted-policy-mock','version':'1'}}})
     elif method == 'tools/list':
         send({'jsonrpc':'2.0','id':message['id'],'result':{'tools':[{
@@ -338,13 +365,20 @@ for line in sys.stdin:
         current = message
         event('call', id=message['id'])
     elif method == 'ping':
-        if os.environ['BEHAVIOR'] == 'silent_ping_ignore_eof':
+        if behavior in probed:
             event('ping')
+        if behavior in unanswered:
             continue
-        send({'jsonrpc':'2.0','id':message['id'],'result':{}})
+        if behavior == 'ping_error':
+            send({'jsonrpc':'2.0','id':message['id'],
+                  'error':{'code':-32601,'message':'Method not found'}})
+        elif behavior == 'ping_meta':
+            send({'jsonrpc':'2.0','id':message['id'],'result':{'_meta':{'alive':True}}})
+        else:
+            send({'jsonrpc':'2.0','id':message['id'],'result':{}})
     elif method == 'notifications/cancelled':
         event('cancelled')
 event('eof')
-if os.environ['BEHAVIOR'] in ('ignore_eof', 'silent_ping_ignore_eof'):
+if behavior in ('ignore_eof', 'silent_ping_ignore_eof'):
     threading.Event().wait()
 "#;

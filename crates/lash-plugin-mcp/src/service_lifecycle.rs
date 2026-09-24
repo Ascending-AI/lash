@@ -283,6 +283,8 @@ pub(crate) enum LifecycleEvent {
     Wedged { pid: u32 },
     /// The bounded reconnect loop spent its final attempt.
     ReconnectExhausted,
+    /// The actor armed its next reconnect attempt for `deadline`.
+    ReconnectScheduled { deadline: Instant },
 }
 
 #[cfg(test)]
