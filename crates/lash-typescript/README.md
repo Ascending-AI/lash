@@ -282,7 +282,8 @@ no probe that fires it fails that test.
   `JSON.stringify` throws Node's catchable
   `TypeError: Converting circular structure to JSON` — but a durable binding
   that still holds one when the cell ends cannot be written down, and refuses
-  by name at the boundary. Hold a key or index instead of the parent object.
+  at the boundary as `TS_CYCLIC_VALUE_UNSUPPORTED`. Hold a key or index
+  instead of the parent object.
 - The value model is dense records with no prototype chain, so `__proto__`,
   `__defineGetter__`, `__defineSetter__`, `__lookupGetter__`, and
   `__lookupSetter__` all reject as `TS_PROTOTYPE_MUTATION_UNSUPPORTED` — as a

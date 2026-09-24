@@ -132,7 +132,7 @@ const PROBES: &[Probe] = &[
     // 4. Cycles at durable capture.
     probe(
         4,
-        "CyclicHostValue",
+        "TS_CYCLIC_VALUE_UNSUPPORTED",
         "const node: any = {}; node.self = node; finish(1);",
     ),
     // 5. Mutable captures, on the read path and on the write path.

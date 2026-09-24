@@ -3672,7 +3672,7 @@ test/built-ins/JSON/stringify/space-number.js	pass	-
 test/built-ins/JSON/stringify/space-string-object.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/JSON/stringify/space-string-range.js	pass	-
 test/built-ins/JSON/stringify/space-string.js	pass	-
-test/built-ins/JSON/stringify/value-array-circular.js	fail	FIG-3662
+test/built-ins/JSON/stringify/value-array-circular.js	refused	TS_CYCLIC_VALUE_UNSUPPORTED
 test/built-ins/JSON/stringify/value-boolean-object.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/JSON/stringify/value-function.js	pass	-
 test/built-ins/JSON/stringify/value-number-negative-zero.js	pass	-

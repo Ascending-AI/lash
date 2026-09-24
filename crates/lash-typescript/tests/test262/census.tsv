@@ -226,6 +226,7 @@ typescript	builtin-arity	rejected	TS_EXPRESSION_UNSUPPORTED	isNaN(1, 2);
 typescript	classic-for-forms	rejected	TS_FOR_UNSUPPORTED	for (let i = 0; i < 3; i += 2) { }
 typescript	closed-shape-field-guard	rejected	TS_LINK_ERROR	const o = { a: 1 }; const c = o.c;
 typescript	comma-operator	rejected	TS_SEQUENCE_UNSUPPORTED	const x = (1, 2);
+typescript	cyclic-heap-value	rejected	TS_CYCLIC_VALUE_UNSUPPORTED	const a = []; a.push(a);
 typescript	date-mutation	rejected	TS_DATE_IMMUTABLE	const d = new Date(0); d.setUTCHours(1);
 typescript	date-string-coercion	rejected	TS_DATE_STRING_COERCION_PENDING	const s = '' + new Date(0);
 typescript	debugger	rejected	TS_DEBUGGER_UNSUPPORTED	debugger;
