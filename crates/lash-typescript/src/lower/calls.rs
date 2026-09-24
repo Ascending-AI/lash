@@ -576,9 +576,8 @@ impl Lowerer {
                 }
                 let value = &args[0];
                 let replacer = args.get(1);
-                let function_replacer = replacer.filter(|replacer| {
-                    !matches!(replacer, Expr::Null | Expr::Undefined | Expr::Array(_))
-                });
+                let function_replacer =
+                    replacer.filter(|replacer| !matches!(replacer, Expr::Null | Expr::Array(_)));
                 let property_replacer = function_replacer.is_none().then_some(replacer).flatten();
                 return self.lower_json_stringify(
                     value,
@@ -1008,9 +1007,7 @@ impl Lowerer {
                 )
                 || !receiver_is_callback_exotic
                     && matches!(method, "sort" | "toSorted")
-                    && args
-                        .first()
-                        .is_some_and(|argument| !matches!(argument, Expr::Undefined)))
+                    && !args.is_empty())
         {
             return self.lower_array_callback_method(method, object, args);
         }

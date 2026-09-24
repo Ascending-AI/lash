@@ -101,9 +101,9 @@ modules and imports, JSX, enums, namespaces, decorators, `eval` and `Function`,
 prototype access, accessors, object methods, regular expressions, BigInt,
 spread, optional chaining, `switch`, `do`/`while`, labels, `this`, `super`,
 `new`, `delete`, `in`, `instanceof`, exponentiation, bitwise operators, sequence
-expressions, tagged templates, computed properties, parameter defaults and rest
-parameters, and the compound assignment operators (`x += 1` and `a[0] += 5`
-alike). Identifiers beginning with `__typescript_` are reserved for the
+expressions, tagged templates, computed properties, array-literal elisions
+(`[0, , 2]`), parameter defaults and rest parameters, and the compound
+assignment operators (`x += 1` and `a[0] += 5` alike). Identifiers beginning with `__typescript_` are reserved for the
 lowerer's generated bindings.
 
 Three rejections are dialect-specific enough to state their reasons here.
@@ -614,7 +614,11 @@ that each entry is a limit taken knowingly.
     that would skip an index rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`, and a
     negative or non-index write rejects as
     `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`. Neither path mutates an element.
-    Holes are indistinguishable from explicit `undefined` in the v1 dense
+    An elision in an array literal — a hole anywhere, including a trailing one
+    as in `[1, , ]`, where a single trailing comma is not an elision — creates
+    the same hole, so it rejects statically as `TS_SPARSE_ARRAY_UNSUPPORTED`
+    rather than silently storing `undefined` (FIG-3702). Holes are
+    indistinguishable from explicit `undefined` in the v1 dense
     representation, which is why they are refused rather than approximated.
 13. **`console.log` is host-defined**, not ECMA-262. *(Superseded on the
     coercion point by FIG-2767: this ruling originally said the arguments are

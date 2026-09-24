@@ -140,8 +140,7 @@ impl Expr {
                 }
             }
             Expr::Update { target, .. } => children.extend(target.child_expressions()),
-            Expr::Undefined
-            | Expr::Null
+            Expr::Null
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)

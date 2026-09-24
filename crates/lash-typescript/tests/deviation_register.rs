@@ -198,11 +198,17 @@ const PROBES: &[Probe] = &[
         refusal: "TS_SOURCE_NESTING_LIMIT",
         source: Source::Generated(nested_source),
     },
-    // 12. Dense arrays.
+    // 12. Dense arrays: the skipped-index write, and a literal elision refused
+    // statically rather than filled with `undefined` (FIG-3702).
     probe(
         12,
         "TS_SPARSE_ARRAY_UNSUPPORTED",
         "const a = [1]; a[3] = 9; finish(a.length);",
+    ),
+    probe(
+        12,
+        "TS_SPARSE_ARRAY_UNSUPPORTED",
+        "const a = [0, , 2]; finish(a);",
     ),
     probe(
         12,

@@ -1039,7 +1039,6 @@ impl Lowerer {
 
     fn lower_expr_inner(&mut self, expr: &Expr) -> Result<LashExpr, Diagnostic> {
         Ok(match expr {
-            Expr::Undefined => LashExpr::Undefined,
             Expr::Null => LashExpr::Null,
             Expr::Bool(value) => LashExpr::Bool(*value),
             Expr::Number(value) => LashExpr::Number(*value),

@@ -138,9 +138,7 @@ fn literal_receiver_kind(expr: &Expr) -> Option<LiteralReceivers> {
         Expr::String(_) => Some(LiteralReceivers::STRING),
         Expr::Array(_) => Some(LiteralReceivers::ARRAY),
         Expr::Number(_) => Some(LiteralReceivers::NUMBER),
-        Expr::Bool(_) | Expr::Null | Expr::Undefined | Expr::Object(_) => {
-            Some(LiteralReceivers::OTHER)
-        }
+        Expr::Bool(_) | Expr::Null | Expr::Object(_) => Some(LiteralReceivers::OTHER),
         _ => None,
     }
 }

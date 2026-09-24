@@ -217,6 +217,7 @@ typescript	accessors	rejected	TS_ACCESSOR_UNSUPPORTED	const o = { get x() { retu
 typescript	annotations	accepted	-	-
 typescript	array-holes	rejected	TS_SPARSE_ARRAY_UNSUPPORTED	const a = [1]; a[3] = 9;
 typescript	array-index-delete	rejected	TS_DELETE_ARRAY_INDEX_UNSUPPORTED	const a = [1, 2]; delete a[0];
+typescript	array-literal-elisions	rejected	TS_SPARSE_ARRAY_UNSUPPORTED	const a = [0, , 2];
 typescript	array-named-properties	rejected	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED	const a = [1, 2]; a[-1] = 9;
 typescript	as-casts	accepted	-	-
 typescript	async-array-callbacks	skip	registered-deviation:TS_ASYNC_MAP_SEQUENTIAL_V1	-
