@@ -200,6 +200,77 @@ fn string_regex_methods_replacements_and_match_all_are_exact() {
     );
 }
 
+/// GetSubstitution's numeric-reference rule, end to end: `$0` and `$00` are
+/// index 0 and never name a capture, `$01` names capture 1, and an
+/// out-of-range `$nn` falls back to `$n` plus a literal digit before staying
+/// literal itself — under `replace` and `replaceAll` alike (FIG-3649).
+#[test]
+fn replacement_dollar_digits_follow_get_substitution() {
+    let cases = [
+        ("finish('foo-x-bar'.replace(/(x)/,'|$0|'));", "foo-|$0|-bar"),
+        (
+            "finish('foo-x-bar'.replace(/(x)/,'|$00|'));",
+            "foo-|$00|-bar",
+        ),
+        (
+            "finish('foo-x-bar'.replace(/(x)/,'|$000|'));",
+            "foo-|$000|-bar",
+        ),
+        ("finish('foo-x-bar'.replace(/(x)/,'|$01|'));", "foo-|x|-bar"),
+        (
+            "finish('foo-x-bar'.replace(/(x)/,'|$010|'));",
+            "foo-|x0|-bar",
+        ),
+        (
+            "finish('foo-x-bar'.replace(/((((((((((x))))))))))/,'|$10|'));",
+            "foo-|x|-bar",
+        ),
+        (
+            "finish('foo-x-bar'.replace(/(x)/,'|$10|'));",
+            "foo-|x0|-bar",
+        ),
+        ("finish('foo-x-bar'.replace('x','|$1|'));", "foo-|$1|-bar"),
+        ("finish('foo-x-bar'.replace('x','|$01|'));", "foo-|$01|-bar"),
+        (
+            "finish('foo-x-bar'.replace(/(x)/,'|$02|'));",
+            "foo-|$02|-bar",
+        ),
+        (
+            "finish('foo-x-bar'.replace(/(x)/,'|$99|'));",
+            "foo-|$99|-bar",
+        ),
+        (
+            "finish('foo-x-bar'.replace(/(x)/,'|$11|'));",
+            "foo-|x1|-bar",
+        ),
+        (
+            "finish('foo-x-bar'.replace(/(x)|(y)/,'|$2|'));",
+            "foo-||-bar",
+        ),
+        (
+            "finish('foo-x-bar'.replace(/(x)|(y)/,'|$02|'));",
+            "foo-||-bar",
+        ),
+        ("finish('x-x'.replaceAll(/(x)/g,'$01'));", "x-x"),
+        (
+            "finish('x-x'.replaceAll(/(x)/g,'|$0|$1|'));",
+            "|$0|x|-|$0|x|",
+        ),
+        ("finish('x-x'.replaceAll('x','|$1|'));", "|$1|-|$1|"),
+        (
+            "finish('foo-x-bar'.replace(/(?<n>x)/,'|$<n>|$<miss>|'));",
+            "foo-|x||-bar",
+        ),
+        (
+            "finish('foo-x-bar'.replace(/(x)/,\"|$$|$&|$`|$'|\"));",
+            "foo-|$|x|foo-|-bar|-bar",
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+}
+
 #[test]
 fn function_replacers_receive_captures_offset_input_and_groups() {
     assert_eq!(

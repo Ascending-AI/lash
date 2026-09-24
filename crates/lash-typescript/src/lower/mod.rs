@@ -1018,7 +1018,15 @@ impl Lowerer {
                 UnaryOp::Minus => js_unary(JavaScriptUnaryOp::Negate, self.lower_expr(value)?),
                 UnaryOp::Not => js_unary(JavaScriptUnaryOp::Not, self.lower_expr(value)?),
                 UnaryOp::BitNot => self.lower_bit_not(value)?,
-                UnaryOp::TypeOf if matches!(value.as_ref(), Expr::Ident(name, _) if !self.has_binding(name)) => {
+                // `typeof` on a name nothing binds answers "undefined" without
+                // resolving it — except the reserved value idents, which are
+                // never unbound names: each lowers to a concrete literal below,
+                // and `typeof` must classify that literal.
+                UnaryOp::TypeOf
+                    if matches!(value.as_ref(), Expr::Ident(name, _)
+                        if !self.has_binding(name)
+                            && !matches!(name.as_str(), "undefined" | "NaN" | "Infinity")) =>
+                {
                     LashExpr::String("undefined".into())
                 }
                 UnaryOp::TypeOf
@@ -1324,6 +1332,7 @@ impl Lowerer {
             };
             let constant = match (owner.as_str(), name) {
                 ("Number", "EPSILON") => Some(f64::EPSILON),
+                ("Number", "NaN") => Some(f64::NAN),
                 ("Number", "MIN_SAFE_INTEGER") => Some(-9_007_199_254_740_991.0),
                 ("Number", "MAX_SAFE_INTEGER") => Some(9_007_199_254_740_991.0),
                 ("Number", "MAX_VALUE") => Some(f64::MAX),

@@ -635,8 +635,8 @@ The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
 `getUTCMilliseconds`, and `toISOString`. The signature table in
 `src/signatures.rs` gives every optional form.
 
-`Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, and `MAX_VALUE` are
-accepted constants. Array callbacks run synchronously and sequentially inside
+`Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, `MAX_VALUE`, and
+`NaN` are accepted constants. Array callbacks run synchronously and sequentially inside
 the durable VM callback driver. `sort` is stable, mutates and returns its
 receiver; `toSorted`, `toReversed`, `toSpliced`, and `with` return fresh arrays.
 The array representation is dense: `arr.length = 0` is accepted, while writes
@@ -759,10 +759,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 588 rows, of which 515 are distinct
+The Node differential table carries 604 rows, of which 531 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of those 515 unique expressions rather than of all 588 rows. Every count in
+that of those 531 unique expressions rather than of all 604 rows. Every count in
 this paragraph is pinned against the table by
 `committed_row_counts_match_the_register`, and the generator pins each lane's
 own row count, so neither this paragraph nor a lane can drift from the corpus in
