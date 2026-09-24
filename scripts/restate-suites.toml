@@ -71,12 +71,12 @@ report_only = "tool-result durations reach journaled identities (FIG-3672); see 
 # The child's process-environment read is not journaled, so a replay reads
 # it again: "a park is not re-run: the child read its environment once" sees 2.
 "tests::conformance_and_poison::a_divergent_child_settles_with_its_park" = "the child's process-env read runs again on replay (FIG-3683)"
-# Harness, not product: ConformanceTurnProbe parks a run-once job and takes it
-# on the first execution, so a replayed handler finds no job and returns where
-# the journal recorded a `run`.
-"tests::conformance_and_poison::a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate" = "ConformanceTurnProbe runs a run-once job, which a replayed handler no longer has (FIG-3684)"
-"tests::conformance_and_poison::public_signal_intent_wakes_parked_process" = "ConformanceTurnProbe runs a run-once job, which a replayed handler no longer has (FIG-3684)"
-"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "ConformanceTurnProbe runs a run-once job, which a replayed handler no longer has (FIG-3684)"
+# A suspension drops the turn's registration in the live opener registry, so
+# the turn's tool child finds no dispatch context to run in ("no executor
+# currently routes ... tool child 0") and the resumed turn waits for it.
+"tests::conformance_and_poison::a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate" = "a suspended turn strands its tool child: no executor routes it (FIG-3712)"
+"tests::conformance_and_poison::public_signal_intent_wakes_parked_process" = "a suspended turn strands its tool child: no executor routes it (FIG-3712)"
+"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "a suspended turn strands its tool child: no executor routes it (FIG-3712)"
 
 [suites.agent-workbench]
 label = "//examples/agent-workbench:agent-workbench__unit_test"

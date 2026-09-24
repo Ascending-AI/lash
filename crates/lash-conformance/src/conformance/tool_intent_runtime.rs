@@ -179,50 +179,67 @@ pub async fn public_signal_intent_wakes_parked_process(
             }
         })
         .build();
-    let mut host = crate::LawBackend::in_process()
-        .with_effect_host(Arc::clone(&effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
-    host.providers.provider_resolver =
-        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
-    let mut policy = crate::testing::mock_session_policy();
-    policy.session_id = Some(session_id.clone());
-    let state = crate::RuntimeSessionState {
-        session_id: session_id.clone(),
-        policy: policy.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let mut runtime = Box::pin(
-        crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner())
-            .with_session_id(&session_id)
-            .with_policy(policy)
-            .with_initial_state(state)
-            .with_plugin_factories(
-                crate::testing::test_standard_protocol_factories()
-                    .into_iter()
-                    .chain([tool_plugin])
-                    .collect(),
-            )
-            .with_store(Arc::new(crate::InMemorySessionStore::new()))
-            .with_process_work(crate::testing::process_work_wiring_for_registry(
-                Arc::clone(&registry),
-            ))
-            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
-            .build(),
-    )
-    .await
-    .expect("build public signal-intent conformance runtime");
+    // Restate re-runs the turn's handler from the top on every replay, so
+    // each execution builds its runtime afresh from these inputs, which
+    // outlive it; the store is the durable state they share.
+    let store: Arc<dyn crate::RuntimePersistence> = Arc::new(crate::InMemorySessionStore::new());
     let admitted = admit(crate::ExecutionScope::turn(&session_id, &turn_id));
     let mut input = crate::TurnInput::text("signal the parked process");
     input.trace_turn_id = Some(turn_id);
-    let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
+    let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
+    let turn_parts = (
+        Arc::clone(&effect_host),
+        Arc::clone(&registry),
+        session_id.clone(),
+    );
     turn_runner
         .run_turn(
             admitted,
-            Box::new(move |turn_scope| {
+            Arc::new(move |turn_scope| {
+                let (effect_host, registry, session_id) = turn_parts.clone();
+                let store = Arc::clone(&store);
+                let model = model.clone();
+                let tool_plugin = Arc::clone(&tool_plugin);
+                let input = input.clone();
+                let turn_tx = turn_tx.clone();
                 Box::pin(async move {
+                    let mut host = crate::LawBackend::in_process()
+                        .with_effect_host(effect_host)
+                        .host_config(
+                            crate::CommitBudget::bounded(1024 * 1024, 512),
+                            crate::QueuedWorkBatchingConfig::new(1),
+                        );
+                    host.providers.provider_resolver =
+                        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+                    let mut policy = crate::testing::mock_session_policy();
+                    policy.session_id = Some(session_id.clone());
+                    let state = crate::RuntimeSessionState {
+                        session_id: session_id.clone(),
+                        policy: policy.clone(),
+                        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                            crate::TurnBudget::Unbounded,
+                        ))
+                    };
+                    let mut runtime = Box::pin(
+                        crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner())
+                            .with_session_id(&session_id)
+                            .with_policy(policy)
+                            .with_initial_state(state)
+                            .with_plugin_factories(
+                                crate::testing::test_standard_protocol_factories()
+                                    .into_iter()
+                                    .chain([tool_plugin])
+                                    .collect(),
+                            )
+                            .with_store(store)
+                            .with_process_work(crate::testing::process_work_wiring_for_registry(
+                                registry,
+                            ))
+                            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+                            .build(),
+                    )
+                    .await
+                    .expect("build public signal-intent conformance runtime");
                     let turn = runtime
                         .stream_turn(
                             input,
@@ -240,6 +257,7 @@ pub async fn public_signal_intent_wakes_parked_process(
         )
         .await;
     let turn = turn_rx
+        .recv()
         .await
         .expect("the tier's turn runner ran the public signal-intent turn")
         .expect("run public signal-intent conformance turn");

@@ -41,20 +41,35 @@ fn cancellable_store(host: &Arc<dyn EffectHost>) -> Arc<dyn crate::RuntimePersis
     )
 }
 
+/// What a law's turn is built from: inputs that outlive every execution of
+/// it. Restate re-runs a turn's handler from the top on every replay, so each
+/// execution builds its runtime afresh from these and reaches the same
+/// journaled commands; the store and host are the durable state they share.
+#[derive(Clone)]
+struct TurnParts {
+    host: Arc<dyn EffectHost>,
+    store: Arc<dyn crate::RuntimePersistence>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    session_id: SessionId,
+    plugin: Arc<dyn crate::facade_support::PluginFactory>,
+    model: crate::testing::TestProvider,
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn build_runtime(
-    host: &Arc<dyn EffectHost>,
-    store: Arc<dyn crate::RuntimePersistence>,
-    registry: Arc<dyn crate::ProcessRegistry>,
-    session_id: &SessionId,
-    plugin: Arc<dyn crate::facade_support::PluginFactory>,
-    model: crate::testing::TestProvider,
-) -> crate::LashRuntime {
+async fn build_runtime(parts: TurnParts) -> crate::LashRuntime {
+    let TurnParts {
+        host,
+        store,
+        registry,
+        session_id,
+        plugin,
+        model,
+    } = parts;
     let mut config = crate::LawBackend::in_process()
-        .with_effect_host(Arc::clone(host))
+        .with_effect_host(host)
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
@@ -70,7 +85,7 @@ async fn build_runtime(
     };
     Box::pin(
         crate::LashRuntime::builder(config, crate::testing::runtime_lease_owner())
-            .with_session_id(session_id)
+            .with_session_id(&session_id)
             .with_policy(policy)
             .with_initial_state(state)
             .with_plugin_factories(
@@ -88,30 +103,34 @@ async fn build_runtime(
     .expect("build tool-child turn-cancel conformance runtime")
 }
 
-/// Runs `runtime`'s turn `turn_id` on the tier's runner in its own task and
-/// hands back the join handle; the assembled turn is the task's output.
+/// Runs turn `turn_id` of `parts`' session on the tier's runner in its own
+/// task and hands back the join handle; the assembled turn is the task's
+/// output. Every execution of the turn builds its own runtime from `parts`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: a runner that drops the turn is a fixture defect"
 )]
 fn spawn_turn(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
-    mut runtime: crate::LashRuntime,
-    session_id: &SessionId,
+    parts: TurnParts,
     turn_id: &TurnId,
     text: &str,
 ) -> tokio::task::JoinHandle<Result<crate::AssembledTurn, crate::RuntimeError>> {
-    let admitted = admit(ExecutionScope::turn(session_id, turn_id));
+    let admitted = admit(ExecutionScope::turn(&parts.session_id, turn_id));
     let mut input = crate::TurnInput::text(text);
     input.trace_turn_id = Some(turn_id.clone());
     crate::task::spawn(async move {
-        let (turn_tx, turn_rx) = tokio::sync::oneshot::channel();
+        let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
         runner
             .run_turn(
                 admitted,
-                Box::new(move |scope| {
+                Arc::new(move |scope| {
+                    let parts = parts.clone();
+                    let input = input.clone();
+                    let turn_tx = turn_tx.clone();
                     Box::pin(async move {
-                        let turn = runtime
+                        let turn = build_runtime(parts)
+                            .await
                             .stream_turn(
                                 input,
                                 crate::TurnOptions::new(
@@ -128,6 +147,7 @@ fn spawn_turn(
             )
             .await;
         turn_rx
+            .recv()
             .await
             .expect("the tier's turn runner ran the conformance turn")
     })
@@ -272,16 +292,15 @@ pub async fn an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteratio
         text("finished after the retry"),
     ]);
     let store = cancellable_store(&host);
-    let runtime = build_runtime(
-        &host,
-        Arc::clone(&store),
+    let parts = TurnParts {
+        host: Arc::clone(&host),
+        store: Arc::clone(&store),
         registry,
-        &session_id,
+        session_id: session_id.clone(),
         plugin,
         model,
-    )
-    .await;
-    let turn = spawn_turn(runner, runtime, &session_id, &turn_id, "retry once");
+    };
+    let turn = spawn_turn(runner, parts, &turn_id, "retry once");
 
     wait_until("the first attempt fails retryably", || {
         attempts.load(Ordering::SeqCst) == 1
@@ -466,15 +485,15 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
         tool_call("pending-in-follow-on", "conformance_follow_on_pending"),
         text("finished after the follow-on wait"),
     ]);
-    let store = cancellable_store(&host);
-    let runtime = build_runtime(&host, store, registry, &session_id, plugin, model).await;
-    let mut turn = spawn_turn(
-        runner,
-        runtime,
-        &session_id,
-        &root_turn_id,
-        "switch and wait",
-    );
+    let parts = TurnParts {
+        store: cancellable_store(&host),
+        host: Arc::clone(&host),
+        registry,
+        session_id: session_id.clone(),
+        plugin,
+        model,
+    };
+    let mut turn = spawn_turn(runner, parts, &root_turn_id, "switch and wait");
 
     let completion_key = tokio::select! {
         key = completion_key_rx => match key {
@@ -649,16 +668,15 @@ pub async fn a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation(
         text("unreachable after the cancel"),
     ]);
     let store = cancellable_store(&host);
-    let runtime = build_runtime(
-        &host,
-        Arc::clone(&store),
+    let parts = TurnParts {
+        host: Arc::clone(&host),
+        store: Arc::clone(&store),
         registry,
-        &session_id,
+        session_id: session_id.clone(),
         plugin,
         model,
-    )
-    .await;
-    let turn = spawn_turn(runner, runtime, &session_id, &turn_id, "park and cancel");
+    };
+    let turn = spawn_turn(runner, parts, &turn_id, "park and cancel");
 
     wait_until("the tool child starts", || {
         started.load(Ordering::SeqCst) == 1

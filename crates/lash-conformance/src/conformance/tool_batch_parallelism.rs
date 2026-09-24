@@ -874,18 +874,25 @@ async fn run_scenario(
     // The turn runs where the tier runs turns: the runner supplies the
     // controller admitted for the scenario's turn — the host's own in process,
     // a handler-bound one on Restate — and the observations come back over a
-    // channel because the job owns everything it drives.
+    // channel because the attempt owns everything it drives. Each execution
+    // of the attempt (every replay, on Restate) runs the scenario afresh.
     let admitted = admit(crate::ExecutionScope::turn(
         &session_id,
         tool_batch_turn_id(&session_id),
     ));
-    let (observed_tx, observed_rx) = tokio::sync::oneshot::channel();
+    let (observed_tx, mut observed_rx) = tokio::sync::mpsc::unbounded_channel();
     let producer = producer.clone();
     let plan = plan.clone();
     runner
         .run_turn(
             admitted,
-            Box::new(move |turn_controller| {
+            Arc::new(move |turn_controller| {
+                let session_id = session_id.clone();
+                let effect_host = Arc::clone(&effect_host);
+                let producer = producer.clone();
+                let plan = plan.clone();
+                let dependencies = dependencies.clone();
+                let observed_tx = observed_tx.clone();
                 Box::pin(async move {
                     let observed = run_scenario_on_session(
                         session_id,
@@ -905,6 +912,7 @@ async fn run_scenario(
         )
         .await;
     observed_rx
+        .recv()
         .await
         .expect("the tier's turn runner ran the scenario's turn")
 }

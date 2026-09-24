@@ -4,11 +4,17 @@
 //! `ctx`-bound [`RestateRuntimeEffectController`](crate::RestateRuntimeEffectController),
 //! and the deployment host refuses every effect that has not entered one. The
 //! live suite's endpoint serves in this test process, so a law hands its turn
-//! to [`LiveTurnRunner`], which parks the job in a process-local table and
-//! invokes [`ConformanceTurnProbe`] through ingress; the handler takes the job
-//! back and runs it on its own controller. The tool calls of that turn open
-//! real Restate effect groups whose children run in the endpoint's dispatch
-//! invocations.
+//! to [`LiveTurnRunner`], which parks the law's attempt factory in a
+//! process-local table and invokes [`ConformanceTurnProbe`] through ingress;
+//! the handler looks the factory up and runs a fresh attempt on its own
+//! controller. The tool calls of that turn open real Restate effect groups
+//! whose children run in the endpoint's dispatch invocations.
+//!
+//! Restate runs the handler again from the top on every replay of the
+//! invocation (after a suspension or a failed attempt), so the table never
+//! gives an attempt away: every execution builds its turn afresh from the
+//! same inputs and takes the same command path, and only the execution that
+//! ends reports.
 //!
 //! One scope is one invocation, as on the in-process runner: a turn that
 //! aborts without an outcome — it parked on a replay divergence, or met a
@@ -36,17 +42,10 @@ use restate_sdk::serde::Json;
 
 use crate::RestateIngressClient;
 
-/// One attempt a law hands a turn's invocation. A plain law's job runs once;
-/// a crash-redrive law's attempts are factories, because Restate re-runs the
-/// handler from the top on every replay, so an attempt runs until one of its
-/// executions ends.
-enum AttemptRun {
-    Once(Option<lash_conformance::ConformanceTurnJob>),
-    Factory(lash_conformance::ConformanceTurnAttempt),
-}
-
+/// One attempt a law hands a turn's invocation. It runs once per execution of
+/// the handler until one of its executions ends.
 struct QueuedAttempt {
-    run: AttemptRun,
+    attempt: lash_conformance::ConformanceTurnAttempt,
     /// The attempt must crash; its crash is a redelivery, not a failure.
     crashing: bool,
 }
@@ -96,12 +95,10 @@ pub(super) struct ConformanceTurnProbeImpl;
 enum NextAttempt {
     Run {
         admitted: lash_core::AdmittedScope,
-        job: lash_conformance::ConformanceTurnJob,
+        attempt: lash_conformance::ConformanceTurnAttempt,
         crashing: bool,
         ends: tokio::sync::mpsc::UnboundedSender<AttemptEnd>,
     },
-    /// A plain job an earlier execution of this attempt already took.
-    Taken,
     /// The law has queued no attempt yet.
     Idle,
     /// No turn with this key is pending in this process.
@@ -115,22 +112,12 @@ fn next_attempt(key: &str) -> NextAttempt {
     let Some(turn) = turns.get_mut(key) else {
         return NextAttempt::Unknown;
     };
-    let Some(front) = turn.attempts.front_mut() else {
+    let Some(front) = turn.attempts.front() else {
         return NextAttempt::Idle;
-    };
-    let job: lash_conformance::ConformanceTurnJob = match &mut front.run {
-        AttemptRun::Once(job) => match job.take() {
-            Some(job) => job,
-            None => return NextAttempt::Taken,
-        },
-        AttemptRun::Factory(attempt) => {
-            let attempt = Arc::clone(attempt);
-            Box::new(move |scoped| attempt(scoped))
-        }
     };
     NextAttempt::Run {
         admitted: turn.admitted.clone(),
-        job,
+        attempt: Arc::clone(&front.attempt),
         crashing: front.crashing,
         ends: turn.ends.clone(),
     }
@@ -153,24 +140,23 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
         ctx: WorkflowContext<'_>,
         Json(key): Json<String>,
     ) -> HandlerResult<Json<bool>> {
-        let (admitted, job, crashing, ends) = loop {
+        let (admitted, attempt, crashing, ends) = loop {
             let queued = attempt_queued().notified();
             tokio::pin!(queued);
             queued.as_mut().enable();
             match next_attempt(&key) {
                 NextAttempt::Run {
                     admitted,
-                    job,
+                    attempt,
                     crashing,
                     ends,
-                } => break (admitted, job, crashing, ends),
+                } => break (admitted, attempt, crashing, ends),
                 // An invocation that finds nothing to run fails terminally
                 // rather than silently succeeding without the turn it was
                 // asked to run.
-                NextAttempt::Unknown | NextAttempt::Taken => {
+                NextAttempt::Unknown => {
                     return Err(TerminalError::new(format!(
-                        "conformance turn `{key}` has no job for this execution; the probe \
-                         handler was re-invoked after its job already ran"
+                        "conformance turn `{key}` is not pending in this process"
                     ))
                     .into());
                 }
@@ -192,7 +178,11 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
         let scoped = controller
             .scoped_effect_controller(admitted)
             .map_err(TerminalError::from_error)?;
-        let (end, result) = match (CatchUnwind { inner: job(scoped) }).await {
+        let (end, result) = match (CatchUnwind {
+            inner: attempt(scoped),
+        })
+        .await
+        {
             Ok(lash_conformance::ConformanceTurnEnd::Settled) => {
                 (AttemptEnd::Settled, Ok(Json(true)))
             }
@@ -226,7 +216,7 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
             ),
             // Any other panic in the law must fail the invocation terminally:
             // an unwinding handler reads as retryable, and the retry would
-            // find no job.
+            // panic again.
             Err(()) => {
                 return Err(TerminalError::new(format!(
                     "conformance turn `{key}` panicked inside the probe handler"
@@ -388,12 +378,12 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
     async fn run_turn(
         &self,
         admitted: lash_core::AdmittedScope,
-        job: lash_conformance::ConformanceTurnJob,
+        attempt: lash_conformance::ConformanceTurnAttempt,
     ) {
         self.run_attempts(
             admitted,
             vec![QueuedAttempt {
-                run: AttemptRun::Once(Some(job)),
+                attempt,
                 crashing: false,
             }],
         )
@@ -410,11 +400,11 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
             admitted,
             vec![
                 QueuedAttempt {
-                    run: AttemptRun::Factory(crashing),
+                    attempt: crashing,
                     crashing: true,
                 },
                 QueuedAttempt {
-                    run: AttemptRun::Factory(redrive),
+                    attempt: redrive,
                     crashing: false,
                 },
             ],

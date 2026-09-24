@@ -292,10 +292,7 @@ pub async fn a_diverged_tool_presentation_parks_the_turn(
                         &parts.session_id,
                         &parts.turn_id,
                     )),
-                    Box::new({
-                        let attempt = attempt(&parts, 3, Some(result_tx.clone()));
-                        move |scope| attempt(scope)
-                    }),
+                    attempt(&parts, 3, Some(result_tx.clone())),
                 )
                 .await;
         }
