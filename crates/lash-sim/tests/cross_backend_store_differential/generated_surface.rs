@@ -1513,11 +1513,17 @@ impl SurfaceRunner {
                         .map(|child| {
                             serde_json::json!({
                                 "replay_key": child.replay_key,
+                                // Whether the last pass ran a child to its rank
+                                // (`Settled`) or only seated a rank an earlier pass
+                                // left held at the commit-order barrier (`Decided`)
+                                // depends on which lease lapsed first, which is a
+                                // scheduler fact. Both end with the child ranked,
+                                // and the rank itself is compared in the group rows.
                                 "outcome": match &child.outcome {
-                                    ChildDrainOutcome::Settled => "settled",
+                                    ChildDrainOutcome::Settled
+                                    | ChildDrainOutcome::Decided => "ranked",
                                     ChildDrainOutcome::Contested => "contested",
                                     ChildDrainOutcome::LeaseLive { .. } => "lease_live",
-                                    ChildDrainOutcome::Decided => "decided",
                                     ChildDrainOutcome::NoExecutor => "no_executor",
                                     ChildDrainOutcome::Interrupted => "interrupted",
                                     ChildDrainOutcome::Corrupt { .. } => "corrupt",
