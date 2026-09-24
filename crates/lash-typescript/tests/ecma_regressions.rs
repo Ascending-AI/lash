@@ -1142,3 +1142,278 @@ fn from_code_point_names_the_lone_surrogate_refusal() {
         Value::String("A\u{1F600}".into())
     );
 }
+
+// FIG-3662: assorted ECMA divergences the Test262 selection exposed.
+
+#[test]
+fn fig3662_array_holes_are_absent_for_search_and_in() {
+    // Literal elisions are holes, not stored `undefined`: index search skips
+    // them (HasProperty), and `in` answers false.
+    for source in [
+        "finish([0,,2].indexOf(undefined));",
+        "finish([0,,2].lastIndexOf(undefined));",
+    ] {
+        assert_eq!(finished(source), Value::Number(-1.0), "{source}");
+    }
+    for (source, expected) in [
+        ("finish(1 in [0,,2]);", false),
+        ("finish(0 in [0,,2]);", true),
+        ("finish(2 in [0,,2]);", true),
+        ("finish(3 in [0,,2]);", false),
+        ("finish('length' in [0,,2]);", true),
+    ] {
+        assert_eq!(finished(source), Value::Bool(expected), "{source}");
+    }
+    // A hole still reads as `undefined`, and writing an index fills it —
+    // after the write the index is present.
+    assert_eq!(
+        finished("finish([0,,2][1] === undefined);"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        finished("const a = [0,,2]; a[1] = 7; finish(a[1] === 7 && (1 in a));"),
+        Value::Bool(true)
+    );
+    // Extending past the end is still the refused sparse write.
+    let error =
+        execute("const a = [1]; a[3] = 9; finish(a);").expect_err("sparse extension stays refused");
+    assert!(
+        error.to_string().contains("TS_SPARSE_ARRAY_UNSUPPORTED"),
+        "{error}"
+    );
+}
+
+#[test]
+fn fig3662_parse_float_uses_the_ecma_decimal_grammar() {
+    for source in [
+        "finish(parseFloat('infinity'));",
+        "finish(parseFloat('INFINITY'));",
+        "finish(parseFloat('.x'));",
+        "finish(parseFloat(''));",
+        "finish(parseFloat('e3'));",
+        "finish(parseFloat('+'));",
+    ] {
+        assert!(
+            matches!(finished(source), Value::Number(number) if number.is_nan()),
+            "{source}"
+        );
+    }
+    assert_eq!(
+        finished("finish(parseFloat('Infinity'));"),
+        Value::Number(f64::INFINITY)
+    );
+    assert_eq!(
+        finished("finish(parseFloat(' -Infinity '));"),
+        Value::Number(f64::NEG_INFINITY)
+    );
+    assert_eq!(
+        finished("finish(parseFloat('5.e3'));"),
+        Value::Number(5000.0)
+    );
+    assert_eq!(
+        finished("finish(parseFloat('1.5xyz'));"),
+        Value::Number(1.5)
+    );
+}
+
+#[test]
+fn fig3662_to_exponential_rounds_exactly() {
+    // ECMA rounds the exact binary value and takes the larger magnitude on a
+    // tie — `25` is a halfway case that must render `3e+1`, not Rust's
+    // round-half-even `2e+1`.
+    for (source, expected) in [
+        ("finish((25).toExponential(0));", "3e+1"),
+        ("finish((-25).toExponential(0));", "-3e+1"),
+        ("finish((12345).toExponential(3));", "1.235e+4"),
+        ("finish((0).toExponential(2));", "0.00e+0"),
+        (
+            "finish((123.456).toExponential(20));",
+            "1.23456000000000003070e+2",
+        ),
+    ] {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+}
+
+#[test]
+fn fig3662_computed_record_keys_use_ecma_to_string() {
+    assert_eq!(
+        finished(
+            "var ok={[1e55]:'B',[1.2]:'A',[-0]:'D',[NaN]:'G',[Infinity]:'E'};\
+             finish(ok['1e+55']+'|'+ok['1.2']+'|'+ok[0]+'|'+ok.NaN+'|'+ok.Infinity);"
+        ),
+        Value::String("B|A|D|G|E".into())
+    );
+}
+
+#[test]
+fn fig3662_in_operator_evaluates_left_first_and_reads_prototypes() {
+    // Left operand runs before the right.
+    assert_eq!(
+        finished(
+            "var x=function(){throw 'x'}; var y=function(){throw 'y'};\
+             var r=(function(){try{x() in y(); return 'no-throw'}catch(e){return e}})();\
+             finish(r);"
+        ),
+        Value::String("x".into())
+    );
+    // Inherited Object.prototype names are present; absent keys are not.
+    for (source, expected) in [
+        ("finish('valueOf' in {});", true),
+        ("finish('toString' in {});", true),
+        ("finish('hasOwnProperty' in {});", true),
+        ("finish('x' in {});", false),
+        ("finish('indexOf' in [1]);", true),
+        ("finish('0' in [1]);", true),
+    ] {
+        assert_eq!(finished(source), Value::Bool(expected), "{source}");
+    }
+    // A primitive right operand throws a catchable TypeError.
+    assert_eq!(
+        finished(
+            "finish((function(){try{return 'toString' in true}catch(e){return e instanceof TypeError}})());"
+        ),
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn fig3662_split_coerces_separator_and_limit_as_a_guest() {
+    // A non-RegExp object separator converts through guest `toString`.
+    assert_eq!(
+        finished("var o={toString:function(){return 'AB'}}; finish('xAByABz'.split(o).join('|'));"),
+        Value::String("x|y|z".into())
+    );
+    // `limit` invokes guest `valueOf`; a thrown error propagates.
+    assert_eq!(
+        finished(
+            "var o2={valueOf:function(){throw 'vo'}};\
+             var r=(function(){try{''.split('',o2);return 'no-throw'}catch(e){return e}})();\
+             finish(r);"
+        ),
+        Value::String("vo".into())
+    );
+    assert_eq!(
+        finished("finish('abc'.split('', {valueOf:function(){return 1}}).join(','));"),
+        Value::String("a".into())
+    );
+    // The limit converts through ToUint32: negative wraps, NaN truncates to 0.
+    assert_eq!(
+        finished("finish('abc'.split('', -1).length);"),
+        Value::Number(3.0)
+    );
+    assert_eq!(
+        finished("finish('abc'.split('', NaN).length);"),
+        Value::Number(0.0)
+    );
+}
+
+#[test]
+fn fig3662_rest_binding_can_take_an_object_pattern() {
+    assert_eq!(
+        finished("const [...{length}] = [1,2,3]; finish(length);"),
+        Value::Number(3.0)
+    );
+    assert_eq!(
+        finished("const [...{0:v, 3:y, length:z}] = [7,8,9]; finish(''+v+'|'+y+'|'+z);"),
+        Value::String("7|undefined|3".into())
+    );
+}
+
+#[test]
+fn fig3662_builtin_method_values_carry_length_and_call_through_this() {
+    assert_eq!(
+        finished("finish('word'.includes.length);"),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        finished("finish(typeof ('word'.includes));"),
+        Value::String("function".into())
+    );
+    assert_eq!(
+        finished("finish([1,2].includes.length);"),
+        Value::Number(1.0)
+    );
+    // A detached method called without a receiver fails rather than silently
+    // binding the read site — `this` is `undefined`, as ECMA requires.
+    assert_eq!(
+        finished(
+            "var m='word'.includes;\
+             var r=(function(){try{m('o'); return 'no-throw'}catch(e){return 'threw'}})(); finish(r);"
+        ),
+        Value::String("threw".into())
+    );
+    // Guest functions answer `length` the same way.
+    assert_eq!(
+        finished("var f=function(a,b,c){return 0}; finish(f.length);"),
+        Value::Number(3.0)
+    );
+}
+
+#[test]
+fn fig3662_json_stringify_binds_replacer_this_and_calls_to_json() {
+    // The replacer sees (key, value) with `this` bound to the holder, in
+    // traversal order — the upstream `replacer-function-arguments` shape.
+    assert_eq!(
+        finished(
+            "var calls=[];\
+             var rp=function(k,v){if(k!==''){calls.push([this,k,v])}return v};\
+             var b1=[1,2]; var a1={b1:b1}; var obj={a1:a1,a2:'a2'};\
+             JSON.stringify(obj,rp);\
+             finish(calls[0][0]===obj && calls[0][1]==='a1' && calls[1][0]===a1 && calls[1][1]==='b1' && calls[1][2]===b1);"
+        ),
+        Value::Bool(true)
+    );
+    // `toJSON` runs with the value as `this` before the replacer sees it.
+    assert_eq!(
+        finished("var tj={v:{toJSON:function(){return 42}}}; finish(JSON.stringify(tj));"),
+        Value::String("{\"v\":42}".into())
+    );
+    assert_eq!(
+        finished(
+            "var tj2={toJSON:function(){return this.mark}}; var wrap={t:tj2,mark:0}; finish(JSON.stringify(wrap));"
+        ),
+        Value::String("{\"mark\":0}".into())
+    );
+}
+
+#[test]
+fn fig3662_cyclic_values_throw_inside_a_cell_and_refuse_at_the_boundary() {
+    // `JSON.stringify` on a cycle throws Node's catchable TypeError.
+    assert_eq!(
+        finished(
+            "var a=[]; a.push(a);\
+             var r=(function(x){try{JSON.stringify(x);return 'no-throw'}catch(e){return e instanceof TypeError}})(a);\
+             a.pop(); finish(r);"
+        ),
+        Value::Bool(true)
+    );
+    // A binding that still holds the cycle when the cell ends cannot be
+    // written down; the boundary refusal names itself.
+    let error = execute("const a = []; a.push(a); finish(1);")
+        .expect_err("a retained cycle refuses at durable capture");
+    assert!(
+        error.to_string().contains("TS_CYCLIC_VALUE_UNSUPPORTED"),
+        "{error}"
+    );
+}
+
+#[test]
+fn fig3662_set_intersection_iterates_the_smaller_side() {
+    for (source, expected) in [
+        (
+            "finish([...(new Set([3,2,1,0])).intersection(new Set([1,3,5]))].join(','));",
+            "1,3",
+        ),
+        (
+            "finish([...(new Set([1,3,5])).intersection(new Set([3,2,1,0]))].join(','));",
+            "1,3",
+        ),
+        (
+            "finish([...(new Set([3,2,1])).intersection(new Set([1,3,5,7]))].join(','));",
+            "3,1",
+        ),
+    ] {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+}

@@ -225,6 +225,7 @@ typescript	builtin-arity
 typescript	classic-for-forms
 typescript	closed-shape-field-guard
 typescript	comma-operator
+typescript	cyclic-heap-value
 typescript	date-mutation
 typescript	date-string-coercion
 typescript	debugger

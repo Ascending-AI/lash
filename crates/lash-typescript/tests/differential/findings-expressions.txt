@@ -315,3 +315,30 @@ typeof -NaN
 'foo-x-bar'.replace(/(x)|(y)/, '|$2|')
 'foo-x-bar'.replace(/(?<n>x)/, '|$<n>|$<miss>|')
 'foo-x-bar'.replace(/(x)/, "|$$|$&|$`|$'|")
+[0,,2].indexOf(undefined)
+[0,,2].lastIndexOf(undefined)
+1 in [0,,2]
+2 in [0,,2]
+(25).toExponential(0)
+(12345).toExponential(3)
+(123.456).toExponential(20)
+'word'.includes.length
+typeof ('word'.includes)
+parseFloat('infinity')
+parseFloat('5.e3')
+({[1e55]:1})['1e+55']
+({[1e55]:'a',[1e55]:'b'})['1e+55']
+'valueOf' in {}
+'x' in {}
+(()=>{try{'toString' in true;return 'no'}catch(e){return e.name}})()
+JSON.stringify({a:1,b:2},function(k,v){return k==='b'?undefined:v})
+JSON.stringify({h:9},function(k,v){return k==='h'&&this.h===9?v:v})
+JSON.stringify({v:{toJSON:function(){return 42}}})
+[...(new Set([3,2,1,0])).intersection(new Set([1,3,5]))].join(',')
+[...(new Set([3,1,5,2])).intersection(new Set([5,3,1]))].join(',')
+'xAByABz'.split({toString:function(){return 'AB'}}).join('|')
+'abc'.split('',{valueOf:function(){return 2}}).join('|')
+'abc'.split('',NaN).length
+(()=>{const [...{length}]=[1,2,3];return length})()
+(()=>{const [...{0:a,length:b}]=[7,8,9];return a+'|'+b})()
+(()=>{const a=[];a.push(a);try{JSON.stringify(a);return 'no'}catch(e){return e.name}})()

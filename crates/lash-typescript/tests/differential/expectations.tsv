@@ -603,3 +603,30 @@ findings	314	accept	"'x-x'.replaceAll('x', '|$1|')"	"|$1|-|$1|"	-
 findings	315	accept	"'foo-x-bar'.replace(/(x)|(y)/, '|$2|')"	"foo-||-bar"	-
 findings	316	accept	"'foo-x-bar'.replace(/(?<n>x)/, '|$<n>|$<miss>|')"	"foo-|x||-bar"	-
 findings	317	accept	"'foo-x-bar'.replace(/(x)/, \"|$$|$&|$`|$'|\")"	"foo-|$|x|foo-|-bar|-bar"	-
+findings	318	accept	"[0,,2].indexOf(undefined)"	"-1"	-
+findings	319	accept	"[0,,2].lastIndexOf(undefined)"	"-1"	-
+findings	320	accept	"1 in [0,,2]"	"false"	-
+findings	321	accept	"2 in [0,,2]"	"true"	-
+findings	322	accept	"(25).toExponential(0)"	"3e+1"	-
+findings	323	accept	"(12345).toExponential(3)"	"1.235e+4"	-
+findings	324	accept	"(123.456).toExponential(20)"	"1.23456000000000003070e+2"	-
+findings	325	accept	"'word'.includes.length"	"1"	-
+findings	326	accept	"typeof ('word'.includes)"	"function"	-
+findings	327	accept	"parseFloat('infinity')"	"NaN"	-
+findings	328	accept	"parseFloat('5.e3')"	"5000"	-
+findings	329	accept	"({[1e55]:1})['1e+55']"	"1"	-
+findings	330	accept	"({[1e55]:'a',[1e55]:'b'})['1e+55']"	"b"	-
+findings	331	accept	"'valueOf' in {}"	"true"	-
+findings	332	accept	"'x' in {}"	"false"	-
+findings	333	accept	"(()=>{try{'toString' in true;return 'no'}catch(e){return e.name}})()"	"TypeError"	-
+findings	334	accept	"JSON.stringify({a:1,b:2},function(k,v){return k==='b'?undefined:v})"	"{\"a\":1}"	-
+findings	335	accept	"JSON.stringify({h:9},function(k,v){return k==='h'&&this.h===9?v:v})"	"{\"h\":9}"	-
+findings	336	accept	"JSON.stringify({v:{toJSON:function(){return 42}}})"	"{\"v\":42}"	-
+findings	337	accept	"[...(new Set([3,2,1,0])).intersection(new Set([1,3,5]))].join(',')"	"1,3"	-
+findings	338	accept	"[...(new Set([3,1,5,2])).intersection(new Set([5,3,1]))].join(',')"	"5,3,1"	-
+findings	339	accept	"'xAByABz'.split({toString:function(){return 'AB'}}).join('|')"	"x|y|z"	-
+findings	340	accept	"'abc'.split('',{valueOf:function(){return 2}}).join('|')"	"a|b"	-
+findings	341	accept	"'abc'.split('',NaN).length"	"0"	-
+findings	342	accept	"(()=>{const [...{length}]=[1,2,3];return length})()"	"3"	-
+findings	343	accept	"(()=>{const [...{0:a,length:b}]=[7,8,9];return a+'|'+b})()"	"7|3"	-
+findings	344	accept	"(()=>{const a=[];a.push(a);try{JSON.stringify(a);return 'no'}catch(e){return e.name}})()"	"TypeError"	-
