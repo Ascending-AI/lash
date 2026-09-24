@@ -820,7 +820,7 @@ async fn a_native_call_on_a_drifted_tool_needed_live_parks() -> Result<()> {
             assert!(
                 matches!(
                     park.reason,
-                    lash_core::store::TurnParkReason::BindingDrift { .. }
+                    lash_core::store::ParkReason::BindingDrift { .. }
                 ),
                 "{drift:?}: {park:?}"
             );
