@@ -67,7 +67,9 @@ lash_rust_unit_test(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "2", "test.memory_kb": "1048576"},
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-typescript:session_oracle_corpus",
+    ],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
     tags = [],
@@ -353,7 +355,9 @@ lash_rust_feature_test(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "2", "test.memory_kb": "1048576"},
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-typescript:session_oracle_corpus",
+    ],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
     tags = [

@@ -63,6 +63,23 @@ pub(super) fn function_var_names(statements: &[Stmt]) -> Vec<String> {
                     visit(alternate, names);
                 }
             }
+            // A `var` loop head declares the enclosing function's (or the
+            // script's) one binding, which every iteration assigns.
+            Stmt::ForOf {
+                pattern,
+                kind: Some(VarKind::Var),
+                body,
+                ..
+            }
+            | Stmt::ForIn {
+                pattern,
+                kind: Some(VarKind::Var),
+                body,
+                ..
+            } => {
+                pattern_names(pattern, names);
+                visit(body, names);
+            }
             Stmt::While { body, .. }
             | Stmt::DoWhile { body, .. }
             | Stmt::For { body, .. }
@@ -331,24 +348,30 @@ impl Lowerer {
         keys: bool,
     ) -> Result<Vec<LashExpr>, Diagnostic> {
         self.scopes.push(Scope::default());
-        let mode = if let Some(kind) = kind {
-            let mut names = Vec::new();
-            pattern_names(pattern, &mut names);
-            for name in names {
-                self.declare(
-                    &name,
-                    match kind {
-                        VarKind::Const => BindingKind::Const,
-                        VarKind::Let => BindingKind::Let,
-                        VarKind::Var => BindingKind::Var,
-                    },
-                    false,
-                    false,
-                )?;
+        // A `var` head names the binding its function hoisted
+        // (`function_var_names`): each iteration initializes that one binding,
+        // as a `var` declaration in the body would, and the loop declares
+        // nothing of its own.
+        let mode = match kind {
+            Some(VarKind::Var) => PatternMode::Initialize,
+            Some(kind) => {
+                let mut names = Vec::new();
+                pattern_names(pattern, &mut names);
+                for name in names {
+                    self.declare(
+                        &name,
+                        if kind == VarKind::Const {
+                            BindingKind::Const
+                        } else {
+                            BindingKind::Let
+                        },
+                        false,
+                        false,
+                    )?;
+                }
+                PatternMode::Initialize
             }
-            PatternMode::Initialize
-        } else {
-            PatternMode::Assign
+            None => PatternMode::Assign,
         };
         let iteration = self.temporary(if keys { "for_in_key" } else { "for_of_value" });
         let direct_exotic = match source {

@@ -475,6 +475,18 @@ impl super::Lowerer {
     /// its visible spelling, kind (mutable or not), and hold-class. Generated
     /// slot names are unique across the stack precisely where a binding is
     /// locally shadowed, so the reverse lookup answers one binding at most.
+    /// Marks the binding the current scope declares under `internal`.
+    pub(super) fn set_local_initialized(&mut self, internal: &str, initialized: bool) {
+        if let Some(binding) = self.scopes.last_mut().and_then(|scope| {
+            scope
+                .bindings
+                .values_mut()
+                .find(|binding| binding.internal.as_str() == internal)
+        }) {
+            binding.initialized = initialized;
+        }
+    }
+
     pub(super) fn binding_by_internal(&self, internal: &str) -> std::option::Option<&Binding> {
         self.scopes
             .iter()

@@ -352,20 +352,35 @@ pub fn workflow_graph_from_source(src: &str) -> Result<WorkflowGraph, WorkflowGr
 /// which parses back successfully. The final-parse check prints once to an
 /// internal buffer, but this function returns no source.
 pub fn validate(graph: &WorkflowGraph) -> Result<(), GraphRenderError> {
-    validated_source(graph)?;
+    validated_source(graph, &BTreeSet::new())?;
     Ok(())
 }
 
 /// Validate and render a graph through the canonical TypeScript printer.
 pub fn workflow_graph_to_source(graph: &WorkflowGraph) -> Result<String, GraphRenderError> {
-    validated_source(graph)
+    validated_source(graph, &BTreeSet::new())
 }
 
-fn validated_source(graph: &WorkflowGraph) -> Result<String, GraphRenderError> {
+/// Validate and render the graph of a session cell: `globals` are the names
+/// earlier cells of its session bound, which the cell reads and its final
+/// parse must know, as the cell's own link did.
+pub fn workflow_graph_to_source_in_session(
+    graph: &WorkflowGraph,
+    globals: &BTreeSet<String>,
+) -> Result<String, GraphRenderError> {
+    validated_source(graph, globals)
+}
+
+fn validated_source(
+    graph: &WorkflowGraph,
+    globals: &BTreeSet<String>,
+) -> Result<String, GraphRenderError> {
     let program = validated_program(graph)?;
     let source = typescript_program_source(&program)?;
-    crate::parse(&source).map_err(|error| GraphRenderError::RenderedSourceInvalid {
-        message: error.to_string(),
+    crate::parse_with_globals(&source, globals).map_err(|error| {
+        GraphRenderError::RenderedSourceInvalid {
+            message: error.to_string(),
+        }
     })?;
     Ok(source)
 }
@@ -802,6 +817,53 @@ fn splice_at(
         };
         literal.params = process.params.clone();
         *literal.body = process_wrapper(&process.params, body);
+    } else if let Expr::ProcessRef { process: name } = expr
+        && let Some((_, process)) = by_site
+            .remove_entry(path.as_slice())
+            .or_else(|| by_site.remove_entry(unlabelled.as_slice()))
+    {
+        // An admitted program holds the lifted literal as a reference to its
+        // declaration; the rendered program holds the literal itself, rebuilt
+        // from the declaration: its authored parameters, the captures its
+        // hidden parameters carry, and the rendered body.
+        if name.as_str() != process.name {
+            return Err(GraphRenderError::ProcessOriginMismatch {
+                name: process.name.clone(),
+                message: "the reference at its site names another process".to_string(),
+            });
+        }
+        let lashlang::ProcessOrigin::Lifted { hidden_params, .. } = &process.origin else {
+            unreachable!("only lifted processes are spliced")
+        };
+        let authored = process
+            .params
+            .len()
+            .checked_sub(*hidden_params as usize)
+            .ok_or_else(|| GraphRenderError::ProcessOriginMismatch {
+                name: process.name.clone(),
+                message: "more hidden parameters than parameters".to_string(),
+            })?;
+        let (params, hidden) = process.params.split_at(authored);
+        let mut statements = match subgraph_to_block(
+            &process.body,
+            RenderContext {
+                scope: RenderScope::Process,
+                processes: context.processes,
+            },
+        )? {
+            Expr::Block(statements) => statements,
+            other => vec![other],
+        };
+        statements.push(Expr::Undefined);
+        let body = Expr::Role {
+            role: lashlang::StructuralRole::Completion,
+            expr: Box::new(Expr::Block(statements)),
+        };
+        *expr = Expr::ProcessLiteral(Box::new(lashlang::ProcessLiteralExpr {
+            params: params.to_vec(),
+            hidden_args: hidden.to_vec(),
+            body: Box::new(process_wrapper(params, body)),
+        }));
     }
     let label = matches!(expr, Expr::LabelAnnotated { .. });
     for (index, child) in expr.children_mut().enumerate() {

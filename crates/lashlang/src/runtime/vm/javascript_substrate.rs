@@ -412,7 +412,7 @@ pub(super) fn javascript_json_stringify_with_options(
     replacer: Option<&Value>,
     space: Option<&Value>,
 ) -> Result<Option<String>, RuntimeError> {
-    if matches!(value, Value::Undefined) {
+    if matches!(value, Value::Undefined) || is_function(heap, value) {
         return Ok(None);
     }
     let whitelist = replacer
@@ -494,7 +494,25 @@ fn javascript_json_stringify_with_errors(
                 ));
             }
             let result = match heap.get(*id)? {
-                HeapObject::Error(_) | HeapObject::UrlSearchParams(_) => Ok("{}".to_string()),
+                // No own enumerable property of any of these reaches
+                // `SerializeJSONObject`, so each is the empty object.
+                HeapObject::Error(_)
+                | HeapObject::UrlSearchParams(_)
+                | HeapObject::Map(_)
+                | HeapObject::Set(_)
+                | HeapObject::RegExp(_) => Ok("{}".to_string()),
+                // `SerializeJSONProperty` calls `toJSON` first: an ISO string,
+                // or `null` for an invalid time value.
+                HeapObject::Date(date) => {
+                    match super::javascript_date::to_iso_string(date.milliseconds) {
+                        Some(iso) => serde_json::to_string(&iso)
+                            .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}"))),
+                        None => Ok("null".to_string()),
+                    }
+                }
+                // A function serializes to nothing: `null` in an array, and its
+                // property is omitted from an object (filtered by the caller).
+                HeapObject::Closure { .. } => Ok("null".to_string()),
                 HeapObject::Url(url) => serde_json::to_string(&url.href)
                     .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}"))),
                 HeapObject::List(values) | HeapObject::Tuple(values) => {
@@ -535,10 +553,6 @@ fn javascript_json_stringify_with_errors(
                 HeapObject::Record(record) => {
                     stringify_heap_record(heap, record, active, whitelist, gap, depth)
                 }
-                object => Err(js_stdlib_error(format!(
-                    "JSON.stringify received unsupported {} object",
-                    object.kind_name()
-                ))),
             };
             active.remove(id);
             result
@@ -588,7 +602,7 @@ fn stringify_heap_record(
     );
     let entries = ordered_entries
         .into_iter()
-        .filter(|(_, value)| !matches!(value, Value::Undefined))
+        .filter(|(_, value)| !matches!(value, Value::Undefined) && !is_function(heap, value))
         .map(|(key, value)| {
             let separator = if gap.is_empty() { ":" } else { ": " };
             Ok(format!(
@@ -607,6 +621,11 @@ fn stringify_heap_record(
         })
         .collect::<Result<Vec<_>, RuntimeError>>()?;
     Ok(join_json_container('{', '}', entries, gap, depth))
+}
+
+/// Whether `value` is a function, which `JSON.stringify` serializes to nothing.
+fn is_function(heap: &Heap, value: &Value) -> bool {
+    matches!(value, Value::Ref(id) if matches!(heap.get(*id), Ok(HeapObject::Closure { .. })))
 }
 
 fn join_json_container(

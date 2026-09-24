@@ -20,6 +20,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[path = "workflow_graph/goldens.rs"]
+mod goldens;
+
 use lash_typescript::workflow_graph::{
     TypeScriptStatementText, workflow_graph_from_artifact, workflow_graph_from_source,
     workflow_graph_to_source,
@@ -29,67 +32,6 @@ use lashlang::{
     Declaration, Expr, LinkedModule, ModuleArtifact, Program, WorkflowDeclaration, WorkflowGraph,
     WorkflowNodeKind,
 };
-
-/// Sources that exercise every structure the ownership walk distinguishes.
-const CORPUS: &[&str] = &[
-    // A multi-statement loop body with a branch, a key loop, plain and
-    // compound member assignment in braced and unbraced arms, try, and an
-    // array callback.
-    r#"const items = [1, 2];
-const box = { value: 0 };
-for (const item of items) {
-  await tools.echo({ value: item });
-  if (item > 1) {
-    await tools.echo({ value: "then" });
-  } else {
-    box.value = await tools.echo({ value: "else" });
-  }
-}
-for (const field in box) {
-  await tools.echo({ value: field });
-  await tools.echo({ value: "keys" });
-}
-if (box.value === 0) box.value = await tools.echo({ value: 1 });
-if (box.value === 1) {
-  box.value += 2;
-}
-try {
-  await tools.echo({ value: "try" });
-} catch (error) {
-  await tools.echo({ value: "catch" });
-}
-const doubled = items.map((item) => item * 2);
-finish(doubled);
-"#,
-    // A process literal with a multi-statement loop, a literal nested in it,
-    // and an async closure (an arrow in a record field is a closure, not a
-    // process literal).
-    r#"const worker = async (limit: number) => {
-  for (const step of [1, 2]) {
-    await tools.echo({ value: step });
-    await tools.echo({ value: limit });
-  }
-  const inner = async () => {
-    await tools.echo({ value: "inner" });
-    return 1;
-  };
-  const nested = await processes.start({ definition: inner });
-  const handle = await processes.start({
-    definition: async () => {
-      await tools.echo({ value: "closure" });
-      return 1;
-    }
-  });
-  return 2;
-};
-const started = await processes.start({ definition: worker, args: { limit: 3 } });
-finish("started");
-"#,
-    // The number literals whose identity the one IR number rule settles.
-    "const values = [NaN, Infinity, -Infinity, 0, -0];\nfinish(values.length);\n",
-    // Non-canonically formatted source.
-    "const   a=1;for(const x of [a,2]){await tools.echo({value:x});await tools.echo({value:a})}\nfinish(a)",
-];
 
 fn link(source: &str) -> LinkedModule {
     lash_typescript::link(source, &test_environment())
@@ -274,7 +216,7 @@ fn alpha_rename(program: &Program, private: &BTreeSet<String>) -> Program {
 #[test]
 fn l3_alpha_renaming_private_binders_preserves_node_ids() {
     let mut authored_locals = BTreeSet::new();
-    for source in CORPUS {
+    for source in goldens::CARRIER_LAWS {
         let program = link(source).artifact.ir().clone();
         let private = private_binders(&program);
         authored_locals.extend(
@@ -408,7 +350,7 @@ fn l3_a_rename_inside_a_lifted_literal_remints_one_owner_everywhere() {
 
 #[test]
 fn l4_draft_and_admitted_projections_agree() {
-    for source in CORPUS {
+    for source in goldens::CARRIER_LAWS {
         let draft = workflow_graph_from_source(source).expect("corpus source projects");
         let linked = link(source);
         let admitted = workflow_graph_from_artifact(&linked.artifact);

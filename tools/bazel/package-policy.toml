@@ -132,6 +132,13 @@ packages = ["lash-internal-remote-protocol"]
 kinds = ["unit-test"]
 compile_data = ["//:host_schemas"]
 
+# The Node session oracle (FIG-3599) runs the dialect's session corpus through
+# the RLM executor; the corpus and its Node answers live with the dialect.
+[[rule]]
+packages = ["lash-internal-protocol-rlm"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lash-typescript:session_oracle_corpus"]
+
 # --- Binary and integration-test support -------------------------------------
 
 # The checked-in workspace fact that replaces a nested `cargo metadata` call
@@ -178,6 +185,14 @@ packages = ["lash-internal-typescript"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["integration"]
 compile_data = ["//examples:codemode_parity_cells", "//:workflow_graph_schema"]
+
+# The corpus laws (FIG-3599) run over every corpus, the codemode parity cells
+# among them.
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["corpus_laws"]
+compile_data = ["//examples:codemode_parity_cells"]
 
 # The schema agreement tests compile the published trace record and graph
 # snapshot schemas in and validate real serialized records against them.
@@ -370,6 +385,9 @@ queued_claim_atomicity = { srcs = ["tests/support/queued_claim_atomicity.rs"] }
 
 [filegroups.lash-internal-lashlang]
 old_module_fixture = { srcs = ["tests/fixtures/module-artifact-old.json"] }
+
+[filegroups.lash-internal-typescript]
+session_oracle_corpus = { srcs = ["tests/differential/sessions/expectations.json"] }
 
 # --- trybuild fixtures ---------------------------------------------------------
 

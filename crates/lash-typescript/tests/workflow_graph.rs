@@ -117,26 +117,9 @@ fn assert_lens_laws(source: &str) {
     );
 }
 
-const REPRESENTATIVE: &str = r#"const child = async (input: unknown) => {
-    let total = 0;
-    for (const value of input.values) {
-      await sleep(1);
-    }
-    const signal = await waitSignal("refresh");
-    return total;
-  };
-const items = [1, 2, 3].filter((value) => value > 1).map((value) => value * 2);
-if (items.length > 0) {
-  console.log(items);
-} else {
-  console.log("empty");
-}
-finish(items);
-"#;
-
 #[test]
 fn canonical_get_put_and_put_get() {
-    assert_lens_laws(REPRESENTATIVE);
+    assert_lens_laws(goldens::REPRESENTATIVE);
 }
 
 #[test]
@@ -578,9 +561,7 @@ fn reconcile_suppresses_pairs_for_ids_duplicated_at_unmatched_locations() {
 
 #[test]
 fn workflow_graph_ir_json_golden_is_exact() {
-    let graph =
-        workflow_graph_from_source("await tools.lookup({ query: \"x\" });\nawait sleep(\"1s\");\n")
-            .expect("fixture projects");
+    let graph = workflow_graph_from_source(goldens::IR_JSON).expect("fixture projects");
     assert_eq!(graph.schema_version, 16);
     let kinds = serde_json::Value::Array(
         graph
@@ -649,11 +630,9 @@ fn workflow_type_facet_slot_json_golden_is_exact() {
 
 #[test]
 fn workflow_graph_with_facets_json_golden_is_exact() {
-    let graph = workflow_graph_from_source_with_facets(
-        "const answer = await tools.lookup({ query: \"x\" });\nfinish(answer);\n",
-        Some(&facet_environment()),
-    )
-    .expect("golden fixture projects");
+    let graph =
+        workflow_graph_from_source_with_facets(goldens::WITH_FACETS, Some(&facet_environment()))
+            .expect("golden fixture projects");
     let actual = serde_json::to_string_pretty(&graph).expect("golden graph serializes") + "\n";
     assert_eq!(
         actual,
@@ -1579,7 +1558,7 @@ fn canonical_span_goldens_cover_every_textual_node() {
     let fixtures: Vec<(&str, &str, &[&str])> = vec![
         (
             "named-nested-repeated",
-            r#"const worker=async()=>{await tools.echo({value:"same"});await tools.echo({value:"same"});if(true){for(const value of [1]){while(false){await sleep(value);}}}return "done";};"#,
+            goldens::SPAN_NAMED_NESTED_REPEATED,
             &[
                 r#"const worker = async () => {
   await (tools.echo({ value: "same" }));
@@ -1604,9 +1583,9 @@ fn canonical_span_goldens_cover_every_textual_node() {
         ),
         (
             "lifted-inline",
-            r#"await triggers.register({source:{expr:"0 8 * * *"},target:async(event)=>{await tools.echo({value:"inline"});return event;}});"#,
+            goldens::SPAN_LIFTED_INLINE,
             &[
-                "await (triggers.register({ source: { expr: \"0 8 * * *\" }, target: async (event) => {\n  await (tools.echo({ value: \"inline\" }));\n  return event;\n} }))",
+                "await (triggers.register({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: async (event) => {\n  await (tools.echo({ value: \"inline\" }));\n  return event;\n} }))",
                 r#"await (tools.echo({ value: "inline" }))"#,
                 "return event;",
             ],
@@ -2509,3 +2488,5 @@ fn effect_argument_ir_edit_renders_without_an_expression_text_field() {
 
 #[path = "workflow_graph/carrier_fix_round.rs"]
 mod carrier_fix_round;
+#[path = "workflow_graph/goldens.rs"]
+mod goldens;

@@ -143,7 +143,7 @@ opus	141	accept	"[1,2,3][0]"	"1"	-
 opus	142	accept	"[1,2,3][-1]"	"undefined"	-
 opus	143	accept	"[1,2,3][5]"	"undefined"	-
 opus	144	accept	"({a:1}).a"	"1"	-
-opus	145	accept	"({a:1}).b"	"undefined"	-
+opus	145	accept-unlinked	"({a:1}).b"	"undefined"	TS_LINK_ERROR
 opus	146	accept	"({a:1})['a']"	"1"	-
 opus	147	accept	"void 0"	"undefined"	-
 opus	148	accept	"2 ** 3"	"8"	-
@@ -298,7 +298,7 @@ findings	9	accept	"NaN"	"NaN"	-
 findings	10	accept	"Infinity"	"Infinity"	-
 findings	11	accept	"'\\u{10000}' < '\\uff61'"	"true"	-
 findings	12	accept	"((function f(this: number, a: number){ return a; })(7))"	"7"	-
-findings	13	accept	"({a:1}).missing"	"undefined"	-
+findings	13	accept-unlinked	"({a:1}).missing"	"undefined"	TS_LINK_ERROR
 findings	14	accept	"[1][9]"	"undefined"	-
 findings	15	runtime-reject	"(() => { const a = [1]; a[3] = 9; return `${a.length}|${a[1]}|${a[2]}|${a[3]}`; })()"	"4|undefined|undefined|9"	TS_SPARSE_ARRAY_UNSUPPORTED
 findings	16	runtime-reject	"(() => { const a = [1,2]; a[-1] = 9; return a[-1]; })()"	"9"	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
@@ -367,7 +367,7 @@ findings	78	accept	"(() => { let i=0; do { i++; } while(i<2); return i; })()"	"2
 findings	79	accept	"(() => `${-1 >>> 1}|${2147483647 << 1}|${~0}|${5 & 3}|${5 | 2}|${5 ^ 1}`)()"	"2147483647|-2|-1|1|7|4"	-
 findings	80	accept	"(() => [...[4,5].entries()].map(x=>x.join(':')).join(','))()"	"0:4,1:5"	-
 findings	81	accept	"(() => { function f(){ const before=x; if(true){var x=3;} return `${before}|${x}`; } return f(); })()"	"undefined|3"	-
-findings	82	accept	"(() => { const k='x'; const n=2; const o={n,[k]:1,f(){return this;}}; return `${o.n}|${o.x}`; })()"	"2|1"	-
+findings	82	accept-unlinked	"(() => { const k='x'; const n=2; const o={n,[k]:1,f(){return this;}}; return `${o.n}|${o.x}`; })()"	"2|1"	TS_LINK_ERROR
 findings	83	accept	"(() => 0xff + 0o10 + 0b10 + 1_000)()"	"1265"	-
 findings	84	accept	"(() => { 'use strict'; return 3; })()"	"3"	-
 findings	85	accept	"(() => { function f(){ return this; } return f(); })()"	"undefined"	-
@@ -424,7 +424,7 @@ findings	135	accept	"(() => `${Array.isArray([])}|${Array.isArray({})}`)()"	"tru
 findings	136	accept	"(() => String.fromCharCode(65,66)+String.fromCodePoint(0x1f600))()"	"AB😀"	-
 findings	137	accept	"(() => Object.entries({b:2,a:1}).map(x=>x.join(':')).join(','))()"	"b:2,a:1"	-
 findings	138	accept	"(() => Object.fromEntries([['a',1],['b',2]]).b)()"	"2"	-
-findings	139	accept	"(() => { const a={x:1}; const b=Object.assign(a,{y:2},{x:3}); return `${a.x}|${a.y}|${a===b}`; })()"	"3|2|true"	-
+findings	139	accept-unlinked	"(() => { const a={x:1}; const b=Object.assign(a,{y:2},{x:3}); return `${a.x}|${a.y}|${a===b}`; })()"	"3|2|true"	TS_LINK_ERROR
 findings	140	accept	"(() => `${Object.hasOwn({x:1},'x')}|${({x:1}).hasOwnProperty('x')}`)()"	"true|true"	-
 findings	141	accept	"(() => `${Object.is(NaN,NaN)}|${Object.is(-0,0)}`)()"	"true|false"	-
 findings	142	accept	"(() => JSON.stringify(Object.groupBy([1,2,3,4],v=>v%2)))()"	"{\"0\":[2,4],\"1\":[1,3]}"	-
@@ -441,7 +441,7 @@ findings	152	accept	"(() => `${(1.25).toFixed(1)}|${(123).toExponential(1)}|${(1
 findings	153	accept	"(() => JSON.stringify({a:1,b:2,c:3},['c','a'],2))()"	"{\n  \"c\": 3,\n  \"a\": 1\n}"	-
 findings	154	accept	"(() => JSON.stringify({a:1,b:2},(k,v)=>k==='b'?undefined:v))()"	"{\"a\":1}"	-
 findings	155	accept	"(() => { const x={toJSON(k){return {key:k,ok:true};}}; return JSON.stringify(x); })()"	"{\"key\":\"\",\"ok\":true}"	-
-findings	156	accept	"(() => { try { const a={}; a.self=a; JSON.stringify(a); } catch(e) { return `${e.name}: ${e.message}`; } })()"	"TypeError: Converting circular structure to JSON\n    --> starting at object with constructor 'Object'\n    --- property 'self' closes the circle"	-
+findings	156	accept-unlinked	"(() => { try { const a={}; a.self=a; JSON.stringify(a); } catch(e) { return `${e.name}: ${e.message}`; } })()"	"TypeError: Converting circular structure to JSON\n    --> starting at object with constructor 'Object'\n    --- property 'self' closes the circle"	TS_LINK_ERROR
 findings	157	accept	"(() => `${1e20}|${1e21}|${0.1+0.2}|${5e-7}|${6e-7}|${-0}|${Number.MAX_SAFE_INTEGER+1}`)()"	"100000000000000000000|1e+21|0.30000000000000004|5e-7|6e-7|0|9007199254740992"	-
 findings	158	accept	"(() => [1e20,1e21,0.1+0.2,5e-7,6e-7,-0,Number.MAX_SAFE_INTEGER+1].map(String).join('|'))()"	"100000000000000000000|1e+21|0.30000000000000004|5e-7|6e-7|0|9007199254740992"	-
 findings	159	accept	"(() => JSON.stringify([1e20,1e21,0.1+0.2,5e-7,6e-7,-0,Number.MAX_SAFE_INTEGER+1]))()"	"[100000000000000000000,1e+21,0.30000000000000004,5e-7,6e-7,0,9007199254740992]"	-
@@ -514,7 +514,7 @@ findings	225	accept	"'aa ba'.replace(/a/gy,'x')"	"xx ba"	-
 findings	226	accept	"(() => [...'aa ba'.matchAll(/a/gy)].map(m=>m.index).join(','))()"	"0,1"	-
 findings	227	accept	"(() => `${/^b/m.test('a\\nb')}|${/a.b/s.test('a\\nb')}`)()"	"true|true"	-
 findings	228	accept	"(() => { const a=[0]; return 'xx'.replace(/x/g,()=>{a[0]=a[0]+1; return a;}); })()"	"12"	-
-findings	229	accept	"(() => { const o={}; o['\\0lash.regexp.match']=true; o.length=1e100; return `${Array.isArray(o)}|${Object.keys(o).includes('\\0lash.regexp.match')}`; })()"	"false|true"	-
+findings	229	accept-unlinked	"(() => { const o={}; o['\\0lash.regexp.match']=true; o.length=1e100; return `${Array.isArray(o)}|${Object.keys(o).includes('\\0lash.regexp.match')}`; })()"	"false|true"	TS_LINK_ERROR
 findings	230	reject	"new RegExp(/a/g)"	"/a/g"	TS_NEW_UNSUPPORTED
 findings	231	accept	"new Set('a'.matchAll(/a/g)).size"	"1"	-
 findings	232	accept	"(() => { const m=/(?<x>a)(b)/.exec('ab'); m[0]='changed'; m.index=7; m['input']='input'; m.groups={x:'group'}; m.length=1; return `${m[0]}|${m.index}|${m.input}|${m.groups.x}|${m.length}`; })()"	"changed|7|input|group|1"	-
@@ -545,3 +545,18 @@ findings	256	accept	"JSON.stringify(Object.fromEntries('a1b2'.matchAll(/([a-z])(
 findings	257	accept	"new Set('a1b2'.matchAll(/[a-z]/g)).size"	"2"	-
 findings	258	runtime-reject	"JSON.stringify(JSON.parse('{\"__proto__\":1,\"a\":2}'))"	"{\"__proto__\":1,\"a\":2}"	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 findings	259	runtime-reject	"Object.keys(JSON.parse('{\"a\":1,\"__proto__\":2}')).join(',')"	"a,__proto__"	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+findings	260	accept	"JSON.stringify(new Map([['a', 1]]))"	"{}"	-
+findings	261	accept	"JSON.stringify(new Set([1]))"	"{}"	-
+findings	262	accept	"JSON.stringify(/a/g)"	"{}"	-
+findings	263	accept	"JSON.stringify(new Date(0))"	"\"1970-01-01T00:00:00.000Z\""	-
+findings	264	accept	"JSON.stringify([() => 1])"	"[null]"	-
+findings	265	accept	"JSON.stringify({ f: () => 1, a: 1 })"	"{\"a\":1}"	-
+findings	266	accept	"JSON.stringify({ m: new Map(), s: new Set() })"	"{\"m\":{},\"s\":{}}"	-
+findings	267	accept	"JSON.stringify(() => 1)"	"undefined"	-
+findings	268	accept	"(() => { let total = 0; for (var n of [1, 2]) { total += n; } return `${n}|${total}`; })()"	"2|3"	-
+findings	269	accept	"(() => { var x = 0; for (var x of [1, 2]) {} return x; })()"	"2"	-
+findings	270	accept	"(() => { for (var k in { a: 1, b: 2 }) {} return k; })()"	"b"	-
+findings	271	reject	"(() => { var v = 1; v = 2; return v; })()"	"2"	TS_ASSIGN_CONST
+findings	272	open-defect	"(() => { let x = 1; const f = () => x; x = 2; return f(); })()"	"2"	mutable-capture-read
+findings	273	reject	"(() => { function h(p) { p = p + 1; return p; } return h(1); })()"	"2"	TS_ASSIGN_CONST
+findings	274	reject	"(() => { try { throw 1; } catch (e) { e = 2; return e; } })()"	"2"	TS_ASSIGN_CONST

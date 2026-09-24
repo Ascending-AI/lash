@@ -91,6 +91,16 @@ impl Session {
     /// about what the *next* cell sees, so a scenario has to be able to run a
     /// failing cell without the harness deciding that is a test failure.
     pub(crate) fn run(&mut self, code: &str) -> CellOutcome {
+        let response = self.run_observed(code);
+        CellOutcome {
+            error: response.error,
+            finish: response.terminal_finish,
+        }
+    }
+
+    /// Runs a cell and returns everything it reported: its printed
+    /// observations as well as its failure and terminal value.
+    pub(crate) fn run_observed(&mut self, code: &str) -> lash_core::ExecResponse {
         let request = ExecRequest {
             language: LANGUAGE_ID.to_string(),
             code: code.to_string(),
@@ -117,10 +127,7 @@ impl Session {
         if self.mode == HarnessMode::RestartBetweenCells {
             self.restart();
         }
-        CellOutcome {
-            error: response.error,
-            finish: response.terminal_finish,
-        }
+        response
     }
 
     /// Runs a cell that the scenario requires to succeed.
@@ -199,6 +206,15 @@ impl Session {
             }
             out
         })
+    }
+
+    /// The names the next cell links against: the session's live globals.
+    pub(crate) fn global_names(&self) -> std::collections::BTreeSet<String> {
+        self.state
+            .bound_variable_values(&std::collections::BTreeSet::new())
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
     }
 
     /// The session's persisted execution state: the root record and every leaf

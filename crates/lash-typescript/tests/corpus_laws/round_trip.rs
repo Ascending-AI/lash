@@ -1,0 +1,162 @@
+//! The print → reparse → admit round-trip law over every corpus.
+//!
+//! For every program: lower and admit it (link), project the admitted
+//! artifact through the lens, print the graph, then reparse and admit the
+//! printed source. The printed program must admit to the same `module_ref`
+//! and `source_identity` as the original: the lens's text is the program, not
+//! a paraphrase of it. Where the printer cannot spell a program it refuses
+//! with a typed [`TypeScriptSourceError`], and every such refusal is a row of
+//! `round_trip_refusals.tsv` with its reason. The allowlist is a ratchet: a
+//! listed program that now round-trips, or a listed refusal that changed,
+//! fails until the row is deleted or corrected.
+
+use std::collections::BTreeMap;
+
+use lash_typescript::workflow_graph::{
+    GraphRenderError, typescript_program_source, workflow_graph_from_artifact,
+    workflow_graph_to_source_in_session,
+};
+
+use super::corpora::{self, CorpusProgram};
+
+const REFUSALS: &str = include_str!("round_trip_refusals.tsv");
+
+/// What the round trip did with one program.
+#[derive(Debug, PartialEq)]
+enum Trip {
+    /// The printed program admits to the original's module and identity.
+    Agrees,
+    /// The printer refused, typed.
+    Refused(String),
+    /// Anything else: a law violation.
+    Violates(String),
+}
+
+fn round_trip(program: &CorpusProgram) -> Result<Trip, String> {
+    let environment = program.environment();
+    let linked = lash_typescript::link(&program.source, &environment)
+        .map_err(|error| format!("does not admit: {error}"))?;
+    // The lens's canonical text is the printer's spelling of the admitted
+    // program; a program the printer cannot spell is refused here, typed,
+    // before the graph carries the refusal as an opaque node's placeholder.
+    // That text is itself a print of the admitted program (the one node
+    // spans address), so it re-admits to the same module as well.
+    let canonical = match typescript_program_source(linked.artifact.ir()) {
+        Ok(canonical) => canonical,
+        Err(error) => return Ok(Trip::Refused(error.to_string())),
+    };
+    if let Some(violation) = readmits(&linked, &canonical, &environment, "canonical text") {
+        return Ok(Trip::Violates(violation));
+    }
+    let graph = workflow_graph_from_artifact(&linked.artifact);
+    let printed = match workflow_graph_to_source_in_session(&graph, &program.globals) {
+        Ok(printed) => printed,
+        Err(GraphRenderError::CanonicalSource(error)) => {
+            return Ok(Trip::Refused(error.to_string()));
+        }
+        Err(error) => {
+            return Ok(Trip::Violates(format!(
+                "the admitted view does not render: {error}"
+            )));
+        }
+    };
+    Ok(readmits(&linked, &printed, &environment, "printed view")
+        .map_or(Trip::Agrees, Trip::Violates))
+}
+
+/// Whether `printed` re-admits to `linked`'s module and identity, or how it
+/// does not.
+fn readmits(
+    linked: &lashlang::LinkedModule,
+    printed: &str,
+    environment: &lashlang::LashlangHostEnvironment,
+    what: &str,
+) -> Option<String> {
+    let relinked = match lash_typescript::link(printed, environment) {
+        Ok(relinked) => relinked,
+        Err(error) => {
+            return Some(format!(
+                "the {what} does not admit: {error}\n--- printed\n{printed}"
+            ));
+        }
+    };
+    let mut differences = Vec::new();
+    if relinked.artifact.module_ref() != linked.artifact.module_ref() {
+        differences.push("module_ref");
+    }
+    if relinked.artifact.source_identity() != linked.artifact.source_identity() {
+        differences.push("source_identity");
+    }
+    (!differences.is_empty()).then(|| {
+        format!(
+            "the {what} admits to a different {} (first IR difference: {})\n--- printed\n{printed}",
+            differences.join(" and "),
+            super::first_difference(
+                &serde_json::to_value(linked.artifact.ir()).expect("the IR serializes"),
+                &serde_json::to_value(relinked.artifact.ir()).expect("the IR serializes"),
+                "ir",
+            )
+            .unwrap_or_else(|| "none; the refs differ outside the IR".to_string()),
+        )
+    })
+}
+
+/// `program id` → (refusal, reason).
+fn allowlist() -> BTreeMap<&'static str, (&'static str, &'static str)> {
+    let mut rows = BTreeMap::new();
+    for line in REFUSALS
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let [id, refusal, reason] = line.split('\t').collect::<Vec<_>>()[..] else {
+            panic!("malformed refusal row: {line}")
+        };
+        assert!(reason.len() > 10, "{id}: a refusal row gives its reason");
+        assert!(
+            rows.insert(id, (refusal, reason)).is_none(),
+            "{id} is listed twice"
+        );
+    }
+    rows
+}
+
+#[test]
+fn every_corpus_program_round_trips_or_is_an_allowlisted_refusal() {
+    let mut allowlist = allowlist();
+    let mut failures = Vec::new();
+    let mut agreed = 0usize;
+    for program in corpora::all() {
+        let listed = allowlist.remove(program.id.as_str());
+        match (round_trip(&program), listed) {
+            (Ok(Trip::Agrees), None) => agreed += 1,
+            (Ok(Trip::Agrees), Some(_)) => failures.push(format!(
+                "{}: round-trips now; delete its refusal row (ratchet)",
+                program.id
+            )),
+            (Ok(Trip::Refused(refusal)), Some((listed, _))) if refusal == listed => {}
+            (Ok(Trip::Refused(refusal)), Some((listed, _))) => failures.push(format!(
+                "{}: refuses `{refusal}`, but its row names `{listed}`",
+                program.id
+            )),
+            (Ok(Trip::Refused(refusal)), None) => failures.push(format!(
+                "{}: the printer refuses `{refusal}` and no row allows it\n{}",
+                program.id, program.source
+            )),
+            (Ok(Trip::Violates(violation)), _) => failures.push(format!(
+                "{}: {violation}\n--- source\n{}",
+                program.id, program.source
+            )),
+            (Err(error), _) => failures.push(format!("{}: {error}", program.id)),
+        }
+    }
+    for id in allowlist.keys() {
+        failures.push(format!("{id}: the refusal row names no corpus program"));
+    }
+    assert!(
+        failures.is_empty(),
+        "{} programs round-trip; {} do not:\n{}",
+        agreed,
+        failures.len(),
+        failures.join("\n")
+    );
+}

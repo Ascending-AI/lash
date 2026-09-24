@@ -1,1 +1,4 @@
 tools/bazel/patches/*.patch whitespace=-blank-at-eol,-blank-at-eof
+# Vendored Test262 sources stay byte-identical to the pinned upstream
+# (`sync.mjs check`), whitespace included.
+crates/lash-typescript/tests/test262/test/** whitespace=-blank-at-eol,-blank-at-eof,-trailing-space

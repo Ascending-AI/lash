@@ -126,6 +126,38 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "corpus_laws__test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "corpus_laws",
+    crate_root = "tests/corpus_laws.rs",
+    declared_features = [
+        "testing",
+    ],
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    extra_compile_data = [
+        "//examples:codemode_parity_cells",
+    ],
+    library = ":lash-typescript",
+    library_crate_name = "lash_typescript",
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    rustc_env = {},
+    tags = [
+        "dev-deferred",
+    ],
+    version = "0.0.0-dev",
+)
+
+filegroup(
+    name = "session_oracle_corpus",
+    srcs = [
+        "tests/differential/sessions/expectations.json",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
