@@ -1025,18 +1025,20 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
         RuntimePerfScenario::Standard,
     ] {
         let phases = required_phases(scenario);
-        for expected in [
-            "prepared_turn",
-            "commit_admission.product_attempt",
-            "committed_turn",
-            "post_commit_delivery",
-        ] {
+        for expected in ["prepared_turn", "committed_turn", "post_commit_delivery"] {
             assert!(
                 phases.contains(&expected),
                 "{} is missing required phase {expected}",
                 scenario.name()
             );
         }
+        // Restate orders a turn's commit on its own journal, so the
+        // in-process lane never takes local commit admission.
+        assert!(
+            !phases.contains(&"commit_admission.product_attempt"),
+            "{} requires local commit admission on the Restate lane",
+            scenario.name()
+        );
         for removed in [
             "finalize_turn",
             "persist_turn",
@@ -1049,6 +1051,19 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
                 scenario.name()
             );
         }
+    }
+    // The durable SQLite lanes admit their commits locally.
+    for scenario in [
+        RuntimePerfScenario::DurableStandardToolTurnSqlite,
+        RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
+        RuntimePerfScenario::DurableAgentChildTurnSqlite,
+        RuntimePerfScenario::SqliteStoreReopen,
+    ] {
+        assert!(
+            required_phases(scenario).contains(&"commit_admission.product_attempt"),
+            "{} is missing required phase commit_admission.product_attempt",
+            scenario.name()
+        );
     }
 }
 

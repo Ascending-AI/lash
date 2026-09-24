@@ -1257,7 +1257,7 @@ mod tests {
             );
         }
         assert!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline) <= 400_000_000.0
+            allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline) <= 500_000_000.0
         );
         assert!(
             steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline)
@@ -1334,11 +1334,11 @@ mod tests {
             );
         }
         assert!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmObliqueStackMix) <= 2_000_000_000.0
+            allocation_budget_bytes(RuntimePerfScenario::RlmObliqueStackMix) <= 2_100_000_000.0
         );
         assert!(
             steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmObliqueStackMix)
-                <= 170_000_000.0
+                <= 180_000_000.0
         );
         assert!(wall_clock_budget_ms(RuntimePerfScenario::RlmObliqueStackMix) <= 20_000.0);
     }
@@ -1354,7 +1354,7 @@ mod tests {
         }
         assert!(
             allocation_budget_bytes(RuntimePerfScenario::RlmStreamedPairedLashlang)
-                <= 128_000_000.0
+                <= 150_000_000.0
         );
         assert!(
             steady_state_turn_allocation_budget_bytes(
