@@ -332,13 +332,23 @@ async fn get_at_path(
     Ok(StoredAttachment { bytes })
 }
 
+/// Deletes the object at `path`; an object that is already absent is a no-op.
+///
+/// S3 deletes go through DeleteObjects, whose answer for a key that never
+/// existed differs by implementation: AWS S3 and MinIO report it `<Deleted>`,
+/// Garage reports a per-key `<Error><Code>NoSuchKey</Code>`, which
+/// `object_store` surfaces as an opaque per-key failure rather than
+/// `NotFound`. A delete promises only that the object is absent afterwards,
+/// so a failed delete is re-checked with a HEAD: an object that is absent is
+/// the no-op the delete would have been, and anything else is the failure.
 async fn delete_at_path(store: &dyn ObjectStore, path: Path) -> Result<(), AttachmentStoreError> {
     match store.delete(&path).await {
-        Ok(()) => {}
-        Err(object_store::Error::NotFound { .. }) => {}
-        Err(err) => return Err(backend_error("delete", err)),
+        Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+        Err(err) => match store.head(&path).await {
+            Err(object_store::Error::NotFound { .. }) => Ok(()),
+            _ => Err(backend_error("delete", err)),
+        },
     }
-    Ok(())
 }
 
 fn backend_error(operation: &'static str, err: object_store::Error) -> AttachmentStoreError {
@@ -834,6 +844,9 @@ mod tests {
         )
     }
 }
+
+#[cfg(test)]
+mod delete_response_tests;
 
 #[cfg(test)]
 mod redaction_tests {
