@@ -603,3 +603,52 @@ findings	314	accept	"'x-x'.replaceAll('x', '|$1|')"	"|$1|-|$1|"	-
 findings	315	accept	"'foo-x-bar'.replace(/(x)|(y)/, '|$2|')"	"foo-||-bar"	-
 findings	316	accept	"'foo-x-bar'.replace(/(?<n>x)/, '|$<n>|$<miss>|')"	"foo-|x||-bar"	-
 findings	317	accept	"'foo-x-bar'.replace(/(x)/, \"|$$|$&|$`|$'|\")"	"foo-|$|x|foo-|-bar|-bar"	-
+findings	318	accept	"(() => { const p=/a./gi; const r=new RegExp(p); return r.source+'|'+r.flags; })()"	"a.|gi"	-
+findings	319	accept	"(() => { const p=/a./gi; const r=new RegExp(p,'y'); return r.source+'|'+r.flags; })()"	"a.|y"	-
+findings	320	accept	"(() => { const p=/a./gi; const r=new RegExp(p,undefined); return r.source+'|'+r.flags; })()"	"a.|gi"	-
+findings	321	accept	"(() => { const r=new RegExp(undefined,undefined); return r.source+'|'+r.flags; })()"	"(?:)|"	-
+findings	322	accept	"(() => { try { /x/(); return 'uncaught'; } catch(e) { return e instanceof TypeError ? 'TypeError' : e.name; } })()"	"TypeError"	-
+findings	323	accept	"/(?:(?<x>a)|(?<x>b))\\k<x>/.test('aa')"	"true"	-
+findings	324	accept	"/(?:(?<x>a)|(?<x>b))\\k<x>/.test('bb')"	"true"	-
+findings	325	accept	"/(?:(?<x>a)|(?<x>b))\\k<x>/.test('ab')"	"false"	-
+findings	326	accept	"/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.test('xz')"	"true"	-
+findings	327	accept	"/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.test('xzx')"	"false"	-
+findings	328	accept	"(() => { const m=/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('bb'); return m.slice(0,3).join('|'); })()"	"bb||b"	-
+findings	329	accept	"(() => { const m=/(?:(?:(?<x>a)|(?<x>b))\\k<x>){2}/.exec('aabb'); return m.groups.x; })()"	"b"	-
+findings	330	accept	"/(a)(?i:\\1)/.test('aA')"	"true"	-
+findings	331	accept	"/(a)(?i:\\1)/.test('Aa')"	"false"	-
+findings	332	accept	"/(a)(?-i:\\1)/i.test('aA')"	"false"	-
+findings	333	accept	"/(a)(?-i:\\1)/i.test('AA')"	"true"	-
+findings	334	accept	"/(?i:\\b)/u.test('\\u017f')"	"true"	-
+findings	335	accept	"/(?i:\\b)/u.test('\\u212a')"	"true"	-
+findings	336	accept	"/(?-i:\\b)/ui.test('\\u017f')"	"false"	-
+findings	337	accept	"/(?-i:\\b)/ui.test('\\u212a')"	"false"	-
+findings	338	accept	"/(?i:Z\\B)/u.test('Z\\u017f')"	"true"	-
+findings	339	accept	"/(?i:Z\\B)/u.test('Z\\u212a')"	"true"	-
+findings	340	accept	"/(?-i:Z\\B)/ui.test('Z\\u017f')"	"false"	-
+findings	341	accept	"/(?-i:Z\\B)/ui.test('Z\\u212a')"	"false"	-
+findings	342	accept	"/(?i:\\w)/u.test('\\u017f')"	"true"	-
+findings	343	accept	"/(?-i:\\w)/iu.test('\\u017f')"	"false"	-
+findings	344	accept	"/(?i:\\p{Lu})/u.test('a')"	"true"	-
+findings	345	accept	"/(?i:\\p{Lu})/u.test('\\u03c3')"	"true"	-
+findings	346	accept	"/(?-i:\\p{Lu})/iu.test('a')"	"false"	-
+findings	347	accept	"/(?i:\\P{Lu})/u.test('A')"	"true"	-
+findings	348	accept	"/(?i:\\P{Lu})/u.test('a')"	"true"	-
+findings	349	accept	"/(?-s:^.$)/s.dotAll"	"true"	-
+findings	350	accept	"/(?s:.)/.test('\\n')"	"true"	-
+findings	351	accept	"/(?s:.)/.dotAll"	"false"	-
+findings	352	accept	"/(?m:^b$)/.test('a\\nb')"	"true"	-
+findings	353	accept	"/(?-m:^b$)/m.test('a\\nb')"	"false"	-
+findings	354	accept	"'gnulluna'.match(null)[0]"	"null"	-
+findings	355	accept	"'gnulluna'.search(null)"	"1"	-
+findings	356	accept	"String('undefined').search(undefined)"	"0"	-
+findings	357	accept	"'1234567890'.match(3)[0]"	"3"	-
+findings	358	accept	"'abc'.match().length"	"1"	-
+findings	359	accept	"'abc'.search('b','ignored')"	"1"	-
+findings	360	accept	"'xBy'.match(/b/i)[0]"	"B"	-
+findings	361	accept	"(() => { const r=/x/; return [0,true,r,3,false].lastIndexOf(r,2); })()"	"2"	-
+findings	362	accept	"(() => { const r=/x/; return [0,true,3,r,false].lastIndexOf(r,2); })()"	"-1"	-
+findings	363	accept	"[0,/x/,3].indexOf(/x/)"	"-1"	-
+findings	364	accept	"(() => { const r=/x/; return [[r],r].includes(r); })()"	"true"	-
+findings	365	runtime-reject	"'AB'.match({ toString: function() { return 'AB'; } })"	"AB"	TS_OBJECT_STRING_COERCION
+findings	366	runtime-reject	"[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	"2"	TS_OBJECT_STRING_COERCION
