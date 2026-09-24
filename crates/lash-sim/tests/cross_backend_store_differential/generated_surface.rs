@@ -1343,6 +1343,10 @@ impl SurfaceRunner {
     /// Poll the durable journal until the child's settlement rank is
     /// allocated, bounded by `GROUP_OP_BOUND`.
     async fn wait_group_row_settled(&self, replay_key: &str) {
+        // A lane without groups opened none, so no row is owed.
+        if self.groups.is_none() {
+            return;
+        }
         let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
         loop {
             if self
@@ -1394,6 +1398,10 @@ impl SurfaceRunner {
     /// there within the bound refuses the step, and that refusal diverges
     /// from the memory runner's `Ok`.
     async fn wait_group_lifecycle_settled(&mut self, group: u8) -> Result<(), String> {
+        // A lane without groups opened none, so no finalization is owed.
+        if self.groups.is_none() {
+            return Ok(());
+        }
         let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
         loop {
             if self.reader.group_lifecycle_settled(&group_key(group)).await {
