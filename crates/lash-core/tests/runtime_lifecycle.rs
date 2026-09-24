@@ -67,6 +67,7 @@ mod runtime {
 
         mod attachment_continuation;
         mod child_sessions;
+        mod commit_bytes;
         mod persistence;
         mod plugin_lifecycle;
         mod tool_restore_report;
