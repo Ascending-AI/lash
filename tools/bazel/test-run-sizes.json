@@ -335,26 +335,12 @@
     "peak_bytes": 58265600,
     "samples": 3
   },
-  "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_676c8c38": {
-    "cpu_count": 2,
-    "memory_kb": 1048576,
-    "p95_cores": 1.28,
-    "peak_bytes": 74547200,
-    "samples": 4
-  },
   "//crates/lash-protocol-rlm:protocol_drivers__test": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
     "peak_bytes": 18309120,
     "samples": 3
-  },
-  "//crates/lash-protocol-rlm:protocol_drivers__test__fv_676c8c38": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 11411456,
-    "samples": 4
   },
   "//crates/lash-protocol-rlm:test_batch": {
     "cpu_count": 2,
@@ -369,13 +355,6 @@
     "p95_cores": 1.35,
     "peak_bytes": 60219392,
     "samples": 3
-  },
-  "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_676c8c38": {
-    "cpu_count": 2,
-    "memory_kb": 1048576,
-    "p95_cores": 1.49,
-    "peak_bytes": 56393728,
-    "samples": 4
   },
   "//crates/lash-protocol-standard:embedded_builder__test": {
     "cpu_count": 1,
