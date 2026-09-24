@@ -82,6 +82,7 @@ impl RuntimeTurnDriver<'_> {
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::LlmCall {
+                    provider_id: self.policy.provider_id.clone(),
                     request: Box::new(
                         LlmRequestSpec::from_request(
                             &request,
@@ -159,13 +160,14 @@ impl RuntimeTurnDriver<'_> {
     pub(in crate::runtime) async fn run_assistant_response_hooks(
         &mut self,
         response: LlmResponse,
+        stream_hook_states: &[crate::runtime::AssistantStreamHookState],
     ) -> Result<crate::runtime::RuntimeAssistantResponseHooksOutcome, RuntimeEffectControllerError>
     {
         let original = response.clone();
         let transforms = self
             .session
             .plugins()
-            .transform_assistant_response(&self.session_id, response)
+            .transform_assistant_response(&self.session_id, response, stream_hook_states)
             .await
             .map_err(|err| {
                 RuntimeEffectControllerError::retryable_response_derivation(format!(
@@ -209,8 +211,8 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(request) => request,
             Err(err) => {
-                return (
-                    Err(LlmCallError {
+                return RuntimeLlmCallOutcome {
+                    result: Err(LlmCallError {
                         message: err.to_string(),
                         retryable: false,
                         kind: crate::ProviderFailureKind::Unknown,
@@ -222,14 +224,15 @@ impl RuntimeTurnDriver<'_> {
                         request_body: None,
                         partial_response: None,
                     }),
-                    false,
-                    None,
-                );
+                    text_streamed: false,
+                    call_record: None,
+                    stream: crate::runtime::LlmStreamRecord::default(),
+                };
             }
         };
         let request_model = request.model.clone();
         let trace_enabled = self.host.core.tracing.trace_sink.is_some();
-        let llm_call_id = trace_enabled.then(|| self.llm_call_id(protocol_iteration));
+        let llm_call_id = trace_enabled.then(|| self.llm_call_id(protocol_iteration, &invocation));
         if let Some(llm_call_id) = llm_call_id.as_ref() {
             crate::runtime::effect::emit_llm_trace_started(
                 &self.host.core.tracing.trace_sink,
@@ -265,15 +268,18 @@ impl RuntimeTurnDriver<'_> {
             ..request
         };
 
+        // Each call runs on its own copy of the provider the turn was admitted
+        // with. Nothing the provider object learns during a call reaches the
+        // next one: a replay, which never runs this body, must make the same
+        // next call as the live pass.
         let mut call_provider = self.policy.provider().clone();
         let completion_sideband = call_provider.prepare_completion(&mut llm_request);
         let task_sideband = completion_sideband.clone();
         let charge_safety = self.policy.charge_safety.clone();
         let mut llm_task = crate::task::spawn(async move {
-            let result = call_provider
+            call_provider
                 .complete_prepared(llm_request, task_sideband, charge_safety)
-                .await;
-            (result, call_provider)
+                .await
         });
         let mut llm_task_abort = AbortOnDrop::new(llm_task.abort_handle());
 
@@ -368,11 +374,9 @@ impl RuntimeTurnDriver<'_> {
                             break Err(err);
                         }
                         if llm_task.is_finished()
-                            && let Ok((provider_result, provider_after)) = (&mut llm_task).await
+                            && let Ok(provider_result) = (&mut llm_task).await
                         {
                             llm_task_abort.disarm();
-                            self.policy.binding =
-                                crate::ProviderBinding::from_provider(provider_after);
                             match provider_result {
                                 Ok(completion) => {
                                     let crate::ProviderCompletion {
@@ -448,7 +452,7 @@ impl RuntimeTurnDriver<'_> {
                     }
                 }
                 join = &mut llm_task => {
-                    let (result, provider_after) = match join {
+                    let result = match join {
                         Ok(v) => {
                             llm_task_abort.disarm();
                             v
@@ -532,7 +536,6 @@ impl RuntimeTurnDriver<'_> {
                             ));
                         }
                     };
-                    self.policy.binding = crate::ProviderBinding::from_provider(provider_after);
                     if let Err(err) = self
                         .drain_provider_stream_queue(
                             &mut host_forwarder,
@@ -629,11 +632,9 @@ impl RuntimeTurnDriver<'_> {
             record_protocol_owned_stop_suppression(&mut result, call_record.as_mut());
         }
 
-        self.finish_assistant_stream_hooks(assistant_stream_finish_reason(
-            &result,
-            abort_requested,
-        ))
-        .await;
+        let stream_hook_states = self
+            .finish_assistant_stream_hooks(assistant_stream_finish_reason(&result, abort_requested))
+            .await;
 
         if let Err(err) = &result {
             tracing::error!(
@@ -678,37 +679,46 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
         }
-        if trace_enabled {
-            self.llm_stream_summaries
-                .insert(protocol_iteration, debug.summary);
+        RuntimeLlmCallOutcome {
+            result,
+            text_streamed,
+            call_record,
+            stream: crate::runtime::LlmStreamRecord {
+                reasoning_published: reasoning_publication.into_published_blocks(),
+                stream_hook_states,
+            },
         }
-        self.reasoning_publication = reasoning_publication;
-        (result, text_streamed, call_record)
     }
 
+    /// Ends the stream for every stream-finished hook and returns the end
+    /// states they hand to phase 2.
     async fn finish_assistant_stream_hooks(
         &mut self,
         reason: crate::plugin::AssistantStreamFinishReason,
-    ) {
+    ) -> Vec<crate::runtime::AssistantStreamHookState> {
         if !self.session.plugins().has_assistant_stream_finished_hooks() {
-            return;
+            return Vec::new();
         }
-        if let Err(err) = self
+        match self
             .session
             .plugins()
             .finish_assistant_stream(&self.session_id, reason)
             .await
         {
-            tracing::error!(
-                session_id = %self.session_id,
-                reason = ?reason,
-                error = %err,
-                "assistant stream cleanup hook failed"
-            );
+            Ok(states) => states,
+            Err(err) => {
+                tracing::error!(
+                    session_id = %self.session_id,
+                    reason = ?reason,
+                    error = %err,
+                    "assistant stream cleanup hook failed"
+                );
+                Vec::new()
+            }
         }
     }
 
-    pub(super) fn handle_log_event(&mut self, event: crate::sansio::LogEvent) {
+    pub(super) fn handle_log_event(&self, event: crate::sansio::LogEvent) {
         if self.host.core.tracing.trace_sink.is_none() {
             return;
         }
@@ -723,7 +733,6 @@ impl RuntimeTurnDriver<'_> {
                 response_parts,
                 ..
             } => {
-                let stream_summary = self.llm_stream_summaries.remove(&protocol_iteration);
                 crate::trace::emit_trace(
                     &self.host.core.tracing.trace_sink,
                     &self.host.core.tracing.trace_context,
@@ -744,7 +753,8 @@ impl RuntimeTurnDriver<'_> {
                         ),
                         usage: Some(crate::trace::trace_usage_from_session(&usage)),
                         provider_usage,
-                        stream_summary: stream_summary.map(|summary| summary.to_json()),
+                        // The call's own trace carries its stream summary.
+                        stream_summary: None,
                         attempts: None,
                     },
                     self.host.core.clock.as_ref(),
@@ -761,7 +771,6 @@ impl RuntimeTurnDriver<'_> {
                 terminal_reason,
                 ..
             } => {
-                let stream_summary = self.llm_stream_summaries.remove(&protocol_iteration);
                 crate::trace::emit_trace(
                     &self.host.core.tracing.trace_sink,
                     &self.host.core.tracing.trace_context,
@@ -784,7 +793,8 @@ impl RuntimeTurnDriver<'_> {
                                 .map(|code| code.namespace().as_str().to_string()),
                             raw,
                         },
-                        stream_summary: stream_summary.map(|summary| summary.to_json()),
+                        // The call's own trace carries its stream summary.
+                        stream_summary: None,
                         attempts: None,
                     },
                     self.host.core.clock.as_ref(),

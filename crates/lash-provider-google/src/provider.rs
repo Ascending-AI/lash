@@ -435,7 +435,16 @@ impl GoogleOAuthProvider {
         let access_token = access_token.into_inner();
         let refresh_token = refresh_token.into_inner();
         if self.project_id.is_none() {
-            self.project_id = self.resolve_project_id(&access_token).await?;
+            self.project_id = match self.resolved_project_id.get() {
+                Some(resolved) => Some(resolved.clone()),
+                None => {
+                    let resolved = self.resolve_project_id(&access_token).await?;
+                    if let Some(resolved) = &resolved {
+                        let _ = self.resolved_project_id.set(resolved.clone());
+                    }
+                    resolved
+                }
+            };
         }
         let project_id = self.project_id.clone();
 
@@ -662,11 +671,13 @@ mod error_detail_tests {
                     assert!(request.url.ends_with(":loadCodeAssist"));
                     r#"{"cloudaicompanionProject":"resolved-project"}"#
                 }
-                1 => {
-                    assert!(request.url.ends_with(":generateContent"));
+                _ => {
+                    assert!(
+                        request.url.ends_with(":generateContent"),
+                        "only the first request resolves the project: request {attempt}"
+                    );
                     r#"{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"done"}]}}]}"#
                 }
-                _ => panic!("unexpected provider request {attempt}"),
             };
             Ok(lash_llm_transport::LlmHttpResponse {
                 status: 200,
@@ -774,6 +785,41 @@ mod error_detail_tests {
             json!("resolved-project")
         );
         assert_eq!(transport.calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// Lash runs every model call on a fresh copy of the turn's provider.
+    /// A copy taken before the first call still reuses the project that call
+    /// resolved, so the lookup runs once per provider, not once per call.
+    #[tokio::test]
+    async fn every_copy_of_a_provider_reuses_the_project_one_call_resolved() {
+        let transport = Arc::new(ProjectResolutionTransport {
+            calls: AtomicUsize::new(0),
+        });
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            u64::MAX,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(transport.clone());
+
+        for _ in 0..2 {
+            let mut call_copy = provider.clone();
+            let response = call_copy
+                .complete(completion_request())
+                .await
+                .expect("credentialed completion succeeds");
+            assert_eq!(response.full_text(), "done");
+            assert_eq!(call_copy.project_id.as_deref(), Some("resolved-project"));
+        }
+        assert_eq!(
+            transport.calls.load(Ordering::SeqCst),
+            3,
+            "one project lookup and two completions"
+        );
     }
 
     #[tokio::test]

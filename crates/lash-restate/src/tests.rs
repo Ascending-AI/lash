@@ -1218,6 +1218,7 @@ fn fig793_llm_envelope() -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         runtime_invocation(RuntimeEffectKind::LlmCall, "fig793-llm"),
         RuntimeEffectCommand::LlmCall {
+            provider_id: "test".to_string(),
             request: Box::new(llm_spec()),
         },
     )
@@ -1234,6 +1235,7 @@ fn fig793_llm_outcome() -> RuntimeEffectOutcome {
         })),
         text_streamed: false,
         call_record: None,
+        stream: Box::default(),
     }
 }
 
@@ -1487,6 +1489,7 @@ fn fig1142_llm_envelope(model_version: usize) -> RuntimeEffectEnvelope {
             "fig1142-replay-divergence",
         ),
         RuntimeEffectCommand::LlmCall {
+            provider_id: "test".to_string(),
             request: Box::new(request),
         },
     )

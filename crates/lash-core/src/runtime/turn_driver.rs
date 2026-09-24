@@ -20,7 +20,6 @@ pub(in crate::runtime) use crate::runtime::turn_loop::{
 };
 pub(super) use events::{emit_semantic_response_parts, send_turn_input_applications};
 use handlers::foreground_exec_graph_key;
-pub(super) use local_effects::TurnEffectStateUpdate;
 pub(super) use trace::protocol_step_trace_event;
 
 pub(super) struct RuntimeTurnDriver<'a> {
@@ -41,19 +40,11 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// logical turn began so a persisted continuation cannot rebuild history
     /// from a later call in the same turn.
     pub(super) latest_prompt_usage: Option<crate::TokenUsage>,
-    pub(super) llm_stream_summaries: HashMap<usize, LlmStreamSummary>,
-    /// Reasoning parts published by the current live LLM effect.
-    ///
-    /// This is deliberately local execution state rather than part of the
-    /// durable effect outcome: a replay that did not re-run the provider did
-    /// not publish its live deltas and must use the completed-response fallback.
-    pub(super) reasoning_publication: ReasoningPublicationState,
     /// Parent-session calls only. Child runtimes assemble their own ledgers.
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
     /// Non-transcript evidence from charge-safety-refused generations, with
     /// cardinality capped at one component per sealed provider attempt.
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
-    pub(super) next_llm_ordinal: usize,
     pub(super) session_services: Arc<RuntimeSessionServices>,
     pub(super) protocol_turn_options: crate::ProtocolTurnOptions,
     pub(super) protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,

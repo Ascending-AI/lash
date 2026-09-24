@@ -498,6 +498,7 @@ impl lash_core::testing::EffectLayer for CapturingRuntimeReplayController {
                     })),
                     text_streamed: false,
                     call_record: None,
+                    stream: Box::default(),
                 })
             }
             RuntimeEffectCommand::Checkpoint { .. } => Ok(RuntimeEffectOutcome::Checkpoint {

@@ -43,11 +43,11 @@ pub use lash_core_effect::promise_semantics;
 mod validation;
 
 pub use envelope::{
-    AssistantResponseHookEvents, CheckpointClaimSet, LlmRequestSpec, ProcessCommand,
-    ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome,
-    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimeLlmCallOutcome, SleepSpec, ToolAttemptEffectOutcome,
-    ToolAttemptLaunch, ToolInvocationEffectOutcome,
+    AssistantResponseHookEvents, AssistantStreamHookState, CheckpointClaimSet, LlmRequestSpec,
+    LlmStreamRecord, ProcessCommand, ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome,
+    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, SleepSpec,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolInvocationEffectOutcome,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{

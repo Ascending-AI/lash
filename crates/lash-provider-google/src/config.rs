@@ -159,6 +159,11 @@ pub struct GoogleOAuthProvider {
     pub(crate) endpoint: String,
     pub(crate) api_version: String,
     pub project_id: Option<String>,
+    /// The project Code Assist resolved for an unconfigured provider, shared
+    /// by every clone of it. Lash runs each model call on its own copy of the
+    /// provider and hands nothing back, so a copy's own `project_id` is gone
+    /// after its call; this keeps the lookup to once per provider.
+    pub(crate) resolved_project_id: Arc<OnceLock<String>>,
     pub options: ProviderOptions,
     pub stream_termination: StreamTermination,
     pub(crate) transport: Arc<dyn LlmHttpTransport>,
@@ -208,6 +213,7 @@ impl GoogleOAuthProvider {
             endpoint: CODE_ASSIST_ENDPOINT.to_string(),
             api_version: CODE_ASSIST_API_VERSION.to_string(),
             project_id: None,
+            resolved_project_id: Arc::new(OnceLock::new()),
             options: ProviderOptions::default(),
             stream_termination: StreamTermination::EofTolerated,
             transport: Arc::clone(&DEFAULT_HTTP_TRANSPORT),

@@ -12,6 +12,7 @@ fn legacy_llm_call_outcome(full_text: &str, parts: Vec<crate::LlmOutputPart>) ->
         })),
         text_streamed: false,
         call_record: None,
+        stream: Box::default(),
     };
     let mut value = serde_json::to_value(outcome).expect("encode legacy outcome fixture");
     value["result"]["Ok"]["full_text"] = serde_json::Value::String(full_text.to_string());

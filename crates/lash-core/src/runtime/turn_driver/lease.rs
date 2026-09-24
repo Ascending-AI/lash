@@ -1,5 +1,4 @@
 use super::*;
-use lash_sansio::sync::MutexExt;
 
 impl<'run> RuntimeTurnDriver<'run> {
     pub(super) fn turn_effect_invocation(
@@ -27,20 +26,21 @@ impl<'run> RuntimeTurnDriver<'run> {
         envelope: RuntimeEffectEnvelope,
         decode: impl FnOnce(RuntimeEffectOutcome) -> Result<T, RuntimeEffectControllerError>,
     ) -> Result<T, RuntimeEffectControllerError> {
+        // The step body runs on a copy of this driver and hands nothing back
+        // but its outcome: every decision it made rides the recorded outcome,
+        // so a replay that never ran the body reconstructs the same state.
         let scoped_effect_controller = self.scoped_effect_controller.clone();
         let outcome = if let Some(task_controller) = scoped_effect_controller.to_static() {
-            let (local_executor, update) = super::local_effects::turn_effect_executor(
+            let local_executor = super::local_effects::turn_effect_executor(
                 self,
                 machine,
                 event_tx.clone(),
                 cancel.clone(),
                 task_controller,
             );
-            let outcome = scoped_effect_controller
+            scoped_effect_controller
                 .execute_effect(envelope, local_executor)
-                .await;
-            self.apply_turn_effect_update(&update);
-            outcome
+                .await
         } else {
             let (task_controller, task_requests) =
                 crate::runtime::effect::EffectTaskController::scoped(
@@ -48,50 +48,23 @@ impl<'run> RuntimeTurnDriver<'run> {
                     scoped_effect_controller.admitted_scope().clone(),
                 )
                 .map_err(RuntimeEffectControllerError::from)?;
-            let (local_executor, update) = super::local_effects::turn_effect_executor(
+            let local_executor = super::local_effects::turn_effect_executor(
                 self,
                 machine,
                 event_tx.clone(),
                 cancel.clone(),
                 task_controller,
             );
-            let outcome = crate::runtime::effect::drive_effect_controller_task(
+            crate::runtime::effect::drive_effect_controller_task(
                 scoped_effect_controller.controller(),
                 scoped_effect_controller.execution_scope().clone(),
                 envelope,
                 local_executor,
                 task_requests,
             )
-            .await;
-            self.apply_turn_effect_update(&update);
-            outcome
+            .await
         };
         let outcome = outcome?;
         decode(outcome)
-    }
-
-    fn apply_turn_effect_update(
-        &mut self,
-        update: &std::sync::Mutex<Option<super::TurnEffectStateUpdate>>,
-    ) {
-        let update = update.lock_recover().take();
-        if let Some(update) = update {
-            self.policy = update.policy;
-            self.llm_stream_summaries = update.llm_stream_summaries;
-            self.reasoning_publication = update.reasoning_publication;
-            self.next_llm_ordinal = update.next_llm_ordinal;
-            self.pending_queue_claims = update.pending_queue_claims;
-            self.pending_turn_input_claims = update.pending_turn_input_claims;
-            self.pending_checkpoint_turn_input_claim = update.pending_checkpoint_turn_input_claim;
-            // FIG-3157: extended, not assigned. The journalled claim set is
-            // merged on top of this copy and dedupes against it, so a
-            // successful checkpoint still routes exactly one copy.
-            self.withheld_terminal_work
-                .queued
-                .extend(update.withheld_terminal_work.queued);
-            self.withheld_terminal_work
-                .turn_inputs
-                .extend(update.withheld_terminal_work.turn_inputs);
-        }
     }
 }

@@ -336,6 +336,11 @@ pub enum SleepSpec {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEffectCommand {
     LlmCall {
+        /// The provider the turn's policy names for this call. With the
+        /// request's model it is the recorded policy the call runs under, so a
+        /// replay whose live policy names another provider diverges instead of
+        /// continuing on it.
+        provider_id: String,
         request: Box<LlmRequestSpec>,
     },
     /// Run host assistant-response hooks over the raw provider completion that
@@ -345,6 +350,10 @@ pub enum RuntimeEffectCommand {
     /// outcome, so this command is reconstructed identically on redrive.
     AssistantResponseHooks {
         response: Box<LlmResponse>,
+        /// The stream-hook end states phase 1 recorded. The response hooks
+        /// read these, never state a stream hook left in plugin memory, so
+        /// phase 2 derives the same response on any worker.
+        stream_hook_states: Vec<AssistantStreamHookState>,
     },
     Direct {
         request: Box<LlmRequestSpec>,
@@ -987,11 +996,41 @@ pub enum ToolAttemptLaunch {
     },
 }
 
-pub type RuntimeLlmCallOutcome = (
-    Result<LlmResponse, LlmCallError>,
-    bool,
-    Option<crate::LlmCallRecord>,
-);
+/// What phase 1 of a turn's LLM call recorded, decoded for the driver.
+#[derive(Debug)]
+pub struct RuntimeLlmCallOutcome {
+    pub result: Result<LlmResponse, LlmCallError>,
+    pub text_streamed: bool,
+    pub call_record: Option<crate::LlmCallRecord>,
+    pub stream: LlmStreamRecord,
+}
+
+/// What a turn's provider stream left behind that later steps read: recorded
+/// with phase 1's outcome so a replay reads it from the journal, never from
+/// the memory of the worker that streamed.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LlmStreamRecord {
+    /// The reasoning blocks the live stream already published, so the driver
+    /// publishes the completed response's remaining reasoning the same way on
+    /// every replay.
+    pub reasoning_published: Vec<crate::llm::types::StreamBlockIdentity>,
+    /// Each plugin's stream-hook end state, which phase 2's
+    /// [`RuntimeEffectCommand::AssistantResponseHooks`] carries.
+    pub stream_hook_states: Vec<AssistantStreamHookState>,
+}
+
+/// The state one plugin's stream hooks reached when the provider stream
+/// finished (see [`crate::plugin::AssistantStreamFinishedHook`]).
+///
+/// Recorded with phase 1's outcome and handed to the same plugin's
+/// assistant-response hook in phase 2, so the derivation never depends on
+/// which worker streamed the completion.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AssistantStreamHookState {
+    pub plugin_id: String,
+    pub state: serde_json::Value,
+}
 
 /// Plugin-attributed runtime events emitted by one assistant-response hook.
 ///
@@ -1022,10 +1061,12 @@ pub enum RuntimeEffectOutcome {
     LlmCall {
         result: Box<Result<LlmResponse, LlmCallError>>,
         text_streamed: bool,
-        /// Sealed provider-attempt history. Older journal entries and calls
-        /// interrupted before the provider handle returns have no record.
+        /// Sealed provider-attempt history. Calls interrupted before the
+        /// provider handle returns have no record.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_record: Option<crate::LlmCallRecord>,
+        /// What the provider stream left that later steps read.
+        stream: Box<LlmStreamRecord>,
     },
     /// Phase 2 of the staged LLM-call boundary.
     ///
@@ -1295,7 +1336,13 @@ impl RuntimeEffectOutcome {
                 result,
                 text_streamed,
                 call_record,
-            } => Ok((*result, text_streamed, call_record)),
+                stream,
+            } => Ok(RuntimeLlmCallOutcome {
+                result: *result,
+                text_streamed,
+                call_record,
+                stream: *stream,
+            }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::LlmCall,
                 other.kind(),

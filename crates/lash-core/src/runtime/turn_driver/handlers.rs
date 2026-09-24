@@ -116,8 +116,16 @@ impl RuntimeTurnDriver<'_> {
             );
         }
         self.ensure_queued_work_cost_is_bounded(&request)?;
-        self.reasoning_publication = ReasoningPublicationState::default();
-        let (result, text_streamed, call_record) = match self
+        let crate::runtime::RuntimeLlmCallOutcome {
+            result,
+            text_streamed,
+            call_record,
+            stream:
+                crate::runtime::LlmStreamRecord {
+                    reasoning_published,
+                    stream_hook_states,
+                },
+        } = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx, cancel)
             .await
         {
@@ -155,7 +163,14 @@ impl RuntimeTurnDriver<'_> {
         let result = match result {
             Ok(raw) if self.session.plugins().has_assistant_response_hooks() => {
                 match self
-                    .invoke_assistant_response_hooks_effect(machine, id, raw, event_tx, cancel)
+                    .invoke_assistant_response_hooks_effect(
+                        machine,
+                        id,
+                        raw,
+                        stream_hook_states,
+                        event_tx,
+                        cancel,
+                    )
                     .await
                 {
                     Ok(response) => Ok(response),
@@ -210,7 +225,7 @@ impl RuntimeTurnDriver<'_> {
                     event_tx,
                     response,
                     prose_projector.as_deref(),
-                    &self.reasoning_publication,
+                    &ReasoningPublicationState::from_published_blocks(reasoning_published),
                 );
             }
         }
