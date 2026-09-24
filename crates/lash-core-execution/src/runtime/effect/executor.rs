@@ -355,14 +355,16 @@ enum LocalTarget {
 
 /// Everything the presentation boundary needs that is not on the journaled
 /// command: the session's plugin chain, the settlement a step may read, the
-/// store retained artifacts are `put` into, and the recorded
+/// store retained artifacts are `put` into, the recorded
 /// attachment-acceptance environment the materialization notices compute
-/// under.
+/// under, and how long the settled call took — an observation the steps may
+/// read, never part of the command's recorded identity.
 pub struct PresentationLocalExecution {
     pub plugins: Arc<crate::plugin::PluginSession>,
     pub settlement: Arc<super::ToolSettlement>,
     pub attachment_store: Arc<crate::SessionAttachmentStore>,
     pub attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
+    pub duration_ms: u64,
 }
 
 impl PresentationLocalExecution {
@@ -375,7 +377,6 @@ impl PresentationLocalExecution {
             tool_name,
             args,
             output,
-            duration_ms,
         } = envelope.command
         else {
             return Err(RuntimeEffectControllerError::new(
@@ -395,7 +396,7 @@ impl PresentationLocalExecution {
             tool_name,
             args,
             output: *output,
-            duration_ms,
+            duration_ms: self.duration_ms,
             artifacts,
         };
         let presentation = self
@@ -703,6 +704,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         settlement: Arc<super::ToolSettlement>,
         attachment_store: Arc<crate::SessionAttachmentStore>,
         attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
+        duration_ms: u64,
     ) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(
@@ -711,6 +713,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     settlement,
                     attachment_store,
                     attachment_acceptance,
+                    duration_ms,
                 },
             )),
             replay_trace: None,
