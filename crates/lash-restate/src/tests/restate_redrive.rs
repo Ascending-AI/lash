@@ -442,6 +442,7 @@ pub(super) async fn replay_divergence_mid_turn_fails_the_attempt_retryably_and_c
         .bind(
             Fig1142ReplayDivergenceImpl {
                 model_version: Arc::clone(&model_version),
+                executions: Arc::new(AtomicUsize::new(0)),
             }
             .serve(),
         )
@@ -476,7 +477,7 @@ pub(super) async fn replay_divergence_mid_turn_fails_the_attempt_retryably_and_c
         workflow_key,
         &input,
         &suspended,
-        serde_json::to_value(recorded).expect("serialize first-incarnation effect"),
+        journal_entry_value(recorded),
     )
     .expect("splice the first-incarnation runtime-effect run");
 
@@ -511,6 +512,119 @@ pub(super) async fn replay_divergence_mid_turn_fails_the_attempt_retryably_and_c
         restate_output_json::<bool>(&restored),
         Some(true),
         "the restored retry completes from the recorded run"
+    );
+}
+
+/// The effect-journal generation gate (ADR 0105 §12) on the endpoint double:
+/// a recorded effect's journal entry stamped with another generation, or with
+/// none because it predates the stamp, refuses with the engine-neutral
+/// divergence before the effect runs. The attempt fails retryably, so the turn
+/// parks and the invocation keeps its journal; the same entry under this
+/// build's generation replays the recorded outcome and completes.
+#[tokio::test]
+pub(super) async fn an_effect_journal_entry_of_another_generation_parks_before_the_effect_runs() {
+    let executions = Arc::new(AtomicUsize::new(0));
+    let endpoint = Endpoint::builder()
+        .bind(
+            Fig1142ReplayDivergenceImpl {
+                model_version: Arc::new(AtomicUsize::new(1)),
+                executions: Arc::clone(&executions),
+            }
+            .serve(),
+        )
+        .build();
+    let workflow_key = "effect-journal-generation-gate";
+    let input = Fig1142ReplayDivergenceInput;
+    let suspended = invoke_endpoint(
+        &endpoint,
+        "Fig1142ReplayDivergence",
+        "run",
+        workflow_key,
+        &input,
+    )
+    .await
+    .expect("capture the model-call run");
+    executions.store(0, Ordering::SeqCst);
+
+    let recorded = RecordedRuntimeEffect {
+        envelope: Arc::new(
+            fig1142_llm_envelope(1)
+                .canonical_form()
+                .expect("canonical model-call envelope"),
+        ),
+        outcome: Ok(fig793_llm_outcome()),
+    };
+    let current = journal_entry_value(recorded.clone());
+    assert_eq!(
+        current["effect_journal_version"],
+        serde_json::json!(crate::EFFECT_JOURNAL_VERSION),
+        "every recorded effect's journal entry carries this build's generation"
+    );
+    let predecessor = serde_json::to_value(&recorded).expect("an entry written before the stamp");
+    let mut previous = current.clone();
+    previous["effect_journal_version"] = serde_json::json!(crate::EFFECT_JOURNAL_VERSION - 1);
+    let mut successor = current.clone();
+    successor["effect_journal_version"] = serde_json::json!(crate::EFFECT_JOURNAL_VERSION + 1);
+
+    for (name, entry, found) in [
+        (
+            "predecessor",
+            predecessor,
+            "carries no effect-journal generation (it predates the stamp)".to_string(),
+        ),
+        (
+            "previous",
+            previous,
+            format!(
+                "carries effect-journal generation {}",
+                crate::EFFECT_JOURNAL_VERSION - 1
+            ),
+        ),
+        (
+            "successor",
+            successor,
+            format!(
+                "carries effect-journal generation {}",
+                crate::EFFECT_JOURNAL_VERSION + 1
+            ),
+        ),
+    ] {
+        let replay = encode_run_replay(workflow_key, &input, &suspended, entry)
+            .expect("splice the journal entry");
+        let redriven = invoke_endpoint_body(&endpoint, "Fig1142ReplayDivergence", "run", replay)
+            .await
+            .expect("the refused redrive fails its attempt");
+        assert!(
+            restate_output_failure_message(&redriven).is_none(),
+            "{name}: a retired generation must not complete the invocation with a terminal failure"
+        );
+        let rendered = restate_error_message(&redriven)
+            .unwrap_or_else(|| panic!("{name}: the attempt fails with a retryable error"));
+        assert!(
+            rendered.contains("effect_replay_divergence") && rendered.contains(&found),
+            "{name}: the refusal names the typed divergence and the generation it found: {rendered}"
+        );
+        assert_eq!(
+            executions.load(Ordering::SeqCst),
+            0,
+            "{name}: the refusal comes before the effect runs"
+        );
+    }
+
+    let replay = encode_run_replay(workflow_key, &input, &suspended, current)
+        .expect("splice the current-generation entry");
+    let replayed = invoke_endpoint_body(&endpoint, "Fig1142ReplayDivergence", "run", replay)
+        .await
+        .expect("the current generation replays");
+    assert_eq!(
+        restate_output_json::<bool>(&replayed),
+        Some(true),
+        "the current generation replays the recorded run and completes"
+    );
+    assert_eq!(
+        executions.load(Ordering::SeqCst),
+        0,
+        "the replay answers from the journal, never the model"
     );
 }
 
@@ -1864,11 +1978,7 @@ pub(super) async fn fig793_pre_fix_suspended_llm_run(
         ),
         outcome: Ok(fig793_llm_outcome()),
     };
-    (
-        endpoint,
-        suspended,
-        serde_json::to_value(recorded).expect("serialize recorded LLM outcome"),
-    )
+    (endpoint, suspended, journal_entry_value(recorded))
 }
 
 #[tokio::test]

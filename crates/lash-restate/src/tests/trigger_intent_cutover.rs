@@ -171,7 +171,7 @@ async fn trigger_intent_cutover_endpoint() -> (
 }
 
 #[tokio::test]
-async fn restate_ordinal_replay_refuses_v1_trigger_before_store_ingress() {
+async fn restate_replay_refuses_the_pre_stamp_v1_trigger_journal_before_store_ingress() {
     let fixture: PredecessorTriggerIntentFixture = serde_json::from_slice(include_bytes!(
         "../../tests/fixtures/tool_intent_journals/v1-trigger-mid-drain.json"
     ))
@@ -186,16 +186,17 @@ async fn restate_ordinal_replay_refuses_v1_trigger_before_store_ingress() {
     )
     .await
     .expect("replay predecessor trigger intent through Restate endpoint");
-    let outcomes = restate_output_json::<Vec<lash_core::ToolIntentExecutionOutcome>>(&response)
-        .expect("typed predecessor refusal output");
-    assert!(matches!(
-        outcomes.as_slice(),
-        [lash_core::ToolIntentExecutionOutcome::Refused {
-            kind: lash_core::ToolIntentKind::EmitTrigger,
-            refusal: lash_core::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 1 },
-            ..
-        }]
-    ));
+    // The journal predates the effect-journal generation stamp (ADR 0105
+    // §12), so its tool attempt is refused at the generation gate before the
+    // v1 trigger intent it carries is ever read.
+    let error = restate_output_failure_message(&response)
+        .or_else(|| restate_error_message(&response))
+        .expect("the predecessor journal refuses");
+    assert!(
+        error.contains("effect_replay_divergence")
+            && error.contains("carries no effect-journal generation"),
+        "the predecessor journal refuses at the effect-journal generation gate: {error}"
+    );
     assert!(
         store
             .list_occurrences(lash_core::TriggerOccurrenceFilter::default())

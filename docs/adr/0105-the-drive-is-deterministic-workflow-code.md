@@ -375,9 +375,26 @@ The seam proof's per-session laws stand, amended:
 
 ### 12. The Restate journal generation cutover
 
-- P1 adds an effect-journal version inside every recorded effect entry,
-  refused typed in its deserializer before any command is dispatched.
-- Every later slice that changes recorded bytes or positions bumps it.
+- **Implemented (P1).** Every entry a recorded effect journals in its
+  `lash:{replay_key}` slot carries `effect_journal_version`, stamped with
+  `EFFECT_JOURNAL_VERSION` (`lash-restate`, registered in
+  `scripts/versioned-surfaces.toml` and `lash::formats` as
+  `RestateEffectJournal`). An entry stamped with another generation, or with
+  none, still decodes, so the SDK never loops on a decode failure, and the
+  controller refuses it as the engine-neutral `effect_replay_divergence`
+  before the replay acts on it. The refusal parks the turn: the attempt fails
+  retryably, the invocation keeps its journal, and only a build of the
+  generation that wrote it replays it.
+- The gate sits at each recorded effect's entry. A durable process command
+  runs its work before its entry is journaled, but in a turn it always follows
+  the recorded model call that asked for it, and a process segment's journal
+  is refused first at admission by its own `RESTATE_PROCESS_JOURNAL_VERSION`.
+  So an old journal is refused before a replay runs any effect.
+- **Every later slice that changes the bytes a recorded effect journals, or
+  the position of a recorded effect in the journal, bumps
+  `EFFECT_JOURNAL_VERSION`.** The surface's guards fail CI on an unbumped
+  shape change to the entry, the envelope and outcome vocabulary, or the
+  controller error an outcome carries.
 - S5 adds the input stamp for the session and turn handlers and the
   session-state generation bump that covers new admission entries.
 - The process journal keeps its own version, which P16 bumps.

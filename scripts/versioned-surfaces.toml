@@ -2197,6 +2197,60 @@ kind = "rust_items"
 paths = ["crates/lash-restate/src/effect_group.rs"]
 symbols = ["INDEX_STATE_KEY"]
 
+[[surface]]
+constant = "EFFECT_JOURNAL_VERSION"
+constant_path = "crates/lash-restate/src/controller/effect_journal.rs"
+description = "Restate effect journal: every recorded effect's `lash:{replay_key}` ctx.run entry (the canonical envelope, the outcome and its error, the give-up entry) and its position"
+manifest = "RestateEffectJournal"
+
+# ADR 0105 section 12. Every entry a recorded effect journals is stamped with
+# the generation that wrote it, and the controller refuses an entry stamped
+# with any other generation, or none, as a parked replay divergence before the
+# replay acts on it. Any change that moves the bytes a recorded effect
+# journals, or the position of a recorded effect in the journal, bumps this
+# constant. The guards project the entry shapes, the envelope and outcome
+# vocabulary, and the error an outcome carries. Leaf payloads reached through
+# an outcome (model responses, tool records, process events) are guarded by
+# their own surfaces; a change there that moves recorded effect bytes bumps
+# this constant as well.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-restate/src/controller/effect_journal.rs"]
+must_cover = ["RecordedRuntimeEffect", "GaveUpEntry", "Stamped"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/controller/effect_journal.rs"]
+symbols = ["JournaledEffectRecord", "EFFECT_JOURNAL_VERSION_FIELD", "stamped"]
+
+[[surface.guard]]
+kind = "rust_impls"
+paths = ["crates/lash-restate/src/controller/effect_journal.rs"]
+symbols = [
+  "Serialize for JournaledEffectRecord",
+  "Deserialize for JournaledEffectRecord",
+]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-core-execution/src/runtime/effect/envelope.rs"]
+must_cover = [
+  "RuntimeEffectInvocation",
+  "RuntimeEffectEnvelope",
+  "RuntimeEffectCommand",
+  "RuntimeEffectOutcome",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/effect/validation.rs"]
+symbols = ["CanonicalRuntimeEffectEnvelope"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/runtime_error.rs"]
+symbols = ["RuntimeEffectControllerError", "RuntimeEffectReplayMismatchReport"]
+
 # Hash-domain family tags. A `*_FAMILY_VERSION` names the preimage family
 # inside a content-addressed key, fingerprint, or retry identity; it is an
 # identity component, not a format stamp a reader compares. A moved tag mints

@@ -1139,7 +1139,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             normalized_record,
-            r##"{"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_ref\":{\"process_id\":\"fig1767-proc\",\"incarnation\":1},\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"20d4cec599f2608d4d3b9257b9def351f9e4b193aff837496b293488474521a3"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"fig1767-proc","process_incarnation":1,"sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"fig1767-proc","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"fig1767-proc"}},"semantics":{},"occurred_at":0}}}}}"##,
+            r##"{"effect_journal_version":1,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_ref\":{\"process_id\":\"fig1767-proc\",\"incarnation\":1},\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"20d4cec599f2608d4d3b9257b9def351f9e4b193aff837496b293488474521a3"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"fig1767-proc","process_incarnation":1,"sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"fig1767-proc","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"fig1767-proc"}},"semantics":{},"occurred_at":0}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
@@ -1392,11 +1392,12 @@ pub(super) fn restate_replay_refuses_pre_effect_19_session_list_envelope() {
     )
     .canonical_form()
     .expect("canonical current trigger-list envelope");
-    let journal_wire = serde_json::to_vec(&RecordedRuntimeEffect {
-        envelope: Arc::new(recorded_envelope),
-        outcome: Ok(RuntimeEffectOutcome::Sleep),
-    })
-    .expect("encode predecessor Restate journal entry");
+    let journal_wire =
+        serde_json::to_vec(&JournaledEffectRecord::Recorded(RecordedRuntimeEffect {
+            envelope: Arc::new(recorded_envelope),
+            outcome: Ok(RuntimeEffectOutcome::Sleep),
+        }))
+        .expect("encode predecessor Restate journal entry");
     let JournaledEffectRecord::Recorded(recorded) = serde_json::from_slice(&journal_wire)
         .expect("replay predecessor through JournaledEffectRecord deserialization")
     else {

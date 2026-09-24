@@ -12,93 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use std::fmt;
 
-use super::RecordedRuntimeEffect;
+use super::effect_journal::{
+    GaveUpEntry, JournaledEffectRecord, RecordedRuntimeEffect, retired_generation_refusal, stamped,
+};
 use crate::effect_group::EffectGroupOpenRequest;
-
-/// What a journaled effect's `ctx.run` entry carries.
-///
-/// One journal shape for both give-up paths and the happy path, so the slot a
-/// recorded effect occupies never depends on the payload budget in force at the
-/// time. [`Self::GaveUp`] is the fixed-size poison entry: it carries the verdict
-/// and the budget that produced it, never the envelope, so it fits any journal
-/// even when the envelope-carrying record does not. Replaying it reproduces the
-/// original give-up under whatever budget the replaying attempt was configured
-/// with.
-///
-/// The encoding is untagged on purpose: a recorded effect keeps the exact
-/// payload bytes it had before this entry type existed, so a journal written by
-/// an older deployment still replays - a wrapper tag would fail to deserialize on
-/// every in-flight journal, which is the redrive-panic loop this whole seam
-/// exists to prevent. The two variants stay mutually exclusive because
-/// [`GaveUpEntry`] denies unknown fields and carries a field name no recorded
-/// effect has, while a recorded effect requires `envelope` and `outcome`.
-#[derive(Clone, Debug, Serialize)]
-#[serde(untagged)]
-pub(crate) enum JournaledEffectRecord {
-    Recorded(RecordedRuntimeEffect),
-    GaveUp(GaveUpEntry),
-}
-
-impl<'de> Deserialize<'de> for JournaledEffectRecord {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if journal_carries_pre_incarnation_process_command(&value) {
-            return Err(serde::de::Error::custom(
-                "process_reference_format_cutover: a pre-incarnation process command cannot be replayed because its bare process_id does not identify one process lifetime",
-            ));
-        }
-        if value
-            .as_object()
-            .is_some_and(|object| object.contains_key("envelope") && object.contains_key("outcome"))
-        {
-            return serde_json::from_value(value)
-                .map(Self::Recorded)
-                .map_err(serde::de::Error::custom);
-        }
-        serde_json::from_value(value)
-            .map(Self::GaveUp)
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-fn journal_carries_pre_incarnation_process_command(value: &serde_json::Value) -> bool {
-    value
-        .get("envelope")
-        .and_then(|envelope| envelope.get("json"))
-        .and_then(serde_json::Value::as_str)
-        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
-        .is_some_and(|envelope| contains_pre_incarnation_process_command(&envelope))
-}
-
-fn contains_pre_incarnation_process_command(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Object(object) => {
-            let is_pre_incarnation_command = matches!(
-                object.get("op").and_then(serde_json::Value::as_str),
-                Some("await" | "cancel" | "signal")
-            ) && object.contains_key("process_id")
-                && !object.contains_key("process_ref");
-            is_pre_incarnation_command
-                || object
-                    .values()
-                    .any(contains_pre_incarnation_process_command)
-        }
-        serde_json::Value::Array(values) => {
-            values.iter().any(contains_pre_incarnation_process_command)
-        }
-        _ => false,
-    }
-}
-
-/// The fixed-size poison entry: one budget, no envelope, no error text.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct GaveUpEntry {
-    journaled_effect_gave_up_over_budget: u64,
-}
 
 /// The pre-flight budget verdict for an effect that runs outside the run
 /// closure.
@@ -237,9 +154,9 @@ pub(super) fn group_open_gave_up_over_budget(
 /// Measure a journal entry against the journal payload budget.
 ///
 /// Any entry body is accepted by reference so a candidate can be measured before
-/// it is committed to a [`JournaledEffectRecord`] variant. [`JournaledEffectRecord`]
-/// is untagged, so measuring a variant's body yields exactly the bytes the
-/// wrapped variant would write.
+/// it is committed to a [`JournaledEffectRecord`] variant. A recorded-effect
+/// candidate is measured [`stamped`], which is exactly the bytes the wrapped
+/// variant writes.
 fn record_exceeds_budget<T: Serialize + ?Sized>(
     payload_budget: Option<u64>,
     recorded: &T,
@@ -274,7 +191,7 @@ pub(super) fn unjournalable_envelope_give_up(
         Arc::clone(envelope),
         PoisonReason::OverBudget { budget },
     );
-    if record_exceeds_budget(payload_budget, &substitute).is_ok() {
+    if record_exceeds_budget(payload_budget, &stamped(&substitute)).is_ok() {
         return None;
     }
     tracing::error!(
@@ -293,20 +210,26 @@ pub(super) fn unjournalable_envelope_give_up(
 /// derives from the invocation - while the give-up verdict itself comes from the
 /// journal. That keeps the observed failure identical across attempts whose
 /// configured budgets differ.
+///
+/// An entry another effect-journal generation wrote is refused here, typed,
+/// before the replay acts on its outcome.
 pub(super) fn recorded_effect_from_journal(
     envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
     effect: &str,
     entry: JournaledEffectRecord,
-) -> RecordedRuntimeEffect {
+) -> Result<RecordedRuntimeEffect, RuntimeEffectControllerError> {
     match entry {
-        JournaledEffectRecord::Recorded(recorded) => recorded,
+        JournaledEffectRecord::Recorded(recorded) => Ok(recorded),
         JournaledEffectRecord::GaveUp(GaveUpEntry {
             journaled_effect_gave_up_over_budget: budget,
-        }) => poisoned_effect_record(
+        }) => Ok(poisoned_effect_record(
             effect,
             Arc::clone(envelope),
             PoisonReason::OverBudget { budget },
-        ),
+        )),
+        JournaledEffectRecord::Retired(retired) => {
+            Err(retired_generation_refusal(effect, envelope, &retired))
+        }
     }
 }
 
@@ -334,7 +257,7 @@ pub(super) fn journalable_recorded_effect(
     payload_budget: Option<u64>,
     recorded: RecordedRuntimeEffect,
 ) -> JournaledEffectRecord {
-    let Err((exceeded, error)) = record_exceeds_budget(payload_budget, &recorded) else {
+    let Err((exceeded, error)) = record_exceeds_budget(payload_budget, &stamped(&recorded)) else {
         return JournaledEffectRecord::Recorded(recorded);
     };
     let reason = if exceeded {
@@ -351,64 +274,4 @@ pub(super) fn journalable_recorded_effect(
         "journaled effect outcome cannot be recorded; giving up with a terminal poison outcome"
     );
     JournaledEffectRecord::Recorded(poisoned_effect_record(effect, recorded.envelope, reason))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_core::{ProcessCommand, ProcessIncarnation, ProcessRef};
-
-    #[test]
-    fn bare_process_id_is_a_typed_process_reference_format_cutover() {
-        let mut command = serde_json::to_value(ProcessCommand::Await {
-            process_ref: ProcessRef::new(
-                "pre-incarnation-process",
-                ProcessIncarnation::from_registration_sequence(1),
-            ),
-        })
-        .expect("serialize current process command");
-        let object = command
-            .as_object_mut()
-            .expect("process command serializes as an object");
-        let process_ref = object
-            .remove("process_ref")
-            .expect("current process command carries process_ref");
-        object.insert(
-            "process_id".to_string(),
-            process_ref
-                .get("process_id")
-                .expect("process_ref carries process_id")
-                .clone(),
-        );
-
-        let command_error = serde_json::from_value::<ProcessCommand>(command.clone())
-            .expect_err("bare process_id must not deserialize as a process command");
-        assert!(
-            command_error
-                .to_string()
-                .contains("process_reference_format_cutover"),
-            "ProcessCommand must return the typed cutover message: {command_error}"
-        );
-
-        let journal = serde_json::json!({
-            "envelope": {
-                "json": serde_json::json!({
-                    "command": {
-                        "type": "process",
-                        "command": command,
-                    }
-                })
-                .to_string()
-            },
-            "outcome": null
-        });
-        let journal_error = serde_json::from_value::<JournaledEffectRecord>(journal)
-            .expect_err("bare process_id must not deserialize from a journaled effect");
-        assert!(
-            journal_error
-                .to_string()
-                .contains("process_reference_format_cutover"),
-            "JournaledEffectRecord must return the typed cutover message: {journal_error}"
-        );
-    }
 }
