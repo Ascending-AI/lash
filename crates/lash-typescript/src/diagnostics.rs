@@ -774,6 +774,7 @@ mod tests {
                 "adapter/rejections.rs",
                 include_str!("adapter/rejections.rs"),
             ),
+            ("adapter/template.rs", include_str!("adapter/template.rs")),
             ("node_label.rs", include_str!("node_label.rs")),
             ("regex.rs", include_str!("regex.rs")),
             ("signatures.rs", include_str!("signatures.rs")),

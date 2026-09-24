@@ -73,3 +73,10 @@
 "(async () => { var \\u0061wait; })()"	reject	TS_SYNTAX_ERROR
 "(() => { function f() { return 1; } function f() { return 2; } return f(); })()"	reject	TS_FUNCTION_REDECLARATION_UNSUPPORTED
 "(() => delete 1)()"	reject	TS_DELETE_NON_REFERENCE_UNSUPPORTED
+# Invalid escapes are a SyntaxError in an untagged template (the raw form is
+# reserved for tags, which are refused), and a cooked lone surrogate is as
+# unrepresentable as the string-literal form (FIG-3720).
+"`\\unicode`"	reject	TS_SYNTAX_ERROR
+"`\\uD800`"	reject	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
+"`\\8`"	reject	TS_SYNTAX_ERROR
+"`\\u{1F_639}`"	reject	TS_SYNTAX_ERROR

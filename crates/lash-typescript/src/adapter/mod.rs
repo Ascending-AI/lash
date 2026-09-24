@@ -15,6 +15,7 @@ mod nesting;
 mod optional_chain;
 mod prototype_chain;
 mod rejections;
+mod template;
 #[cfg(test)]
 mod tests;
 mod traversal;
@@ -1337,21 +1338,34 @@ impl Adapter<'_> {
                     source_span(call.span),
                 )
             }
-            swc::Expr::Tpl(template) => Expr::Template {
-                quasis: template
-                    .quasis
-                    .iter()
-                    .map(|quasi| {
-                        self.check_template_text(quasi.span)?;
-                        Ok(quasi.raw.to_string())
-                    })
-                    .collect::<Result<_, Diagnostic>>()?,
-                expressions: template
-                    .exprs
-                    .iter()
-                    .map(|expr| self.convert_expr(expr))
-                    .collect::<Result<_, _>>()?,
-            },
+            swc::Expr::Tpl(template) => {
+                let mut quasis = Vec::with_capacity(template.quasis.len());
+                for quasi in &template.quasis {
+                    self.check_template_text(quasi.span)?;
+                    // An untagged template's value is its cooked text: every
+                    // escape resolves per ECMA's `TemplateCharacter` TV.
+                    match template::cook_template_quasi(&quasi.raw) {
+                        Ok(cooked) => quasis.push(cooked),
+                        Err(template::TemplateEscapeError::InvalidEscape) => {
+                            return Err(early_errors::syntax_error(
+                                "invalid escape sequence in untagged template literal",
+                                Some(source_span(quasi.span)),
+                            ));
+                        }
+                        Err(template::TemplateEscapeError::LoneSurrogate) => {
+                            return Ok(Expr::LoneSurrogateString);
+                        }
+                    }
+                }
+                Expr::Template {
+                    quasis,
+                    expressions: template
+                        .exprs
+                        .iter()
+                        .map(|expr| self.convert_expr(expr))
+                        .collect::<Result<_, _>>()?,
+                }
+            }
             swc::Expr::Paren(expr) => optional_chain::parenthesized(self.convert_expr(&expr.expr)?),
             swc::Expr::TsTypeAssertion(expr) => self.convert_expr(&expr.expr)?,
             swc::Expr::TsConstAssertion(expr) => self.convert_expr(&expr.expr)?,
