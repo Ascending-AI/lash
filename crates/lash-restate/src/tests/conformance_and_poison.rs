@@ -489,6 +489,19 @@ async fn live_restate_executing_effect_quiescence_witness() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+async fn live_restate_fig1464_over_budget_group_open_gives_up_before_the_group_is_opened() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    tokio::time::timeout(
+        Duration::from_secs(120),
+        harness.run_group_open_budget_witness(),
+    )
+    .await
+    .expect("Restate group-open budget witness exceeded 120 seconds");
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 async fn live_restate_cold_reopen_witnesses() {
     let harness = effect_group_conformance::LiveConformanceHarness::start().await;
     tokio::time::timeout(
@@ -843,6 +856,127 @@ pub(super) async fn fig1464_over_budget_give_up_replays_identically_under_a_larg
         context.runs.lock_recover().as_slice(),
         ["lash:restate-budget-flip", "lash:restate-budget-flip"],
         "the redrive must consume the same journal slot, not add one"
+    );
+}
+
+/// A one-child effect group under a runtime-operation scope, for the FIG-3564
+/// group-open budget laws.
+pub(super) fn fig3564_budget_group(operation: &str) -> lash_core::RuntimeEffectGroup {
+    let scope = ExecutionScope::runtime_operation(operation);
+    let child = RuntimeEffectEnvelope::new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(scope.clone(), format!("{operation}:child:0"))
+                .expect("valid group child address"),
+            lash_core::RuntimeAttribution::none(),
+            "fig3564-child",
+        ),
+        RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "fig3564-child".to_string(),
+        },
+    );
+    lash_core::RuntimeEffectGroup::try_new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(scope, format!("{operation}:group"))
+                .expect("valid group address"),
+            lash_core::RuntimeAttribution::none(),
+            "fig3564-group",
+        ),
+        operation,
+        vec![child],
+        lash_core::GroupWakePolicy::All,
+        lash_core::LoserPolicy::RunToCompletion,
+    )
+    .expect("a valid one-child group")
+}
+
+/// FIG-1464 / FIG-3564: an effect-group open journals engine calls whose
+/// requests carry every child's envelope, so a group the journal cannot hold
+/// must give up before the open reaches the engine - the pre-flight the
+/// deleted durable tool batch had, and the one the durable process command
+/// keeps. The give-up is the process-command arm's typed failure, and it
+/// occupies only its own verdict slot.
+#[tokio::test]
+pub(super) async fn fig1464_over_budget_group_open_gives_up_before_the_group_is_opened() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::with_options_for_test(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+    );
+
+    // The recording context serves no group engine: an open that got past the
+    // pre-flight would fail on its index probe with a different code.
+    let error = controller
+        .open_effect_group(fig3564_budget_group("fig1464-over-budget-group"))
+        .await
+        .expect_err("an unjournalable group open must give up");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned,
+        "the group open must give up with the process-command arm's typed failure: {}",
+        error.message
+    );
+    assert!(
+        error.code.is_terminal(),
+        "the give-up must not be re-attempted"
+    );
+    assert_eq!(
+        error.message,
+        "journaled effect `lash:fig1464-over-budget-group:group` gave up because its payload \
+         exceeded the 16-byte durable journal budget"
+    );
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        ["lash:fig1464-over-budget-group:group.journal-budget"],
+        "the give-up occupies its verdict slot and nothing else is journaled"
+    );
+}
+
+/// FIG-1464 / FIG-3564 deciding risk: the verdict reads a process-configured
+/// budget, so a redrive under a larger budget must replay the journaled
+/// give-up rather than re-decide it and open the group the first attempt
+/// refused.
+#[tokio::test]
+pub(super) async fn fig1464_over_budget_group_open_replay_under_a_larger_budget_never_opens() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let group = || fig3564_budget_group("fig1464-budget-flip-group");
+
+    let recorded = RestateRuntimeEffectController::with_options_for_test(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+    )
+    .open_effect_group(group())
+    .await
+    .expect_err("the over-budget group open must give up");
+
+    context.replaying.store(true, Ordering::SeqCst);
+    let replayed = RestateRuntimeEffectController::with_options_for_test(
+        Arc::clone(&context),
+        // Big enough that a verdict re-decided from live config would proceed
+        // to the engine, which this context does not serve.
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
+    )
+    .open_effect_group(group())
+    .await
+    .expect_err("the journaled verdict must still give up");
+
+    assert_eq!(
+        replayed.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned,
+        "the replay must render the journaled give-up: {}",
+        replayed.message
+    );
+    assert_eq!(
+        replayed.message, recorded.message,
+        "the replayed give-up must render the journaled verdict, not the new budget"
+    );
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        [
+            "lash:fig1464-budget-flip-group:group.journal-budget",
+            "lash:fig1464-budget-flip-group:group.journal-budget"
+        ],
+        "the redrive must consume the same verdict slot and add none"
     );
 }
 
