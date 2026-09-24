@@ -62,6 +62,19 @@ pub(crate) fn corpus() -> Corpus {
     serde_json::from_str(EXPECTATIONS).expect("the session expectations parse")
 }
 
+impl Cell {
+    /// Whether the dialect refuses the cell today: a `reject` cell, or a
+    /// deviation or defect cell whose stated lash answer is the refusal.
+    pub(crate) fn refused(&self) -> bool {
+        self.reject.is_some()
+            || self
+                .lash
+                .as_ref()
+                .and_then(|answers| answers.resident.as_ref())
+                .is_some_and(|answer| answer.outcome == "rejected")
+    }
+}
+
 impl Session {
     /// The names bound after each cell, as the lash side must answer the
     /// probes of a live (resident) session: Node's answer under the session's

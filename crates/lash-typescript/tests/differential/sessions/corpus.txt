@@ -568,3 +568,197 @@ const record = async () => {
   return 1;
 };
 end
+
+session printed-non-finite-numbers
+about inside a printed object or array a non-finite number is JSON's null (FIG-3608)
+probe values
+cell
+const values = [NaN, Infinity];
+console.log(values, { low: -Infinity }, NaN, [undefined]);
+end
+
+session exotic-values-are-not-arrays
+about Array.isArray and instanceof Array answer for every exotic without crossing the host boundary (FIG-3608)
+probe tags link match
+cell
+{
+  const tags = new Set([1]);
+  const link = new URL('https://example.com/');
+  const match = /(a)/.exec('a');
+  console.log(Array.isArray(tags), link instanceof Array, new Date(0) instanceof Array, /a/ instanceof Array, Array.isArray(match));
+}
+end
+
+session function-name-shadowed-in-its-body
+about a function body may declare a binding of the function's own name (FIG-3608)
+probe named arrow scale
+deviation closure-boundary
+cell
+function named() {
+  let named = 1;
+  return named;
+}
+const arrow = (scale) => {
+  const arrow = scale * 2;
+  return arrow;
+};
+console.log(named(), arrow(3));
+end
+
+session computed-literal-keys
+about a computed key that is a string literal is that key, so a later field write links (FIG-3608)
+probe keyed
+cell
+const keyed = { ['q']: 1, r: 2 };
+keyed.q = 7;
+console.log(keyed.q, keyed);
+end
+
+session optional-chain-method-calls
+about a method called inside an optional chain is the value's method (FIG-3608)
+probe data none
+cell
+const data = { list: [3, 1], text: 'ab' };
+const none = null;
+console.log(data?.text.toUpperCase(), data?.list.includes(1), (data?.text).padEnd(4, '.'), none?.text.toUpperCase());
+end
+
+session parentheses-end-an-optional-chain
+about in (a?.b).c the short circuit ends at the parenthesis, so .c reads undefined (FIG-3608)
+probe none
+cell deviation runtime-fault-brand
+const none = null;
+console.log((none?.b).c);
+lash {"outcome":"throw","error":"RuntimeError","prints":[],"probes":{"none":"object null"}}
+end
+
+session durable-error-value
+about an Error bound at the top level stays an Error after a reload (FIG-3608)
+probe failure
+cell
+const failure = new RangeError('out', { cause: 'why' });
+cell
+console.log(String(failure), failure instanceof RangeError, failure.cause);
+end
+
+session durable-regexp-match
+about a RegExp match bound at the top level keeps its index and groups after a reload (FIG-3608)
+probe found
+cell
+const found = /(?<word>[a-z]+)/.exec('  lash');
+cell
+console.log(found.index, found.groups.word);
+end
+
+session durable-shared-identity
+about two session paths to one object stay one object after a reload (FIG-3608)
+probe shared pair
+cell
+const shared = { count: 1 };
+const pair = { left: shared, right: shared };
+cell
+pair.left.count = 2;
+console.log(pair.right.count, shared.count);
+end
+
+session for-of-shadowed-iterable
+about a for...of body may declare a binding of its iterable's name (FIG-3625)
+probe items item
+cell defect for-of-shadowed-iterable
+const items = [1, 2];
+for (const item of items) {
+  const items = [item];
+  console.log(items.length);
+}
+lash {"outcome":"rejected","diagnostic":"TS_FOR_OF_UNSUPPORTED","prints":[],"probes":{"item":"unbound","items":"unbound"}}
+end
+
+session spread-object-field-check
+about a field of an object literal built by a spread links as TypeScript types it (FIG-3626)
+probe base copy
+cell defect spread-object-field-check
+const base = { a: 1 };
+const copy = { ...base, b: 2 };
+copy.a = 3;
+console.log(copy);
+lash {"outcome":"rejected","diagnostic":"TS_LINK_ERROR","prints":[],"probes":{"base":"unbound","copy":"unbound"}}
+end
+
+session builtin-call-spread
+about a spread argument to a builtin function passes the array's items (FIG-3627)
+probe items
+cell defect builtin-call-spread
+const items = [3, 1];
+console.log(Math.max(...items));
+lash {"outcome":"rejected","diagnostic":"TS_METHOD_UNSUPPORTED","prints":[],"probes":{"items":"unbound"}}
+end
+
+session builtin-method-call-spread
+about a spread argument to a builtin method passes the array's items (FIG-3627)
+probe items
+cell defect builtin-call-spread
+const items = [3, 1];
+items.push(...[4, 5]);
+console.log(items);
+lash {"outcome":"throw","error":"RuntimeError","prints":[],"probes":{"items":"object [3,1]"}}
+end
+
+session collection-methods-through-aliases
+about a Map, Set or URLSearchParams not written as one (an alias, a field) iterates as itself (FIG-3608)
+probe out map alias box value key
+cell
+const out = [];
+{
+  const map = new Map([['k', 1], ['j', 2]]);
+  const alias = map;
+  alias.forEach((value, key) => { out.push(key + value); });
+  const box = { set: new Set([4, 5]), params: new URLSearchParams('a=1') };
+  box.set.forEach((value) => { out.push(value * 2); });
+  box.params.forEach((value, key) => { out.push(key); });
+  console.log([...alias.keys()], [...alias.values()], [...box.params.entries()]);
+}
+console.log(out);
+end
+
+session collection-copy-constructors
+about new Map and new Set copy another collection (FIG-3608)
+probe map set copies
+cell
+{
+  const map = new Map([['k', 1]]);
+  const set = new Set([4, 5]);
+  const copies = [new Set(set).size, new Map(map).get('k'), new Map(new Set([['x', 2]])).get('x'), [...new Set(map)]];
+  console.log(copies);
+}
+end
+
+session for-of-aliased-iterable
+about a for...of loop visits what its body appends through an alias made before the loop (FIG-3625)
+probe items same item
+cell defect for-of-aliased-iterable
+const items = [1];
+const same = items;
+for (const item of items) {
+  if (same.length < 3) {
+    same.push(item + 1);
+  }
+}
+console.log(same);
+lash {"outcome":"normal","prints":["[1,2]"],"probes":{"item":"unbound","items":"object [1,2]","same":"object [1,2]"}}
+end
+
+session sibling-block-binding-types
+about sibling blocks may declare one name with values of different types (FIG-3631)
+probe label
+cell defect sibling-block-binding-types
+if (true) {
+  let label = 1;
+} else {
+  let label = true;
+}
+{
+  let label = 'x';
+  console.log(label);
+}
+lash {"outcome":"rejected","diagnostic":"TS_LINK_ERROR","prints":[],"probes":{"label":"unbound"}}
+end

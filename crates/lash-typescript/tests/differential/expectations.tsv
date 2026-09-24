@@ -560,3 +560,25 @@ findings	271	reject	"(() => { var v = 1; v = 2; return v; })()"	"2"	TS_ASSIGN_CO
 findings	272	reject	"(() => { let x = 1; const f = () => x; x = 2; return f(); })()"	"2"	TS_MUTABLE_CAPTURE_UNSUPPORTED
 findings	273	reject	"(() => { function h(p) { p = p + 1; return p; } return h(1); })()"	"2"	TS_ASSIGN_CONST
 findings	274	reject	"(() => { try { throw 1; } catch (e) { e = 2; return e; } })()"	"2"	TS_ASSIGN_CONST
+findings	275	accept	"Array.isArray(new Set([1]))"	"false"	-
+findings	276	accept	"Array.isArray(new Map([['a', 1]]))"	"false"	-
+findings	277	accept	"new URL('https://example.com/') instanceof Array"	"false"	-
+findings	278	accept	"new Date(0) instanceof Array"	"false"	-
+findings	279	accept	"Array.isArray(/a/)"	"false"	-
+findings	280	accept	"Array.isArray(new URLSearchParams('a=1'))"	"false"	-
+findings	281	accept	"Array.isArray(/(a)/.exec('a'))"	"true"	-
+findings	282	accept	"({ text: 'ab' })?.text.toUpperCase()"	"AB"	-
+findings	283	accept	"({ list: [3, 1] })?.list.includes(1)"	"true"	-
+findings	284	accept	"(({ text: 'ab' })?.text).padEnd(4, '.')"	"ab.."	-
+findings	285	accept	"(() => { const none = null; return none?.text.toUpperCase(); })()"	"undefined"	-
+findings	286	accept	"(() => { const none = null; try { return (none?.text).length; } catch (error) { return 'threw'; } })()"	"threw"	-
+findings	287	accept	"(() => { const keyed = { ['q']: 1, r: 2 }; keyed.q = 7; return keyed.q + keyed.r; })()"	"9"	-
+findings	288	accept	"(() => { function named() { let named = 1; return named; } return named(); })()"	"1"	-
+findings	289	accept	"(() => { const arrow = (scale) => { const arrow = scale * 2; return arrow; }; return arrow(3); })()"	"6"	-
+findings	290	accept	"(() => { const m = new Map([['k', 1]]); const alias = m; return JSON.stringify([[...alias.keys()], [...alias.values()], [...alias.entries()]]); })()"	"[[\"k\"],[1],[[\"k\",1]]]"	-
+findings	291	accept	"(() => { const box = { m: new Map([['k', 1]]) }; return JSON.stringify([...box.m.entries()]); })()"	"[[\"k\",1]]"	-
+findings	292	accept	"(() => { const m = new Map([['k', 1], ['j', 2]]); const alias = m; const out = []; alias.forEach((value, key) => { out.push(key + value); }); return out.join(','); })()"	"k1,j2"	-
+findings	293	accept	"(() => { const s = new Set([4, 5]); const alias = s; const out = []; alias.forEach((value) => { out.push(value * 2); }); return out.join(','); })()"	"8,10"	-
+findings	294	accept	"(() => { const s = new Set([4, 5]); return new Set(s).size; })()"	"2"	-
+findings	295	accept	"(() => { const m = new Map([['k', 1]]); return new Map(m).get('k'); })()"	"1"	-
+findings	296	accept	"(() => { const pairs = new Set([['x', 1]]); return new Map(pairs).get('x'); })()"	"1"	-

@@ -1,35 +1,11 @@
 // The Node session oracle's generator (FIG-3599).
 //
 // Reads `corpus.txt` and writes `expectations.json`: every session's cells
-// with the reference answer of the pinned Node, which runs each cell as a
-// successive classic Script in ONE realm (`vm.createContext` plus
-// `vm.Script`). Top-level `let`/`const`/`class` therefore live in the realm's
-// shared global lexical environment and `var`/function declarations on its
-// global object, exactly as ECMA-262 GlobalDeclarationInstantiation specifies.
-//
-// The mapping from a lash cell to that reference (the README next to this
-// file states it in full, and ADR 0062 records it):
-//
-// * A cell is a Script. Its observation is its printed lines, how it ended
-//   (normally, through `finish(value)`, or by throwing an error of a class),
-//   and one binding-visibility probe per session binder name, run as its own
-//   Script after the cell.
-// * `console.log`/`warn`/`error`/`info`/`debug` are the host-defined printer
-//   of deviation register entry 13: arguments joined by one space, a plain
-//   object or array as compact JSON, every other value as ECMA `ToString`.
-// * `finish(value)` records the value and ends the cell; nothing after it in
-//   the cell runs.
-// * A Script's completion value is not observed: a lash cell surfaces none.
-// * A cell the dialect statically rejects (`cell reject TS_*`) never enters
-//   the realm, as it never runs in lash.
-// * Top-level `await` has no classic-Script meaning (ECMA-262 permits it only
-//   in a Module, whose declarations are not global), so the corpus holds no
-//   await cell; one would fail here as the SyntaxError it is.
-// * A probe is `console.log(typeof NAME, JSON.stringify(NAME))`. It prints the
-//   binding's type and JSON; a ReferenceError answers `unbound`, or `tdz` when
-//   the binding exists but is uninitialized. The generator also records the
-//   names whose value reaches a function, which the registered
-//   `closure-boundary` deviation turns into `unbound` on the lash side.
+// with the reference answer of the pinned Node. Each cell runs as a
+// successive classic Script in ONE realm under the cell-to-Script mapping
+// `realm.mjs` states once (the README next to this file states it in full,
+// and ADR 0062 records it); the generated sessions (FIG-3608) are answered by
+// the same realm through `oracle.mjs`.
 //
 // Regeneration is deliberate and byte-identical, as for `../generate.mjs`:
 //
@@ -40,12 +16,10 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import vm from 'node:vm';
 
-const NODE_VERSION = 'v25.2.1';
-if (process.version !== NODE_VERSION) {
-  throw new Error(`oracle requires Node ${NODE_VERSION}, got ${process.version}`);
-}
+import { NODE_VERSION, observeSession, requirePinnedNode } from './realm.mjs';
+
+requirePinnedNode();
 
 const directory = dirname(fileURLToPath(import.meta.url));
 
@@ -123,149 +97,23 @@ function parseCorpus(text) {
   return sessions;
 }
 
-// --- the realm ---------------------------------------------------------------
-
-// Installs the lash host surface into a fresh realm. It declares nothing: the
-// host functions are non-enumerable global-object properties, which is where a
-// host's own globals live.
-const SETUP = `(() => {
-  const host = globalThis.__lashOracleHost;
-  delete globalThis.__lashOracleHost;
-  const plain = (value) => {
-    if (Array.isArray(value)) return true;
-    if (value === null || typeof value !== 'object') return false;
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
-  };
-  const render = (value) => (plain(value) ? JSON.stringify(value) : String(value));
-  const log = (...values) => host.print(values.map(render).join(' '));
-  const define = (name, value) =>
-    Object.defineProperty(globalThis, name, { value, writable: true, configurable: true, enumerable: false });
-  define('console', { log, warn: log, error: log, info: log, debug: log });
-  const finished = { finished: true };
-  host.sentinel(finished);
-  define('finish', (value) => {
-    host.finish(JSON.stringify(value === undefined ? null : value));
-    throw finished;
-  });
-  const reach = (value, seen) => {
-    if (typeof value === 'function') return true;
-    if (value === null || typeof value !== 'object' || seen.has(value)) return false;
-    seen.add(value);
-    if (value instanceof Map) return [...value].some(([key, item]) => reach(key, seen) || reach(item, seen));
-    if (value instanceof Set) return [...value].some((item) => reach(item, seen));
-    return Object.values(value).some((item) => reach(item, seen));
-  };
-  host.reach((value) => reach(value, new Set()));
-})();`;
-
-function realm() {
-  const state = { prints: [], finish: undefined, sentinel: undefined, reach: undefined };
-  const context = vm.createContext({
-    // `URL` and `URLSearchParams` are dialect built-ins that Node provides as
-    // host globals rather than ECMA-262 intrinsics, so a bare realm lacks
-    // them; the host's own constructors stand in.
-    URL,
-    URLSearchParams,
-    __lashOracleHost: {
-      print: (text) => state.prints.push(text),
-      finish: (json) => {
-        state.finish = json;
-      },
-      sentinel: (value) => {
-        state.sentinel = value;
-      },
-      reach: (reach) => {
-        state.reach = reach;
-      },
-    },
-  });
-  new vm.Script(SETUP).runInContext(context);
-  return { context, state };
-}
-
-function errorClass(error) {
-  if (error !== null && (typeof error === 'object' || typeof error === 'function')) {
-    return typeof error.name === 'string' ? error.name : 'Object';
-  }
-  return typeof error;
-}
-
-function runCell({ context, state }, source) {
-  state.prints = [];
-  state.finish = undefined;
-  const observation = { outcome: 'normal', prints: [] };
-  try {
-    new vm.Script(source).runInContext(context);
-  } catch (error) {
-    if (state.finish !== undefined && error !== state.sentinel) {
-      throw new Error(`a cell caught finish's end of the cell, which the mapping excludes:\n${source}`);
-    }
-    if (error === state.sentinel) {
-      observation.outcome = 'finish';
-      observation.finish = JSON.parse(state.finish);
-    } else {
-      observation.outcome = 'throw';
-      observation.error = errorClass(error);
-    }
-  }
-  if (state.finish !== undefined && observation.outcome !== 'finish') {
-    throw new Error(`a cell caught finish's end of the cell, which the mapping excludes:\n${source}`);
-  }
-  observation.prints = state.prints;
-  return observation;
-}
-
-function probe({ context, state }, name) {
-  state.prints = [];
-  let answer;
-  try {
-    new vm.Script(`console.log(typeof ${name}, JSON.stringify(${name}));`).runInContext(context);
-    answer = state.prints.join('\n');
-  } catch (error) {
-    if (errorClass(error) === 'ReferenceError') {
-      answer = /before initialization/.test(error.message) ? 'tdz' : 'unbound';
-    } else {
-      answer = `throws ${errorClass(error)}`;
-    }
-  }
-  let closure = false;
-  try {
-    closure = state.reach(new vm.Script(name).runInContext(context));
-  } catch {
-    closure = false;
-  }
-  return { answer, closure };
-}
-
 // --- generation --------------------------------------------------------------
 
 const sessions = parseCorpus(readFileSync(join(directory, 'corpus.txt'), 'utf8'));
 const output = { node: NODE_VERSION, sessions: [] };
 for (const session of sessions) {
-  const engine = realm();
-  const cells = [];
-  for (const cell of session.cells) {
-    const node = cell.reject
-      ? { outcome: 'rejected', prints: [] }
-      : runCell(engine, cell.source);
-    node.probes = {};
-    node.closures = [];
-    for (const name of session.probe) {
-      const { answer, closure } = probe(engine, name);
-      node.probes[name] = answer;
-      if (closure) node.closures.push(name);
-    }
+  const observations = observeSession(session.probe, session.cells);
+  const cells = session.cells.map((cell, index) => {
     const entry = {
       source: cell.source,
       reject: cell.reject,
       deviation: cell.deviation,
       defect: cell.defect,
-      node,
+      node: observations[index],
     };
     if (cell.lash) entry.lash = cell.lash;
-    cells.push(entry);
-  }
+    return entry;
+  });
   output.sessions.push({
     id: session.id,
     about: session.about,

@@ -1636,8 +1636,10 @@ jobs:
     runs-on: ubuntu-24.04
     # Explicit budget: one bounded libFuzzer run per [[bin]] target in
     # fuzz/Cargo.toml over the committed seed corpus, plus the nightly
-    # toolchain build, must never grow past this.
-    timeout-minutes: 45
+    # toolchain build, and one bounded run of generated TypeScript sessions
+    # against the pinned Node (FIG-3608) with its test build, must never grow
+    # past this.
+    timeout-minutes: 75
     needs: plan
     # Off the pull-request critical path by design (FIG-878): the smoke run
     # happens on the manual full-profile dispatch only.
@@ -1678,6 +1680,25 @@ jobs:
               -max_total_time=60 -timeout=10 -rss_limit_mb=4096 \
               "-artifact_prefix=${PWD}/artifacts/"
           done
+
+      # The longer run of the generated differential sessions (FIG-3608):
+      # fresh seeds on every run, reproducible from the run id, against the
+      # Node the session oracle pins. A divergence prints its minimized
+      # session-corpus row.
+      - name: Install the session oracle's Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 25.2.1
+
+      - name: Run generated TypeScript sessions against Node
+        run: |
+          set -euo pipefail
+          start=$(( 1000000 + (GITHUB_RUN_ID % 1000000) * 1000 ))
+          echo "generated session seeds ${start}..$(( start + 300 ))"
+          LASH_GENERATED_SEEDS="${start}..$(( start + 300 ))" \
+            cargo test -p lash-internal-protocol-rlm --lib -- \
+            --ignored --exact --nocapture \
+            testing::cell_conformance::node_oracle::generated::generated_sessions_against_live_node
 
       - name: Upload fuzz crash artifacts
         if: failure()

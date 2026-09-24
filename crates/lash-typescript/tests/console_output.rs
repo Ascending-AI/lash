@@ -21,6 +21,11 @@ fn console_methods_follow_observation_rendering() {
             ("[{ a: 1 }]", r#"[{"a":1}]"#),
             ("null", "null"),
             ("undefined", "undefined"),
+            // Inside a container a non-finite number is JSON's `null`; alone
+            // it keeps its ECMA string (FIG-3608).
+            ("[NaN, Infinity, -Infinity]", "[null,null,null]"),
+            ("{ a: NaN }", r#"{"a":null}"#),
+            ("NaN", "NaN"),
         ] {
             let source = format!("console.{method}({args});");
             let program = lash_typescript::testing::compile(&source).unwrap();

@@ -132,8 +132,9 @@ packages = ["lash-internal-remote-protocol"]
 kinds = ["unit-test"]
 compile_data = ["//:host_schemas"]
 
-# The Node session oracle (FIG-3599) runs the dialect's session corpus through
-# the RLM executor; the corpus and its Node answers live with the dialect.
+# The Node session oracle (FIG-3599) runs the dialect's session corpora through
+# the RLM executor; the corpora, their Node answers and the census the
+# session generator (FIG-3608) draws rejected cells from live with the dialect.
 [[rule]]
 packages = ["lash-internal-protocol-rlm"]
 kinds = ["unit-test"]
@@ -392,7 +393,12 @@ queued_claim_atomicity = { srcs = ["tests/support/queued_claim_atomicity.rs"] }
 old_module_fixture = { srcs = ["tests/fixtures/module-artifact-old.json"] }
 
 [filegroups.lash-internal-typescript]
-session_oracle_corpus = { srcs = ["tests/differential/sessions/expectations.json"] }
+session_oracle_corpus = { srcs = [
+    "README.md",
+    "tests/differential/sessions/expectations.json",
+    "tests/differential/sessions/generated.json",
+    "tests/test262/census.tsv",
+] }
 
 # --- trybuild fixtures ---------------------------------------------------------
 

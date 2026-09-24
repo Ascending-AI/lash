@@ -213,6 +213,21 @@ rejection, or an unexpectedly compiling skip fails CI. Tests use no network or
 wall clock. See [`tests/test262/README.md`](tests/test262/README.md) for the
 pinned commit, harness shims, and deliberate inventory-first sync procedure.
 
+Sequences of cells are checked against Node too (FIG-3599, FIG-3608): a
+hand-written session corpus, sessions a seeded generator draws from the
+census's accepted grammar, and a snapshot round-trip law over every value
+type the dialect accepts, each run live and reloading through the durable
+snapshot between cells. See
+[`tests/differential/sessions/README.md`](tests/differential/sessions/README.md).
+
+The token-sequence fuzzer in `tests/grammar_coverage.rs` (shared with
+`tests/no_abort_guarantee.rs`) is not differential and stays separate: it
+feeds the parser sources mostly outside the accepted grammar and asserts only
+that parsing never aborts, in a child process on the 2 MiB stack contract. A
+differential check needs accepted programs with a meaning to compare, so the
+session generator draws only accepted grammar and cannot stand in for it, and
+it cannot stand in for the session generator.
+
 ## Deviation register
 
 These are the only deliberate deviations from an otherwise accepted
@@ -481,12 +496,38 @@ surface below.
 
 ## Open conformance defects
 
-The Node oracles found these divergences (FIG-3599). They are defects, not
-rulings: each corpus row that shows one states the current wrong answer, and
-the row fails once the defect is fixed, until it is promoted to an ordinary
-row. They are listed here so no divergence is silent while its fix is owed.
+The Node oracles found these divergences (FIG-3599, and the generated
+sessions and snapshot round-trip law of FIG-3608). They are defects, not
+rulings: each corpus row or round-trip law row that shows one states the
+current wrong answer, and fails once the defect is fixed, until it is promoted
+to an ordinary row. The session generator draws none of their shapes until
+then, each exclusion naming its entry here. They are listed so no divergence
+is silent while its fix is owed.
 
-No defect is open.
+- `for-of-shadowed-iterable` (FIG-3625): the `for...of` iterable check is by
+  name, so a body that declares its own binding of the iterable's name and
+  then uses it is refused as touching the iterable (`TS_FOR_OF_UNSUPPORTED`).
+- `for-of-aliased-iterable` (FIG-3625): the same check misses an alias made
+  before the loop, so a body that appends to its array through the alias is
+  accepted, and the loop, which walks a snapshot, misses what Node visits:
+  `const same = items; for (const item of items) { same.push(item); }` visits
+  the items the loop started with, where Node also visits the appended ones
+  (and, unbounded, never ends).
+- `spread-object-field-check` (FIG-3626): an object literal built by a spread
+  is typed `{}`, so reading or writing one of its fields is refused
+  (`TS_LINK_ERROR`, `object type has no field`), where TypeScript types the
+  spread's fields.
+- `sibling-block-binding-types` (FIG-3631): block declarations of one name in
+  sibling blocks are separate bindings, but share one slot the linker types as
+  one variable, so after a branch binds it two ways a later block's
+  string-literal initializer is refused as an incompatible literal
+  (`TS_LINK_ERROR`).
+- `builtin-call-spread` (FIG-3627): a spread argument to a builtin is not
+  passed as the array's items. A static function (`Math.max(...items)`,
+  `String.fromCharCode(...codes)`) is refused as `TS_METHOD_UNSUPPORTED`,
+  naming the function as if it were missing from the surface, and a method
+  (`items.push(...more)`) faults at run time calling `undefined`. A spread
+  argument to a function the program defines is passed as ECMA specifies.
 
 ## Syntax, iteration, and Node traps
 
@@ -715,10 +756,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 561 rows, of which 488 are distinct
+The Node differential table carries 583 rows, of which 510 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of those 488 unique expressions rather than of all 561 rows. Every count in
+that of those 510 unique expressions rather than of all 583 rows. Every count in
 this paragraph is pinned against the table by
 `committed_row_counts_match_the_register`, and the generator pins each lane's
 own row count, so neither this paragraph nor a lane can drift from the corpus in

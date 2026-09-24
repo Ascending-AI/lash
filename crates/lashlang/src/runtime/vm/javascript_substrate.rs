@@ -144,6 +144,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
             ("Map", []) | ("Map", [Value::Undefined | Value::Null]) => {
                 self.heap.allocate_map(Vec::new())?
             }
+            // A `Map` copies another's entries, as its iteration yields them.
+            ("Map", [Value::Ref(source)])
+                if matches!(self.heap.get(*source)?, HeapObject::Map(_)) =>
+            {
+                let HeapObject::Map(map) = self.heap.get(*source)? else {
+                    unreachable!("a Map source checked above")
+                };
+                let entries = map.entries.clone();
+                self.heap.allocate_map(entries)?
+            }
             ("Map", [entries]) => {
                 let mut map_entries = Vec::new();
                 for entry in heap_sequence(&self.heap, entries)? {
@@ -159,6 +169,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             ("Set", []) | ("Set", [Value::Undefined | Value::Null]) => {
                 self.heap.allocate_set(Vec::new())?
+            }
+            // A `Set` of a `Map` holds its entries, each a fresh pair.
+            ("Set", [Value::Ref(source)])
+                if matches!(self.heap.get(*source)?, HeapObject::Map(_)) =>
+            {
+                let HeapObject::Map(map) = self.heap.get(*source)? else {
+                    unreachable!("a Map source checked above")
+                };
+                let entries = map.entries.clone();
+                let mut pairs = Vec::with_capacity(entries.len());
+                for (key, value) in entries {
+                    pairs.push(self.heap.allocate_list(vec![key, value])?);
+                }
+                self.heap.allocate_set(pairs)?
             }
             ("Set", [values]) => self.heap.allocate_set(heap_sequence(&self.heap, values)?)?,
             ("Date", values) => self.construct_javascript_date(values)?,
@@ -349,6 +373,9 @@ fn heap_sequence(heap: &Heap, value: &Value) -> Result<Vec<Value>, RuntimeError>
     Ok(match value {
         Value::Ref(id) => match heap.get(*id)? {
             HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+            // A `Set` iterates its values: `new Set(set)` copies one, and
+            // `new Map(set)` reads each value as an entry pair.
+            HeapObject::Set(set) => set.values.clone(),
             // An exec/`matchAll` result is an array in ECMA, and `new Map` of a
             // `matchAll` reads its first two slots exactly as it would any
             // other entry pair.
@@ -763,6 +790,11 @@ fn write_console_value(
         // or null it exactly as `JSON.stringify` does.
         Value::Undefined => push_console_text(out, if top_level { "undefined" } else { "null" })?,
         Value::Bool(value) => push_console_text(out, if *value { "true" } else { "false" })?,
+        // Inside a container a number is JSON's, which spells a non-finite
+        // one `null`, as `JSON.stringify` and the host's print projector do.
+        Value::Number(number) if !top_level && !number.is_finite() => {
+            push_console_text(out, "null")?;
+        }
         Value::Number(_) => push_console_text(out, &javascript_to_string(value))?,
         Value::String(value) => {
             if top_level {

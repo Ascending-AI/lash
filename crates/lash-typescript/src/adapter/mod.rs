@@ -10,6 +10,7 @@ use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 
 mod enums;
 mod nesting;
+mod optional_chain;
 mod prototype_chain;
 mod rejections;
 #[cfg(test)]
@@ -18,6 +19,7 @@ mod traversal;
 mod types;
 use enums::{ConstEnumValue, enum_member_property_name};
 use nesting::{guard_source_nesting, source_nesting_diagnostic};
+pub(crate) use prototype_chain::is_prototype_chain_property as names_the_prototype_chain;
 use prototype_chain::{
     check_property_key, is_prototype_chain_property, prototype_access_rejection,
 };
@@ -1288,7 +1290,7 @@ impl Adapter {
                     .map(|expr| self.convert_expr(expr))
                     .collect::<Result<_, _>>()?,
             },
-            swc::Expr::Paren(expr) => self.convert_expr(&expr.expr)?,
+            swc::Expr::Paren(expr) => optional_chain::parenthesized(self.convert_expr(&expr.expr)?),
             swc::Expr::TsTypeAssertion(expr) => self.convert_expr(&expr.expr)?,
             swc::Expr::TsConstAssertion(expr) => self.convert_expr(&expr.expr)?,
             swc::Expr::TsNonNull(expr) => self.convert_expr(&expr.expr)?,
@@ -1531,82 +1533,6 @@ impl Adapter {
                 })
             })
             .collect()
-    }
-
-    fn append_optional_operation(
-        &self,
-        base: Expr,
-        operation: OptionalOperation,
-        span: SourceSpan,
-    ) -> Expr {
-        match base {
-            Expr::OptionalChain {
-                base,
-                mut operations,
-            } => {
-                operations.push(operation);
-                Expr::OptionalChain { base, operations }
-            }
-            base => match operation {
-                OptionalOperation::Member {
-                    property,
-                    optional: false,
-                } => Expr::Member {
-                    object: Box::new(base),
-                    property,
-                    span,
-                },
-                OptionalOperation::Call {
-                    args,
-                    optional: false,
-                } => Expr::Call {
-                    callee: Box::new(base),
-                    args,
-                    span,
-                },
-                operation => Expr::OptionalChain {
-                    base: Box::new(base),
-                    operations: vec![operation],
-                },
-            },
-        }
-    }
-
-    fn convert_optional_chain(&self, chain: &swc::OptChainExpr) -> Result<Expr, Diagnostic> {
-        Ok(match chain.base.as_ref() {
-            swc::OptChainBase::Member(member) => {
-                let object = self.convert_expr(&member.obj)?;
-                let property = match &member.prop {
-                    swc::MemberProp::Ident(name) => MemberProperty::Field(name.sym.to_string()),
-                    swc::MemberProp::Computed(property) => {
-                        MemberProperty::Index(Box::new(self.convert_expr(&property.expr)?))
-                    }
-                    swc::MemberProp::PrivateName(_) => {
-                        return Err(reject(
-                            DiagnosticCode::PrivateNameUnsupported,
-                            "private names",
-                            Some(source_span(member.span)),
-                        ));
-                    }
-                };
-                self.append_optional_operation(
-                    object,
-                    OptionalOperation::Member {
-                        property,
-                        optional: chain.optional,
-                    },
-                    source_span(member.span),
-                )
-            }
-            swc::OptChainBase::Call(call) => self.append_optional_operation(
-                self.convert_expr(&call.callee)?,
-                OptionalOperation::Call {
-                    args: self.convert_call_args(&call.args)?,
-                    optional: chain.optional,
-                },
-                source_span(call.span),
-            ),
-        })
     }
 
     fn convert_update_target(&self, expr: &swc::Expr) -> Result<AssignTarget, Diagnostic> {

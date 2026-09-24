@@ -155,7 +155,10 @@ lash_rust_integration_test(
 filegroup(
     name = "session_oracle_corpus",
     srcs = [
+        "README.md",
         "tests/differential/sessions/expectations.json",
+        "tests/differential/sessions/generated.json",
+        "tests/test262/census.tsv",
     ],
 )
 

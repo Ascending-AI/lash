@@ -209,6 +209,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             return Ok(());
         }
+        // `Array.isArray` asks what a heap object is, and every kind answers
+        // without crossing the host boundary: an array or a match (which is
+        // one) is, and a `Map`, `Set`, `Date`, `RegExp`, `URL`, error or
+        // function is not.
+        if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
+            && method.as_str() == "Array.isArray"
+        {
+            let is_array = matches!(
+                self.heap.get(*receiver)?,
+                HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_)
+            );
+            self.stack.push(Value::Bool(is_array));
+            return Ok(());
+        }
         if self.try_execute_regexp_match_stdlib(&values)? {
             return Ok(());
         }
@@ -220,7 +234,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     Some(Value::List(Vec::new().into()))
                 }
                 "JSON.stringify" => Some(Value::String("{}".into())),
-                "Array.isArray" => Some(Value::Bool(false)),
                 _ => None,
             };
             if let Some(result) = result {
