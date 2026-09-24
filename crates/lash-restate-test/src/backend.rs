@@ -398,6 +398,12 @@ impl DeploymentProcessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for DeploymentProcessRunner {
+    fn replay_key_grammar(&self, registration: &lash_core::ProcessRegistration) -> Option<u32> {
+        self.installed()
+            .ok()
+            .and_then(|runner| runner.replay_key_grammar(registration))
+    }
+
     async fn run_process_segment(
         &self,
         started: &SegmentStarted,

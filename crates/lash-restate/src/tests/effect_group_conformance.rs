@@ -662,12 +662,12 @@ impl LiveConformanceHarness {
     > + Send
     + Sync
     + 'static {
-        let ingress_url = self.ingress_url.clone();
+        let connection = self.connection.clone();
         move || {
-            let ingress_url = ingress_url.clone();
+            let connection = connection.clone();
             Box::pin(async move {
                 Arc::new(crate::RestateBackend::new(
-                    ingress_url.as_str(),
+                    connection,
                     crate::RestateAuthorityId::new("lash-conformance-backend-laws")
                         .expect("valid authority"),
                     Arc::new(
