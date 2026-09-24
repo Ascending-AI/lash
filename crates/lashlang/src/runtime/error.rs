@@ -56,6 +56,11 @@ pub enum RuntimeError {
     /// A value used as a function was not a closure.
     #[error("attempted to call a non-function {actual}")]
     NonFunctionCall { actual: String },
+    /// A built-in method was called on a receiver its prototype rejects, as
+    /// a detached `const f = 'x'.includes; f()` is. ECMA throws a TypeError;
+    /// the message is node's.
+    #[error("{message}")]
+    IncompatibleReceiver { message: String },
     /// A closure was called with the wrong number of arguments.
     #[error("function takes {expected} arg(s), got {actual}")]
     FunctionArgumentCount { expected: usize, actual: usize },
@@ -522,6 +527,7 @@ impl RuntimeError {
             Self::FrameDepthExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::FunctionIndexOverflow => ErrorTaxonomy::Catchable,
             Self::NonFunctionCall { .. } => ErrorTaxonomy::Catchable,
+            Self::IncompatibleReceiver { .. } => ErrorTaxonomy::Catchable,
             Self::FunctionArgumentCount { .. } => ErrorTaxonomy::Catchable,
             Self::UnknownFunction { .. } => ErrorTaxonomy::Catchable,
             Self::ClosureCaptureCountMismatch { .. } => ErrorTaxonomy::Catchable,
@@ -658,6 +664,7 @@ impl RuntimeError {
             Self::FrameDepthExceeded { .. } => "FrameDepthExceeded",
             Self::FunctionIndexOverflow => "FunctionIndexOverflow",
             Self::NonFunctionCall { .. } => "NonFunctionCall",
+            Self::IncompatibleReceiver { .. } => "IncompatibleReceiver",
             Self::FunctionArgumentCount { .. } => "FunctionArgumentCount",
             Self::UnknownFunction { .. } => "UnknownFunction",
             Self::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
@@ -857,6 +864,9 @@ mod tests {
             RuntimeError::FunctionIndexOverflow,
             RuntimeError::NonFunctionCall {
                 actual: "number".into(),
+            },
+            RuntimeError::IncompatibleReceiver {
+                message: "String.prototype.includes called on null or undefined".into(),
             },
             RuntimeError::FunctionArgumentCount {
                 expected: 1,
@@ -1175,6 +1185,9 @@ mod tests {
                     "lashlang function table exceeds the durable function index space"
                 }
                 RuntimeError::NonFunctionCall { .. } => "attempted to call a non-function number",
+                RuntimeError::IncompatibleReceiver { .. } => {
+                    "String.prototype.includes called on null or undefined"
+                }
                 RuntimeError::FunctionArgumentCount { .. } => "function takes 1 arg(s), got 2",
                 RuntimeError::UnknownFunction { .. } => {
                     "closure function index 7 is not present in the compiled program"
@@ -1494,6 +1507,7 @@ mod tests {
     RuntimeError::FrameDepthExceeded { .. } => "FrameDepthExceeded",
     RuntimeError::FunctionIndexOverflow => "FunctionIndexOverflow",
     RuntimeError::NonFunctionCall { .. } => "NonFunctionCall",
+    RuntimeError::IncompatibleReceiver { .. } => "IncompatibleReceiver",
     RuntimeError::FunctionArgumentCount { .. } => "FunctionArgumentCount",
     RuntimeError::UnknownFunction { .. } => "UnknownFunction",
     RuntimeError::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",

@@ -17,6 +17,10 @@ pub(crate) enum HeapObject {
         /// at creation; same writability and deletability as `name`.
         length: Option<Value>,
     },
+    /// A built-in method as a value, such as `'x'.includes`. The heap holds
+    /// at most one object per function (see [`Heap::builtin_function`]), so
+    /// every read answers the same reference and ECMA's identity holds.
+    BuiltinFunction(BuiltinFunction),
     RegExp(RegExpObject),
     RegExpMatch(RegExpMatchObject),
     Map(MapObject),
@@ -101,11 +105,12 @@ pub(super) fn compound_identity(value: &Value) -> Option<(u8, usize)> {
 /// kinds a durable session can hold. The snapshot round-trip law (FIG-3608)
 /// holds each one to a row, or to the stated reason no program builds it, so
 /// a new kind cannot enter the heap without a law row.
-pub(crate) const HEAP_OBJECT_KINDS: [&str; 12] = [
+pub(crate) const HEAP_OBJECT_KINDS: [&str; 13] = [
     "tuple",
     "list",
     "record",
     "function",
+    "built-in function",
     "RegExp",
     "RegExp match array",
     "Map",
@@ -125,15 +130,23 @@ impl HeapObject {
             Self::List(_) => HEAP_OBJECT_KINDS[1],
             Self::Record(_) => HEAP_OBJECT_KINDS[2],
             Self::Closure { .. } => HEAP_OBJECT_KINDS[3],
-            Self::RegExp(_) => HEAP_OBJECT_KINDS[4],
-            Self::RegExpMatch(_) => HEAP_OBJECT_KINDS[5],
-            Self::Map(_) => HEAP_OBJECT_KINDS[6],
-            Self::Set(_) => HEAP_OBJECT_KINDS[7],
-            Self::Date(_) => HEAP_OBJECT_KINDS[8],
-            Self::Error(_) => HEAP_OBJECT_KINDS[9],
-            Self::Url(_) => HEAP_OBJECT_KINDS[10],
-            Self::UrlSearchParams(_) => HEAP_OBJECT_KINDS[11],
+            Self::BuiltinFunction(_) => HEAP_OBJECT_KINDS[4],
+            Self::RegExp(_) => HEAP_OBJECT_KINDS[5],
+            Self::RegExpMatch(_) => HEAP_OBJECT_KINDS[6],
+            Self::Map(_) => HEAP_OBJECT_KINDS[7],
+            Self::Set(_) => HEAP_OBJECT_KINDS[8],
+            Self::Date(_) => HEAP_OBJECT_KINDS[9],
+            Self::Error(_) => HEAP_OBJECT_KINDS[10],
+            Self::Url(_) => HEAP_OBJECT_KINDS[11],
+            Self::UrlSearchParams(_) => HEAP_OBJECT_KINDS[12],
         }
+    }
+
+    /// Whether the object is callable: a closure, or a built-in method read
+    /// as a value. Both are ECMA functions, so `typeof` answers `"function"`
+    /// for either, and neither can outlive the program that holds it.
+    pub(crate) fn is_function(&self) -> bool {
+        matches!(self, Self::Closure { .. } | Self::BuiltinFunction(_))
     }
 
     /// The kind as a diagnostic names it: an error by its class.
@@ -169,6 +182,8 @@ impl HeapObject {
                     .map(value_logical_bytes)
                     .fold(0_u64, u64::saturating_add),
             ),
+            // The payload is one table index; the function's text is static.
+            Self::BuiltinFunction(_) => 2,
             Self::RegExp(regexp) => (regexp.pattern.len() as u64)
                 .saturating_add(regexp.flags.len() as u64)
                 .saturating_add(VALUE_SLOT_BYTES.saturating_mul(3))
@@ -236,9 +251,10 @@ impl HeapObject {
                 length,
                 ..
             } => Box::new(captures.iter().chain(name.iter()).chain(length.iter())),
-            Self::RegExp(_) | Self::Date(_) | Self::UrlSearchParams(_) => {
-                Box::new(std::iter::empty())
-            }
+            Self::BuiltinFunction(_)
+            | Self::RegExp(_)
+            | Self::Date(_)
+            | Self::UrlSearchParams(_) => Box::new(std::iter::empty()),
             Self::RegExpMatch(result) => {
                 Box::new(
                     result

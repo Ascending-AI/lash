@@ -749,18 +749,18 @@ fn previous_snapshot_version_is_typed_rejection_for_missing_child_attempt_bound(
     // v19 is the last envelope written without the child attempt bound; v20
     // added it. v21 is the single-language cutover (ADR 0096), v22 the
     // nested-tool-definition cutover (FIG-1210), v23 the durable-heap
-    // cutover (FIG-3605) and v24 the closure-metadata bump (FIG-3655), which
-    // sit on top without touching this envelope's other fields, so the gap
-    // to the reader is five rather than one. The rejection asserted below is
-    // unchanged.
+    // cutover (FIG-3605), v24 the closure-metadata bump (FIG-3655) and v25
+    // the built-in method value bump (FIG-3701), which sit on top without
+    // touching this envelope's other fields, so the gap to the reader is six
+    // rather than one. The rejection asserted below is unchanged.
     const PREVIOUS_SNAPSHOT_VERSION: u32 = 19;
     assert_eq!(
         RLM_SNAPSHOT_VERSION,
-        PREVIOUS_SNAPSHOT_VERSION + 5,
+        PREVIOUS_SNAPSHOT_VERSION + 6,
         "the child attempt-bound snapshot bump, the single-language cutover, \
-         the tool-definition nesting, the durable-heap cutover and the \
-         closure-metadata bump are the only versions between this envelope \
-         and the current reader"
+         the tool-definition nesting, the durable-heap cutover, the \
+         closure-metadata bump and the built-in method value bump are the \
+         only versions between this envelope and the current reader"
     );
 
     #[derive(Serialize)]
@@ -927,7 +927,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-24 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-25 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -938,10 +938,10 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_24_root_encodes_to_golden_bytes() {
+fn version_25_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "87a776657273696f6e18a6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
-        "0ba7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
+        "87a776657273696f6e19a6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
+        "0ca7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
         "6582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d706f7369",
         "746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f6366",
         "3737383234633263313231663030663133626563343139626164306464663766653930646639313730653732303139643938",
@@ -1028,7 +1028,7 @@ fn version_24_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-24 root encoding changed; decide on a version bump before updating the golden"
+        "the version-25 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =

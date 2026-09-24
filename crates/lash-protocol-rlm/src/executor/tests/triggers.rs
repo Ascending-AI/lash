@@ -1682,6 +1682,10 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// unchanged (`js_name` skips serialization when absent). Only the module and
 /// component hashes and the derived registration identity moved; the lifted
 /// name, the compiled program and the registration payload did not.
+///
+/// FIG-3701 re-pinned them again: `LASHLANG_SEMANTIC_HASH_VERSION` moved to
+/// v21 because a member read of an advertised method now means the built-in
+/// function, so every module hash moved with it; the artifact's IR did not.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"

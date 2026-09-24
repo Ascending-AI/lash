@@ -517,7 +517,7 @@ fn json_property_whitelist(heap: &Heap, value: &Value) -> Result<Vec<String>, Ru
     let values = match value {
         Value::Ref(id) => match heap.get(*id)? {
             HeapObject::List(values) | HeapObject::Tuple(values) => values.as_slice(),
-            HeapObject::Closure { .. } => {
+            object if object.is_function() => {
                 return Err(js_stdlib_error(
                     "TS_JSON_REPLACER_FUNCTION_INTERNAL: function replacers must stay in the VM",
                 ));
@@ -582,7 +582,9 @@ fn javascript_json_stringify_with_errors(
                 }
                 // A function serializes to nothing: `null` in an array, and its
                 // property is omitted from an object (filtered by the caller).
-                HeapObject::Closure { .. } => Ok("null".to_string()),
+                HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) => {
+                    Ok("null".to_string())
+                }
                 HeapObject::Url(url) => serde_json::to_string(&url.href)
                     .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}"))),
                 HeapObject::List(values) | HeapObject::Tuple(values) => {
@@ -695,7 +697,7 @@ fn stringify_heap_record(
 
 /// Whether `value` is a function, which `JSON.stringify` serializes to nothing.
 fn is_function(heap: &Heap, value: &Value) -> bool {
-    matches!(value, Value::Ref(id) if matches!(heap.get(*id), Ok(HeapObject::Closure { .. })))
+    matches!(value, Value::Ref(id) if matches!(heap.get(*id), Ok(object) if object.is_function()))
 }
 
 fn join_json_container(
@@ -869,6 +871,15 @@ fn write_console_heap_object(
                 push_console_text(out, text)
             } else {
                 write_json_string(text, out)
+            }
+        }
+        // A built-in knows its name, and node's inspection prints it.
+        HeapObject::BuiltinFunction(function) => {
+            let text = format!("[Function: {}]", function.name());
+            if top_level {
+                push_console_text(out, &text)
+            } else {
+                write_json_string(&text, out)
             }
         }
         _ => {

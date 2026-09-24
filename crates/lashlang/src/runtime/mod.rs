@@ -51,14 +51,14 @@ pub(crate) use entry_points::compile_ast;
 pub use entry_points::{Entry, compile, execute, prewarm};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use heap::HEAP_OBJECT_KINDS;
+pub(crate) use heap::{
+    BuiltinFunction, BuiltinPrototype, DateObject, ErrorKind, ErrorObject, Heap, HeapObject,
+    HeapRestoreWire, MapObject, PersistedRoots, RegExpMatchObject, RegExpObject, SetObject,
+    UrlObject, UrlSearchParamsObject, canonical_regexp_flags, regexp_source, regexp_string,
+};
 pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
     HeapId,
-};
-pub(crate) use heap::{
-    DateObject, ErrorKind, ErrorObject, Heap, HeapObject, HeapRestoreWire, MapObject,
-    PersistedRoots, RegExpMatchObject, RegExpObject, SetObject, UrlObject, UrlSearchParamsObject,
-    canonical_regexp_flags, regexp_source, regexp_string,
 };
 pub use host::{
     AbilityOp, AbilityResult, AggregateConsumer, DEFAULT_HOST_MEMORY_LIMIT_BYTES,
@@ -102,11 +102,12 @@ pub(crate) use access::value_contains_tool_handle;
 pub(crate) use access::{
     add_assign_index_number, add_assign_value_number, assign_index, assign_path, assign_path_steps,
     assign_record_field, descend_index, descend_record_field, ensure_no_prototype_chain_wire_key,
-    is_prototype_chain_key, next_assign_index, prototype_chain_data_key_error,
-    prototype_chain_key_error, read_field_ref_direct, read_image_field, read_index_ref_direct,
-    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
-    read_javascript_index_direct, read_javascript_index_direct_with_key,
-    resolve_existing_list_assignment_index, resolve_index, unwrap_tool_result,
+    heap_inherited_builtin, inline_inherited_builtin, is_prototype_chain_key, next_assign_index,
+    prototype_chain_data_key_error, prototype_chain_key_error, read_field_ref_direct,
+    read_image_field, read_index_ref_direct, read_javascript_field_direct,
+    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct,
+    read_javascript_index_direct_with_key, resolve_existing_list_assignment_index, resolve_index,
+    unwrap_tool_result,
 };
 pub use access::{is_process_handle, parse_handle_record};
 #[allow(unused_imports)]

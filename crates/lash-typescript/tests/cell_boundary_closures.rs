@@ -111,3 +111,24 @@ fn ordinary_session_state_still_crosses_the_cell_boundary() {
         ExecutionOutcome::Finished(Value::Number(6.0))
     );
 }
+
+#[test]
+fn a_builtin_method_value_bound_to_a_session_global_does_not_survive_the_cell() {
+    // `'x'.includes` is a function like an arrow is: it works in its own cell
+    // and the binding is dropped at the boundary (FIG-3701).
+    let mut state = State::new();
+    run_cell(
+        &mut state,
+        "const has = 'x'.includes;\nconst box = { find: [].indexOf, n: 2 };\nconst tag = typeof has;",
+    );
+    assert_eq!(
+        run_cell(&mut state, "finish(6 * 7);"),
+        ExecutionOutcome::Finished(Value::Number(42.0))
+    );
+    assert_eq!(state.globals().get("has"), None);
+    assert_eq!(state.globals().get("box"), None);
+    assert_eq!(
+        state.globals().get("tag"),
+        Some(&Value::String("function".into()))
+    );
+}

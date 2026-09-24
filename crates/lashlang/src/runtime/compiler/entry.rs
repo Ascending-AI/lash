@@ -1130,13 +1130,21 @@ impl Compiler {
                     _ => None,
                 }
             }
+            // A read that reaches a built-in method is a function object, which
+            // lives on the heap the run owns, so it is never a constant.
             Expr::Field { target, field } => {
                 let target = self.fold_compile_time_expr(target)?;
+                if inline_inherited_builtin(&target, field).is_some() {
+                    return None;
+                }
                 read_javascript_field_direct(target, &transient_name(field)).ok()
             }
             Expr::Index { target, index } => {
                 let target = self.fold_compile_time_expr(target)?;
                 let index = self.fold_compile_time_expr(index)?;
+                if inline_inherited_builtin(&target, &javascript_to_string(&index)).is_some() {
+                    return None;
+                }
                 read_javascript_index_direct(target, index).ok()
             }
             Expr::Unary { op, expr } => {

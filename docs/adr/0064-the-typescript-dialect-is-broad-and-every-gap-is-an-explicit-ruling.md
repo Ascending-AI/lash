@@ -120,6 +120,18 @@ than by construct list:
   explicit signature-table entry, with `ryu-js` at the single
   number-to-string choke point because Rust's native formatting is not
   ECMA-exact at the edges.
+- **Built-in methods are values** (FIG-3701). A read of an advertised
+  instance method that misses the value's own properties (`'x'.includes`,
+  `[].map`, `new Set().keys`) answers ECMA's one function object for it on
+  that value's prototype: `'a'.includes === 'b'.includes`,
+  `'a'.includes !== [].includes`, `new Set().keys === new Set().values`,
+  `typeof` is `"function"`, and its own `name` and `length` are node's. Field,
+  computed, optional and destructuring reads agree, and an own property wins.
+  A plain call passes `undefined` as the receiver and answers as node does: a
+  TypeError, except `Object.prototype.toString`. The value is a function, so
+  the closure boundary drops a binding that reaches one
+  (`TS_FUNCTION_NOT_PERSISTED`). Only advertised names are readable; an ECMA
+  method outside the call surface still reads `undefined`.
 - **Regex** is ECMA semantics on the published, fuel-instrumented
   `lash-regress` fork of the `regress` engine: every bytecode dispatch and
   backtrack transition is charged against a deterministic budget, because a backtracking engine

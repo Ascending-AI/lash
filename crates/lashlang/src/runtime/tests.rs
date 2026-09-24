@@ -1246,6 +1246,7 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
 }
 
 mod builtin_cases;
+mod builtin_function_cases;
 mod case_builders;
 mod compiler_cases;
 mod projection_cases;

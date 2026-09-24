@@ -1816,8 +1816,8 @@ fn the_selected_rejection_is_replay_deterministic() {
 fn the_consumer_mode_moves_the_vm_abi_and_not_the_snapshot() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        11,
-        "snapshot v11 keeps property order, the dropped functions, error message presence and closure name/length; no aggregate state rides it"
+        12,
+        "snapshot v12 keeps property order, the dropped functions, error message presence, closure name/length and built-in method values; no aggregate state rides it"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,

@@ -503,8 +503,9 @@ runs (`tests/differential/sessions/`). Each is named by the slug the session
 corpus cites:
 
 - `closure-boundary`: a binding whose value reaches a function — a function
-  declaration, an arrow, an array or object holding one — does not survive
-  its cell ([ADR 0076](../../docs/adr/0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
+  declaration, an arrow, a built-in method read as a value (`'x'.includes`),
+  an array or object holding one — does not survive its cell
+  ([ADR 0076](../../docs/adr/0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
   a function's index is only meaningful inside the program that compiled it,
   where Node still holds the function. The session remembers the name, live
   and across a reload, so a later cell that reads it (by name, with `typeof`,

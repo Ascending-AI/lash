@@ -209,6 +209,10 @@ impl Heap {
                 "length" => length.take().is_some(),
                 _ => false,
             },
+            // A built-in's own `name` and `length` belong to the one object
+            // every read of it shares, so deleting them stays refused below;
+            // any other key is not its own, and deleting it changes nothing.
+            HeapObject::BuiltinFunction(_) if !matches!(key.as_ref(), "name" | "length") => false,
             object => {
                 return Err(RuntimeError::ValidationFailed {
                     reason: format!(
@@ -502,13 +506,19 @@ impl Heap {
             // carries them as non-writable data properties too, so a write never
             // creates an own property — even after `delete` cleared the own
             // slot, the inherited non-writable property still blocks the set.
-            (HeapObject::Closure { .. }, CompiledAssignPathStep::Field(field)) => {
+            (
+                HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_),
+                CompiledAssignPathStep::Field(field),
+            ) => {
                 return Err(RuntimeError::CannotAssignField {
                     field: names[field].text.to_string(),
                     actual: "function".to_string(),
                 });
             }
-            (HeapObject::Closure { .. }, CompiledAssignPathStep::Index) => {
+            (
+                HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_),
+                CompiledAssignPathStep::Index,
+            ) => {
                 return Err(RuntimeError::CannotAssignIndex {
                     actual: "function".to_string(),
                 });

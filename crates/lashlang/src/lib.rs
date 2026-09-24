@@ -152,7 +152,11 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// an explicitly empty one. A v21 stream is refused.
 /// v23 (FIG-3655): the continuation's heap-object wire carries a closure's
 /// own `name` and `length`. A v22 stream is refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 23;
+/// v24 (FIG-3701): a read of an advertised method (`'x'.includes`) is the
+/// built-in function object, so it no longer folds to a constant `undefined`,
+/// and the continuation's heap-object wire carries a `builtin_function` kind
+/// and the `IncompatibleReceiver` error. A v23 stream is refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 24;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

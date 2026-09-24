@@ -1,0 +1,21 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3701	1	accept	"typeof 'word'.includes"	"function"	-
+FIG-3701	2	accept	"'word'.includes.length"	"1"	-
+FIG-3701	3	accept	"'word'.includes.name"	"includes"	-
+FIG-3701	4	accept	"'a'.includes === 'b'.includes"	"true"	-
+FIG-3701	5	accept	"'a'.includes === [].includes"	"false"	-
+FIG-3701	6	accept	"(() => { const s = 'word'; const k = 'includes'; return s[k] === s.includes; })()"	"true"	-
+FIG-3701	7	accept	"({ includes: 7 }).includes"	"7"	-
+FIG-3701	8	accept	"({ toString: undefined }).toString"	"undefined"	-
+FIG-3701	9	accept	"(() => { const f = 'x'.includes; try { f('x'); return 'none'; } catch (e) { return e instanceof TypeError; } })()"	"true"	-
+FIG-3701	10	accept	"(() => { const t = ({}).toString; return t(); })()"	"[object Undefined]"	-
+FIG-3701	11	accept	"String([].map)"	"function map() { [native code] }"	-
+FIG-3701	12	accept	"new Set().keys === new Set().values"	"true"	-
+FIG-3701	13	accept	"[].hasOwnProperty === ({}).hasOwnProperty"	"true"	-
+FIG-3701	14	accept	"[].toString === ({}).toString"	"false"	-
+FIG-3701	15	accept	"(1).toFixed.length"	"1"	-
+FIG-3701	16	accept	"['a', 'b'].map(({}).toString).join()"	"[object Undefined],[object Undefined]"	-
+FIG-3701	17	accept	"JSON.stringify({ f: 'x'.includes, n: 1 })"	"{\"n\":1}"	-
+FIG-3701	18	accept	"Object.hasOwn('x'.includes, 'name')"	"true"	-
+FIG-3701	19	accept	"(() => { const f = [].sort; try { f(1); return 'none'; } catch (e) { return e instanceof TypeError; } })()"	"true"	-
+FIG-3701	20	accept	"typeof (() => 1).toString"	"function"	-

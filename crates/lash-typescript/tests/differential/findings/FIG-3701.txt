@@ -1,0 +1,20 @@
+typeof 'word'.includes
+'word'.includes.length
+'word'.includes.name
+'a'.includes === 'b'.includes
+'a'.includes === [].includes
+(() => { const s = 'word'; const k = 'includes'; return s[k] === s.includes; })()
+({ includes: 7 }).includes
+({ toString: undefined }).toString
+(() => { const f = 'x'.includes; try { f('x'); return 'none'; } catch (e) { return e instanceof TypeError; } })()
+(() => { const t = ({}).toString; return t(); })()
+String([].map)
+new Set().keys === new Set().values
+[].hasOwnProperty === ({}).hasOwnProperty
+[].toString === ({}).toString
+(1).toFixed.length
+['a', 'b'].map(({}).toString).join()
+JSON.stringify({ f: 'x'.includes, n: 1 })
+Object.hasOwn('x'.includes, 'name')
+(() => { const f = [].sort; try { f(1); return 'none'; } catch (e) { return e instanceof TypeError; } })()
+typeof (() => 1).toString

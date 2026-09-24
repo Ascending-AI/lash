@@ -146,7 +146,8 @@ pub(crate) fn rebind_object(object: &mut HeapObject, rebind: &mut Rebind<'_>) ->
             }
             changed
         }
-        HeapObject::RegExp(_)
+        HeapObject::BuiltinFunction(_)
+        | HeapObject::RegExp(_)
         | HeapObject::Date(_)
         | HeapObject::Url(_)
         | HeapObject::UrlSearchParams(_) => false,

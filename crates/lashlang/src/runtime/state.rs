@@ -48,7 +48,10 @@ pub use canonical_messagepack::{
 // closures would decode under the old shape, but restoring them would silently
 // drop the properties — an empty answer where the live run reported one — so
 // the bump is what refuses the older bytes.
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 11;
+// v12 writes a built-in method value as a `builtin_function` heap object named
+// by prototype and `name` (FIG-3701). A v11 reader meets an unknown kind while
+// deserializing, so the bump is what makes its refusal a version boundary.
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 12;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 /// The longest summary [`State::opaque_bindings`] renders, in characters.
 pub const BINDING_SUMMARY_MAX_CHARS: usize = super::heap::SUMMARY_MAX_CHARS;
@@ -942,6 +945,7 @@ const TAGGED_VALUE_FIELDS: &[&str] = &[
     "fields",
     "function",
     "captures",
+    "prototype",
     "name",
     "length",
     "pattern",

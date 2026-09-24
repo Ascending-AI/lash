@@ -397,7 +397,7 @@ impl Heap {
     }
 
     pub(crate) fn is_javascript_vm_object(&self, id: HeapId) -> Result<bool, RuntimeError> {
-        Ok(matches!(self.get(id)?, HeapObject::Closure { .. }) || self.is_javascript_exotic(id)?)
+        Ok(self.get(id)?.is_function() || self.is_javascript_exotic(id)?)
     }
 
     pub(crate) fn javascript_instanceof(
@@ -728,7 +728,7 @@ impl Heap {
         for name in ["toString", "valueOf"] {
             if let Some(member) = record.get(name)
                 && let Value::Ref(id) = member
-                && matches!(self.get(*id)?, HeapObject::Closure { .. })
+                && self.get(*id)?.is_function()
             {
                 return Ok(true);
             }
@@ -989,6 +989,11 @@ impl Heap {
             }
             Some(HeapObject::Closure { .. }) => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
+            }
+            // `Function.prototype.toString` of a built-in is ECMA's
+            // NativeFunction form, and the text node prints.
+            Some(HeapObject::BuiltinFunction(function)) => {
+                Value::String(format!("function {}() {{ [native code] }}", function.name()).into())
             }
             None => match value {
                 Value::Tuple(values) | Value::List(values) => Value::String(

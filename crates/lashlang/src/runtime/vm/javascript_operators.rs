@@ -47,14 +47,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if op == JavaScriptUnaryOp::TypeOf
             && let Value::Ref(id) = value
         {
-            let kind = self.heap.get(id)?.kind_name();
+            let is_function = self.heap.get(id)?.is_function();
             self.stack.push(Value::String(
-                if kind == "function" {
-                    "function"
-                } else {
-                    "object"
-                }
-                .into(),
+                if is_function { "function" } else { "object" }.into(),
             ));
         } else if matches!(op, JavaScriptUnaryOp::Plus | JavaScriptUnaryOp::Negate) {
             let number = self.heap.javascript_to_number(&value)?;
