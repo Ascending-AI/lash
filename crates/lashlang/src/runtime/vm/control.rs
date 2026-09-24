@@ -399,6 +399,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
         result
     }
 
+    /// Charges an intrinsic's proportional work to the instruction budget.
+    ///
+    /// An intrinsic's dispatch counts as one instruction, but its work can be
+    /// proportional to what it reads or writes: `JSON.parse` over a megabyte is
+    /// a megabyte of work behind one bytecode. Every such intrinsic charges one
+    /// instruction per unit of that work — a byte of text, a UTF-16 unit, an
+    /// element — so the instruction budget alone bounds what a cell can do,
+    /// with no wall-clock guard behind it. The units are a function of the
+    /// values alone, so the charge, and the instruction a budget runs out on,
+    /// is the same on every run and every replay. The bounds check that
+    /// follows every intrinsic's dispatch enforces it.
+    ///
+    /// The collection shaping builtins (`charge_collection_work` in `ops.rs`)
+    /// and the regexp engine (`grant_regexp_fuel`) charge the same budget.
+    pub(super) fn charge_intrinsic_work(&mut self, units: usize) {
+        self.instructions_executed = self.instructions_executed.saturating_add(units as u64);
+    }
+
     fn enforce_execution_bounds(&self) -> Result<(), RuntimeError> {
         // This is the structural taxonomy boundary: every error returned from
         // here is an uncatchable execution terminal, and callers return it

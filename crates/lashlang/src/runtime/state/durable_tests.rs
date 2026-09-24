@@ -333,6 +333,78 @@ fn a_rebuilt_heap_is_unlike_every_capture_taken_before_it() {
     );
 }
 
+/// Each root's body as a capture leaves it: the body it rewrote, or the body
+/// the capture it was diffed against recorded.
+fn resolved_bodies(
+    parts: &DurableParts,
+    prior: &BTreeMap<String, Vec<u8>>,
+) -> BTreeMap<String, Vec<u8>> {
+    parts
+        .fragments
+        .iter()
+        .map(|(name, fragment)| match fragment {
+            DurableFragment::Changed(body) => (name.clone(), body.clone()),
+            DurableFragment::Unchanged => (
+                name.clone(),
+                prior
+                    .get(name)
+                    .unwrap_or_else(|| panic!("`{name}` is unchanged from a body never recorded"))
+                    .clone(),
+            ),
+        })
+        .collect()
+}
+
+/// The write stamps are drawn from one process-wide clock, so which fragments a
+/// capture re-encodes depends on the process's history: a worker that kept the
+/// heap since the last capture rewrites only what was written, and a worker
+/// that rebuilt it from the wire rewrites every fragment that carries an
+/// object. What the capture persists does not: every fragment it rewrites
+/// re-encodes to the canonical bytes the unchanged ones already hold, so warm
+/// and cold workers leave byte-identical state behind (FIG-3672 CR17).
+#[test]
+fn warm_and_cold_captures_persist_byte_identical_state() {
+    let mut heap = Heap::default();
+    let list = heap
+        .allocate_list(vec![Value::Number(1.0)])
+        .expect("written list");
+    let untouched = heap
+        .allocate_list(vec![Value::String("still".into())])
+        .expect("untouched list");
+    let mut warm = install(vec![("list", list), ("untouched", untouched)], heap);
+    let first = complete(&warm);
+    let stored = bodies(&first);
+    let (mut cold, cold_baseline) = reload(&first.header, &stored);
+
+    for state in [&mut warm, &mut cold] {
+        let Some(Value::Ref(list)) = heap_backed(state).runtime_globals.get("list").cloned() else {
+            panic!("`list` is a heap list")
+        };
+        heap_backed_mut(state)
+            .heap
+            .push_list(&Value::Ref(list), Value::Number(2.0))
+            .expect("push onto the list");
+    }
+    let warm_parts = warm.durable_parts(&first.baseline).expect("warm capture");
+    let cold_parts = cold.durable_parts(&cold_baseline).expect("cold capture");
+    // A cold worker diffing against the capture a warm worker took before the
+    // heap was rebuilt rewrites more, and persists the same bytes.
+    let rebuilt_parts = cold
+        .durable_parts(&first.baseline)
+        .expect("rebuilt capture");
+    assert!(
+        changed_names(&rebuilt_parts).len() > changed_names(&warm_parts).len(),
+        "the rebuilt heap re-encodes fragments the warm heap did not"
+    );
+
+    assert_eq!(warm_parts.header, cold_parts.header);
+    assert_eq!(warm_parts.header, rebuilt_parts.header);
+    let persisted = resolved_bodies(&warm_parts, &stored);
+    assert_eq!(persisted, resolved_bodies(&cold_parts, &stored));
+    assert_eq!(persisted, resolved_bodies(&rebuilt_parts, &stored));
+    assert_ne!(persisted, stored, "the push is persisted");
+}
+
 #[test]
 fn a_reader_refuses_parts_this_writer_would_not_produce() {
     // `a` and `b` share one list; the writer puts it in `a`'s fragment.

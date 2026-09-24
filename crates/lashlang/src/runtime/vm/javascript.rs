@@ -197,7 +197,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 rest.get(1),
             );
             match result {
-                Ok(Some(json)) => self.stack.push(Value::String(json.into())),
+                Ok(Some(json)) => {
+                    // Serializing writes every byte of the text once.
+                    self.charge_intrinsic_work(json.len());
+                    self.stack.push(Value::String(json.into()));
+                }
                 Ok(None) => self.stack.push(Value::Undefined),
                 Err(RuntimeError::ValidationFailed { reason })
                     if reason.starts_with("TypeError: ") =>
@@ -437,6 +441,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let elements = self.array_like_elements(record)?;
             self.stack.push(Value::List(elements.into()));
             return Ok(());
+        }
+        if let [Value::String(method), Value::String(source), ..] = values.as_slice()
+            && method.as_str() == "JSON.parse"
+        {
+            // Parsing reads every byte of the text once.
+            self.charge_intrinsic_work(source.len());
         }
         let result = javascript_stdlib(&self.heap, &values)?;
         if let Value::String(value) = &result {
