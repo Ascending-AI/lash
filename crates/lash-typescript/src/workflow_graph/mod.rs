@@ -739,67 +739,134 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
 ///
 /// A top-level `const`-bound `async` arrow is a process literal in `main`
 /// (FIG-2999), and the lens projects it twice: the statement node carries the
-/// arrow as authored text, and the body is projected as its own lifted process
-/// declaration so the nodes inside are editable. The statement's text is the
-/// pre-edit arrow, so rendering `main` alone drops every edit made inside a
-/// process container. The lens owns those bodies, so the rendered subgraph is
-/// spliced over the literal's body here.
+/// arrow, and the body is projected as its own lifted process declaration so
+/// the nodes inside are editable. Rendering `main` alone would drop every edit
+/// made inside a process container, so the rendered body is spliced back.
 ///
-/// A declaration is matched to its literal by origin: the literal must sit at
-/// the declaration's `site` and still digest to its name. A rendered body is
-/// rebuilt in the shape the lowering gives a braced arrow body (one completion
-/// list), so a literal nested in it sits at the same site it was projected
-/// from. A label a host added to the statement holding a literal is metadata,
-/// not structure, so the site is also looked up with the rendered program's
-/// label steps skipped. A literal no declaration names keeps its authored
-/// body; a declaration whose literal is gone or changed is refused, never
-/// spliced into another literal.
+/// Which literal a declaration belongs to is derived, never read from an
+/// authored position (FIG-3571). A declaration's name is the digest of the
+/// literal it was lifted from together with the site it was lifted at, so a
+/// literal carries the declaration exactly when it still digests to that name
+/// at that site — wherever the literal sits now. Adding, removing or reordering
+/// statements around a literal moves it without changing that proof, and
+/// admission re-derives the origin of the rendered program. An admitted
+/// program that holds the literal as a reference to its declaration names it
+/// directly.
+///
+/// A declaration no literal or reference carries — its origin, name or literal
+/// was edited — is refused, as is a literal two declarations could claim and a
+/// reference naming a lifted process twice. Nothing is spliced into a literal
+/// it was not projected from; a literal no declaration claims keeps its
+/// authored body.
 fn splice_lifted_bodies(
     main: &mut Expr,
     lifted: Vec<&WorkflowProcess>,
     context: RenderContext<'_>,
 ) -> Result<(), GraphRenderError> {
-    let mut by_site = std::collections::BTreeMap::new();
+    let mut pending = LiftedBodies::default();
     for process in lifted {
-        let lashlang::ProcessOrigin::Lifted { site, .. } = &process.origin else {
-            continue;
-        };
-        by_site.insert(site.steps.clone(), process);
+        if process.origin.is_lifted() {
+            pending.by_name.insert(process.name.clone(), process);
+        }
     }
     splice_at(
         main,
         &mut Vec::new(),
         &mut Vec::new(),
-        &mut by_site,
+        &mut pending,
         context,
     )?;
-    match by_site.into_values().next() {
+    match pending.by_name.into_values().next() {
         Some(process) => Err(GraphRenderError::ProcessOriginMismatch {
             name: process.name.clone(),
-            message: "no process literal sits at its site".to_string(),
+            message: "no process literal or reference in the program carries it".to_string(),
         }),
         None => Ok(()),
     }
+}
+
+/// The lifted declarations not yet spliced, by name.
+#[derive(Default)]
+struct LiftedBodies<'a> {
+    by_name: std::collections::BTreeMap<String, &'a WorkflowProcess>,
+    spliced: BTreeSet<String>,
+}
+
+impl<'a> LiftedBodies<'a> {
+    fn take_named(&mut self, name: &str) -> Option<&'a WorkflowProcess> {
+        let process = self.by_name.remove(name)?;
+        self.spliced.insert(name.to_string());
+        Some(process)
+    }
+
+    /// The declaration `literal` carries: one whose name `literal` digests to
+    /// at the declaration's own site, preferring the one lifted at the
+    /// literal's current position.
+    fn take_for_literal(
+        &mut self,
+        literal: &lashlang::ProcessLiteralExpr,
+        path: &[u32],
+        unlabelled: &[u32],
+    ) -> Result<Option<&'a WorkflowProcess>, GraphRenderError> {
+        let carried = self
+            .by_name
+            .values()
+            .filter_map(|process| match &process.origin {
+                lashlang::ProcessOrigin::Lifted { site, .. }
+                    if lashlang::lifted_process_identity(&literal.body, &site.steps)
+                        == process.name =>
+                {
+                    Some((site.steps.as_slice(), process.name.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let name = match carried
+            .iter()
+            .find(|(site, _)| *site == path || *site == unlabelled)
+        {
+            Some((_, name)) => name.clone(),
+            None => match carried.as_slice() {
+                [] => return Ok(None),
+                [(_, name)] => name.clone(),
+                [(_, name), ..] => {
+                    return Err(GraphRenderError::ProcessOriginMismatch {
+                        name: name.clone(),
+                        message: "more than one lifted process could claim a moved literal"
+                            .to_string(),
+                    });
+                }
+            },
+        };
+        Ok(self.take_named(&name))
+    }
+}
+
+/// The lifted declaration `expr` refers to, if it is a reference to one.
+///
+/// An admitted view spells the reference as `ProcessRef`. A host that carries
+/// node text spells it as the reference's printed name, which reads back as a
+/// variable; since lifted names are reserved to the linker, a variable naming
+/// a lifted declaration of this graph can only be that reference.
+fn lifted_reference(expr: &Expr, pending: &LiftedBodies<'_>) -> Option<String> {
+    let name = match expr {
+        Expr::ProcessRef { process } => process.as_str(),
+        Expr::Variable(name) => name.as_str(),
+        _ => return None,
+    };
+    (pending.by_name.contains_key(name) || pending.spliced.contains(name)).then(|| name.to_string())
 }
 
 fn splice_at(
     expr: &mut Expr,
     path: &mut Vec<u32>,
     unlabelled: &mut Vec<u32>,
-    by_site: &mut std::collections::BTreeMap<Vec<u32>, &WorkflowProcess>,
+    pending: &mut LiftedBodies<'_>,
     context: RenderContext<'_>,
 ) -> Result<(), GraphRenderError> {
     if let Expr::ProcessLiteral(literal) = expr
-        && let Some((site, process)) = by_site
-            .remove_entry(path.as_slice())
-            .or_else(|| by_site.remove_entry(unlabelled.as_slice()))
+        && let Some(process) = pending.take_for_literal(literal, path, unlabelled)?
     {
-        if lashlang::lifted_process_identity(&literal.body, &site) != process.name {
-            return Err(GraphRenderError::ProcessOriginMismatch {
-                name: process.name.clone(),
-                message: "the literal at its site no longer digests to its name".to_string(),
-            });
-        }
         let mut statements = match subgraph_to_block(
             &process.body,
             RenderContext {
@@ -817,21 +884,20 @@ fn splice_at(
         };
         literal.params = process.params.clone();
         *literal.body = process_wrapper(&process.params, body);
-    } else if let Expr::ProcessRef { process: name } = expr
-        && let Some((_, process)) = by_site
-            .remove_entry(path.as_slice())
-            .or_else(|| by_site.remove_entry(unlabelled.as_slice()))
+    } else if let Some(name) = lifted_reference(expr, pending)
+        && pending.spliced.contains(name.as_str())
+    {
+        return Err(GraphRenderError::ProcessOriginMismatch {
+            name,
+            message: "a lifted process is carried by one literal, not referenced twice".to_string(),
+        });
+    } else if let Some(name) = lifted_reference(expr, pending)
+        && let Some(process) = pending.take_named(&name)
     {
         // An admitted program holds the lifted literal as a reference to its
         // declaration; the rendered program holds the literal itself, rebuilt
         // from the declaration: its authored parameters, the captures its
         // hidden parameters carry, and the rendered body.
-        if name.as_str() != process.name {
-            return Err(GraphRenderError::ProcessOriginMismatch {
-                name: process.name.clone(),
-                message: "the reference at its site names another process".to_string(),
-            });
-        }
         let lashlang::ProcessOrigin::Lifted { hidden_params, .. } = &process.origin else {
             unreachable!("only lifted processes are spliced")
         };
@@ -872,7 +938,7 @@ fn splice_at(
         if !label {
             unlabelled.push(step);
         }
-        splice_at(child, path, unlabelled, by_site, context)?;
+        splice_at(child, path, unlabelled, pending, context)?;
         path.pop();
         if !label {
             unlabelled.pop();

@@ -249,7 +249,9 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
         .iter()
         .find(|node| node.data.binding.as_deref() == Some("my_process"))
         .expect("reprojected added process binding");
-    assert_eq!(added.data.kind, "computation");
+    // In the admitted view the binding holds the reference to its lifted
+    // process, which is pure data (FIG-3571).
+    assert_eq!(added.data.kind, "data");
     let container_id = &saved.document.roots.processes[0];
     let added = saved
         .document
@@ -334,7 +336,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
     process.data.params = vec![
         EditableProcessField {
             name: "input".to_string(),
-            field_type: "int".to_string(),
+            field_type: "float".to_string(),
         },
         EditableProcessField {
             name: "enabled".to_string(),
@@ -371,7 +373,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
     // does not become a second module declaration.
     assert_eq!(
         saved.document.source,
-        "const renamed = async (input, enabled) => {\n  return 0;\n};\n"
+        "const renamed = async (input: number, enabled: boolean) => {\n  return 0;\n};\n"
     );
 
     let process = saved
@@ -406,7 +408,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
     let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
     assert_eq!(
         saved.document.source,
-        "const renamed = async (input) => {\n  return 0;\n};\n"
+        "const renamed = async (input: number) => {\n  return 0;\n};\n"
     );
     let process = saved
         .document
@@ -414,14 +416,14 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .iter()
         .find(|node| node.data.kind == "process")
         .expect("reprojected reduced process");
-    // FIG-3033: a canonical process arrow prints its parameters without
-    // type annotations, so an authored parameter type does not survive the
-    // round trip. The parameter itself, and its position, do.
+    // FIG-3571: a canonical process arrow prints each parameter's type as
+    // the annotation that lowers to it, so an authored parameter type
+    // survives the round trip along with the parameter and its position.
     assert_eq!(
         process.data.params,
         [EditableProcessField {
             name: "input".to_string(),
-            field_type: "any".to_string(),
+            field_type: "float".to_string(),
         }]
     );
     assert_eq!(process.data.available_vars, ["input"]);

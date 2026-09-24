@@ -12,9 +12,9 @@ use std::collections::BTreeSet;
 use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
     GraphRenderError, TypeScriptSourceError, WorkflowGraphBuildError,
-    parse_typescript_assign_target, parse_typescript_expression, typescript_program_source,
-    validate, workflow_graph_from_source, workflow_graph_from_source_with_facets,
-    workflow_graph_to_source,
+    parse_typescript_assign_target, parse_typescript_expression, typescript_expression_source,
+    typescript_program_source, validate, workflow_graph_from_source,
+    workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lashlang::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField,
