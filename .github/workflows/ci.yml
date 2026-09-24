@@ -1793,7 +1793,13 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
+    # Trusted events take the worker binaries from the shared build cache
+    # (FIG-3666): the Cargo release build took 38 of this job's 40 minutes
+    # and gated every workers and process-operations leg behind it. Untrusted
+    # events receive no cache credentials and keep the Cargo release build.
+    environment: build-cache
     env:
+      BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
       RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
     steps:
       - name: Explain plan deferral
@@ -1830,22 +1836,33 @@ jobs:
         if: env.RUN_WORKER_ARTIFACTS == 'true'
         run: bash scripts/ci-reclaim-disk.sh
 
+      - name: Configure shared build cache
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED == 'true'
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
       - name: Install Rust toolchain
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
         uses: ./.github/actions/rust-toolchain
 
       - name: Install protoc
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       - name: Install mold
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
         uses: ./.github/actions/setup-mold
 
       - name: Restore worker release dependencies
-        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        if: env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
@@ -1857,11 +1874,23 @@ jobs:
       - name: Build worker binaries once
         if: env.RUN_WORKER_ARTIFACTS == 'true'
         run: |
-          cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
-          mkdir -p "${RUNNER_TEMP}/worker-artifacts"
-          find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
-            -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
+          if [ "${BAZEL_TRUSTED}" = true ]; then
+            # Every binary of the package, under its Cargo name and
+            # stripped: the same set `--bins` builds below.
+            python3 scripts/ci/restate_suite.py stage-binaries \
+              //runbooks/restate-postgres-workers "${RUNNER_TEMP}/worker-artifacts"
+          else
+            cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+            mkdir -p "${RUNNER_TEMP}/worker-artifacts"
+            find target/release -maxdepth 1 -type f -name 'lash-e2e-*' -executable \
+              -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
+          fi
           tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
+
+      - name: Remove client credentials
+        if: always() && env.RUN_WORKER_ARTIFACTS == 'true' && env.BAZEL_TRUSTED == 'true'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
       - name: Record worker binary provenance
         id: prepare-worker-binaries
@@ -1890,7 +1919,7 @@ jobs:
             ${{ runner.temp }}/worker-binaries.tar
             ${{ runner.temp }}/worker-binaries.provenance.json
           if-no-files-found: error
-          compression-level: 0
+          compression-level: 1
           retention-days: 1
 
   functional-e2e:
@@ -2057,6 +2086,9 @@ jobs:
     # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
+    # Its test binaries come from the shared build cache (FIG-3666); a
+    # dispatch is always a trusted event.
+    environment: build-cache
 
     strategy:
       fail-fast: false
@@ -2075,18 +2107,15 @@ jobs:
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
-
-
-      - name: Install protoc
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      # Provides the linker the workflow-level RUSTFLAGS names.
-      - name: Install mold
-        uses: ./.github/actions/setup-mold
+      - name: Configure shared build cache
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
       # The repo-local installer uses checksum-pinned release archives instead
       # of the GitHub releases API; merge-queue trains fan out enough jobs that
@@ -2139,6 +2168,11 @@ jobs:
           LASH_SESSION_LEASE_ARTIFACT_DIR: target/functional-e2e-artifacts/session-lease-triage
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: just ${{ matrix.recipe }}
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
       - name: Upload functional E2E failure artifacts
         if: failure() && matrix.artifact != 'none'
