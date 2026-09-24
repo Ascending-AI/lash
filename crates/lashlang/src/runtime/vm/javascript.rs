@@ -180,6 +180,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Ok(());
         }
         if let [Value::String(method), arguments @ ..] = values.as_slice()
+            && method.as_str() == "String.raw"
+        {
+            let result = self.javascript_string_raw(arguments)?;
+            self.stack.push(result);
+            return Ok(());
+        }
+        if let [Value::String(method), arguments @ ..] = values.as_slice()
             && method.as_str() == javascript_substrate::CONSOLE_OBSERVATION_TEXT
         {
             let text =

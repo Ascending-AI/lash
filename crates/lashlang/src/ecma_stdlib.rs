@@ -101,6 +101,7 @@ pub const STATIC_STDLIB_SIGNATURES: &[StdlibSignature] = signatures![
     ("Array", "of", "...values"),
     ("String", "fromCharCode", "...codeUnits"),
     ("String", "fromCodePoint", "...codePoints"),
+    ("String", "raw", "template, ...substitutions"),
     ("Map", "groupBy", "iterable, callback"),
     ("Date", "parse", "value"),
     (

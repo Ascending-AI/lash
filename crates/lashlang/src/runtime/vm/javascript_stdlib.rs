@@ -1,5 +1,5 @@
 use super::super::{
-    ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
+    ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
 };
 use super::*;
 use num_traits::Float;
@@ -903,6 +903,78 @@ pub(super) fn to_int32(value: f64) -> i64 {
         value - 4_294_967_296
     } else {
         value
+    }
+}
+
+impl<H: ExecutionHost> Vm<'_, H> {
+    /// `String.raw(template, ...substitutions)`, ECMA-262 22.1.2.4: the cooked
+    /// template is never read; the raw segments come from `template.raw`,
+    /// counted by its `length` after `ToLength`, and a substitution joins the
+    /// output only when a later raw segment follows it.
+    pub(super) fn javascript_string_raw(&mut self, args: &[Value]) -> Result<Value, RuntimeError> {
+        let template = args.first().cloned().unwrap_or(Value::Undefined);
+        if matches!(template, Value::Null | Value::Undefined) {
+            return Err(self.javascript_type_error("Cannot convert undefined or null to object"));
+        }
+        let raw = self.read_dialect_index(template, Value::String("raw".into()))?;
+        if matches!(raw, Value::Null | Value::Undefined) {
+            return Err(self.javascript_type_error("Cannot convert undefined or null to object"));
+        }
+        // `ToObject(raw)` before the length read: a sequence or string raw is
+        // an object with an indexed length, which the value model answers
+        // without materialising a wrapper.
+        let length = match &raw {
+            Value::List(items) | Value::Tuple(items) => items.len() as f64,
+            Value::String(value) => value.encode_utf16().count() as f64,
+            Value::Ref(id) => match self.heap.get(*id)? {
+                HeapObject::List(items) | HeapObject::Tuple(items) => items.len() as f64,
+                HeapObject::RegExpMatch(result) => result.items.len() as f64,
+                _ => {
+                    let value =
+                        self.read_dialect_index(raw.clone(), Value::String("length".into()))?;
+                    self.heap.javascript_to_number(&value)?
+                }
+            },
+            _ => {
+                let value = self.read_dialect_index(raw.clone(), Value::String("length".into()))?;
+                self.heap.javascript_to_number(&value)?
+            }
+        };
+        // ToLength: ToIntegerOrInfinity clamped to [0, 2^53 - 1].
+        let segments = if length.is_nan() || length <= 0.0 {
+            0
+        } else {
+            (length.trunc() as u64).min(9_007_199_254_740_991)
+        };
+        let substitutions = args.get(1..).unwrap_or(&[]);
+        let mut output = String::new();
+        for index in 0..segments {
+            let key = Value::String(index.to_string().into());
+            let literal = self.read_dialect_index(raw.clone(), key)?;
+            output.push_str(&self.heap.javascript_to_string(&literal)?);
+            ensure_javascript_string_size(output.len())?;
+            if index + 1 < segments && (index as usize) < substitutions.len() {
+                output.push_str(
+                    &self
+                        .heap
+                        .javascript_to_string(&substitutions[index as usize])?,
+                );
+                ensure_javascript_string_size(output.len())?;
+            }
+        }
+        Ok(Value::String(output.into()))
+    }
+
+    /// A guest-visible `TypeError`, thrown the way `assert.throws` expects:
+    /// as an uncaught exception carrying an error object, not a VM fault.
+    fn javascript_type_error(&mut self, message: &str) -> RuntimeError {
+        match self
+            .heap
+            .allocate_error(ErrorKind::TypeError, Some(message.to_string()), None, None)
+        {
+            Ok(value) => RuntimeError::UncaughtException { value },
+            Err(error) => error,
+        }
     }
 }
 

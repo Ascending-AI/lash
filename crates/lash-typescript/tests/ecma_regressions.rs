@@ -293,6 +293,22 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "const e=[1,2,3,4,5].copyWithin(1,0,3); const f=[1,2,3].copyWithin(0,1); finish(e.join(',')+'|'+f.join(','));",
             "1,1,2,3,5|2,3,3",
         ),
+        (
+            "const t={raw:['a','b','c']}; finish(String.raw(t,1,2)+'|'+String.raw(t)+'|'+String.raw({raw:{length:0}})+'|'+String.raw({raw:{length:undefined}}));",
+            "a1b2c|abc||",
+        ),
+        (
+            "const r={length:5,0:'e',1:'',2:null,3:undefined,4:123,5:'past'}; finish(String.raw({raw:r}));",
+            "enullundefined123",
+        ),
+        (
+            "try { String.raw(null); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "try { String.raw({raw:undefined}); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
         ("finish([1,[2,[3]]].flat(Infinity).join(','));", "1,2,3"),
         (
             "const a=[3,1,2]; const b=a.toReversed(); const c=a.toSpliced(1,1,9); const d=a.with(-1,8); finish(a.join(',')+'|'+b.join(',')+'|'+c.join(',')+'|'+d.join(','));",
