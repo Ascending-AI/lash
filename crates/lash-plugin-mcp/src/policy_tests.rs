@@ -90,8 +90,6 @@ except (FileNotFoundError, ValueError):
     starts = 0
 with open(starts_path, 'w', encoding='utf-8') as f:
     f.write(str(starts + 1))
-if behavior == 'silent_no_ping_once' and starts > 0:
-    sys.exit(1)
 if behavior == 'fail_once_then_success' and starts < 1:
     sys.exit(1)
 if behavior == 'fail_twice_then_success' and starts < 2:
@@ -150,13 +148,7 @@ for line in sys.stdin:
         else:
             threading.Thread(target=run_call, args=(message, call_index), daemon=True).start()
     elif method == 'ping':
-        if behavior == 'ping_error':
-            send({'jsonrpc': '2.0', 'id': message['id'],
-                  'error': {'code': -32601, 'message': 'Method not found'}})
-        elif behavior == 'ping_meta':
-            send({'jsonrpc': '2.0', 'id': message['id'],
-                  'result': {'_meta': {'alive': True}}})
-        elif behavior in ('silent_ping', 'success', 'fail_twice_then_success'):
+        if behavior in ('silent_ping', 'success', 'fail_twice_then_success'):
             send({'jsonrpc': '2.0', 'id': message['id'], 'result': {}})
 if behavior in ('ignore_eof', 'exit_on_eof_after_hang_initialize'):
     with open(eof_path, 'w', encoding='utf-8') as f:
@@ -253,13 +245,31 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
     }
 }
 
+/// Connects the policy mock. Callers hold a [`scripted::Clock`]: the startup
+/// timeout is policy time, so an interpreter that starts slowly on a loaded
+/// host must not be able to outrun it.
 async fn connect_mock(root: &Path, options: MockOptions) -> Arc<McpConnectionPool> {
-    McpConnectionPool::connect(BTreeMap::from([(
+    let pool = McpConnectionPool::connect(BTreeMap::from([(
         "mock".to_string(),
         mock_config(root, options),
     )]))
     .await
-    .expect("connect policy mock")
+    .expect("connect policy mock");
+    assert_connected(&pool);
+    pool
+}
+
+/// `McpConnectionPool::connect` keeps an unavailable server registered and
+/// retries it in the background, recording why in its status. A test that
+/// needs the connection fails here with that recorded fault instead of at a
+/// later assertion about a pool that never connected.
+fn assert_connected(pool: &McpConnectionPool) {
+    let status = &pool.server_statuses()[0];
+    assert!(
+        status.connected,
+        "policy mock failed to connect: {:?}",
+        status.last_error
+    );
 }
 
 async fn call(pool: &McpConnectionPool) -> ToolOutcome {
@@ -479,74 +489,59 @@ async fn idle_timeout_emits_cancellation_notification() {
     pool.shutdown_all().await;
 }
 
-#[tokio::test]
-async fn silent_tool_with_answered_ping_times_out_without_disconnect() {
+/// Drives one call past its idle timeout into a ping probe the mock answers
+/// per `behavior`. The probe timeout stays frozen, so only the mock's answer
+/// can settle it, and any well-formed answer must keep the service connected.
+async fn answered_probe_keeps_connection(behavior: &'static str) {
+    let clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "silent_ping",
+            behavior,
             call_timeout_ms: 50,
             policy: TimeoutDisconnectPolicy::PingProbe,
             ..MockOptions::default()
         },
     )
     .await;
-
-    let result = call(&pool).await;
+    let mut request = Box::pin(call(&pool));
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    mock.event("call").await;
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    tokio::time::advance(Duration::from_millis(50) + scripted::TIMER_TICK).await;
+    let result = request.await;
+    mock.event("cancelled").await;
+    mock.event("ping").await;
     assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
     assert!(pool.server_statuses()[0].connected);
-    assert!(received(root.path()).contains("\"method\":\"ping\""));
+    drop(clock);
     pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn silent_tool_with_answered_ping_times_out_without_disconnect() {
+    answered_probe_keeps_connection("answered_ping").await;
 }
 
 #[tokio::test]
 async fn ping_method_not_found_answer_proves_liveness() {
-    let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
-        root.path(),
-        MockOptions {
-            behavior: "ping_error",
-            call_timeout_ms: 50,
-            policy: TimeoutDisconnectPolicy::PingProbe,
-            ..MockOptions::default()
-        },
-    )
-    .await;
-
-    let result = call(&pool).await;
-    assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
-    assert!(pool.server_statuses()[0].connected);
-    pool.shutdown_all().await;
+    answered_probe_keeps_connection("ping_error").await;
 }
 
 #[tokio::test]
 async fn ping_meta_result_answer_proves_liveness() {
-    let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
-        root.path(),
-        MockOptions {
-            behavior: "ping_meta",
-            call_timeout_ms: 50,
-            policy: TimeoutDisconnectPolicy::PingProbe,
-            ..MockOptions::default()
-        },
-    )
-    .await;
-
-    let result = call(&pool).await;
-    assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
-    assert!(pool.server_statuses()[0].connected);
-    pool.shutdown_all().await;
+    answered_probe_keeps_connection("ping_meta").await;
 }
 
 #[tokio::test]
 async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() {
+    let clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
-            behavior: "silent_no_ping_once",
+            behavior: "unanswered_ping_once",
             call_timeout_ms: 50,
             policy: TimeoutDisconnectPolicy::PingProbe,
             reconnect_initial_ms: 10,
@@ -558,8 +553,20 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
 
     let mut lifecycle = scripted::Lifecycle::new();
     lifecycle.observe(&entry(&pool));
-    let result = call(&pool).await;
+    let mut request = Box::pin(call(&pool));
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    mock.event("call").await;
+    assert!(futures_util::poll!(request.as_mut()).is_pending());
+    tokio::time::advance(Duration::from_millis(50) + scripted::TIMER_TICK).await;
+    // The call must keep running while the probe it starts reaches the mock:
+    // the ping event proves the frozen probe timeout is armed.
+    let (result, ()) = tokio::join!(request, async {
+        mock.event("cancelled").await;
+        mock.event("ping").await;
+        tokio::time::advance(Duration::from_millis(100) + scripted::TIMER_TICK).await;
+    });
     assert_eq!(failure(&result).class, ToolFailureClass::Unavailable);
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
     lifecycle.reconnect_exhausted().await;
     assert_eq!(starts(root.path()), 2);
     let status = &pool.server_statuses()[0];
@@ -578,12 +585,13 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
     );
     assert_eq!(failure(&terminal).retry, ToolRetryStatus::Never);
     assert_eq!(starts(root.path()), 2);
+    drop(clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn consecutive_timeout_threshold_resets_only_after_success() {
-    let _clock = scripted::Clock::new().await;
+    let clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
     let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
@@ -596,12 +604,8 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
         },
     )
     .await;
-    let reconnect_ready = Arc::new(tokio::sync::Notify::new());
-    let ready = Arc::clone(&reconnect_ready);
-    entry(&pool).with_reconnect_jitter(Arc::new(move |delay| {
-        ready.notify_one();
-        delay
-    }));
+    let mut lifecycle = scripted::Lifecycle::new();
+    lifecycle.observe(&entry(&pool));
     async fn expire(pool: &McpConnectionPool, mock: &mut scripted::Mock) -> ToolOutcome {
         let mut request = Box::pin(call(pool));
         assert!(futures_util::poll!(request.as_mut()).is_pending());
@@ -637,15 +641,13 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
         failure(&expire(&pool, &mut mock).await).class,
         ToolFailureClass::Unavailable
     );
-    tokio::time::resume();
-    reconnect_ready.notified().await;
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
     let mut service = entry(&pool).service.clone();
     service
         .wait_for(Option::is_some)
         .await
         .expect("replacement publication");
     mock.reconnected().await;
-    tokio::time::pause();
     assert_eq!(
         failure(&expire(&pool, &mut mock).await).class,
         ToolFailureClass::Timeout
@@ -654,12 +656,14 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
         pool.server_statuses()[0].connected,
         "the first timeout after reconnect must start a fresh budget"
     );
-    drop(_clock);
+    drop(clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let pool = connect_mock(
         root.path(),
@@ -671,11 +675,13 @@ async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
     )
     .await;
     let current_entry = entry(&pool);
+    lifecycle.observe(&current_entry);
     let stale_generation = current_entry
         .service_snapshot()
         .expect("initial service")
         .generation;
     assert!(call(&pool).await.is_success());
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
     published_generation(&current_entry, 2).await;
     assert!(!current_entry.mark_disconnected(
         "late failure from generation 1".to_string(),
@@ -705,11 +711,14 @@ async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
         2
     );
     assert_eq!(starts(root.path()), 2);
+    drop(clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn stale_generation_timeout_does_not_contaminate_replacement_accounting() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let pool = connect_mock(
         root.path(),
@@ -723,7 +732,9 @@ async fn stale_generation_timeout_does_not_contaminate_replacement_accounting() 
     )
     .await;
     let current_entry = entry(&pool);
+    lifecycle.observe(&current_entry);
     assert!(call(&pool).await.is_success());
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
     published_generation(&current_entry, 2).await;
 
     let (reply, result) = tokio::sync::oneshot::channel();
@@ -736,11 +747,14 @@ async fn stale_generation_timeout_does_not_contaminate_replacement_accounting() 
         .expect("queue stale generation-1 timeout");
     assert_eq!(result.await.expect("actor timeout observation reply"), None);
     assert_eq!(current_entry.consecutive_timeouts.load(Ordering::SeqCst), 0);
+    drop(clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let pool = connect_mock(
         root.path(),
@@ -752,6 +766,7 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
     )
     .await;
     let current_entry = entry(&pool);
+    lifecycle.observe(&current_entry);
     let initial = current_entry
         .service_snapshot()
         .expect("generation 1 service");
@@ -770,6 +785,7 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
         "replace generation 1 while its catalog refresh is paused".to_string(),
         1,
     ));
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
     published_generation(&current_entry, 2).await;
     hook.release.notify_one();
     refresh.await.expect("stale refresh task");
@@ -785,11 +801,14 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
             .collect::<Vec<_>>(),
         [mcp_name("mock", "generation-2")]
     );
+    drop(clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn failed_connection_attempt_reserves_a_unique_generation() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let entry = McpEntry::new(
         "mock".to_string(),
@@ -803,19 +822,24 @@ async fn failed_connection_attempt_reserves_a_unique_generation() {
         McpHostServices::default(),
     )
     .with_reconnect_jitter(Arc::new(|_| Duration::ZERO));
+    lifecycle.observe(&entry);
 
     entry
         .establish()
         .await
         .expect_err("first attempt must fail before publication");
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
     published_generation(&entry, 2).await;
+    drop(clock);
     entry.shutdown().await;
 }
 
 #[tokio::test]
 async fn successful_respawn_resets_reconnect_attempt_budget_but_not_generation() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
-    let pool = Arc::new(McpConnectionPool::empty());
+    let pool = lifecycle.observed_pool();
     let entry = McpEntry::new(
         "mock".to_string(),
         mock_config(
@@ -836,14 +860,22 @@ async fn successful_respawn_resets_reconnect_attempt_budget_but_not_generation()
         .await
         .expect_err("generation 1 must fail before publication");
 
+    // Generation 2 connects and quits, generation 3 fails, generation 4
+    // connects: three reconnects, the last one after a spent attempt.
+    for _ in 0..3 {
+        clock.expire(lifecycle.reconnect_scheduled().await).await;
+    }
     published_generation(&entry, 4).await;
     assert_eq!(starts(root.path()), 4);
     assert!(!pool.server_statuses()[0].reconnect_exhausted);
+    drop(clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn crash_per_call_preserves_backoff_across_successful_respawns() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let observed_ceilings = Arc::new(Mutex::new(Vec::new()));
     let reconnect_jitter = {
@@ -853,7 +885,7 @@ async fn crash_per_call_preserves_backoff_across_successful_respawns() {
             Duration::ZERO
         }) as Arc<dyn Fn(Duration) -> Duration + Send + Sync>
     };
-    let pool = Arc::new(McpConnectionPool::empty());
+    let pool = lifecycle.observed_pool();
     let entry = McpEntry::new(
         "mock".to_string(),
         mock_config(
@@ -874,8 +906,9 @@ async fn crash_per_call_preserves_backoff_across_successful_respawns() {
     for expected_starts in 2..=4 {
         let result = call(&pool).await;
         assert!(result.is_success(), "crash-after-call result: {result:?}");
+        clock.expire(lifecycle.reconnect_scheduled().await).await;
         published_generation(&entry, expected_starts).await;
-        assert!(starts(root.path()) >= expected_starts);
+        assert_eq!(starts(root.path()), expected_starts);
     }
 
     assert_eq!(
@@ -887,6 +920,7 @@ async fn crash_per_call_preserves_backoff_across_successful_respawns() {
         ],
         "short-lived successful connections must not reset reconnect pacing"
     );
+    drop(clock);
     pool.shutdown_all().await;
 }
 
@@ -895,8 +929,10 @@ async fn disconnect_immediately_after_reconnect_publish_rearms_actor() {
     // The old guard-clear suppression race is structurally absent in the
     // actor topology. This replacement law proves an ordinary queued
     // post-publication disconnect rearms the same actor.
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
-    let pool = Arc::new(McpConnectionPool::empty());
+    let pool = lifecycle.observed_pool();
     let entry = McpEntry::new(
         "mock".to_string(),
         mock_config(
@@ -915,32 +951,49 @@ async fn disconnect_immediately_after_reconnect_publish_rearms_actor() {
         .establish()
         .await
         .expect_err("the eager connection must fail");
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
     published_generation(&entry, 2).await;
     assert!(pool.server_statuses()[0].connected);
 
     assert!(entry.mark_disconnected("forced post-publish disconnect".to_string(), 2));
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
     published_generation(&entry, 3).await;
     assert_eq!(starts(root.path()), 3);
+    drop(clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn keepalive_rearms_an_exhausted_reconnect_loop() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
-        root.path(),
-        MockOptions {
-            behavior: "fail_twice_then_success",
-            probe_interval_ms: 25,
-            reconnect_initial_ms: 10,
-            reconnect_max_attempts: 1,
-            ..MockOptions::default()
-        },
-    )
-    .await;
+    let pool = lifecycle.observed_pool();
+    let entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "fail_twice_then_success",
+                probe_interval_ms: 25,
+                reconnect_initial_ms: 10,
+                reconnect_max_attempts: 1,
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    );
+    let keepalive = Instant::now() + Duration::from_millis(25);
+    assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
+    entry.establish().await.expect_err("the first start fails");
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
+    lifecycle.reconnect_exhausted().await;
 
-    published_generation(&entry(&pool), 3).await;
-    assert!(starts(root.path()) >= 3);
+    clock.expire(keepalive).await;
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
+    published_generation(&entry, 3).await;
+    assert_eq!(starts(root.path()), 3);
+    drop(clock);
     pool.shutdown_all().await;
 }
 
@@ -1007,11 +1060,11 @@ fn dropping_connected_pool_kills_misbehaving_stdio_child_and_logs() {
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
     let root = tempfile::tempdir().unwrap();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime");
+    let clock = runtime.block_on(scripted::Clock::new());
     let pool = runtime.block_on(connect_mock(
         root.path(),
         MockOptions {
@@ -1019,6 +1072,7 @@ fn dropping_connected_pool_kills_misbehaving_stdio_child_and_logs() {
             ..MockOptions::default()
         },
     ));
+    runtime.block_on(async move { drop(clock) });
     let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
         .expect("stdio child must publish its pid")
         .parse()
@@ -1054,11 +1108,11 @@ fn dropping_connected_pool_kills_misbehaving_stdio_child_and_logs() {
 #[test]
 fn shutdown_all_fully_reaps_stdio_child() {
     let root = tempfile::tempdir().unwrap();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime");
+    let clock = runtime.block_on(scripted::Clock::new());
     let pool = runtime.block_on(connect_mock(
         root.path(),
         MockOptions {
@@ -1066,6 +1120,7 @@ fn shutdown_all_fully_reaps_stdio_child() {
             ..MockOptions::default()
         },
     ));
+    runtime.block_on(async move { drop(clock) });
     let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
         .expect("stdio child must publish its pid")
         .parse()
@@ -1646,11 +1701,13 @@ async fn aborted_mid_establish_attach_still_allows_bounded_shutdown() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn publish_then_die_while_attach_is_in_flight_reconnects() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
     let root = tempfile::tempdir().unwrap();
     let hook = Arc::new(ActorPauseHook::default());
-    let pool = Arc::new(McpConnectionPool::empty());
+    let pool = lifecycle.observed_pool();
     *pool.attach_return_hook.write_recover() = Some(Arc::clone(&hook));
 
     let attaching_pool = Arc::clone(&pool);
@@ -1670,6 +1727,7 @@ async fn publish_then_die_while_attach_is_in_flight_reconnects() {
         "attach must remain in flight at the seam"
     );
 
+    clock.expire(lifecycle.reconnect_scheduled().await).await;
     published_generation(&entry(&pool), 2).await;
     assert_eq!(starts(root.path()), 2);
     assert!(
@@ -1682,6 +1740,7 @@ async fn publish_then_die_while_attach_is_in_flight_reconnects() {
         attaching.await.expect("attach task panicked"),
         Ok(())
     ));
+    drop(clock);
     pool.shutdown_all().await;
 }
 
@@ -1801,7 +1860,11 @@ fn shutdown_all_reaps_stdio_child_on_a_runtime_without_a_signal_driver() {
         .enable_time()
         .build()
         .expect("time-only runtime");
+    let clock = runtime.block_on(scripted::Clock::new());
     let pool = runtime.block_on(connect_mock(root.path(), MockOptions::default()));
+    // Without a SIGCHLD stream the reaper polls on the runtime clock, so
+    // reaping runs in real time once the frozen startup has connected.
+    runtime.block_on(async move { drop(clock) });
     let entry = entry(&pool);
     let pid: u32 = std::fs::read_to_string(root.path().join("pid"))
         .expect("mock records its pid")
@@ -1903,10 +1966,12 @@ async fn protocol_2026_degrades_ping_policy_to_counting_and_warns_once() {
         .with_writer(traces.clone())
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
+    let clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
+            behavior: "answered_ping",
             protocol: "2026-07-28",
             call_timeout_ms: 50,
             policy: TimeoutDisconnectPolicy::PingProbe,
@@ -1916,13 +1981,30 @@ async fn protocol_2026_degrades_ping_policy_to_counting_and_warns_once() {
         },
     )
     .await;
+    async fn idle_timeout(pool: &McpConnectionPool, mock: &mut scripted::Mock) -> ToolOutcome {
+        let mut request = Box::pin(call(pool));
+        assert!(futures_util::poll!(request.as_mut()).is_pending());
+        mock.event("call").await;
+        assert!(futures_util::poll!(request.as_mut()).is_pending());
+        tokio::time::advance(Duration::from_millis(50) + scripted::TIMER_TICK).await;
+        let result = request.await;
+        mock.event("cancelled").await;
+        result
+    }
 
-    assert_eq!(failure(&call(&pool).await).class, ToolFailureClass::Timeout);
+    // Each idle timeout also crosses a keepalive deadline. The mock reports
+    // every ping, so reaching its stdin EOF right after the second
+    // cancellation proves neither a probe nor a keepalive pinged it.
     assert_eq!(
-        failure(&call(&pool).await).class,
+        failure(&idle_timeout(&pool, &mut mock).await).class,
+        ToolFailureClass::Timeout
+    );
+    assert_eq!(
+        failure(&idle_timeout(&pool, &mut mock).await).class,
         ToolFailureClass::Unavailable
     );
-    assert!(!received(root.path()).contains("\"method\":\"ping\""));
+    mock.event("eof").await;
+    drop(clock);
     let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
     let warning = "degrading timeout policy to consecutive_timeouts";
     assert_eq!(trace.matches(warning).count(), 1, "captured trace: {trace}");
@@ -1996,6 +2078,7 @@ async fn dead_transport_short_circuits_before_dispatch_timeout() {
 
 #[tokio::test]
 async fn idle_service_death_updates_status_without_a_tool_call() {
+    let clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
     let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
@@ -2021,11 +2104,13 @@ async fn idle_service_death_updates_status_without_a_tool_call() {
         1,
         "idle death must not remove the last discovered tool catalog"
     );
+    drop(clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
 async fn discovery_publishes_received_catalog_before_observing_same_burst_quit() {
+    let clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
     let pool = Arc::new(McpConnectionPool::empty());
     let entry = McpEntry::new(
@@ -2064,6 +2149,7 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
             .collect::<Vec<_>>(),
         [mcp_name("mock", "work")]
     );
+    drop(clock);
     pool.shutdown_all().await;
 }
 
@@ -2379,10 +2465,13 @@ async fn matching_timeout_after_entry_drop_still_cancels_and_reaps_connection() 
 
 #[tokio::test]
 async fn interval_probe_marks_unresponsive_peer_disconnected() {
+    let clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
+    let keepalive = Instant::now() + Duration::from_millis(25);
+    let (pool, mut mock) = scripted::Mock::connect(
         root.path(),
         MockOptions {
+            behavior: "unanswered_ping",
             probe_interval_ms: 25,
             probe_timeout_ms: 25,
             ..MockOptions::default()
@@ -2390,12 +2479,18 @@ async fn interval_probe_marks_unresponsive_peer_disconnected() {
     )
     .await;
 
+    clock.expire(keepalive).await;
+    mock.event("ping").await;
+    clock
+        .expire(Instant::now() + Duration::from_millis(25))
+        .await;
     unpublished(&entry(&pool)).await;
     assert!(matches!(
         pool.server_statuses()[0].last_error.as_ref(),
         Some(McpServerFault::Connection(error))
             if error.contains("background liveness probe failed")
     ));
+    drop(clock);
     pool.shutdown_all().await;
 }
 
