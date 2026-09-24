@@ -36,7 +36,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
-tracing = { workspace = true }
 
 [dev-dependencies]
 lash ={ workspace = true }
