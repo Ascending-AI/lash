@@ -110,6 +110,10 @@ impl RuntimeErrorCode {
             Self::SessionDeleted => Terminal,
             // a capability fact about the deployment.
             Self::SessionCatalogLookupUnsupported => Terminal,
+            // the session's generation marker is older than this build admits; a redrive reads the same marker.
+            Self::SessionStateVersionUnsupported => Terminal,
+            // the session's generation marker is newer than this build knows; a redrive reads the same marker.
+            Self::SessionStateVersionNewerThanRuntime => Terminal,
             // the same turn writes the same nodes and exceeds the budget again.
             Self::StoreCommitNodeBudgetExceeded => Terminal,
             // the same turn writes the same bytes and exceeds the budget again.

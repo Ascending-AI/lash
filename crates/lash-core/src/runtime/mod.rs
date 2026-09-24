@@ -238,7 +238,9 @@ pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
 use error::session_commit_error;
-pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode, TurnFailureCause};
+pub use error::{
+    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal, TurnFailureCause,
+};
 pub use event_pump::drive_with_event_pump;
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
@@ -416,7 +418,7 @@ pub use lash_core_execution::runtime::{
     AgentFrameRun, AssembledTurn, CodeOutputRecord, EventSink, NOOP_EVENT_SINK,
     NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink, ProtocolSessionExtension,
     ProtocolSessionExtensionHandle, RuntimeTurnPhaseProbeSlot, SessionStoreFactory,
-    TerminationPolicy, TurnActivity, TurnActivitySink, TurnEvent,
+    TerminationPolicy, TurnActivity, TurnActivitySink, TurnEvent, admit_session_state_generation,
 };
 
 mod normalized_item {

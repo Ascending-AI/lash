@@ -853,6 +853,9 @@ pub mod runtime {
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
+    /// The session-state generations an admission refused, carried in-process
+    /// on the error a refused call returns (FIG-3619).
+    pub use lash_core::SessionStateVersionRefusal;
     /// How a failed turn settles (FIG-3575): an outcome is recorded, a live
     /// fault aborts. A host minting a foreign error code chooses its class.
     pub use lash_core::TurnFailureCause;

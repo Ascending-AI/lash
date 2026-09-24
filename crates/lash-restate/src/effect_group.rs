@@ -100,20 +100,19 @@ impl RestateEffectGroupServices {
     /// await-event keys and the cancellation binding a tool child's recorded
     /// request is validated against derive from the same id the deployment's
     /// turn/process controllers use.
+    ///
+    /// A session-scope child checks its owning session's state generation in
+    /// `sessions` at invocation entry, before anything else (FIG-3619).
     pub fn new(
         host: &crate::RestateEffectHost,
         ingress: RestateIngressClient,
         infinite_retry_policy: RestateEffectGroupRetryPolicy,
+        sessions: Arc<dyn lash_core::SessionStoreFactory>,
     ) -> Self {
         Self {
             index: EffectGroupIndex,
             payload: EffectGroupPayload,
-            dispatch: EffectGroupDispatch {
-                executors: host.group_executors(),
-                ingress,
-                authority_id: host.authority_id().clone(),
-                infinite_retry_policy: infinite_retry_policy.0,
-            },
+            dispatch: EffectGroupDispatch::new(host, ingress, infinite_retry_policy.0, sessions),
             wait: RestateEffectGroupWaitServices::default(),
         }
     }

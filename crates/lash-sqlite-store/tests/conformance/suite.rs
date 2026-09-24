@@ -1236,6 +1236,20 @@ async fn sqlite_pre_cutover_generation_turn_redrive_is_refused_before_any_effect
     .await;
 }
 
+/// FIG-3619: a runtime already open on a session whose marker moves behind
+/// this build is refused, typed and terminal, at the turn-lane claim.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_pre_cutover_generation_turn_claim_is_refused_typed() {
+    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
+    Box::pin(
+        lash_conformance::pre_cutover_generation_turn_claim_is_refused_typed(
+            |scenario| scenarios.concrete_store(scenario),
+            |_| lash_conformance::ConformanceInvocation::native(),
+        ),
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());

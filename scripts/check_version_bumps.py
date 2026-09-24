@@ -424,7 +424,17 @@ IDENTIFIER_RENAME_BASELINES = {
     # re-encodes it to the same bytes. No column or CHECK moved, so the stamp
     # stays (PostgreSQL 118, SQLite 77). Superseded:
     # sha256:6316b508dd69074999dccc3c4b8ca3f5dd64d254dcd0037d4f56fa44da1a68ee.
-    'crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION': 'sha256:92c2074dae0baa5fa79c72480790752b8e174d1ed3b25a94f4d3114e64f22f74',
+    # FIG-3619 supersedes this reading (lead ruling, 2026-09-24): two
+    # RuntimeErrorCode variants are added (session_state_version_unsupported,
+    # session_state_version_newer_than_runtime), and RuntimeError gains a
+    # #[serde(skip)] field carrying the refused generations in-process only.
+    # Addition only: every existing code keeps its wire spelling, the stored
+    # error shape is unchanged, and an older reader decodes a new spelling
+    # verbatim as RuntimeErrorCode::ForeignCode and re-encodes it to the same
+    # bytes (a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_existed).
+    # No column or CHECK moved, so the stamp stays (SQLite 81). Superseded:
+    # sha256:92c2074dae0baa5fa79c72480790752b8e174d1ed3b25a94f4d3114e64f22f74.
+    'crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION': 'sha256:75c43a7339427ba80ac526ac2164a244ddbf57f422eb7abcb0d40a8f43b34893',
 
     # FIG-1102: the workbench include! splice became real modules, so every
     # item in state.rs gained pub(crate) and one line was rewrapped. Serde
@@ -778,7 +788,17 @@ IDENTIFIER_RENAME_BASELINES = {
     # re-encodes it to the same bytes. No column or CHECK moved, so the stamp
     # stays (PostgreSQL 118, SQLite 77). Superseded:
     # sha256:5b44c05846f0c1d9c7fd96e375d3e6cac38a16a2b07ad2dd96fd6e7d2fe5a472.
-    'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:6f5c10194bb742f138c6753a040b9d4f8b53258db52ddcba0a9ec4084caa29c1',
+    # FIG-3619 supersedes this reading (lead ruling, 2026-09-24): two
+    # RuntimeErrorCode variants are added (session_state_version_unsupported,
+    # session_state_version_newer_than_runtime), and RuntimeError gains a
+    # #[serde(skip)] field carrying the refused generations in-process only.
+    # Addition only: every existing code keeps its wire spelling, the stored
+    # error shape is unchanged, and an older reader decodes a new spelling
+    # verbatim as RuntimeErrorCode::ForeignCode and re-encodes it to the same
+    # bytes (a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_existed).
+    # No column or CHECK moved, so the stamp stays (PostgreSQL 121). Superseded:
+    # sha256:6f5c10194bb742f138c6753a040b9d4f8b53258db52ddcba0a9ec4084caa29c1.
+    'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:1c8a32db1aa89c2f8de14f4e75dc0b00fdb77dc8dcfe0b65bef70ff7e5832f88',
     'crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION': 'sha256:c47b1c80a5d170e70556653319621cc219a493ba54bea2ccdee7317fc9f850b9',
     # FIG-3418: the guarded surface moved for two reasons, neither of which
     # reaches a serialized byte. `EffectOpener` gained a `schemars::JsonSchema`

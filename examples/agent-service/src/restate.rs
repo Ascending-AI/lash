@@ -513,8 +513,11 @@ mod restate_tests {
         } else {
             local_addr
         };
-        let effect_groups =
-            effect_group_services(harness.effect_host.as_ref(), ingress_url.clone());
+        let effect_groups = effect_group_services(
+            harness.effect_host.as_ref(),
+            ingress_url.clone(),
+            harness.store_factory.clone(),
+        );
         let endpoint = restate_sdk::endpoint::Endpoint::builder()
             .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())
             .bind(AgentServiceEffectGroupWorkflowImpl.serve())
@@ -854,6 +857,7 @@ mod restate_tests {
         process_worker: lash::durability::DurableProcessWorker,
         process_deployment: lash_restate::RestateProcessDeployment,
         effect_host: Arc<lash_restate::RestateEffectHost>,
+        store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
     }
 
     async fn live_restate_test_state(
@@ -985,7 +989,7 @@ finish("done via Restate E2E");
         .expect("valid test native substrate config");
         let state = AppStateData::from_shared_db(
             core,
-            turn_deployment.turn_work_driver(store_factory),
+            turn_deployment.turn_work_driver(store_factory.clone()),
             app_db,
             "mock-model".to_string(),
             None,
@@ -998,6 +1002,7 @@ finish("done via Restate E2E");
             process_worker,
             process_deployment,
             effect_host,
+            store_factory,
         }
     }
 

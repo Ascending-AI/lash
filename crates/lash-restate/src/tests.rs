@@ -83,6 +83,7 @@ fn test_restate_await_event_key(
 mod bindings;
 mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
+mod effect_group_session_gate;
 mod effect_group_shape;
 mod endpoint_protocol;
 mod live_turn_probe;

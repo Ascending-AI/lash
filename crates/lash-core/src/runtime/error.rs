@@ -1,8 +1,8 @@
 use crate::SessionError;
 
 pub use lash_core_store::runtime_error::{
-    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, TurnFailureCause,
-    runtime_error_from_store_commit, runtime_error_from_turn_input_admission,
+    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal,
+    TurnFailureCause, runtime_error_from_store_commit, runtime_error_from_turn_input_admission,
 };
 
 /// The typed arm is not a convenience list: every variant here is one a host is

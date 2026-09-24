@@ -356,6 +356,7 @@ impl LiveConformanceHarness {
             &host,
             ingress,
             RestateEffectGroupRetryPolicy::infinite(),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
         );
         let process_registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
         let process_runner = Arc::new(LawProcessRunner::default());

@@ -241,6 +241,19 @@ fn decode_call_frame(frame: &[u8]) -> Option<RestateCallFrame> {
     })
 }
 
+/// Every `CallCommand` in `output`, in journal order, as its called handler and
+/// its JSON parameter.
+pub(super) fn restate_call_parameters(output: &[u8]) -> Option<Vec<(String, serde_json::Value)>> {
+    restate_message_frames(output, 0x040D)?
+        .into_iter()
+        .map(|frame| {
+            let call = decode_call_frame(frame)?;
+            let parameter = protobuf_len_field(frame.get(8..)?, 3)?;
+            Some((call.handler, serde_json::from_slice(parameter).ok()?))
+        })
+        .collect()
+}
+
 /// One command the deployed handler journaled: its frame, and the completion
 /// id a timer, call, or one-way invocation-id notification answers on.
 #[derive(Clone, Debug)]

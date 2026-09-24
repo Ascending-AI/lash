@@ -35,6 +35,26 @@ pub struct EffectGroupDispatch {
     pub(super) ingress: RestateIngressClient,
     pub(super) authority_id: crate::ingress::RestateAuthorityId,
     pub(super) infinite_retry_policy: RunRetryPolicy,
+    /// The catalog a session-scope child reads its owning session's state
+    /// generation from at invocation entry (FIG-3619).
+    pub(super) sessions: Arc<dyn lash_core::SessionStoreFactory>,
+}
+
+impl EffectGroupDispatch {
+    pub(super) fn new(
+        host: &crate::RestateEffectHost,
+        ingress: RestateIngressClient,
+        infinite_retry_policy: RunRetryPolicy,
+        sessions: Arc<dyn lash_core::SessionStoreFactory>,
+    ) -> Self {
+        Self {
+            executors: host.group_executors(),
+            ingress,
+            authority_id: host.authority_id().clone(),
+            infinite_retry_policy,
+            sessions,
+        }
+    }
 }
 
 impl std::fmt::Debug for EffectGroupDispatch {
@@ -251,6 +271,25 @@ impl EffectGroupDispatch {
         ctx: SharedWorkflowContext<'_>,
         Json(request): Json<EffectGroupChildRequest>,
     ) -> HandlerResult<Json<()>> {
+        // FIG-3619: the owning session's generation is checked before
+        // anything else this invocation does — before admission, before its
+        // membership record, before its journal is read or an effect key is
+        // derived, and so before its effect can be dispatched. A child is its
+        // own invocation and ADR 0043 routes it to the latest deployment, so a
+        // turn another build started can open children that land here. A
+        // refused child settles with the typed refusal, which resolves the
+        // opener's rank wait instead of stranding it; its effect never runs.
+        if let Some(refusal) = session_generation_refusal(self.sessions.as_ref(), &request).await? {
+            request.shape.validate_wire()?;
+            return record_child_settlement(
+                &ctx,
+                &request,
+                EffectGroupChildRunOutcome::Completed {
+                    outcome: Err(refusal),
+                },
+            )
+            .await;
+        }
         request.shape.validate_wire()?;
         let own_id = ctx.invocation_id().to_string();
         let admission_request = EffectGroupAdmissionRequest {
@@ -684,6 +723,53 @@ impl EffectGroupDispatch {
     }
 }
 
+/// The FIG-3619 gate a child runs at invocation entry: the typed refusal
+/// when the session that owns the child's scope is on a generation this build
+/// does not admit, and `None` when it may run.
+///
+/// Only a session scope has an owning session to read. A process-scope or
+/// runtime-operation child passes: a process's segment and program-identity
+/// gates own its generation, and tying it to the session that started it
+/// would refuse a live detached process whenever that session's generation
+/// moved. The read is live on every attempt, before the invocation's first
+/// journal entry, like the lease admission a parent turn runs on replay; a
+/// marker never moves back to a refused generation, so every attempt takes
+/// the same branch. A store or catalog failure is retried; a catalog with no
+/// by-id lookup is a wiring fault no retry repairs.
+async fn session_generation_refusal(
+    sessions: &dyn lash_core::SessionStoreFactory,
+    request: &EffectGroupChildRequest,
+) -> HandlerResult<Option<RuntimeEffectControllerError>> {
+    let Some(session_id) = request.envelope.invocation.execution_scope().session_id() else {
+        return Ok(None);
+    };
+    match lash_core::admit_session_state_generation(sessions, session_id).await {
+        Ok(()) => Ok(None),
+        Err(
+            refusal @ (lash_core::StoreError::SessionStateVersionUnsupported { .. }
+            | lash_core::StoreError::SessionStateVersionNewerThanRuntime { .. }),
+            // The settlement carries the code and a message naming both
+            // generations: the opener reading it runs the build that wrote the
+            // session, which decodes a code it does not know as a foreign
+            // recorded outcome.
+        ) => Ok(Some(RuntimeEffectControllerError::from(refusal))),
+        Err(error @ lash_core::StoreError::UnsupportedStoreOperation { .. }) => {
+            Err(TerminalError::new(format!(
+                "effect group {} child {} cannot read its owning session `{session_id}`'s \
+                 state generation: {error}",
+                request.group_key, request.position
+            ))
+            .into())
+        }
+        Err(error) => Err(std::io::Error::other(format!(
+            "read the state generation of session `{session_id}` owning effect group {} \
+             child {}: {error}",
+            request.group_key, request.position
+        ))
+        .into()),
+    }
+}
+
 /// The §8 typed failure: this invocation is a successor minted under the
 /// idempotency key after the retained child invocation's retention expired —
 /// it never runs, and its settlement records the refusal so the opener's
@@ -736,6 +822,11 @@ async fn record_child_settlement(
         | EffectGroupCommitChildResponse::AlreadyCommitted {
             blocking_positions, ..
         } => blocking_positions,
+        // A child that settles without admission (a generation refusal, an
+        // expired attach) can meet a group retired meanwhile; retirement
+        // already settled it, as the payload and settlement writes below
+        // treat the same answer.
+        EffectGroupCommitChildResponse::Retired => return Ok(Json(())),
         EffectGroupCommitChildResponse::CancelDecided { .. } => {
             let refusal = RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
