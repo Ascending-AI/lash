@@ -2312,21 +2312,23 @@ async fn session_lease_generation(
 ) -> i64 {
     match backend {
         "sqlite" => {
-            let sessions_dir = data_dir.join("lash-sessions");
-            let database_path = std::fs::read_dir(&sessions_dir)
-                .expect("read recovery E2E session store directory")
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .find(|path| path.extension().is_some_and(|extension| extension == "db"))
-                .expect("locate recovery E2E SQLite session store");
-            rusqlite::Connection::open(database_path)
-                .expect("open recovery E2E SQLite session store")
-                .query_row(
-                    "SELECT lease_fencing_token FROM session_execution_leases",
-                    [],
-                    |row| row.get(0),
-                )
-                .expect("read recovery E2E SQLite session lease generation")
+            // The backend keeps session leases in its durable core, one of
+            // several databases under the sessions root; name it rather than
+            // take whichever `.db` the directory lists first.
+            let database_path = data_dir
+                .join("lash-sessions")
+                .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
+            rusqlite::Connection::open_with_flags(
+                &database_path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .expect("open recovery E2E SQLite durable core")
+            .query_row(
+                "SELECT lease_fencing_token FROM session_execution_leases WHERE session_id = ?1",
+                [session_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("read recovery E2E SQLite session lease generation")
         }
         "postgres" => {
             let database_url = std::env::var("AGENT_WORKBENCH_E2E_DATABASE_URL")
