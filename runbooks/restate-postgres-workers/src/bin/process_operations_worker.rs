@@ -78,15 +78,19 @@ async fn process_events(
     process_id: &ProcessId,
 ) -> Result<Vec<lash_core::ProcessEvent>> {
     let limit = std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN);
-    let mut continuation = None;
+    let process_ref = registry
+        .resolve_process_ref(process_id)
+        .await
+        .context("resolve process lifetime")?;
+    let mut after_sequence = 0;
     let mut events = Vec::new();
     loop {
         let outcome = registry
-            .event_page(
-                process_id,
+            .event_page_ref(
+                &process_ref,
+                after_sequence,
                 limit,
                 lash_core::ProcessEventQueryMode::Full,
-                continuation,
             )
             .await
             .context("read process event page")?;
@@ -97,9 +101,9 @@ async fn process_events(
             unreachable!("full process event query returned a lite page");
         };
         events.extend(page_events);
-        continuation = match page.more {
+        after_sequence = match page.more {
             lash_core::ProcessEventPageMore::Complete => return Ok(events),
-            lash_core::ProcessEventPageMore::More { continuation } => Some(continuation),
+            lash_core::ProcessEventPageMore::More { after_sequence } => after_sequence,
         };
     }
 }

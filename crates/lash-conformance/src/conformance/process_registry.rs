@@ -489,9 +489,7 @@ pub async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn
     reused_process_ids_refuse_superseded_incarnations_for(registry, "raw").await;
 }
 
-pub async fn process_event_page_tokens_reject_out_of_range_sql_cursors(
-    registry: Arc<dyn ProcessRegistry>,
-) {
+pub async fn process_event_pages_reject_out_of_range_sequences(registry: Arc<dyn ProcessRegistry>) {
     event_paging::assert_out_of_range_sequences_are_rejected(registry).await;
 }
 

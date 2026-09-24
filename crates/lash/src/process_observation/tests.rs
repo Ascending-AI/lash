@@ -214,7 +214,7 @@ impl Fixture {
             "node",
             occurrence,
             "tools.echo",
-            if occurrence % 2 == 0 {
+            if occurrence.is_multiple_of(2) {
                 lash_core::ProcessEffectOutcomeClass::Failure
             } else {
                 lash_core::ProcessEffectOutcomeClass::Success
