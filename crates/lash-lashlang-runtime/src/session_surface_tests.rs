@@ -766,11 +766,25 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         let _ = worker_b.drive_pending_processes().await;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    let record = registry
-        .get_process(&process_id)
-        .await
-        .expect("read the refused process")
-        .expect("the process is still registered");
+    // A sweep's re-run lifts the park and records it again when it refuses,
+    // and the last sweep's re-run may still be in flight once driving stops:
+    // read the record once that re-run has settled back into its park.
+    let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let record = loop {
+        let record = registry
+            .get_process(&process_id)
+            .await
+            .expect("read the refused process")
+            .expect("the process is still registered");
+        let parked = record
+            .wait
+            .as_ref()
+            .is_some_and(lash_core::WaitState::is_parked);
+        if parked || record.is_terminal() || std::time::Instant::now() >= settle_deadline {
+            break record;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    };
     assert!(
         !record.is_terminal(),
         "a refused body is parked, never settled: {record:?}"
