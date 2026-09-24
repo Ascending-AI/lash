@@ -358,7 +358,7 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
     }
 
     fn replay_key_grammar(&self) -> Option<u32> {
-        Some(lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION)
+        Some(lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION)
     }
 
     fn admit_replay_key_grammar(

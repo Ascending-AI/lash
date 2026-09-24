@@ -45,8 +45,8 @@ pub use preparation::{
     resolve_tool_argument_projection_policy,
 };
 pub use preparation::{
-    prepare_granted_tool_call_with_context, prepare_tool_call_with_context,
-    resolve_callable_manifest, resolve_internal_manifest_by_id,
+    prepare_granted_tool_call_with_context, prepare_recorded_tool_call_with_context,
+    prepare_tool_call_with_context, resolve_callable_manifest, resolve_internal_manifest_by_id,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use retry::execute_once;

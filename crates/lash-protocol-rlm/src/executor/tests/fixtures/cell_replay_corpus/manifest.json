@@ -1,6 +1,6 @@
 {
   "format": "lash-protocol-rlm cell replay corpus v1: one SQLite effect journal, one turn per scenario",
-  "grammar": 2,
+  "grammar": 3,
   "dispatched": 13,
   "scenarios": {
     "aggregates": {
@@ -58,6 +58,7 @@
         "effect-group-incorporate:aggregates:group:exec-code:cell-0:lk2:0000000000:1-2",
         "effect-group-incorporate:aggregates:group:exec-code:cell-0:lk2:0000000001:1-2",
         "effect-group-incorporate:aggregates:group:exec-code:cell-0:lk2:0000000002:1-1",
+        "exec-code:cell-0:cell-tool-bindings",
         "exec-code:cell-0:deferred-tool-resolution",
         "exec-code:cell-0:lk2:0000000000:child:0:attempt:1",
         "exec-code:cell-0:lk2:0000000000:child:1:attempt:1",
@@ -87,6 +88,7 @@
         ]
       ],
       "replay_keys": [
+        "exec-code:cell-0:cell-tool-bindings",
         "exec-code:cell-0:deferred-tool-resolution",
         "exec-code:cell-0:lk2:0000000000:attempt:1",
         "exec-code:cell-0:lk2:0000000001:attempt:1",
@@ -107,8 +109,8 @@
             },
             "tool": "app_a"
           },
-          "now": 1790215090820,
-          "roll": 0.057493207110245526,
+          "now": 1790218198955,
+          "roll": 0.7719522403703023,
           "second": {
             "args": {
               "after": 1,
@@ -119,6 +121,7 @@
         }
       ],
       "replay_keys": [
+        "exec-code:cell-0:cell-tool-bindings",
         "exec-code:cell-0:deferred-tool-resolution",
         "exec-code:cell-0:lk2:0000000000:attempt:1",
         "exec-code:cell-0:lk2:0000000001",
@@ -140,6 +143,7 @@
         }
       ],
       "replay_keys": [
+        "exec-code:cell-0:cell-tool-bindings",
         "exec-code:cell-0:deferred-tool-resolution",
         "exec-code:cell-0:lk2:0000000000:sleep",
         "exec-code:cell-0:lk2:0000000001:attempt:1",
@@ -168,6 +172,7 @@
         }
       ],
       "replay_keys": [
+        "exec-code:cell-0:cell-tool-bindings",
         "exec-code:cell-0:deferred-tool-resolution",
         "exec-code:cell-0:lk2:0000000000:attempt:1",
         "exec-code:cell-0:lk2:~seal",

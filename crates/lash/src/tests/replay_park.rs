@@ -1,15 +1,15 @@
-//! FIG-3586 end to end: a real code cell whose redrive cannot replay its
-//! journal parks its turn.
+//! FIG-3586 and FIG-3587 end to end: a real code cell whose redrive cannot
+//! replay its journal parks its turn.
 //!
 //! Each law runs the RLM facade over a file-backed SQLite backend. The first
 //! run of a turn calls a tool from a code cell and is cut down by a journal
-//! fault after the tool dispatched, so the turn aborts with its journal
-//! holding the call. The redrive then runs under a changed build — the tool
-//! the cell's alias resolves to moved (FIG-3587's drift), or the journaled
-//! execution-environment sync predates the replay-key grammar stamp — and must
-//! park: the turn aborts with the typed refusal, its input stays held, a
-//! `TurnPark` is recorded, nothing terminal is written, and nothing is
-//! dispatched, on every redrive.
+//! fault, so the turn aborts with its journal holding the call. The redrive
+//! then runs under a changed build — the tool the cell's alias resolved to
+//! moved, was removed or was redescribed (FIG-3587's binding drift), or the
+//! journaled execution-environment sync names an older cell journal grammar —
+//! and must replay what the journal recorded or park: the turn aborts with
+//! the typed refusal, its input stays held, a `TurnPark` is recorded, nothing
+//! terminal is written, and nothing is dispatched, on every redrive.
 
 use super::*;
 use lash_core::runtime::effect::effect_replay_driver::EffectJournalFaultPoint;
@@ -18,33 +18,63 @@ const CELL: &str =
     "<typescript>\nconst reply = await tools.probe({});\nfinish(reply);\n</typescript>";
 const TURN: &str = "parked-cell-turn";
 
-/// `tools.probe`, resolving to `tool:{id}` so a redrive can move the alias.
+/// What the build registers for `tools.probe`.
+#[derive(Clone, Copy, Debug)]
+enum Probe {
+    /// `tool:{id}`, so a redrive can move the alias.
+    Id(&'static str),
+    /// `tool:probe` under another description.
+    Described(&'static str),
+    /// `tool:probe` under another retry policy, a descriptor change the
+    /// model's prompt does not render.
+    Retried,
+    /// Nothing.
+    Removed,
+}
+
 struct ProbeTool {
-    id: &'static str,
+    probe: Probe,
     executions: Arc<AtomicUsize>,
 }
 
 impl ProbeTool {
-    fn definition(&self) -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::raw(
-            format!("tool:{}", self.id),
-            self.id.to_string(),
-            "Replay-park probe tool.",
+    fn definition(&self) -> Option<lash_core::ToolDefinition> {
+        let (id, description) = match self.probe {
+            Probe::Id(id) => (id, "Replay-park probe tool."),
+            Probe::Described(description) => ("probe", description),
+            Probe::Retried => ("probe", "Replay-park probe tool."),
+            Probe::Removed => return None,
+        };
+        let mut definition = lash_core::ToolDefinition::raw(
+            format!("tool:{id}"),
+            id.to_string(),
+            description,
             serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
             serde_json::json!({ "type": "object" }),
         )
-        .with_tool_binding(lash_core::ToolBinding::new(["tools"], "probe"))
+        .with_tool_binding(lash_core::ToolBinding::new(["tools"], "probe"));
+        if matches!(self.probe, Probe::Retried) {
+            definition.manifest.retry_policy = lash_core::ToolRetryPolicy::Safe {
+                max_attempts: 3,
+                base_delay_ms: 10,
+                max_delay_ms: 100,
+            };
+        }
+        Some(definition)
     }
 }
 
 #[async_trait]
 impl lash_core::ToolProvider for ProbeTool {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![self.definition().manifest()]
+        self.definition()
+            .map(|definition| definition.manifest())
+            .into_iter()
+            .collect()
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        let definition = self.definition();
+        let definition = self.definition()?;
         (definition.manifest.name == name).then(|| Arc::new(definition.contract()))
     }
 
@@ -81,6 +111,11 @@ impl Backend {
 
     /// A core of the build whose `tools.probe` resolves to `tool:{tool_id}`.
     fn core(&self, tool_id: &'static str) -> LashCore {
+        self.core_for(Probe::Id(tool_id))
+    }
+
+    /// A core of the build that registers `probe` for `tools.probe`.
+    fn core_for(&self, probe: Probe) -> LashCore {
         let calls = Arc::clone(&self.provider_calls);
         let provider = crate::testing::TestProvider::builder()
             .kind("replay-park")
@@ -99,7 +134,7 @@ impl Backend {
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::new(ProbeTool {
-            id: tool_id,
+            probe,
             executions: Arc::clone(&self.executions),
         }))
         .build(crate::testing::runtime_lease_owner())
@@ -154,8 +189,14 @@ impl Backend {
     /// finalize: the tool dispatches, its settlement cannot be journaled, and
     /// the turn aborts with the journal holding the attempt.
     async fn abort_after_dispatch(&self, session_id: &str, attempt_key: &str) {
+        self.abort_at(session_id, EffectJournalFaultPoint::Finalize, attempt_key)
+            .await;
+    }
+
+    /// Runs `session_id`'s turn with a journal fault at `point` on `key`.
+    async fn abort_at(&self, session_id: &str, point: EffectJournalFaultPoint, key: &str) {
         let faults = self.backend.effect_host().effect_journal_faults();
-        faults.fail_next(EffectJournalFaultPoint::Finalize, attempt_key);
+        faults.fail_next(point, key);
         let core = self.core("probe");
         let session = core
             .session(session_id)
@@ -224,6 +265,14 @@ async fn assert_parked(
         ),
         "the park names the refusal: {park:?}"
     );
+    assert_eq!(
+        lash_core::RuntimeErrorCode::LashlangCellBindingDrift == code,
+        matches!(
+            park.reason,
+            lash_core::store::TurnParkReason::BindingDrift { .. }
+        ),
+        "the park names the refusal: {park:?}"
+    );
     let session = core
         .session(session_id)
         .open()
@@ -257,69 +306,286 @@ async fn assert_parked(
     assert!(!status.drained());
 }
 
+/// The tool the cell called was dispatched but its result never recorded,
+/// and the redrive build moved or removed it, or changed how it dispatches
+/// (FIG-3587): the call would reach the drifted tool live, so every redrive
+/// parks with the binding-drift refusal naming it and dispatches nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_cell_whose_tool_moved_parks_its_turn_on_every_redrive() -> Result<()> {
-    const SESSION: &str = "drift-real";
-    let backend = Backend::open().await;
-    let attempt_key = backend.first_attempt_key("drift-prob", SESSION).await;
-    backend.abort_after_dispatch(SESSION, &attempt_key).await;
-    let dispatched = backend.executions.load(Ordering::SeqCst);
-    let asked = backend.provider_calls.load(Ordering::SeqCst);
+async fn a_cell_whose_tool_drifted_before_its_result_parks_on_every_redrive() -> Result<()> {
+    for (session_id, probe_id, drift, word) in [
+        ("drift-mov1", "drift-prb1", Probe::Id("probe_v2"), "missing"),
+        ("drift-ret1", "drift-prb4", Probe::Retried, "changed"),
+        ("drift-rem1", "drift-prb2", Probe::Removed, "missing"),
+    ] {
+        let backend = Backend::open().await;
+        let attempt_key = backend.first_attempt_key(probe_id, session_id).await;
+        backend.abort_after_dispatch(session_id, &attempt_key).await;
+        let dispatched = backend.executions.load(Ordering::SeqCst);
+        let asked = backend.provider_calls.load(Ordering::SeqCst);
 
-    // The redrive build resolves `tools.probe` to another tool.
-    let moved = backend.core("probe_v2");
-    for _ in 0..2 {
-        let code = redrive(&moved, SESSION).await;
-        assert_eq!(
-            code,
-            lash_core::RuntimeErrorCode::LashlangCellReplayDivergence
-        );
-        assert_parked(&backend, &moved, SESSION, code).await;
-        assert_eq!(
-            backend.executions.load(Ordering::SeqCst),
-            dispatched,
-            "a parked redrive dispatches nothing"
-        );
-        assert_eq!(
-            backend.provider_calls.load(Ordering::SeqCst),
-            asked,
-            "the model call replays from the journal"
-        );
+        let drifted = backend.core_for(drift);
+        for _ in 0..2 {
+            let code = redrive(&drifted, session_id).await;
+            assert_eq!(
+                code,
+                lash_core::RuntimeErrorCode::LashlangCellBindingDrift,
+                "{drift:?}"
+            );
+            assert_parked(&backend, &drifted, session_id, code).await;
+            let park = backend.park_of(session_id).await.expect("parked");
+            let message = park.reason.message();
+            assert!(
+                message.contains("`tools.probe`")
+                    && message.contains("tool:probe")
+                    && message.contains(word),
+                "the park names the binding and how it drifted: {message}"
+            );
+            assert_eq!(
+                backend.executions.load(Ordering::SeqCst),
+                dispatched,
+                "a parked redrive dispatches nothing"
+            );
+            assert_eq!(
+                backend.provider_calls.load(Ordering::SeqCst),
+                asked,
+                "the model call replays from the journal"
+            );
+        }
     }
     Ok(())
 }
 
-/// T11 end to end: the iteration's journaled sync carries no replay-key
-/// grammar stamp, as one written before the stamp existed does. The redrive
-/// reaches the cutover refusal through the replayed sync and parks.
+/// The tool's result was recorded before the crash, and the redrive build
+/// removed or redescribed it (FIG-3587): the cell links against its recorded
+/// binding, replays the result, and the turn completes with nothing
+/// dispatched.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_cell_whose_sync_predates_the_grammar_stamp_parks_its_turn() -> Result<()> {
-    const SESSION: &str = "stamp-real";
+async fn a_cell_whose_tool_drifted_after_its_result_completes_its_turn() -> Result<()> {
+    for (session_id, probe_id, drift) in [
+        ("done-mov01", "done-prb00", Probe::Id("probe_v2")),
+        ("done-ret01", "done-prb03", Probe::Retried),
+        ("done-rem01", "done-prb01", Probe::Removed),
+        ("done-chg01", "done-prb02", Probe::Described("Reworded.")),
+    ] {
+        let backend = Backend::open().await;
+        let attempt_key = backend.first_attempt_key(probe_id, session_id).await;
+        let seal_key = attempt_key.replace(":lk2:0000000000:attempt:1", ":lk2:~seal");
+        backend
+            .abort_at(session_id, EffectJournalFaultPoint::Claim, &seal_key)
+            .await;
+        let dispatched = backend.executions.load(Ordering::SeqCst);
+        let asked = backend.provider_calls.load(Ordering::SeqCst);
+
+        let drifted = backend.core_for(drift);
+        let session = drifted
+            .session(session_id)
+            .open()
+            .await
+            .expect("open the session");
+        let output = session
+            .turn(TurnInput::text("call the probe"))
+            .turn_id(TURN)
+            .run()
+            .await
+            .unwrap_or_else(|error| panic!("{drift:?}: the redrive completes: {error:?}"));
+        assert!(
+            output.is_success(),
+            "{drift:?}: the redrive completes: {:?}",
+            output.result.errors
+        );
+        assert_eq!(
+            backend.executions.load(Ordering::SeqCst),
+            dispatched,
+            "{drift:?}: the recorded result is served"
+        );
+        assert_eq!(
+            backend.provider_calls.load(Ordering::SeqCst),
+            asked,
+            "{drift:?}: the model call replays from the journaled prompt"
+        );
+        assert!(backend.park_of(session_id).await.is_none());
+    }
+    Ok(())
+}
+
+/// A reworded descriptor never parks (FIG-3587): the prompt is served from
+/// the journal and the binding still dispatches the same way, so a call whose
+/// result was never recorded runs the tool live and the turn completes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_redescribed_tool_never_parks() -> Result<()> {
+    const SESSION: &str = "desc-real1";
     let backend = Backend::open().await;
-    let attempt_key = backend.first_attempt_key("stamp-prob", SESSION).await;
+    let attempt_key = backend.first_attempt_key("desc-prob1", SESSION).await;
     backend.abort_after_dispatch(SESSION, &attempt_key).await;
     let dispatched = backend.executions.load(Ordering::SeqCst);
 
-    let stripped = backend
-        .journal()
-        .execute(
-            "UPDATE runtime_effect_replay
-                SET outcome_json = replace(outcome_json, ',\"cell_replay_grammar\":2', '')
-              WHERE replay_key LIKE ?1 AND outcome_json LIKE '%cell_replay_grammar%'",
-            [format!("%{SESSION}%")],
-        )
-        .expect("strip the sync's grammar stamp");
-    assert!(stripped >= 1, "the turn journaled a stamped sync");
+    let redescribed = backend.core_for(Probe::Described("Reworded at length."));
+    let session = redescribed.session(SESSION).open().await?;
+    let output = session
+        .turn(TurnInput::text("call the probe"))
+        .turn_id(TURN)
+        .run()
+        .await?;
+    assert!(output.is_success(), "{:?}", output.result.errors);
+    assert_eq!(
+        backend.executions.load(Ordering::SeqCst),
+        dispatched + 1,
+        "the unrecorded call runs once, live"
+    );
+    assert!(backend.park_of(SESSION).await.is_none());
+    Ok(())
+}
 
-    let core = backend.core("probe");
-    for _ in 0..2 {
-        let code = redrive(&core, SESSION).await;
-        assert_eq!(
-            code,
-            lash_core::RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
-        );
-        assert_parked(&backend, &core, SESSION, code).await;
-        assert_eq!(backend.executions.load(Ordering::SeqCst), dispatched);
+/// T11 end to end: the iteration's journaled sync carries no cell journal
+/// grammar stamp, as one written before the stamp existed does, or names
+/// grammar 2, as one written before cells journaled their binding set
+/// (FIG-3587) does. The redrive reaches the cutover refusal through the
+/// replayed sync and parks, before the cell runs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_cell_whose_sync_predates_the_grammar_stamp_parks_its_turn() -> Result<()> {
+    for (session_id, probe_id, stamp) in [
+        ("stamp-real", "stamp-prob", ""),
+        ("stamp-old2", "stamp-prb2", ",\"cell_replay_grammar\":2"),
+    ] {
+        let backend = Backend::open().await;
+        let attempt_key = backend.first_attempt_key(probe_id, session_id).await;
+        backend.abort_after_dispatch(session_id, &attempt_key).await;
+        let dispatched = backend.executions.load(Ordering::SeqCst);
+
+        let restamped = backend
+            .journal()
+            .execute(
+                "UPDATE runtime_effect_replay
+                    SET outcome_json = replace(outcome_json, ',\"cell_replay_grammar\":3', ?2)
+                  WHERE replay_key LIKE ?1 AND outcome_json LIKE '%cell_replay_grammar%'",
+                [format!("%{session_id}%"), stamp.to_string()],
+            )
+            .expect("restamp the sync's grammar");
+        assert!(restamped >= 1, "the turn journaled a stamped sync");
+
+        let core = backend.core("probe");
+        for _ in 0..2 {
+            let code = redrive(&core, session_id).await;
+            assert_eq!(
+                code,
+                lash_core::RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
+            );
+            assert_parked(&backend, &core, session_id, code).await;
+            assert_eq!(backend.executions.load(Ordering::SeqCst), dispatched);
+        }
     }
+    Ok(())
+}
+
+const SPAWN_CELL: &str = r#"<typescript>
+const child = await agents.spawn({
+  capability: "default",
+  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+  seed: { chunk: ["a", "b"] },
+  output: { len: "int" }
+});
+finish(child);
+</typescript>"#;
+const CHILD_CELL: &str = "<typescript>\nfinish({ len: chunk.length });\n</typescript>";
+
+impl Backend {
+    /// A core whose `agents.spawn` offers `capabilities`, answering the parent
+    /// with [`SPAWN_CELL`] and the spawned child with [`CHILD_CELL`].
+    fn spawn_core(&self, capabilities: &[&'static str]) -> LashCore {
+        let calls = Arc::clone(&self.provider_calls);
+        let provider = crate::testing::TestProvider::builder()
+            .kind("replay-park")
+            .complete(move |_| {
+                let calls = Arc::clone(&calls);
+                async move {
+                    let call = calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(text_response(if call.is_multiple_of(2) {
+                        SPAWN_CELL
+                    } else {
+                        CHILD_CELL
+                    }))
+                }
+            })
+            .build()
+            .into_handle();
+        let registry = capabilities.iter().fold(
+            lash_subagents::CapabilityRegistry::new(),
+            |registry, name| {
+                registry.with(Arc::new(lash_subagents::StaticCapability::new(
+                    *name,
+                    SessionSpec::inherit(),
+                )))
+            },
+        );
+        explicit_ephemeral_facets(rlm_core_builder_over(
+            Arc::clone(&self.backend) as Arc<dyn lash_core::Backend>
+        ))
+        .provider(provider)
+        .model(mock_model_spec())
+        .plugin(Arc::new(lash_subagents::SubagentsPluginFactory::new(
+            Arc::new(registry),
+        )))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("file-backed SQLite RLM backend with subagents")
+    }
+}
+
+/// A completed cell whose `agents.spawn` binding drifted — the redeploy
+/// offers another capability, which moves the orchestrating tool's schema —
+/// replays down the orchestrating path against its recorded nested effects
+/// (FIG-3587): the turn completes with nothing dispatched and no model call
+/// re-issued.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_completed_spawn_whose_capabilities_changed_replays() -> Result<()> {
+    const SESSION: &str = "spawn-real";
+    const PROBE: &str = "spawn-prob";
+    let backend = Backend::open().await;
+    let probe = backend.spawn_core(&["default"]);
+    probe
+        .session(PROBE)
+        .open()
+        .await?
+        .turn(TurnInput::text("spawn"))
+        .turn_id(TURN)
+        .run()
+        .await?;
+    let seal_key = backend
+        .keys_of(PROBE)
+        .into_iter()
+        .find(|key| key.starts_with(&format!("{PROBE}:")) && key.ends_with(":lk2:~seal"))
+        .expect("the probe's cell sealed its run")
+        .replace(PROBE, SESSION);
+
+    let faults = backend.backend.effect_host().effect_journal_faults();
+    faults.fail_next(EffectJournalFaultPoint::Claim, &seal_key);
+    let crashing = backend.spawn_core(&["default"]);
+    let error = crashing
+        .session(SESSION)
+        .open()
+        .await?
+        .turn(TurnInput::text("spawn"))
+        .turn_id(TURN)
+        .run()
+        .await
+        .expect_err("the seal fault aborts the turn after the spawn completed");
+    assert!(faults.fired(), "the armed seal fault fired: {error:?}");
+    let asked = backend.provider_calls.load(Ordering::SeqCst);
+
+    let redeployed = backend.spawn_core(&["default", "reviewer"]);
+    let output = redeployed
+        .session(SESSION)
+        .open()
+        .await?
+        .turn(TurnInput::text("spawn"))
+        .turn_id(TURN)
+        .run()
+        .await?;
+    assert!(output.is_success(), "{:?}", output.result.errors);
+    assert_eq!(
+        backend.provider_calls.load(Ordering::SeqCst),
+        asked,
+        "the parent's and the child's model calls replay from the journal"
+    );
+    assert!(backend.park_of(SESSION).await.is_none());
     Ok(())
 }

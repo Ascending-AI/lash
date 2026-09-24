@@ -28,6 +28,11 @@ SELECT EXISTS(
 SELECT replay_key FROM main.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
              ORDER BY replay_key
+=== main | effect::replay::ReplayStatements | effect_replay.select_settled_keys_in_range
+SELECT replay_key FROM main.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
+               AND status <> 'in_progress'
+             ORDER BY replay_key
 === main | effect::replay::ReplayStatements | effect_replay.select_completed_outcome_by_key
 SELECT outcome_json FROM main.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2 AND status = 'completed'
@@ -366,6 +371,11 @@ SELECT EXISTS(
 SELECT replay_key FROM effect_journal.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
              ORDER BY replay_key
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.select_settled_keys_in_range
+SELECT replay_key FROM effect_journal.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
+               AND status <> 'in_progress'
+             ORDER BY replay_key
 === effect_journal | effect::replay::ReplayStatements | effect_replay.select_completed_outcome_by_key
 SELECT outcome_json FROM effect_journal.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2 AND status = 'completed'
@@ -703,6 +713,11 @@ SELECT EXISTS(
 === process_registry | effect::replay::ReplayStatements | effect_replay.select_keys_in_range
 SELECT replay_key FROM process_registry.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
+             ORDER BY replay_key
+=== process_registry | effect::replay::ReplayStatements | effect_replay.select_settled_keys_in_range
+SELECT replay_key FROM process_registry.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
+               AND status <> 'in_progress'
              ORDER BY replay_key
 === process_registry | effect::replay::ReplayStatements | effect_replay.select_completed_outcome_by_key
 SELECT outcome_json FROM process_registry.runtime_effect_replay

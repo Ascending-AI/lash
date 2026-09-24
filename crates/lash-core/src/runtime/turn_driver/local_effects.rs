@@ -104,14 +104,23 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     &runner.event_tx,
                 )
                 .await),
-            RuntimeEffectCommand::SyncExecutionEnvironment {
-                update_machine_config,
-            } => {
-                let result = runner
+            RuntimeEffectCommand::SyncExecutionEnvironment => {
+                // A live fault rebuilding the environment (a store or lease
+                // fault) is not the sync's outcome: the claim is released
+                // unsealed and the turn aborts, so a redrive rebuilds it
+                // rather than replaying the fault as a failed turn.
+                let result = match runner
                     .driver
-                    .refresh_execution_environment(runner.messages.clone(), update_machine_config)
+                    .refresh_execution_environment(runner.messages.clone())
                     .await
-                    .map_err(|err| err.to_string());
+                {
+                    Ok(sync) => Ok(sync),
+                    Err(super::tool_catalog::SyncFailure::Recorded(message)) => Err(message),
+                    Err(super::tool_catalog::SyncFailure::Live(error)) => {
+                        return Err(RuntimeEffectControllerError::from(error)
+                            .retryable_uncommitted_derivation());
+                    }
+                };
                 // Every sync names the code executor's replay-key grammar,
                 // the protocol-start one included: it is what the iteration's
                 // cells run under on replay (FIG-3586).

@@ -11,7 +11,7 @@
 //! A change to how cells lower, or to the order their commands leave the VM,
 //! that would re-key or re-order a committed journal fails here, the way a
 //! workflow replayer fails a history the current code cannot reproduce. Such a
-//! change must move `LASHLANG_REPLAY_KEY_GRAMMAR_VERSION` (and refuse older
+//! change must move `LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION` (and refuse older
 //! journals at the cutover) before the corpus is re-recorded:
 //!
 //! ```text
@@ -153,7 +153,7 @@ fn cell_replay_corpus_replays_with_nothing_dispatched() {
     assert_eq!(manifest.format, FORMAT);
     assert_eq!(
         manifest.grammar,
-        lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
+        lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
         "the corpus was recorded under another replay-key grammar: a grammar bump re-records it"
     );
     assert_eq!(
@@ -219,7 +219,7 @@ fn regenerate_cell_replay_corpus() {
         }
         let manifest = Manifest {
             format: FORMAT.to_string(),
-            grammar: lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
+            grammar: lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
             dispatched: tools.dispatched(),
             scenarios,
         };

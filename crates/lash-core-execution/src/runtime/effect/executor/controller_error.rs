@@ -184,6 +184,7 @@ mod tests {
                 "command.duration_ms".to_string(),
                 "invocation.replay_key".to_string(),
             ],
+            effect_kind: None,
         };
         let runtime_error = RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
@@ -202,6 +203,7 @@ mod tests {
         let summary = crate::RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
             first_divergent_paths: vec!["invocation.scope.turn_index".to_string()],
+            effect_kind: None,
         };
         let mut runtime_error = RuntimeError::new(
             crate::RuntimeErrorCode::WorkerReplacementAbort,
@@ -215,6 +217,9 @@ mod tests {
             controller_error.code,
             crate::RuntimeErrorCode::WorkerReplacementAbort
         );
-        assert_eq!(controller_error.summary, Some(summary));
+        assert_eq!(
+            controller_error.summary.map(|summary| *summary),
+            Some(summary)
+        );
     }
 }

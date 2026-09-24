@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 157,
+  "cargo_target_count": 158,
   "feature_lane_units": [
     {
       "features": [],
@@ -9505,6 +9505,15 @@
         "default",
         "testing"
       ],
+      "kind": "test",
+      "label": "//crates/lash-protocol-rlm:cell_binding_drift__test__fv_1e128064",
+      "package": "lash-internal-protocol-rlm"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
       "kind": "lib",
       "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1f971cdc",
       "package": "lash-internal-protocol-rlm"
@@ -17764,7 +17773,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 216,
+  "generated_label_count": 217,
   "packages": [
     {
       "declared_features": [
@@ -18971,6 +18980,12 @@
           "tags": []
         },
         {
+          "cargo": "cell_binding_drift",
+          "kind": "test",
+          "label": "//crates/lash-protocol-rlm:cell_binding_drift__test",
+          "tags": []
+        },
+        {
           "cargo": "protocol_drivers",
           "kind": "test",
           "label": "//crates/lash-protocol-rlm:protocol_drivers__test",
@@ -18986,6 +19001,7 @@
       "test_batch": {
         "label": "//crates/lash-protocol-rlm:test_batch",
         "members": [
+          "//crates/lash-protocol-rlm:cell_binding_drift__test",
           "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
           "//crates/lash-protocol-rlm:protocol_drivers__test",
           "//crates/lash-protocol-rlm:tool_batch_parallelism__test"

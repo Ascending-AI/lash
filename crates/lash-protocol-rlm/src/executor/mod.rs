@@ -371,6 +371,54 @@ async fn execute_code_inner(
         }
     }
 
+    // The cell's ambient binding set is journaled before its first effect
+    // and a redrive links against the recorded set, not the live registry
+    // (FIG-3587): a tool removed or changed since keeps its recorded binding,
+    // and calls on it are served only from their recorded results.
+    let cell_bindings = match state
+        .deferred_resolutions
+        .link_key
+        .clone()
+        .filter(|_| !referenced.is_empty())
+    {
+        Some(link_key) => {
+            let _phase = ctx.named_phase("rlm_lashlang.cell_tool_bindings");
+            let excluded = state
+                .deferred_resolutions
+                .resolutions
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            match lash_lashlang_runtime::journal_cell_tool_bindings(
+                &referenced,
+                ctx.tool_catalog().as_ref(),
+                &excluded,
+                &link_key.address.replay_key,
+                &ctx,
+            )
+            .await
+            {
+                Ok(bindings) => bindings,
+                Err(error) => {
+                    let message = error.message.clone();
+                    ctx.record_nested_runtime_effect_error(cell_run::setup_effect_error(
+                        &cell, error,
+                    ));
+                    return exec_setup_failure_or_stop(
+                        state,
+                        &ctx,
+                        lash_core::CellFailureKind::Host,
+                        message,
+                        start,
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+        None => lash_lashlang_runtime::CellToolBindings::default(),
+    };
+    let link_catalog = cell_bindings.link_catalog(ctx.tool_catalog().as_ref());
+
     let mut host_environment = if let Some(_program) = parsed_program
         .as_ref()
         .filter(|_| state.deferred_resolutions.link_key.is_some())
@@ -379,7 +427,7 @@ async fn execute_code_inner(
         match lash_lashlang_runtime::resolve_and_build_deferred_environment_from_references(
             &referenced,
             &effective_surface,
-            ctx.tool_catalog().as_ref(),
+            &link_catalog,
             deferred_tool_resolver.as_ref(),
             &mut state.deferred_resolutions,
             &ctx,
@@ -403,7 +451,7 @@ async fn execute_code_inner(
             }
         }
     } else {
-        match effective_surface.host_environment(ctx.tool_catalog().as_ref()) {
+        match effective_surface.host_environment(&link_catalog) {
             Ok(environment) => environment,
             Err(error) => {
                 emit_step_trace(
@@ -583,6 +631,7 @@ async fn execute_code_inner(
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         host_environment,
         deferred_execution_grants,
+        cell_bindings,
         artifact_store: Arc::clone(&artifact_store),
         child_max_attempts: state.child_max_attempts(),
     });

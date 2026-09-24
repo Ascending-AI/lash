@@ -840,7 +840,12 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// Bumped to 82 for FIG-3598: the durable `RuntimeErrorCode` vocabulary gains
 /// `restate_effect_group_protocol_retired`. No relation changes; a pre-82
 /// database is rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 82;
+/// Bumped to 83 for FIG-3587: the durable `RuntimeErrorCode` vocabulary gains
+/// `lashlang_cell_binding_drift`, the replay-mismatch report gains
+/// `effect_kind`, and a `turn_parks` reason may be `binding_drift` or
+/// `effect_replay_divergence`, which a pre-83 build cannot decode. A pre-83
+/// database is rejected at open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 83;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

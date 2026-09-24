@@ -49,6 +49,25 @@ pub enum TurnParkReason {
         /// The refusal message.
         message: String,
     },
+    /// A code cell needed a host tool binding its journal names, and the live
+    /// tool for it is missing or changed since the pass that wrote the
+    /// journal (FIG-3587).
+    BindingDrift {
+        /// The refusal message, naming the binding and how it drifted.
+        message: String,
+    },
+    /// A recorded effect's envelope no longer matches the one the redrive
+    /// reconstructs — a model call built from another prompt surface, a tool
+    /// attempt with other arguments — and serving its recorded outcome would
+    /// answer a different request (FIG-3587). Any recorded effect's replay
+    /// hash conflict parks instead of failing on every redrive.
+    EffectReplayDivergence {
+        /// The diverged effect's kind (its command `type`, e.g. `llm_call`),
+        /// or `unknown` when the substrate did not name it.
+        effect_kind: String,
+        /// The refusal message, with the divergent envelope paths.
+        message: String,
+    },
 }
 
 impl TurnParkReason {
@@ -64,6 +83,18 @@ impl TurnParkReason {
             RuntimeErrorCode::LashlangCellReplayKeyFormatCutover => {
                 Some(Self::KeyFormatCutover { message })
             }
+            RuntimeErrorCode::LashlangCellBindingDrift => Some(Self::BindingDrift { message }),
+            RuntimeErrorCode::SqliteEffectReplayHashConflict
+            | RuntimeErrorCode::PostgresEffectReplayHashConflict => {
+                Some(Self::EffectReplayDivergence {
+                    effect_kind: error
+                        .summary
+                        .as_ref()
+                        .and_then(|summary| summary.effect_kind.clone())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    message,
+                })
+            }
             _ => None,
         }
     }
@@ -72,7 +103,10 @@ impl TurnParkReason {
     #[must_use]
     pub fn message(&self) -> &str {
         match self {
-            Self::ReplayDivergence { message } | Self::KeyFormatCutover { message } => message,
+            Self::ReplayDivergence { message }
+            | Self::KeyFormatCutover { message }
+            | Self::BindingDrift { message }
+            | Self::EffectReplayDivergence { message, .. } => message,
         }
     }
 }

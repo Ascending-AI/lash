@@ -309,9 +309,7 @@ mod tests {
                 crate::RuntimeAttribution::for_session("child-session"),
                 "env-sync",
             ),
-            RuntimeEffectCommand::SyncExecutionEnvironment {
-                update_machine_config: false,
-            },
+            RuntimeEffectCommand::SyncExecutionEnvironment,
         );
         assert!(crate::GroupExecutors::executor_for(tool_children.as_ref(), &envelope).is_none());
     }

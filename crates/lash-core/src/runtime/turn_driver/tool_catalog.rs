@@ -174,24 +174,22 @@ impl RuntimeTurnDriver<'_> {
     pub(in crate::runtime) async fn refresh_execution_environment(
         &mut self,
         messages: crate::MessageSequence,
-        update_machine_config: bool,
-    ) -> Result<Option<crate::sansio::ExecutionEnvironmentSync>, crate::SessionError> {
-        if !update_machine_config {
-            return Ok(None);
-        }
-
+    ) -> Result<Option<crate::sansio::ExecutionEnvironmentSync>, SyncFailure> {
         let policy = self.policy.policy.clone();
         let execution_environment = self
             .prepare_execution_environment(&policy, self.turn_index, messages)
             .await
-            .map_err(|err| crate::SessionError::Protocol(err.to_string()))?;
+            .map_err(SyncFailure::of_plugin_error)?;
         let prepared_prompt = execution_environment.build_prompt(
             &self.host.core.prompt.prompt,
             &policy.prompt,
             self.turn_context.prompt_layer(),
             Some(self.session.prompt_cache()),
         );
-        let projector_turn_inputs = self.projector_turn_inputs().await?;
+        let projector_turn_inputs = self
+            .projector_turn_inputs()
+            .await
+            .map_err(SyncFailure::of_session_error)?;
 
         Ok(Some(crate::sansio::ExecutionEnvironmentSync {
             system_prompt: prepared_prompt.system_prompt,
@@ -364,5 +362,39 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         Ok(model)
+    }
+}
+
+/// Why an execution-environment sync could not rebuild the environment.
+pub(in crate::runtime) enum SyncFailure {
+    /// Deterministic over the turn's inputs: journaled as the sync's outcome,
+    /// which fails the turn and replays identically.
+    Recorded(String),
+    /// A fact about this attempt — a store, lease or session fault — that must
+    /// not be journaled: the turn aborts and a redrive rebuilds the
+    /// environment (the FIG-3575 live-fault class).
+    Live(crate::RuntimeError),
+}
+
+impl SyncFailure {
+    fn of_plugin_error(error: PluginError) -> Self {
+        let message = format!("protocol error: {error}");
+        let failure = error.into_turn_failure(crate::RuntimeErrorCode::ProtocolBeforeLlmCall);
+        if failure.turn_failure_cause().aborts_invocation() {
+            Self::Live(failure)
+        } else {
+            Self::Recorded(message)
+        }
+    }
+
+    fn of_session_error(error: crate::SessionError) -> Self {
+        match error {
+            crate::SessionError::Plugin(error) => Self::of_plugin_error(error),
+            error @ crate::SessionError::Store { .. } => Self::Live(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::StoreCommitFailed,
+                error.to_string(),
+            )),
+            error => Self::Recorded(error.to_string()),
+        }
     }
 }

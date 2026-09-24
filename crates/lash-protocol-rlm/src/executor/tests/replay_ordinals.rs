@@ -26,33 +26,104 @@ fn app_tool(id: &str, name: &str, operation: &str) -> lash_core::ToolDefinition 
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["app"], operation))
 }
 
-/// `app.a` and `app.b`, echoing their arguments. `revision` renames the tool
-/// `app.a` resolves to, as a changed tool surface does (FIG-3587).
+/// `app.a` and `app.b`, echoing their arguments, and `app.d`, which defers
+/// its outcome to an out-of-band completion. `revision` renames the tool
+/// `app.a` resolves to, as a changed tool surface does; `app_a` removes that
+/// tool, rewords its descriptor, or changes its retry policy under the same
+/// name (FIG-3587); `app_d` does the same to `app.d`.
 #[derive(Clone, Default)]
 pub(super) struct AppTools {
     calls: Arc<Mutex<Vec<(String, Value)>>>,
     call_ids: Arc<Mutex<Vec<String>>>,
     revision: &'static str,
+    app_a: AppA,
+    app_d: AppA,
+    /// The journal `app.d` resolves its completion on.
+    completions: Option<std::path::PathBuf>,
+}
+
+/// What the registry holds for a tool.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) enum AppA {
+    #[default]
+    Registered,
+    Removed,
+    Described(&'static str),
+    /// A dispatch-relevant change: another retry policy.
+    Retried,
+}
+
+impl AppA {
+    fn apply(self, definition: lash_core::ToolDefinition) -> Option<lash_core::ToolDefinition> {
+        match self {
+            Self::Registered => Some(definition),
+            Self::Removed => None,
+            Self::Described(description) => Some(lash_core::ToolDefinition {
+                manifest: lash_core::ToolManifest {
+                    description: description.to_string(),
+                    ..definition.manifest
+                },
+                contract: definition.contract,
+            }),
+            Self::Retried => Some(lash_core::ToolDefinition {
+                manifest: lash_core::ToolManifest {
+                    retry_policy: lash_core::ToolRetryPolicy::Safe {
+                        max_attempts: 3,
+                        base_delay_ms: 10,
+                        max_delay_ms: 100,
+                    },
+                    ..definition.manifest
+                },
+                contract: definition.contract,
+            }),
+        }
+    }
 }
 
 impl AppTools {
     fn revised(&self, revision: &'static str) -> Self {
         Self {
-            calls: Arc::clone(&self.calls),
-            call_ids: Arc::clone(&self.call_ids),
             revision,
+            ..self.clone()
+        }
+    }
+
+    /// The same tools, sharing the dispatch log, with `app.a` as `app_a`.
+    pub(super) fn with_app_a(&self, app_a: AppA) -> Self {
+        Self {
+            app_a,
+            ..self.clone()
+        }
+    }
+
+    /// The same tools, sharing the dispatch log, with `app.d` as `app_d`.
+    pub(super) fn with_app_d(&self, app_d: AppA) -> Self {
+        Self {
+            app_d,
+            ..self.clone()
+        }
+    }
+
+    /// The same tools, resolving `app.d`'s completions on `journal`.
+    pub(super) fn completing_on(&self, journal: &std::path::Path) -> Self {
+        Self {
+            completions: Some(journal.to_path_buf()),
+            ..self.clone()
         }
     }
 
     fn definitions(&self) -> Vec<lash_core::ToolDefinition> {
-        vec![
-            app_tool(
-                &format!("tool:app_a{}", self.revision),
-                &format!("app_a{}", self.revision),
-                "a",
-            ),
-            app_tool("tool:app_b", "app_b", "b"),
-        ]
+        let a = app_tool(
+            &format!("tool:app_a{}", self.revision),
+            &format!("app_a{}", self.revision),
+            "a",
+        );
+        self.app_a
+            .apply(a)
+            .into_iter()
+            .chain([app_tool("tool:app_b", "app_b", "b")])
+            .chain(self.app_d.apply(app_tool("tool:app_d", "app_d", "d")))
+            .collect()
     }
 
     pub(super) fn dispatched(&self) -> usize {
@@ -86,6 +157,10 @@ impl lash_core::ToolProvider for AppTools {
             .map(|definition| Arc::new(definition.contract()))
     }
 
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id.as_str() == "tool:app_d"
+    }
+
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let name = call.name().to_string();
         let args = call.args.clone();
@@ -93,6 +168,30 @@ impl lash_core::ToolProvider for AppTools {
         self.call_ids
             .lock_recover()
             .push(call.context.tool_call_id().unwrap_or_default().to_string());
+        if name == "app_d" {
+            let key = call
+                .context
+                .completion_key()
+                .expect("a deferring tool is issued a completion key");
+            let journal = self
+                .completions
+                .clone()
+                .expect("a deferring tool knows the journal it completes on");
+            let value = serde_json::json!({ "tool": name, "args": args });
+            lash_core::task::spawn(async move {
+                let host = lash_sqlite_store::SqliteEffectHost::open(&journal)
+                    .await
+                    .expect("open the completion journal");
+                lash_core::AwaitEventResolver::resolve_await_event(
+                    &host,
+                    &key,
+                    lash_core::Resolution::Ok(value),
+                )
+                .await
+                .expect("resolve the deferred completion");
+            });
+            return lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::new());
+        }
         (async { lash_core::ToolOutcome::ok(serde_json::json!({ "tool": name, "args": args })) })
             .await
             .into()
@@ -105,7 +204,7 @@ pub(super) struct Run {
 }
 
 impl Run {
-    fn refusal_code(&self) -> Option<lash_core::RuntimeErrorCode> {
+    pub(super) fn refusal_code(&self) -> Option<lash_core::RuntimeErrorCode> {
         self.nested.as_ref().map(|error| error.code.clone())
     }
 
@@ -114,7 +213,7 @@ impl Run {
         assert!(self.response.error.is_none(), "{:?}", self.response.error);
     }
 
-    fn assert_diverged(&self) {
+    pub(super) fn assert_diverged(&self) {
         assert_eq!(
             self.refusal_code(),
             Some(lash_core::RuntimeErrorCode::LashlangCellReplayDivergence),
@@ -176,11 +275,11 @@ impl Journal {
         )
     }
 
-    async fn run(&self, code: &str, tools: &AppTools) -> Run {
+    pub(super) async fn run(&self, code: &str, tools: &AppTools) -> Run {
         self.run_under(code, tools, self.host().await).await
     }
 
-    async fn run_under(
+    pub(super) async fn run_under(
         &self,
         code: &str,
         tools: &AppTools,
@@ -214,7 +313,7 @@ impl Journal {
         }
     }
 
-    async fn keys(&self) -> (Vec<String>, Vec<String>) {
+    pub(super) async fn keys(&self) -> (Vec<String>, Vec<String>) {
         self.keys_of(SESSION, TURN).await
     }
 }
@@ -592,26 +691,26 @@ fn a_divergence_cannot_be_caught_by_the_cell() {
     });
 }
 
-/// T9: the tool an alias resolves to changed between the runs (FIG-3587).
-/// The redrive refuses at the call instead of dispatching the new tool live.
+/// T9: the tool an alias resolves to was renamed between the runs. The
+/// redrive links the call against the cell's recorded binding (FIG-3587) and
+/// replays its recorded result instead of dispatching the new tool live.
 #[test]
-fn a_changed_alias_binding_refuses_instead_of_dispatching() {
+fn a_renamed_alias_binding_replays_its_recorded_result() {
     block_on(async {
         let journal = Journal::open();
         let tools = AppTools::default();
-        journal
-            .run("await app.a({ n: 1 }); finish(1);", &tools)
-            .await
-            .assert_clean();
-        let revised = tools.revised("_v2");
-        let drifted = journal
-            .run("await app.a({ n: 1 }); finish(1);", &revised)
+        let first = journal
+            .run("const a = await app.a({ n: 1 }); finish(a);", &tools)
             .await;
-        drifted.assert_diverged();
-        let message = &drifted.nested.as_ref().expect("refusal").message;
-        assert!(
-            message.contains(":lk2:0000000000") && message.contains("command.call.tool_id"),
-            "the refusal names the entry and the drifted binding: {message}"
+        first.assert_clean();
+        let revised = tools.revised("_v2");
+        let redriven = journal
+            .run("const a = await app.a({ n: 1 }); finish(a);", &revised)
+            .await;
+        redriven.assert_clean();
+        assert_eq!(
+            redriven.response.terminal_finish, first.response.terminal_finish,
+            "the redrive answers from the recorded result"
         );
         assert_eq!(tools.dispatched(), 1, "the revised tool never runs");
     });

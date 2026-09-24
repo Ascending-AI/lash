@@ -1,4 +1,4 @@
-//! A parked turn's record (FIG-3586, FIG-3600), at the store seam.
+//! A parked turn's record (FIG-3586, FIG-3600, FIG-3587), at the store seam.
 //!
 //! A turn parks when it aborts on a replay refusal: it keeps every claim it
 //! holds, and the store records why, one record per session. The record lives
@@ -96,6 +96,33 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
         Some(cutover.clone())
     );
 
+    // Every reason round-trips through the persisted record, the FIG-3587
+    // binding drift and effect replay divergence with their fields.
+    for reason in [
+        crate::store::TurnParkReason::BindingDrift {
+            message: "code cell binding `tools.probe` (tool `tool:probe`) is missing".to_string(),
+        },
+        crate::store::TurnParkReason::EffectReplayDivergence {
+            effect_kind: "llm_call".to_string(),
+            message: "divergent_paths=[command.request.generation]".to_string(),
+        },
+        cutover.reason.clone(),
+    ] {
+        let parked = park(&session_id, &parked_turn, reason);
+        store
+            .record_turn_park(&parked)
+            .await
+            .expect("park the turn under the reason");
+        assert_eq!(
+            store
+                .load_turn_park(&session_id)
+                .await
+                .expect("read the reason back"),
+            Some(parked),
+            "the persisted park reads back with its reason"
+        );
+    }
+
     // A cancel that withdraws the parked turn's input settles its park.
     let cancelled = store
         .cancel_pending_turn_input(&session_id, &input.input_id)
@@ -119,6 +146,14 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
 
     // Another turn's commit leaves the park; the parked turn's own commit
     // settles it, in its own transaction.
+    let cutover = park(
+        &session_id,
+        &parked_turn,
+        crate::store::TurnParkReason::EffectReplayDivergence {
+            effect_kind: "llm_call".to_string(),
+            message: "the model call's envelope drifted".to_string(),
+        },
+    );
     store
         .record_turn_park(&cutover)
         .await

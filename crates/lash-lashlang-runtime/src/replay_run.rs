@@ -45,6 +45,16 @@ use lash_sansio::sync::MutexExt;
 /// marker, the ordinal width, a sub-key, the seal — is a grammar change.
 pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 
+/// The journal grammar a code cell writes (FIG-3587): the replay-key grammar
+/// of [`LASHLANG_REPLAY_KEY_GRAMMAR_VERSION`] plus the cell's ambient binding
+/// set, journaled before its first effect and linked against on redrive.
+///
+/// v3 journals the binding set; v2 did not, so a redrive of a v2 cell would
+/// link against the live registry. A cell's iteration sync stamps this
+/// version, and a cell whose sync names another is refused before it runs.
+/// Process bodies journal no binding set and stay on the key grammar.
+pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 3;
+
 /// The namespace marker that follows a run's base key.
 const NAMESPACE_MARKER: &str = "lk2";
 
@@ -133,7 +143,10 @@ impl LashlangReplayNamespace {
 /// apart: the shape of the rows at its ordinal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandShape {
-    /// A tool call: `{command}:attempt:{n}` and its sub-rows.
+    /// A tool call: `{command}:attempt:{n}` and its sub-rows, or an
+    /// orchestrating tool's nested rows — a process it started
+    /// (`{command}:process:start:{id}`) and awaited
+    /// (`{command}:process:await:{id}`).
     ToolCall,
     /// A journaled value at the command's own key: a runtime value
     /// (`Date.now()`, `Math.random()`) or a trigger operation.
@@ -162,6 +175,7 @@ impl CommandShape {
             "timers-admitted" => Some(Self::Aggregate),
             _ if sub.starts_with("attempt:") => Some(Self::ToolCall),
             _ if sub.starts_with("process:attach-terminal:") => Some(Self::ToolCall),
+            _ if sub.starts_with("process:start:") => Some(Self::ToolCall),
             _ if sub.starts_with("child:") => Some(Self::Aggregate),
             _ if sub.starts_with("process:await:") => Some(Self::AwaitHandle),
             _ => None,
@@ -203,6 +217,9 @@ struct RecordedRun {
     /// Every replay key the journal holds in the namespace: a replayed
     /// command's writes must land on these while entries lie beyond it.
     keys: std::sync::Arc<std::collections::BTreeSet<String>>,
+    /// The subset of `keys` whose outcome the journal holds: all a command
+    /// served only from the journal may touch (FIG-3587).
+    settled: std::sync::Arc<std::collections::BTreeSet<String>>,
 }
 
 impl RecordedRun {
@@ -219,6 +236,7 @@ impl RecordedRun {
             ..Self::default()
         };
         run.keys = std::sync::Arc::new(keys.replay_keys.iter().cloned().collect());
+        run.settled = std::sync::Arc::new(keys.settled_keys.iter().cloned().collect());
         let seal = namespace.seal();
         let mut shapes: BTreeMap<u64, Vec<(String, Option<CommandShape>)>> = BTreeMap::new();
         for key in keys.replay_keys {
@@ -253,6 +271,13 @@ impl RecordedRun {
                     }
                     (Some(row), None) => shape = Some(row),
                     (Some(row), Some(seen)) if row == seen => {}
+                    // An orchestrating tool call awaits the process it
+                    // started under its own ordinal: its await rows are the
+                    // call's, not a separate handle await.
+                    (Some(CommandShape::ToolCall), Some(CommandShape::AwaitHandle)) => {
+                        shape = Some(CommandShape::ToolCall);
+                    }
+                    (Some(CommandShape::AwaitHandle), Some(CommandShape::ToolCall)) => {}
                     (Some(row), Some(seen)) => {
                         unreadable = Some(format!(
                             "rows of a {} and a {} share it (`{key}`)",
@@ -570,6 +595,16 @@ impl LashlangReplayRun {
                 )),
                 None => CommandAdmission::Live,
             }),
+        }
+    }
+
+    /// The keys whose outcome the journal holds, when the run replays against
+    /// a recorded frontier; `None` on a host that checks by position, which
+    /// cannot say whether a recorded entry has settled.
+    pub fn settled_keys(&self) -> Option<std::sync::Arc<std::collections::BTreeSet<String>>> {
+        match &self.state.lock_recover().frontier {
+            Frontier::Recorded(recorded) => Some(std::sync::Arc::clone(&recorded.settled)),
+            Frontier::Unread | Frontier::Positional => None,
         }
     }
 

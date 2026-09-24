@@ -262,7 +262,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             let id = self.next_id();
             self.state = MachineState::WaitingExecutionEnvironment {
                 delivery: EffectDelivery::pending(id),
-                update_machine_config: false,
             };
             return;
         }
@@ -290,7 +289,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             let id = self.next_id();
             self.state = MachineState::WaitingExecutionEnvironment {
                 delivery: EffectDelivery::pending(id),
-                update_machine_config: true,
             };
             return;
         }
@@ -486,22 +484,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         result: Result<Option<ExecutionEnvironmentSync>, String>,
         cell_replay_grammar: Option<u32>,
     ) {
-        let (delivery, update_machine_config) =
-            match std::mem::replace(&mut self.state, MachineState::Finished) {
-                MachineState::WaitingExecutionEnvironment {
-                    delivery,
-                    update_machine_config,
-                } => (delivery, update_machine_config),
-                other => {
-                    self.state = other;
-                    return;
-                }
-            };
+        let delivery = match std::mem::replace(&mut self.state, MachineState::Finished) {
+            MachineState::WaitingExecutionEnvironment { delivery } => delivery,
+            other => {
+                self.state = other;
+                return;
+            }
+        };
         if delivery.id != id {
-            self.state = MachineState::WaitingExecutionEnvironment {
-                delivery,
-                update_machine_config,
-            };
+            self.state = MachineState::WaitingExecutionEnvironment { delivery };
             return;
         }
 

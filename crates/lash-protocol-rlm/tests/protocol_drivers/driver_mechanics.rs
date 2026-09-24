@@ -2186,22 +2186,19 @@ fn drive_rlm_to_second_llm_request(
             panic!("machine finished before a second LLM call");
         };
         match effect {
-            Effect::SyncExecutionEnvironment {
-                id,
-                update_machine_config,
-            } => {
-                // The initial host-only sync carries no machine update; the
-                // boundary sync replays the journaled record.
-                let result = if update_machine_config {
-                    Ok(Some(journaled_sync.clone()))
-                } else {
+            Effect::SyncExecutionEnvironment { id } => {
+                // The protocol-start sync answers as a host with nothing to
+                // refresh; the boundary sync replays the journaled record.
+                let result = if requests.is_empty() {
                     Ok(None)
+                } else {
+                    Ok(Some(journaled_sync.clone()))
                 };
                 machine.handle_response(Response::ExecutionEnvironmentSynced {
                     id,
                     result,
                     cell_replay_grammar: Some(
-                        lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
+                        lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
                     ),
                 });
             }

@@ -42,6 +42,45 @@ lash_conformance::effect_host_tests!({
     })
 });
 
+lash_conformance::cell_binding_drift_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres cell binding-drift conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let host = Arc::new(storage.effect_host());
+    let faults = host.effect_journal_faults();
+    let host = host as Arc<dyn EffectHost>;
+    (
+        database_lock,
+        "postgres",
+        Arc::clone(&host),
+        faults,
+        lash_conformance::HostTurnRunner::shared(host),
+        vec![rlm_factory(false)],
+    )
+});
+
+lash_conformance::model_call_drift_park_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres model-call drift conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    (
+        database_lock,
+        "postgres",
+        Arc::clone(&host),
+        lash_conformance::HostTurnRunner::shared(host),
+        vec![rlm_factory(false)],
+    )
+});
+
 lash_conformance::tool_batch_parallelism_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!(

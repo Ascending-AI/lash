@@ -93,7 +93,7 @@ pub(crate) fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
                     projector_turn_inputs: None,
                 })),
                 cell_replay_grammar: Some(
-                    lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
+                    lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
                 ),
             });
             continue;

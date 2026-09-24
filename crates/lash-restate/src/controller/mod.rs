@@ -1598,15 +1598,13 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
         | RuntimeEffectCommand::PresentToolResult { .. }
-        | RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {
-            RestateEffectExecution::JournaledRun {
-                envelope: RuntimeEffectEnvelope {
-                    invocation,
-                    command,
-                    group,
-                },
-            }
-        }
+        | RuntimeEffectCommand::SyncExecutionEnvironment) => RestateEffectExecution::JournaledRun {
+            envelope: RuntimeEffectEnvelope {
+                invocation,
+                command,
+                group,
+            },
+        },
     })
 }
 pub(crate) fn restate_effect_name(invocation: &RuntimeEffectInvocation) -> String {

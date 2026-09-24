@@ -167,16 +167,14 @@ pub enum LogEvent {
 // justification: effects are short-lived machine states whose generic protocol payload remains inline for checkpoint cloning.
 #[allow(clippy::large_enum_variant)]
 pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
-    /// Sync the live execution environment before the turn proceeds.
-    ///
-    /// `update_machine_config` is only needed after the turn has
-    /// already advanced at least once and the host may need to swap in
-    /// a refreshed system prompt or tool schema for the next
-    /// protocol iteration. Initial syncs are host-only because the machine was
-    /// already constructed from a fresh execution environment.
+    /// Sync the execution environment the next protocol iteration runs
+    /// under: the system prompt, tool schema and projector inputs its model
+    /// call is built from. Every sync — the protocol-start one included —
+    /// returns the environment, and the host journals it, so a redriven
+    /// iteration's model call is built from the surface its live pass saw,
+    /// not from the live registry (FIG-3538, FIG-3587).
     SyncExecutionEnvironment {
         id: EffectId,
-        update_machine_config: bool,
     },
     LlmCall {
         id: EffectId,
@@ -230,13 +228,7 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
 impl<M: TurnProtocol> Clone for Effect<M> {
     fn clone(&self) -> Self {
         match self {
-            Self::SyncExecutionEnvironment {
-                id,
-                update_machine_config,
-            } => Self::SyncExecutionEnvironment {
-                id: *id,
-                update_machine_config: *update_machine_config,
-            },
+            Self::SyncExecutionEnvironment { id } => Self::SyncExecutionEnvironment { id: *id },
             Self::LlmCall { id, request } => Self::LlmCall {
                 id: *id,
                 request: Arc::clone(request),

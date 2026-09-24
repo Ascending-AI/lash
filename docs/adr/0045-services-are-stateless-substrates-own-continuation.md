@@ -85,7 +85,16 @@ the answer decided FIG-526, and it will decide the next one.
   failure the journal already holds, is recorded as a failed turn and settles
   a queued run once. A live fault aborts: an aborted direct turn returns its
   acceptance receipt, and a queued run stays pending for its retry budget.
-  Every host settles the same failure the same way.
+  A replay refusal is a third class, `Parked` (FIG-3586, FIG-3587): the
+  lashlang divergence and cutover codes, `lashlang_cell_binding_drift`, and
+  any recorded effect's replay hash conflict on every SQL host. It is neither
+  terminal nor retryable: the turn aborts with its claims held, a typed park
+  is recorded, and no retry budget is spent, because every redrive by the same
+  build refuses again with zero dispatch. A hash conflict was recorded as a
+  failed turn before FIG-3587; it now parks on every SQL host. Restate's
+  envelope mismatch (`WorkerReplacementAbort`) still aborts as a live fault;
+  parking it is deferred to S7. Otherwise every host settles the same failure
+  the same way.
 - Decided 2026-09-24, not yet implemented (FIG-3600, [ADR 0101's
   amendment](0101-one-session-ingress-carries-every-admitted-item.md#amendment-fig-3600-2026-09-24-one-send-ingress-the-driver-runs-every-turn)):
   continuation is the substrate's for **every** turn, because no caller-driven

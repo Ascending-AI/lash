@@ -24,7 +24,12 @@ use super::*;
 /// execution-environment sync served (`synced_cell_replay_grammar`); a v8
 /// checkpoint has no stamp, and a cell resumed from it would run under no
 /// grammar.
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 9;
+/// Version 10 (FIG-3587) drops `update_machine_config` from the pending
+/// execution-environment sync: every sync, the protocol-start one included,
+/// now returns the environment the iteration's model call is built from, and
+/// a v9 checkpoint parked on a host-only protocol-start sync would resume
+/// with its first model call built from the live registry.
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 10;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1
@@ -66,7 +71,6 @@ pub(super) enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
     WaitingExecutionEnvironment {
         #[serde(rename = "effect_id")]
         delivery: EffectDelivery,
-        update_machine_config: bool,
     },
     PrepareIteration,
     WaitingLlm {
@@ -191,12 +195,8 @@ impl<M: TurnProtocol> Clone for MachineState<M> {
     fn clone(&self) -> Self {
         match self {
             Self::PreparingProtocol => Self::PreparingProtocol,
-            Self::WaitingExecutionEnvironment {
-                delivery,
-                update_machine_config,
-            } => Self::WaitingExecutionEnvironment {
+            Self::WaitingExecutionEnvironment { delivery } => Self::WaitingExecutionEnvironment {
                 delivery: *delivery,
-                update_machine_config: *update_machine_config,
             },
             Self::PrepareIteration => Self::PrepareIteration,
             Self::WaitingLlm {
@@ -253,15 +253,11 @@ impl<M: TurnProtocol> MachineState<M> {
 
     pub(super) fn poll_outstanding_effect(&mut self) -> Option<Effect<M>> {
         match self {
-            Self::WaitingExecutionEnvironment {
-                delivery,
-                update_machine_config,
-            } if delivery.status == EffectDeliveryStatus::Pending => {
+            Self::WaitingExecutionEnvironment { delivery }
+                if delivery.status == EffectDeliveryStatus::Pending =>
+            {
                 delivery.status = EffectDeliveryStatus::Delivered;
-                Some(Effect::SyncExecutionEnvironment {
-                    id: delivery.id,
-                    update_machine_config: *update_machine_config,
-                })
+                Some(Effect::SyncExecutionEnvironment { id: delivery.id })
             }
             Self::WaitingLlm {
                 delivery, request, ..

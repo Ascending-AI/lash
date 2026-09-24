@@ -101,9 +101,7 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             "journaled_run",
         ),
         (
-            RuntimeEffectCommand::SyncExecutionEnvironment {
-                update_machine_config: true,
-            },
+            RuntimeEffectCommand::SyncExecutionEnvironment,
             "journaled_run",
         ),
         (

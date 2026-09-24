@@ -13,13 +13,18 @@ pub use error::{
 };
 mod host_identity;
 pub use host_identity::LashlangHostIdentities;
+mod cell_bindings;
+pub use cell_bindings::{
+    CellBindingDrift, CellBindingDriftKind, CellToolBindings, journal_cell_tool_bindings,
+};
 mod replay_commands;
 pub use replay_commands::{CommandInFlight, ReplayCommands, retype_replay_mismatch};
 mod replay_run;
 pub use replay_run::{
     CommandAdmission, CommandShape, DispatchedOrdinalsDigest, IssuedCommand,
-    LASHLANG_REPLAY_KEY_GRAMMAR_VERSION, LashlangReplayNamespace, LashlangReplayRun,
-    LashlangRunOrdinals, ReplayDivergence, RunSeal, SealAttribution,
+    LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION, LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
+    LashlangReplayNamespace, LashlangReplayRun, LashlangRunOrdinals, ReplayDivergence, RunSeal,
+    SealAttribution,
 };
 mod language_trace_host;
 pub use language_trace_host::{LanguageTraceHost, trace_failure};

@@ -127,6 +127,7 @@ pub(crate) async fn execute_parked_cell_for_tests(
         lashlang_execution_trace: None,
         host_environment,
         deferred_execution_grants: BTreeMap::new(),
+        cell_bindings: lash_lashlang_runtime::CellToolBindings::default(),
         artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
         child_max_attempts: state.child_max_attempts(),
     });

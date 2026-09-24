@@ -1399,10 +1399,11 @@ pub(super) fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
         "Restate replay divergence must retain the shared typed classification"
     );
     assert_eq!(
-        err.summary.expect("mismatch summary"),
+        *err.summary.expect("mismatch summary"),
         lash_core::RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
             first_divergent_paths: vec!["command.spec.duration_ms".to_string()],
+            effect_kind: Some("sleep".to_string()),
         }
     );
 }

@@ -20,6 +20,7 @@ fn replay_mismatch_classification_covers_every_durable_controller_code() {
         "tool_intent_replay_key_format_cutover",
         "lashlang_cell_replay_divergence",
         "lashlang_cell_replay_key_format_cutover",
+        "lashlang_cell_binding_drift",
     ] {
         let typed = RuntimeErrorCode::from_wire_code(code);
         assert!(typed.is_replay_mismatch(), "{code}");
@@ -86,7 +87,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        197,
+        198,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
@@ -297,7 +298,9 @@ fn turn_input_source_key_conflict_is_a_typed_identity_conflict() {
 /// FIG-3575: one answer per code. A code is terminal exactly when a failed
 /// turn settles it as an outcome, with no exceptions, for every first-party
 /// code and for a foreign code of either class. A retryable code is a live
-/// fault by construction.
+/// fault by construction. A parked code (FIG-3586, FIG-3587) is its own
+/// third class: neither a recorded failed turn nor a live fault a retry may
+/// spend budget on, so it is neither terminal nor retryable.
 #[test]
 fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
     use crate::runtime_error::TurnFailureCause;
@@ -313,7 +316,42 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
         if code.is_retryable() {
             assert_eq!(cause, TurnFailureCause::LiveFault, "{code}");
         }
+        match cause {
+            TurnFailureCause::Outcome => {
+                assert!(code.is_terminal() && !code.parks_turn(), "{code}");
+            }
+            TurnFailureCause::LiveFault => {
+                assert!(!code.is_terminal() && !code.parks_turn(), "{code}");
+            }
+            TurnFailureCause::Parked => {
+                assert!(
+                    !code.is_terminal() && !code.is_retryable() && code.parks_turn(),
+                    "{code}: a parked code is neither an outcome nor a live fault"
+                );
+            }
+        }
     }
+    // The parked class, named: the replay refusals, which a redrive of the
+    // same build refuses again with zero dispatch.
+    let parked = RuntimeErrorCode::ALL_FIRST_PARTY
+        .iter()
+        .filter(|code| code.turn_failure_cause() == TurnFailureCause::Parked)
+        .map(RuntimeErrorCode::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        parked,
+        [
+            RuntimeErrorCode::LashlangCellReplayDivergence,
+            RuntimeErrorCode::LashlangCellReplayKeyFormatCutover,
+            RuntimeErrorCode::LashlangCellBindingDrift,
+            RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            RuntimeErrorCode::PostgresEffectReplayHashConflict,
+        ]
+        .iter()
+        .map(RuntimeErrorCode::as_str)
+        .collect::<std::collections::BTreeSet<_>>(),
+        "exactly the replay refusals park"
+    );
     // A foreign code carries the class its minting host chose on the error.
     for (cause, terminal) in [
         (TurnFailureCause::Outcome, true),
@@ -332,8 +370,6 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
     }
     for outcome in [
         RuntimeErrorCode::ProtocolBeforeLlmCall,
-        RuntimeErrorCode::SqliteEffectReplayHashConflict,
-        RuntimeErrorCode::PostgresEffectReplayHashConflict,
         RuntimeErrorCode::RestateProcessJournalIdentityDrift,
         RuntimeErrorCode::ToolIntentReplayKeyFormatCutover,
     ] {
@@ -408,14 +444,18 @@ fn an_aborted_turn_error_carries_its_acceptance_receipt() {
 /// FIG-3586: a lashlang replay refusal parks its turn. It is neither an
 /// outcome — nothing about the turn failed, and a redeploy of the build that
 /// wrote the journal serves it — nor a live fault a queued run may spend its
-/// retry budget on, since every redrive by this build refuses again.
+/// retry budget on, since every redrive by this build refuses again. FIG-3587
+/// widens it to any recorded effect's replay hash conflict on the SQL hosts.
 #[test]
-fn lashlang_replay_refusals_park_the_turn() {
+fn replay_refusals_park_the_turn() {
     use crate::runtime_error::TurnFailureCause;
 
     for code in [
         RuntimeErrorCode::LashlangCellReplayDivergence,
         RuntimeErrorCode::LashlangCellReplayKeyFormatCutover,
+        RuntimeErrorCode::LashlangCellBindingDrift,
+        RuntimeErrorCode::SqliteEffectReplayHashConflict,
+        RuntimeErrorCode::PostgresEffectReplayHashConflict,
     ] {
         assert_eq!(
             code.turn_failure_cause(),
@@ -443,8 +483,11 @@ fn lashlang_replay_refusals_park_the_turn() {
                 code,
                 RuntimeErrorCode::LashlangCellReplayDivergence
                     | RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
+                    | RuntimeErrorCode::LashlangCellBindingDrift
+                    | RuntimeErrorCode::SqliteEffectReplayHashConflict
+                    | RuntimeErrorCode::PostgresEffectReplayHashConflict
             ),
-            "{code}: only the lashlang replay refusals park"
+            "{code}: only the replay refusals park"
         );
     }
 }

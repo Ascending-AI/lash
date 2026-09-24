@@ -253,6 +253,11 @@ pub enum RuntimeErrorCode {
     /// replay-key grammar (FIG-3586). Its keys cannot be read by this build,
     /// so it is refused before the run starts rather than re-issued live.
     LashlangCellReplayKeyFormatCutover,
+    /// A redriven code cell needed a host tool binding its journaled binding
+    /// set names, and the live tool for it is now missing or changed
+    /// (FIG-3587). The binding is served only from recorded results: a call
+    /// that would reach the live tool refuses, before anything is claimed.
+    LashlangCellBindingDrift,
     /// A durable effect controller that does not answer the recorded-frontier
     /// read was asked for it: a replayed lashlang run cannot know which of its
     /// commands the journal holds, so it refuses to run rather than dispatch
@@ -622,6 +627,7 @@ impl RuntimeErrorCode {
             Self::ToolIntentReplayKeyFormatCutover => "tool_intent_replay_key_format_cutover",
             Self::LashlangCellReplayDivergence => "lashlang_cell_replay_divergence",
             Self::LashlangCellReplayKeyFormatCutover => "lashlang_cell_replay_key_format_cutover",
+            Self::LashlangCellBindingDrift => "lashlang_cell_binding_drift",
             Self::RecordedJournalReadUnsupported => "recorded_journal_read_unsupported",
             Self::WorkerReplacementAbort => "worker_replacement_abort",
             Self::RestateJournaledEffectPoisoned => "restate_journaled_effect_poisoned",
@@ -773,6 +779,7 @@ impl RuntimeErrorCode {
                 | Self::ToolIntentReplayKeyFormatCutover
                 | Self::LashlangCellReplayDivergence
                 | Self::LashlangCellReplayKeyFormatCutover
+                | Self::LashlangCellBindingDrift
         )
     }
 
@@ -904,6 +911,7 @@ impl RuntimeErrorCode {
         Self::ToolIntentReplayKeyFormatCutover,
         Self::LashlangCellReplayDivergence,
         Self::LashlangCellReplayKeyFormatCutover,
+        Self::LashlangCellBindingDrift,
         Self::RecordedJournalReadUnsupported,
         Self::RestateEffectHostRequiresHandlerScope,
         Self::RestateJournaledEffectPoisoned,
@@ -1114,6 +1122,7 @@ impl RuntimeErrorCode {
             "tool_intent_replay_key_format_cutover" => Self::ToolIntentReplayKeyFormatCutover,
             "lashlang_cell_replay_divergence" => Self::LashlangCellReplayDivergence,
             "lashlang_cell_replay_key_format_cutover" => Self::LashlangCellReplayKeyFormatCutover,
+            "lashlang_cell_binding_drift" => Self::LashlangCellBindingDrift,
             "recorded_journal_read_unsupported" => Self::RecordedJournalReadUnsupported,
             "worker_replacement_abort" | "restate_effect_hash_mismatch" => {
                 Self::WorkerReplacementAbort
@@ -1501,6 +1510,11 @@ impl std::error::Error for RuntimeError {}
 pub struct RuntimeEffectReplayMismatchReport {
     pub divergent_path_count: usize,
     pub first_divergent_paths: Vec<String>,
+    /// The kind of the recorded effect whose envelope diverged (its command
+    /// `type`, e.g. `llm_call`, `tool_invocation`), so an operator can tell a
+    /// model-call drift from a tool or cell drift (FIG-3587).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_kind: Option<String>,
 }
 
 /// Journal treatment of an executor failure before a terminal is committed.
@@ -1524,8 +1538,10 @@ pub struct RuntimeEffectControllerError {
     journal_disposition: EffectErrorJournalDisposition,
     pub code: RuntimeErrorCode,
     pub message: String,
+    /// Boxed, as on [`RuntimeError`]: the rare diagnostic must not size
+    /// every effect outcome that carries an error inline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<crate::RuntimeEffectReplayMismatchReport>,
+    pub summary: Option<Box<crate::RuntimeEffectReplayMismatchReport>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<crate::RuntimeErrorCause>,
     /// `true` when this error is the journaled record of a failed effect —
@@ -1568,9 +1584,24 @@ impl RuntimeEffectControllerError {
         error
     }
 
-    /// Only the assistant-response command can consume derivation retry authority.
+    /// Marks this failure of an uncommitted host derivation — an
+    /// execution-environment sync's rebuild that met a live fault — as safe to
+    /// execute again: the claim is released unsealed instead of journaling the
+    /// failure as the effect's outcome (FIG-3587).
+    #[must_use]
+    pub fn retryable_uncommitted_derivation(mut self) -> Self {
+        self.journal_disposition =
+            EffectErrorJournalDisposition::RetryUncommittedResponseDerivation;
+        self
+    }
+
+    /// Only the host derivations — the assistant-response hooks and the
+    /// execution-environment sync — can consume derivation retry authority.
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalDisposition {
-        if kind == RuntimeEffectKind::AssistantResponseHooks {
+        if matches!(
+            kind,
+            RuntimeEffectKind::AssistantResponseHooks | RuntimeEffectKind::SyncExecutionEnvironment
+        ) {
             self.journal_disposition
         } else {
             EffectErrorJournalDisposition::Terminal
@@ -1641,7 +1672,7 @@ impl RuntimeEffectControllerError {
     /// Sets the summary carried by a `RuntimeEffectControllerError` for effect-host implementors
     /// while executing or replaying a runtime effect.
     pub fn with_summary(mut self, summary: crate::RuntimeEffectReplayMismatchReport) -> Self {
-        self.summary = Some(summary);
+        self.summary = Some(Box::new(summary));
         self
     }
 
@@ -1667,7 +1698,7 @@ impl RuntimeEffectControllerError {
             foreign_cause,
         } = self;
         let mut runtime = RuntimeError::new(code, message);
-        runtime.summary = summary.map(Box::new);
+        runtime.summary = summary;
         runtime.foreign_cause = foreign_cause;
         match cause {
             Some(cause) => runtime.with_cause(cause),
@@ -1682,7 +1713,7 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
             journal_disposition: EffectErrorJournalDisposition::Terminal,
             code: err.code,
             message: err.message,
-            summary: err.summary.map(|summary| *summary),
+            summary: err.summary,
             cause: err.cause,
             journaled: false,
             foreign_cause: err.foreign_cause,

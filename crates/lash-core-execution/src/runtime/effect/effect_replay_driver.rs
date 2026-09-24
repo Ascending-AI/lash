@@ -765,6 +765,10 @@ pub struct RecordedKeyRange {
 pub struct RecordedKeys {
     /// Replay keys of `runtime_effect_replay` rows.
     pub replay_keys: Vec<String>,
+    /// The subset of [`replay_keys`](Self::replay_keys) whose outcome is
+    /// recorded (completed or failed): what a replay can serve without
+    /// running anything live (FIG-3587).
+    pub settled_keys: Vec<String>,
     /// Group keys of `runtime_effect_group` rows.
     pub group_keys: Vec<String>,
     /// The recorded outcome of the completed replay row at the range's upper

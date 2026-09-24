@@ -276,6 +276,10 @@ pub fn validate_replayed_effect_envelope(
             .take(ERROR_SUMMARY_PATH_LIMIT)
             .cloned()
             .collect(),
+        effect_kind: reconstructed_value
+            .pointer("/command/type")
+            .and_then(Value::as_str)
+            .map(str::to_string),
     };
     if let Some(trace) = trace {
         trace.emit(TraceEffectEnvelopeDiffEvent {
@@ -288,11 +292,12 @@ pub fn validate_replayed_effect_envelope(
     Err(RuntimeEffectControllerError::new(
         mismatch_code,
         format!(
-            "recorded runtime effect hash {} did not match reconstructed envelope hash {}; divergent_path_count={}; divergent_paths=[{}]",
+            "recorded runtime effect hash {} did not match reconstructed envelope hash {}; divergent_path_count={}; divergent_paths=[{}]; effect_kind={}",
             recorded.hash,
             reconstructed.hash,
             summary.divergent_path_count,
-            render_divergent_paths(&summary)
+            render_divergent_paths(&summary),
+            summary.effect_kind.as_deref().unwrap_or("unknown")
         ),
     )
     .with_summary(summary))
@@ -609,7 +614,7 @@ mod tests {
         )
         .expect_err("mismatch");
         assert_eq!(
-            error.summary.as_ref(),
+            error.summary.as_deref(),
             Some(&RuntimeEffectReplayMismatchReport {
                 divergent_path_count: 10,
                 first_divergent_paths: vec![
@@ -622,12 +627,14 @@ mod tests {
                     "command.call.args.f6".to_string(),
                     "command.call.args.f7".to_string(),
                 ],
+                effect_kind: Some("tool_attempt".to_string()),
             })
         );
         assert!(
-            error
-                .message
-                .ends_with("command.call.args.f6, command.call.args.f7, <2 more paths elided>]"),
+            error.message.ends_with(
+                "command.call.args.f6, command.call.args.f7, <2 more paths elided>]; \
+                     effect_kind=tool_attempt"
+            ),
             "bounded rendered summary must say how many paths were elided: {}",
             error.message
         );

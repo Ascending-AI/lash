@@ -33,10 +33,18 @@ const TOOL_BATCH_FAMILY_VERSION: u8 = 3;
 enum ToolCallAuthorization {
     Catalog(crate::ToolId),
     Granted(Box<crate::ToolExecutionGrant>),
+    /// A replayed code cell's call on a host tool binding that drifted since
+    /// the pass that journaled the cell (FIG-3587): authorized under the
+    /// cell's recorded binding instead of the live catalog, and otherwise the
+    /// catalog call it was, so its attempt envelope is the recorded one.
+    Recorded(Box<crate::ToolExecutionGrant>),
 }
 
 impl ToolCallAuthorization {
     fn from_invocation(call: &mut ToolInvocation) -> Self {
+        if let Some(binding) = call.recorded_binding.take() {
+            return Self::Recorded(binding);
+        }
         match call.execution_grant.take() {
             Some(grant) => Self::Granted(grant),
             None => Self::Catalog(call.tool_id.clone()),
@@ -46,7 +54,7 @@ impl ToolCallAuthorization {
     fn tool_id(&self) -> &crate::ToolId {
         match self {
             Self::Catalog(tool_id) => tool_id,
-            Self::Granted(grant) => &grant.manifest().id,
+            Self::Granted(grant) | Self::Recorded(grant) => &grant.manifest().id,
         }
     }
 
@@ -62,7 +70,7 @@ impl ToolCallAuthorization {
             Self::Catalog(tool_id) => {
                 crate::tool_dispatch::resolve_callable_manifest_by_id(dispatch, tool_id)
             }
-            Self::Granted(grant) => Some(grant.manifest().clone()),
+            Self::Granted(grant) | Self::Recorded(grant) => Some(grant.manifest().clone()),
         }
     }
 
@@ -80,24 +88,45 @@ impl ToolCallAuthorization {
                 prepare_granted_tool_call_with_context(dispatch, grant, pending, Some(call_id))
                     .await
             }
+            Self::Recorded(binding) => {
+                crate::tool_dispatch::prepare_recorded_tool_call_with_context(
+                    dispatch,
+                    binding,
+                    pending,
+                    Some(call_id),
+                )
+                .await
+            }
         }
     }
 
+    /// A recorded binding orchestrates as the catalog call it replays did
+    /// (FIG-3587): a drifted orchestrating tool re-runs its body against its
+    /// recorded nested effects, served under the command's settled-key fence.
     fn allows_orchestration(&self) -> bool {
-        matches!(self, Self::Catalog(_))
+        matches!(self, Self::Catalog(_) | Self::Recorded(_))
     }
 
     fn execution_grant(&self) -> Option<&crate::ToolExecutionGrant> {
         match self {
-            Self::Catalog(_) => None,
+            Self::Catalog(_) | Self::Recorded(_) => None,
             Self::Granted(grant) => Some(grant),
         }
     }
 
-    fn into_execution_grant(self) -> Option<Box<crate::ToolExecutionGrant>> {
+    /// The grant the attempt carries, and the one its retry policy resolves
+    /// under. A recorded binding carries none, as the catalog call it replays
+    /// carried none, but its retry policy is the recorded manifest's.
+    fn into_execution_grant(
+        self,
+    ) -> (
+        Option<Box<crate::ToolExecutionGrant>>,
+        Option<Box<crate::ToolExecutionGrant>>,
+    ) {
         match self {
-            Self::Catalog(_) => None,
-            Self::Granted(grant) => Some(grant),
+            Self::Catalog(_) => (None, None),
+            Self::Granted(grant) => (Some(grant.clone()), Some(grant)),
+            Self::Recorded(binding) => (None, Some(binding)),
         }
     }
 }
@@ -108,6 +137,9 @@ pub struct ToolInvocation {
     pub tool_id: crate::ToolId,
     pub args: serde_json::Value,
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
+    /// The binding a replayed code cell recorded for this call when the live
+    /// tool has since drifted (FIG-3587). Never part of the call's identity.
+    pub recorded_binding: Option<Box<crate::ToolExecutionGrant>>,
     pub child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     pub issuing_language_node_id: Option<String>,
 }
@@ -119,6 +151,7 @@ impl ToolInvocation {
             tool_id,
             args,
             execution_grant: None,
+            recorded_binding: None,
             child_execution_trace_hook: None,
             issuing_language_node_id: None,
         }
@@ -137,6 +170,12 @@ impl ToolInvocation {
         self
     }
 
+    /// Authorizes this call under a code cell's recorded binding (FIG-3587).
+    pub fn with_recorded_binding(mut self, binding: crate::ToolExecutionGrant) -> Self {
+        self.recorded_binding = Some(Box::new(binding));
+        self
+    }
+
     pub fn with_issuing_language_node_id(mut self, node_id: impl Into<String>) -> Self {
         self.issuing_language_node_id = Some(node_id.into());
         self
@@ -152,6 +191,10 @@ impl std::fmt::Debug for ToolInvocation {
             .field(
                 "execution_grant",
                 &self.execution_grant.as_ref().map(|_| "<grant>"),
+            )
+            .field(
+                "recorded_binding",
+                &self.recorded_binding.as_ref().map(|_| "<binding>"),
             )
             .field(
                 "child_execution_trace_hook",
@@ -404,6 +447,7 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
             tool_id,
             args,
             execution_grant,
+            recorded_binding: _,
             child_execution_trace_hook: _,
             issuing_language_node_id: _,
         } = call;
@@ -1212,11 +1256,11 @@ impl RuntimeExecutionContext<'_> {
                         .await,
                     ))
                 } else {
-                    let execution_grant = authorization.into_execution_grant();
+                    let (execution_grant, retry_grant) = authorization.into_execution_grant();
                     let retry_policy = crate::tool_dispatch::resolve_retry_policy(
                         &dispatch,
                         &prepared.tool_id,
-                        execution_grant.as_deref(),
+                        retry_grant.as_deref(),
                     );
                     let intent_trace_hook = child_execution_trace_hook.clone();
                     let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
