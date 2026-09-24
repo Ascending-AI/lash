@@ -19,6 +19,7 @@ pub use async_trait::async_trait;
 pub use crate::runtime::concrete_turn_cancellation_authority;
 pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
+pub use lash_core_execution::engine;
 pub use lash_core_execution::impl_store_replay_await_event_resolver;
 pub(crate) use lash_core_execution::model_clamp;
 /// Durable tool-effect format versions, re-exported for the format manifest.
