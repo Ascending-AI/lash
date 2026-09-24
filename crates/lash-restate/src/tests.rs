@@ -96,6 +96,7 @@ pub(super) async fn memory_host_config() -> lash_core::facade_support::RuntimeHo
 }
 
 mod bindings;
+mod determinism;
 mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
 mod effect_group_session_gate;
