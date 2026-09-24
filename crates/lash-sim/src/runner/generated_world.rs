@@ -50,7 +50,7 @@ pub(super) struct GeneratedRuntimeWorld {
     finished_suspends: Vec<FinishedSuspend>,
     /// When set, the driver admits at most one live provider turn at a time
     /// (see `RuntimeCompletionState::serialize_provider_turns`). Enabled for the
-    /// cross-backend durable re-run; left off for the memory reference/search.
+    /// cross-backend durable re-run; left off for the concurrent search run.
     pub(super) serialize_provider_turns: bool,
 }
 

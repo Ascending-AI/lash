@@ -7,64 +7,6 @@ mod turn_ingress;
 /// Expansion machinery for the runtime-persistence registration macros.
 #[macro_export]
 macro_rules! __runtime_persistence_register {
-    (plain $fixture:block;
-        stores [$(( $store_law:ident, $store_label:literal )),* $(,)?]
-        store_refs [$(( $store_ref_law:ident, $store_ref_label:literal )),* $(,)?]
-        factories [$(( $factory_law:ident, $factory_label:literal )),* $(,)?]
-        timed_stores [$(( $timed_law:ident, $timed_label:literal )),* $(,)?]
-        timed_factories [$(( $timed_factory_law:ident, $timed_factory_label:literal )),* $(,)?]
-    ) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $store_law() {
-                let (_fixture_guard, make, _lease_timing) = $fixture;
-                $crate::runtime_persistence_macro_support::$store_law(make($store_label)).await;
-                $crate::law_receipt::record(module_path!(), stringify!($store_law), $store_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $store_ref_law() {
-                let (_fixture_guard, make, _lease_timing) = $fixture;
-                let store = make($store_ref_label);
-                $crate::runtime_persistence_macro_support::$store_ref_law(store.as_ref()).await;
-                $crate::law_receipt::record(module_path!(), stringify!($store_ref_law), $store_ref_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $factory_law() {
-                let (_fixture_guard, make, _lease_timing) = $fixture;
-                $crate::runtime_persistence_macro_support::$factory_law(make, $factory_label)
-                    .await;
-                $crate::law_receipt::record(module_path!(), stringify!($factory_law), $factory_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $timed_law() {
-                let (_fixture_guard, make, lease_timing) = $fixture;
-                $crate::runtime_persistence_macro_support::$timed_law(
-                    make($timed_label),
-                    &lease_timing,
-                )
-                .await;
-                $crate::law_receipt::record(module_path!(), stringify!($timed_law), $timed_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $timed_factory_law() {
-                let (_fixture_guard, make, lease_timing) = $fixture;
-                $crate::runtime_persistence_macro_support::$timed_factory_law(
-                    &|| make($timed_factory_label),
-                    &lease_timing,
-                )
-                .await;
-                $crate::law_receipt::record(module_path!(), stringify!($timed_factory_law), $timed_factory_label);
-            }
-        )*
-    };
     (reopenable $fixture:block;
         stores [$(( $store_law:ident, $store_label:literal )),* $(,)?]
         store_refs [$(( $store_ref_law:ident, $store_ref_label:literal )),* $(,)?]
@@ -129,23 +71,10 @@ macro_rules! __runtime_persistence_register {
     };
 }
 
-/// Register one independently reported test per plain runtime-persistence law.
+/// The runtime-persistence law catalogue, registered through
+/// `runtime_persistence_reopenable_tests!`.
 #[macro_export]
 macro_rules! runtime_persistence_tests {
-    ($fixture:block) => {
-        $crate::runtime_persistence_tests!(@catalogue plain $fixture);
-        $crate::runtime_persistence_tests!(@plain_factory $fixture; [(fresh_instances, "fresh-instance-probe")]);
-    };
-    (@plain_factory $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make, _lease_timing) = $fixture;
-                $crate::runtime_persistence_macro_support::$law(make, $label).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
     (@catalogue $mode:ident $fixture:block) => {
         $crate::__runtime_persistence_register! {
             $mode $fixture;
@@ -320,56 +249,6 @@ macro_rules! runtime_persistence_reopenable_tests {
 /// Expansion machinery for the process-registry registration macros.
 #[macro_export]
 macro_rules! __process_registry_register {
-    (plain $fixture:block;
-        probe [$(( $probe_law:ident, $probe_label:literal )),* $(,)?]
-        conformance [$(( $conformance_law:ident, $conformance_label:literal )),* $(,)?]
-        cancellation [$(( $cancellation_law:ident, $cancellation_label:literal )),* $(,)?]
-        registry [$(( $registry_law:ident, $registry_label:literal )),* $(,)?]
-    ) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $probe_law() {
-                let (_fixture_guard, make) = $fixture;
-                let _ = $probe_label;
-                $crate::registration_macro_support::$probe_law(&make).await;
-                $crate::law_receipt::record(module_path!(), stringify!($probe_law), $probe_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $cancellation_law() {
-                let (_fixture_guard, make) = $fixture;
-                $crate::registration_macro_support::process_registry_cancellation_contract(
-                    make($cancellation_label),
-                )
-                .await;
-                $crate::law_receipt::record(module_path!(), stringify!($cancellation_law), $cancellation_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $conformance_law() {
-                let (_fixture_guard, make) = $fixture;
-                $crate::registration_macro_support::$conformance_law(
-                    make($conformance_label),
-                )
-                .await;
-                $crate::law_receipt::record(module_path!(), stringify!($conformance_law), $conformance_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $registry_law() {
-                let (_fixture_guard, make) = $fixture;
-                let registry: std::sync::Arc<
-                    dyn $crate::registration_macro_support::ProcessRegistry,
-                > =
-                    make($registry_label);
-                $crate::registration_macro_support::$registry_law(registry).await;
-                $crate::law_receipt::record(module_path!(), stringify!($registry_law), $registry_label);
-            }
-        )*
-    };
     (reopenable $fixture:block;
         probe [$(( $probe_law:ident, $probe_label:literal )),* $(,)?]
         conformance [$(( $conformance_law:ident, $conformance_label:literal )),* $(,)?]
@@ -423,12 +302,10 @@ macro_rules! __process_registry_register {
     };
 }
 
-/// Register one independently reported test per process-registry law.
+/// The process-registry law catalogue, registered through
+/// `process_registry_reopenable_tests!`.
 #[macro_export]
 macro_rules! process_registry_tests {
-    ($fixture:block) => {
-        $crate::process_registry_tests!(@catalogue plain $fixture);
-    };
     (@catalogue $mode:ident $fixture:block) => {
         $crate::__process_registry_register! {
             $mode $fixture;
@@ -709,6 +586,7 @@ macro_rules! effect_group_host_tests {
             (settlement_n_is_stable_across_re_reads, "group-reread", wired),
             (every_child_is_delivered_once_in_rank_order, "group-order", wired),
             (siblings_settling_together_get_distinct_sequences, "group-concurrent-ranks", wired),
+            (a_close_racing_its_children_seats_one_terminal_per_child, "group-close-race", wired),
             (a_closed_group_serves_its_caller_no_further_settlements, "group-closed-caller", wired),
             (the_wake_rule_is_identity_and_the_host_filters_nothing, "group-wake-identity", wired),
             (awaiting_past_the_last_child_is_refused, "group-past-last", wired),
@@ -1182,26 +1060,6 @@ macro_rules! tool_access_persistence_tests {
     };
 }
 
-#[macro_export]
-macro_rules! trigger_store_tests {
-    ($fixture:block) => {
-        $crate::trigger_store_tests!(@catalogue $fixture; [
-            (trigger_store, "trigger-store"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
 /// Register the durable reopenable trigger-store laws.
 #[macro_export]
 macro_rules! trigger_store_reopenable_tests {
@@ -1459,47 +1317,6 @@ macro_rules! attachment_store_reopenable_tests {
                 let _ = $label;
                 $crate::registration_macro_support::$law(make, persistence).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! process_execution_env_store_tests {
-    ($fixture:block) => {
-        $crate::process_execution_env_store_tests!(@catalogue $fixture;
-            probe [
-                (process_execution_env_store_fresh_instances, "process-env-fresh-instances"),
-            ]
-            store [
-                (process_environment_namespace, "process-env-hostile-reference"),
-                (process_env_owner_lifecycle, "process-env-owner-lifecycle"),
-                (failed_registration_reclaims_process_env, "process-env-failed-registration"),
-                (process_env_transfer_and_fence, "process-env-transfer"),
-                (slow_process_env_writer_is_fenced, "process-env-slow-writer"),
-            ]
-        );
-    };
-    (@catalogue $fixture:block;
-        probe [$(( $probe_law:ident, $probe_label:literal )),* $(,)?]
-        store [$(( $store_law:ident, $store_label:literal )),* $(,)?]
-    ) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $probe_law() {
-                let (_fixture_guard, make) = $fixture;
-                let _ = $probe_label;
-                $crate::registration_macro_support::$probe_law(&make).await;
-                $crate::law_receipt::record(module_path!(), stringify!($probe_law), $probe_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $store_law() {
-                let (_fixture_guard, make) = $fixture;
-                let _ = $store_label;
-                $crate::registration_macro_support::$store_law(make()).await;
-                $crate::law_receipt::record(module_path!(), stringify!($store_law), $store_label);
             }
         )*
     };
@@ -2186,58 +2003,6 @@ macro_rules! append_receipt_envelope_tests {
                 let _ = $label;
                 $crate::registration_macro_support::$law(store).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! runtime_persistence_targeted_tests {
-    ($fixture:block) => {
-        $crate::runtime_persistence_targeted_tests!(@catalogue $fixture;
-            store_refs [
-                (session_execution_lease_fence_authority, "lease-fence-authority"),
-            ]
-            timed_stores [
-                (queued_work_claims_supersede_across_session_lease_generations, "queued-work-generation"),
-                (turn_input_claims_supersede_across_session_lease_generations, "turn-input-generation"),
-            ]
-            stores [
-                (active_turn_input_claim_reacquires_after_unrecorded_checkpoint, "active-turn-input-reacquire"),
-                (same_generation_claim_scans_reach_rows_beyond_the_scan_surplus, "same-generation-claim-scan"),
-            ]
-        );
-    };
-    (@catalogue $fixture:block;
-        store_refs [$(( $store_ref_law:ident, $store_ref_label:literal )),* $(,)?]
-        timed_stores [$(( $timed_law:ident, $timed_label:literal )),* $(,)?]
-        stores [$(( $store_law:ident, $store_label:literal )),* $(,)?]
-    ) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $store_ref_law() {
-                let (_guard, store, _timing) = $fixture;
-                let _ = $store_ref_label;
-                $crate::registration_macro_support::$store_ref_law(store.as_ref()).await;
-                $crate::law_receipt::record(module_path!(), stringify!($store_ref_law), $store_ref_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $timed_law() {
-                let (_guard, store, timing) = $fixture;
-                let _ = $timed_label;
-                $crate::registration_macro_support::$timed_law(store, timing).await;
-                $crate::law_receipt::record(module_path!(), stringify!($timed_law), $timed_label);
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $store_law() {
-                let (_guard, store, _timing) = $fixture;
-                let _ = $store_label;
-                $crate::registration_macro_support::$store_law(store).await;
-                $crate::law_receipt::record(module_path!(), stringify!($store_law), $store_label);
             }
         )*
     };

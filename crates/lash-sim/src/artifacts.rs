@@ -389,7 +389,7 @@ pub struct GeneratedPostgresReplayCase {
     pub status: &'static str,
     pub report_path: String,
     pub report_sha256: String,
-    pub reference_digest: String,
+    pub memory_digest: String,
     pub actual_digest: String,
     pub verdict: OracleVerdict,
 }

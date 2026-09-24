@@ -220,14 +220,26 @@ async fn commit_session_command_claim_with(
         .expect("commit config-command claim");
 }
 
-/// Virtual clock for runtime settlement tests. Its sleeps advance the same
-/// epoch the backend's stores stamp from and yield once, so settlement deadlines
-/// are exercised without waiting on wall time.
+tokio::task_local! {
+    /// Marks the facade writer's task: only its sleeps move the virtual clock.
+    static DRIVES_SETTLEMENT_CLOCK: ();
+}
+
+/// Virtual clock for runtime settlement tests.
+///
+/// Only the facade writer drives it: a sleep inside [`Self::driving`] advances
+/// the clock by its duration and yields once, so the settlement deadline is
+/// exercised without waiting on wall time. Every other sleeper (the session
+/// lease renewer the settlement loop spawns, for one) waits for the writer to
+/// move the clock past its deadline. A background sleeper therefore never
+/// pushes the writer's deadline forward, and the writer answers at exactly
+/// the bound.
 #[derive(Debug)]
 struct ConfigSettlementClock {
     epoch_ms: std::sync::atomic::AtomicU64,
     monotonic_origin: std::time::Instant,
     epoch_origin_ms: u64,
+    advanced: tokio::sync::Notify,
 }
 
 impl ConfigSettlementClock {
@@ -236,17 +248,37 @@ impl ConfigSettlementClock {
             epoch_ms: std::sync::atomic::AtomicU64::new(epoch_ms),
             monotonic_origin: std::time::Instant::now(),
             epoch_origin_ms: epoch_ms,
+            advanced: tokio::sync::Notify::new(),
         }
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance-law fixture: each result is established by the setup above"
-    )]
+    /// Run `writer` as the task whose sleeps drive the clock.
+    async fn driving<T>(writer: impl Future<Output = T>) -> T {
+        DRIVES_SETTLEMENT_CLOCK.scope((), writer).await
+    }
+
+    fn duration_ms(duration: std::time::Duration) -> u64 {
+        u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+    }
+
     fn advance(&self, duration: std::time::Duration) {
-        let duration_ms = u64::try_from(duration.as_millis()).expect("clock duration fits u64");
-        self.epoch_ms
-            .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
+        self.epoch_ms.fetch_add(
+            Self::duration_ms(duration),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.advanced.notify_waiters();
+    }
+
+    async fn wait_until_ms(&self, deadline_ms: u64) {
+        loop {
+            let advanced = self.advanced.notified();
+            tokio::pin!(advanced);
+            advanced.as_mut().enable();
+            if self.epoch_ms.load(std::sync::atomic::Ordering::SeqCst) >= deadline_ms {
+                return;
+            }
+            advanced.await;
+        }
     }
 }
 
@@ -269,8 +301,16 @@ impl crate::Clock for ConfigSettlementClock {
     }
 
     async fn sleep(&self, duration: std::time::Duration) {
-        self.advance(duration);
-        tokio::task::yield_now().await;
+        if DRIVES_SETTLEMENT_CLOCK.try_with(|()| ()).is_ok() {
+            self.advance(duration);
+            tokio::task::yield_now().await;
+            return;
+        }
+        let deadline_ms = self
+            .epoch_ms
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .saturating_add(Self::duration_ms(duration));
+        self.wait_until_ms(deadline_ms).await;
     }
 
     async fn sleep_until(&self, deadline: std::time::Instant) {
@@ -432,20 +472,18 @@ where
     .await;
     let original_model = runtime.export_persistence_state().policy.model.clone();
     let started = clock.now();
-    let error = runtime
-        .update_session_config(config_settlement_patch("must-remain-pending"))
-        .await
-        .expect_err("blocked config setter must return a typed pending error");
+    let error = ConfigSettlementClock::driving(
+        runtime.update_session_config(config_settlement_patch("must-remain-pending")),
+    )
+    .await
+    .expect_err("blocked config setter must return a typed pending error");
     assert!(
         matches!(error, crate::SessionError::SessionCommandPending(_)),
         "blocked config setter returned {error:?}"
     );
-    // Every sleep on the virtual clock advances it, the runtime's own
-    // lease-renewal sleeps between settlement polls included, so the setter
-    // is held to answering once the bound has elapsed, never before it.
     assert!(
-        clock.now().saturating_duration_since(started) >= std::time::Duration::from_secs(30),
-        "the setter answered pending before the injected 30s settlement bound elapsed"
+        clock.now().saturating_duration_since(started) == std::time::Duration::from_secs(30),
+        "the injected 30s settlement bound must not hang the facade writer"
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
@@ -478,13 +516,13 @@ where
     )
     .await;
     let original_model = runtime.export_persistence_state().policy.model.clone();
-    let setter = crate::task::spawn(async move {
+    let setter = crate::task::spawn(ConfigSettlementClock::driving(async move {
         let mut runtime = runtime;
         let result = runtime
             .update_session_config(config_settlement_patch("must-be-cancelled"))
             .await;
         (result, runtime)
-    });
+    }));
 
     let command_batch = loop {
         if let Some(batch) = store
@@ -573,13 +611,13 @@ where
         .acquired()
         .expect("superseding session lease");
 
-    let setter = crate::task::spawn(async move {
+    let setter = crate::task::spawn(ConfigSettlementClock::driving(async move {
         let mut runtime = runtime;
         let result = runtime
             .update_session_config(config_settlement_patch("first-settled"))
             .await;
         (result, runtime)
-    });
+    }));
 
     let command_batch = loop {
         if let Some(batch) = store

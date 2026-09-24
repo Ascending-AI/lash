@@ -197,9 +197,9 @@ mod runtime_proofs;
 mod scenario_artifacts;
 mod scenario_evidence;
 mod scenario_facts;
-#[cfg(test)]
-mod sqlite_rerun_tests;
 mod standard_contracts;
+#[cfg(test)]
+mod substrate_differential_tests;
 #[cfg(test)]
 mod tests;
 
@@ -209,7 +209,7 @@ pub use fixed_script::run_fixed_script_profile;
 pub(crate) use generated_driver::run_generated_workload_for_fixture;
 pub use generated_driver::{
     DurableRerun, replay_workload_on_postgres, replay_workload_on_sqlite,
-    replay_workload_serialized_reference, run_generated_postgres_replay_for_seeds,
+    replay_workload_serialized_on_memory, run_generated_postgres_replay_for_seeds,
 };
 pub use generated_profiles::{
     SimRunMode, SimRunModeError, SimSeedSource, WEEKLY_REGRESSION_CORPUS,

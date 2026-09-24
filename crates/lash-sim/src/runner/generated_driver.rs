@@ -16,9 +16,9 @@ pub(crate) async fn run_generated_workload_for_fixture(
 
 /// Drive a generated workload through the scheduler-driven, concurrency-faithful
 /// runtime world and return the delivered boundary log plus the abstract world
-/// summary. This is the single driver shared by the reference in-memory run and
-/// the cross-backend SQLite re-run (`replay_workload_on_sqlite`): the only thing
-/// that varies is the `world`'s backend. Driving the SAME workload through the
+/// summary. This is the single driver shared by every side of the substrate
+/// differential (the SQLite memory run and the file and PostgreSQL re-runs): the
+/// only thing that varies is the `world`'s backend. Driving the SAME workload through the
 /// SAME dynamic scheduler — rather than re-deriving a recorded trace in fixed
 /// order with provider events gated to recorded counts — is what makes the
 /// cross-backend comparison apples-to-apples.
@@ -143,18 +143,19 @@ pub(super) async fn drive_generated_workload(
     Ok((events, final_summary))
 }
 
-/// The serialized SQLite-memory reference summary for the cross-backend check.
+/// The serialized SQLite memory side of the substrate differential.
 ///
 /// This drives the workload through the SAME `serialize_provider_turns` discipline
-/// as the durable re-run, differing ONLY in the backend store (ephemeral
-/// in-memory here vs the real durable store in `replay_workload_on_sqlite`). That
+/// as the durable re-runs, differing ONLY in the substrate (a SQLite memory
+/// backend here, a file or PostgreSQL backend in `replay_workload_on_sqlite` and
+/// `replay_workload_on_postgres`). Neither side is an oracle for the other. That
 /// is what makes the comparison a well-posed durable-state equivalence: both runs
 /// share one scheduling discipline, so any difference is a real store divergence
 /// rather than an artifact of serialized-vs-concurrent execution. (The
 /// concurrency-preserving SEARCH lane summary — `run_generated_workload`'s
 /// `serialize_provider_turns == false` run — is a different discipline and is used
 /// for oracle fuzzing, not for this backend equivalence comparison.)
-pub async fn replay_workload_serialized_reference(
+pub async fn replay_workload_serialized_on_memory(
     workload: &GeneratedWorkload,
 ) -> Result<AbstractWorldSummary, FixedScriptRunnerError> {
     let clock = SimClock::new();
@@ -172,8 +173,8 @@ pub async fn replay_workload_serialized_reference(
 /// dynamic runtime driver under the SAME serialized-provider-turn discipline, but
 /// backed by the real `lash-sqlite-store` session store factory and the SQLite
 /// durable-effect replay controller, and return the resulting abstract world
-/// summary. The caller compares it against the serialized SQLite-memory reference
-/// (`replay_workload_serialized_reference`); equality proves the SQLite store
+/// summary. The caller compares it with the serialized SQLite memory run
+/// (`replay_workload_serialized_on_memory`); equality proves the SQLite file store
 /// reproduces identical observable runtime behavior. Both runs serialize provider
 /// turns and the serialized driver holds boundary delivery across a live turn's
 /// completion, so the delivery order is fully determined by the workload and is
@@ -229,8 +230,8 @@ pub async fn replay_workload_on_sqlite(
         Arc::new(backend),
         effect_replay_store,
         // Serialize live provider turns for the durable re-run so async-store
-        // interleaving cannot change committed outcomes vs the in-process
-        // reference; the comparison is then a well-posed durable-state equivalence.
+        // interleaving cannot change committed outcomes vs the memory run; the
+        // comparison is then a well-posed durable-state equivalence.
         true,
         clock.clone(),
     );
@@ -308,51 +309,51 @@ pub async fn run_generated_postgres_replay_for_seeds(
     let mut first_failure = None;
     for seed in seed_values.iter().copied() {
         let workload = generate_workload(seed, profile, boundary_limit)?;
-        let reference = replay_workload_serialized_reference(&workload).await?;
+        let memory = replay_workload_serialized_on_memory(&workload).await?;
         let case_dir = artifact_root.join(format!("seed-{seed:016x}"));
         std::fs::create_dir_all(&case_dir)?;
         let rerun = replay_workload_on_postgres(&workload, database_url, &case_dir).await?;
         let actual = rerun.summary;
         // The reported verdict is the first failure: durable content read back
-        // from Postgres, then equivalence with the SQLite-memory reference.
+        // from Postgres, then agreement with the SQLite memory run.
         let verdict = if rerun.content.is_passed() {
-            replay_determinism(&reference, &actual)
+            replay_determinism(&memory, &actual)
         } else {
             rerun.content
         };
         let report_path = case_dir.join("postgres-generated-rerun.json");
-        let matches_reference = verdict.is_passed();
-        let case_report = if matches_reference {
+        let substrates_agree = verdict.is_passed();
+        let case_report = if substrates_agree {
             json!({
-                "schema": "lash.sim.postgres-generated-rerun.v1",
+                "schema": "lash.sim.postgres-generated-rerun.v2",
                 "seed": seed,
                 "profile": profile,
                 "backend": "lash_postgres_store",
                 "driver": "unified_generated_runtime_world",
-                "matches_reference": true,
-                "reference_digest": reference.digest.clone(),
+                "substrates_agree": true,
+                "memory_digest": memory.digest.clone(),
                 "actual_digest": actual.digest.clone(),
                 "verdict": verdict.clone(),
                 "final_summary": actual,
             })
         } else {
             json!({
-                "schema": "lash.sim.postgres-generated-rerun.v1",
+                "schema": "lash.sim.postgres-generated-rerun.v2",
                 "seed": seed,
                 "profile": profile,
                 "backend": "lash_postgres_store",
                 "driver": "unified_generated_runtime_world",
-                "matches_reference": false,
-                "reference_digest": reference.digest.clone(),
+                "substrates_agree": false,
+                "memory_digest": memory.digest.clone(),
                 "actual_digest": actual.digest.clone(),
                 "verdict": verdict.clone(),
-                "reference_summary": reference,
+                "memory_summary": memory,
                 "actual_summary": actual,
             })
         };
         std::fs::write(&report_path, serde_json::to_vec_pretty(&case_report)?)?;
         let report_sha256 = file_sha256(&report_path)?;
-        if matches_reference {
+        if substrates_agree {
             passed += 1;
         } else {
             failed += 1;
@@ -360,14 +361,10 @@ pub async fn run_generated_postgres_replay_for_seeds(
         cases.push(GeneratedPostgresReplayCase {
             seed,
             trace_alias: format!("seed-{seed:016x}"),
-            status: if matches_reference {
-                "passed"
-            } else {
-                "failed"
-            },
+            status: if substrates_agree { "passed" } else { "failed" },
             report_path: relative_path(artifact_root, &report_path),
             report_sha256,
-            reference_digest: case_report["reference_digest"]
+            memory_digest: case_report["memory_digest"]
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
@@ -377,9 +374,9 @@ pub async fn run_generated_postgres_replay_for_seeds(
                 .to_string(),
             verdict: verdict.clone(),
         });
-        if !matches_reference && first_failure.is_none() {
+        if !substrates_agree && first_failure.is_none() {
             first_failure = Some(format!(
-                "generated Postgres re-run for seed {seed} ({profile}) diverged from the serialized SQLite-memory reference: {}; wrote {}",
+                "generated Postgres re-run for seed {seed} ({profile}) disagreed with the serialized SQLite memory run: {}; wrote {}",
                 verdict.message,
                 report_path.display()
             ));

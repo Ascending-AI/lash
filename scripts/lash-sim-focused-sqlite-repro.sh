@@ -128,7 +128,7 @@ for case_name, dir_name, seeds in cases:
                 report = json.load(handle)
         except json.JSONDecodeError:
             continue
-        if report.get("matches_reference") is False:
+        if report.get("substrates_agree") is False:
             divergent_reports.append(rel(report_path))
 
     runs.append(

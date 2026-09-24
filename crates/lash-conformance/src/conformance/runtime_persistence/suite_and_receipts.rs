@@ -1,16 +1,6 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-/// Prove that a plain runtime-persistence fixture returns distinct stores.
-pub async fn fresh_instances<F>(make: F, label: &str)
-where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-{
-    let first = make(label);
-    let second = make(label);
-    assert_fresh_instances(&first, &second, "runtime_persistence");
-}
-
 /// Prove that independently opened handles mint distinct pending-input identities.
 pub async fn reopen_mint_identity(probe: ReopenableRuntimePersistence) {
     assert_fresh_instances(&probe.open, &probe.reopen, "runtime_persistence_reopenable");

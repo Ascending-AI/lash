@@ -349,21 +349,21 @@ async fn run_generated_evidence_profile(
         // SAME dynamic, concurrency-faithful runtime driver, backed by the real
         // `lash-sqlite-store` (session store + SQLite durable-effect controller),
         // and require the resulting observable Lash STATE (the abstract world
-        // summary) to match the SQLite-memory reference run exactly. Because both
+        // summary) to match the serialized SQLite memory run exactly. Because both
         // runs share one driver and one scheduling discipline and differ ONLY in
-        // the store, the comparison is apples-to-apples by construction: there is no
+        // the substrate, the comparison is apples-to-apples by construction: there is no
         // separate fixed-order, provider-event-gated re-drive that can deadlock or
         // spuriously diverge on active-turn / next-turn ingress timing. The
         // workload is regenerated deterministically from the seed (the original
-        // was consumed by the reference run).
+        // was consumed by the search run).
         let sqlite_workload = generate_workload(seed, profile, boundary_limit)?;
-        // The cross-backend equivalence reference is a SERIALIZED SQLite-memory run of
-        // the same workload: it shares the durable re-run's serialize-provider-turn
-        // discipline and differs ONLY in the backend store, so equality is a
+        // The other side of the substrate differential is a SERIALIZED SQLite
+        // memory run of the same workload: it shares the durable re-run's
+        // serialize-provider-turn discipline and differs ONLY in the substrate, so equality is a
         // well-posed durable-state check. (The concurrency-preserving search-lane
         // summary in `trace.final_summary` runs a different scheduling discipline
         // and is not directly comparable to the serialized durable re-run.)
-        let serialized_reference = replay_workload_serialized_reference(&sqlite_workload).await?;
+        let serialized_memory = replay_workload_serialized_on_memory(&sqlite_workload).await?;
         let sqlite_rerun =
             replay_workload_on_sqlite(&sqlite_workload, &sqlite_database_path).await?;
         if !sqlite_rerun.content.is_passed() {
@@ -374,33 +374,33 @@ async fn run_generated_evidence_profile(
         }
         oracle_verdicts.push(sqlite_rerun.content);
         let sqlite_summary = sqlite_rerun.summary;
-        let backend_verdict = replay_determinism(&serialized_reference, &sqlite_summary);
+        let backend_verdict = replay_determinism(&serialized_memory, &sqlite_summary);
         oracle_verdicts.push(backend_verdict.clone());
         let sqlite_report = if backend_verdict.is_passed() {
             serde_json::json!({
-                "schema": "lash.sim.sqlite-cross-backend-rerun.v1",
+                "schema": "lash.sim.sqlite-substrate-rerun.v2",
                 "seed": seed,
                 "profile": profile,
                 "backend": "lash_sqlite_store",
                 "driver": "unified_generated_runtime_world",
-                "matches_reference": true,
-                "reference_digest": serialized_reference.digest.clone(),
+                "substrates_agree": true,
+                "memory_digest": serialized_memory.digest.clone(),
                 "actual_digest": sqlite_summary.digest.clone(),
                 "verdict": backend_verdict.clone(),
                 "final_summary": sqlite_summary,
             })
         } else {
             serde_json::json!({
-                "schema": "lash.sim.sqlite-cross-backend-rerun.v1",
+                "schema": "lash.sim.sqlite-substrate-rerun.v2",
                 "seed": seed,
                 "profile": profile,
                 "backend": "lash_sqlite_store",
                 "driver": "unified_generated_runtime_world",
-                "matches_reference": false,
-                "reference_digest": serialized_reference.digest.clone(),
+                "substrates_agree": false,
+                "memory_digest": serialized_memory.digest.clone(),
                 "actual_digest": sqlite_summary.digest.clone(),
                 "verdict": backend_verdict.clone(),
-                "reference_summary": serialized_reference,
+                "memory_summary": serialized_memory,
                 "actual_summary": sqlite_summary,
             })
         };
@@ -410,7 +410,7 @@ async fn run_generated_evidence_profile(
         )?;
         if !backend_verdict.is_passed() {
             return Err(FixedScriptRunnerError::Assertion(format!(
-                "cross-backend SQLite re-run for seed {seed} ({profile}) diverged from the serialized SQLite-memory reference: {}; wrote {}",
+                "cross-backend SQLite re-run for seed {seed} ({profile}) disagreed with the serialized SQLite memory run: {}; wrote {}",
                 backend_verdict.message,
                 sqlite_replay_report_path.display()
             )));

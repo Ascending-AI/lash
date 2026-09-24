@@ -40,7 +40,9 @@ use crate::{
 };
 use pretty_assertions::assert_eq;
 
+mod settlement_races;
 mod wait;
+pub use settlement_races::*;
 pub use wait::*;
 
 /// A caller's whole interaction with one group: open, await, close.
@@ -1622,65 +1624,6 @@ pub async fn every_child_is_delivered_once_in_rank_order<F: Fn() -> Host>(make: 
     close(&scoped, handle, RUN).await.expect("the group closes");
 }
 
-/// Siblings that settle in the same instant each take their own sequence: no
-/// two children share a rank, and delivering by rank walks the sequences in
-/// order.
-///
-/// Written at a width where the settlements really do land together, behind a
-/// barrier every child reaches before any is released. A read-then-max rank
-/// allocator passes [`every_child_is_delivered_once_in_rank_order`], whose
-/// children settle one at a time, and fails here (ADR 0065).
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn siblings_settling_together_get_distinct_sequences<F: Fn() -> Host>(
-    make: &F,
-    prefix: &str,
-) {
-    let host = make();
-    let scoped = host
-        .scoped(admit(scope(prefix, "together")))
-        .expect("a scope binds");
-    let key = group_key(prefix, "together");
-    let width = 16;
-    let start = Arc::new(tokio::sync::Barrier::new(width));
-    let executors = (0..width)
-        .map(|position| {
-            let start = Arc::clone(&start);
-            RuntimeEffectLocalExecutor::testing(move |_| async move {
-                start.wait().await;
-                Ok(outcome_of(position))
-            })
-        })
-        .collect::<Vec<_>>();
-    let mut handle = open(&scoped, &key, width, GroupWakePolicy::All, RUN, executors).await;
-
-    let mut sequences = Vec::new();
-    let mut positions = Vec::new();
-    while !handle.is_exhausted() {
-        let settlement = next(&scoped, &mut handle)
-            .await
-            .expect("every child settles");
-        sequences.push(settlement.sequence);
-        positions.push(settlement.position);
-    }
-    assert_eq!(sequences.len(), width);
-    assert!(
-        sequences.windows(2).all(|pair| pair[0] < pair[1]),
-        "siblings settling together must still yield strictly increasing \
-         sequences, not {sequences:?}"
-    );
-    positions.sort_unstable();
-    positions.dedup();
-    assert_eq!(
-        positions,
-        (0..width).collect::<Vec<_>>(),
-        "each child settles exactly once, so no position is delivered twice"
-    );
-    close(&scoped, handle, RUN).await.expect("the group closes");
-}
-
 /// A closed group serves its caller nothing further: a replayed frame that
 /// awaits a rank of a group its caller already closed is refused by shape,
 /// and its cursor stays where it was.
@@ -1940,13 +1883,9 @@ pub async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() ->
     until(|| loser.finished() == 1).await;
 }
 
-/// `Cancel`: the losers stop.
-///
-/// The journaled half — each cancelled child holding its cancellation as its
-/// *terminal* — is a durable fact, asserted by
-/// [`effect_group_cancelled_child_terminal_is_durable`] from each store's own
-/// tests. What every tier owes here is that the loser does not go on to
-/// complete.
+/// `Cancel`: the losers stop, and every child holds exactly one terminal: the
+/// winner its own outcome, each loser its cancellation. A release arriving
+/// after the cancellation seats nothing.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1986,6 +1925,51 @@ pub async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
         0,
         "a cancelled child must not go on to complete"
     );
+
+    // The recorded ranks, read back through a host with no memory of the
+    // close: the winner's own outcome at rank 1 and each loser's cancellation
+    // after it. Every child holds exactly one terminal, so the late release
+    // seated nothing: it neither replaced a cancellation nor took a rank of
+    // its own.
+    let recorded = read_back_ranks(
+        make,
+        prefix,
+        "cancel",
+        &key,
+        3,
+        GroupWakePolicy::First,
+        LoserPolicy::Cancel,
+    )
+    .await;
+    assert_eq!(
+        recorded
+            .iter()
+            .map(|settlement| settlement.sequence)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3],
+        "a cancelled group of three children holds exactly three terminals"
+    );
+    assert_eq!(recorded[0].position, 0);
+    assert!(
+        recorded[0].outcome.is_ok(),
+        "the winner's terminal is its own outcome"
+    );
+    let mut losers = recorded[1..]
+        .iter()
+        .map(|settlement| {
+            let error = settlement
+                .outcome
+                .as_ref()
+                .expect_err("each loser's terminal is its cancellation");
+            assert_eq!(
+                error.code,
+                crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
+            );
+            settlement.position
+        })
+        .collect::<Vec<_>>();
+    losers.sort_unstable();
+    assert_eq!(losers, vec![1, 2], "each loser holds exactly one terminal");
 }
 
 /// Close may narrow the declared disposition and may never widen it: a
@@ -2663,6 +2647,49 @@ async fn close(
         .controller()
         .close_effect_group(handle, disposition)
         .await
+}
+
+/// Every rank a closed group recorded, read back in rank order through a
+/// second host instance over the same substrate. The reader stages children
+/// that never settle, so anything it reads came out of the substrate.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn read_back_ranks<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+    label: &str,
+    key: &str,
+    children: usize,
+    wake: GroupWakePolicy,
+    disposition: LoserPolicy,
+) -> Vec<GroupSettlement> {
+    let reader = make();
+    let resumed = reader
+        .scoped(admit(scope(prefix, label)))
+        .expect("a scope binds on the reading host");
+    let mut reopened = open(
+        &resumed,
+        key,
+        children,
+        wake,
+        disposition,
+        (0..children).map(|_| never()).collect(),
+    )
+    .await;
+    let mut recorded = Vec::new();
+    while !reopened.is_exhausted() {
+        recorded.push(
+            next(&resumed, &mut reopened)
+                .await
+                .expect("every recorded rank reads back"),
+        );
+    }
+    close(&resumed, reopened, disposition)
+        .await
+        .expect("the reading host closes the group");
+    recorded
 }
 
 /// Waits for a condition a host reaches on its own tasks, so a law never
