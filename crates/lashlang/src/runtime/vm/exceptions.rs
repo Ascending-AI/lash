@@ -305,7 +305,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             error,
             RuntimeError::CannotAssignField { actual, .. }
                 | RuntimeError::CannotAssignIndex { actual }
-                if matches!(actual.as_str(), "RegExp" | "Map" | "Set" | "Date")
+                if matches!(actual.as_str(), "RegExp" | "Map" | "Set" | "Date" | "function")
                     || ErrorKind::from_name(actual).is_some()
         ) {
             return self.heap.allocate_error(

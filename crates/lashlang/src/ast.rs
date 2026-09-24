@@ -684,6 +684,12 @@ pub enum Expr {
 pub struct FunctionExpr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<AstString>,
+    /// The ECMA-262 `name` own property the closure value carries: the
+    /// function's own binding name, or the name a `NamedEvaluation` /
+    /// `SetFunctionName` context assigned it. `None` is the anonymous `""`
+    /// ECMA reports for a function no naming context reached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub js_name: Option<AstString>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<AstString>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1180,6 +1186,7 @@ where
         },
         Expr::Function(function) => Expr::Function(Box::new(FunctionExpr {
             name: function.name,
+            js_name: function.js_name,
             params: function.params,
             captures: function.captures,
             body: Box::new(folder.fold_expr(*function.body)),

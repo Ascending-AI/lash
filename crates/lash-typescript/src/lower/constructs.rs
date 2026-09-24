@@ -328,6 +328,8 @@ impl Lowerer {
         };
         LashExpr::Function(Box::new(FunctionExpr {
             name: None,
+            // `String.name`/`Number.name`/`Boolean.name` answer as node's do.
+            js_name: Some(name.into()),
             params: vec![value.into()],
             captures: Vec::new(),
             body: Box::new(body),
@@ -555,7 +557,11 @@ impl Lowerer {
             return Ok(LashExpr::Record(
                 fields
                     .into_iter()
-                    .map(|(key, value)| Ok((key.into(), self.lower_expr(value)?)))
+                    // NamedEvaluation: `{ p: () => {} }` and `{ m() {} }` name
+                    // the anonymous function after the key.
+                    .map(|(key, value)| {
+                        Ok((key.into(), self.lower_named_expr(value, Some(key))?))
+                    })
                     .collect::<Result<_, Diagnostic>>()?,
             ));
         }
@@ -564,13 +570,16 @@ impl Lowerer {
         for property in properties {
             match property {
                 ObjectProperty::KeyValue(key, value) => {
+                    // A statically known key names the anonymous function
+                    // value; a computed key's name is run-time-only here.
+                    let inferred = static_key(key);
                     let key = self.lower_property_key(key)?;
                     expressions.push(LashExpr::Assign {
                         target: AssignTarget {
                             root: result.as_str().into(),
                             steps: vec![AssignPathStep::Index(key)],
                         },
-                        expr: Box::new(self.lower_expr(value)?),
+                        expr: Box::new(self.lower_named_expr(value, inferred)?),
                     });
                 }
                 ObjectProperty::Spread(value) => {
@@ -669,7 +678,10 @@ impl Lowerer {
                         op: JavaScriptBinaryOp::StrictEqual,
                         right: Box::new(LashExpr::Undefined),
                     }),
-                    then_block: Box::new(self.lower_expr(default)?),
+                    // A binding default is SetFunctionName (`[f = () => {}]`).
+                    then_block: Box::new(
+                        self.lower_named_expr(default, single_pattern_name(target))?,
+                    ),
                     else_block: Box::new(Self::variable(&input)),
                 };
                 let mut output = vec![Self::temp_assignment(&input, value)];
@@ -829,7 +841,8 @@ impl Lowerer {
         {
             let target = self.lower_assign_target(target)?;
             let result = LashExpr::Variable(target.root.clone());
-            let value = self.lower_expr(value)?;
+            // NamedEvaluation: `f = function() {}` takes the assigned name.
+            let value = self.lower_named_expr(value, Some(name.as_str()))?;
             self.clear_process_handle_role(name)?;
             // The assignment statement, closed by the value an assignment
             // expression evaluates to.
@@ -940,7 +953,9 @@ impl Lowerer {
                         js_unary(JavaScriptUnaryOp::Not, Self::nullish(old.clone()))
                     }
                 };
-                let rhs = self.lower_expr(value)?;
+                // `f ??= () => {}` (and `||=`/`&&=`) is also an ECMA
+                // NamedEvaluation position for an identifier target.
+                let rhs = self.lower_named_expr(value, assigned_name)?;
                 let write = LashExpr::Block(vec![
                     Self::temp_assignment(&result, rhs),
                     LashExpr::Assign {

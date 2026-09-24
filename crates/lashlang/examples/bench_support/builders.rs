@@ -405,6 +405,7 @@ pub fn function_call(name: &str, args: Vec<Expr>) -> Expr {
 pub fn closure(name: Option<&str>, params: &[&str], captures: &[&str], body: Expr) -> Expr {
     Expr::Function(Box::new(FunctionExpr {
         name: name.map(Into::into),
+        js_name: None,
         params: params.iter().map(|name| AstString::from(*name)).collect(),
         captures: captures.iter().map(|name| AstString::from(*name)).collect(),
         body: Box::new(body),

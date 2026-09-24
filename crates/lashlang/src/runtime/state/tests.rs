@@ -15,6 +15,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             target: AssignTarget::variable("f".into()),
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
+                js_name: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),
@@ -28,6 +29,11 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             .allocate(HeapObject::Closure {
                 function: 0,
                 captures,
+                // The `name`/`length` own-property slots ride the wire, so a
+                // restored closure answers `f.name`/`f.length` as the live one
+                // did — including after a `delete` cleared a slot to `None`.
+                name: Some(Value::String("f".into())),
+                length: Some(Value::Number(2.0)),
             })
             .expect("allocate malformed snapshot closure");
         let mut runtime_globals = Record::new();
@@ -61,6 +67,8 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
         .allocate(HeapObject::Closure {
             function: 99,
             captures: Vec::new(),
+            name: None,
+            length: None,
         })
         .expect("allocate unknown snapshot closure");
     let mut runtime_globals = Record::new();
@@ -1534,6 +1542,7 @@ fn a_restored_real_closure_does_not_reject_a_different_program() {
             target: AssignTarget::variable("f".into()),
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
+                js_name: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),

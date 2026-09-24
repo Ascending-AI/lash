@@ -269,7 +269,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             });
         };
         let (function_index, captures) = match self.heap.get(id)? {
-            HeapObject::Closure { function, captures } => (*function as usize, captures.clone()),
+            HeapObject::Closure {
+                function, captures, ..
+            } => (*function as usize, captures.clone()),
             _ => {
                 return Err(RuntimeError::NonFunctionCall {
                     actual: "value".to_string(),

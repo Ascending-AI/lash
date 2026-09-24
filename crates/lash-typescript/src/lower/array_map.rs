@@ -123,6 +123,7 @@ impl Lowerer {
                         items: Box::new(pairs),
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
                             name: None,
+                            js_name: None,
                             params: vec![pair.as_str().into()],
                             captures: vec![wrapper.as_str().into()],
                             body: Box::new(LashExpr::Return(Box::new(LashExpr::Call {

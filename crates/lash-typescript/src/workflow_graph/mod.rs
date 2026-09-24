@@ -465,6 +465,7 @@ fn process_wrapper(params: &[lashlang::ProcessParam], body: Expr) -> Expr {
     crate::lower::process_run_wrapper(
         Expr::Function(Box::new(lashlang::FunctionExpr {
             name: None,
+            js_name: None,
             params: params.iter().map(|param| param.name.clone()).collect(),
             captures: Vec::new(),
             body: Box::new(body),

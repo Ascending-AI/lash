@@ -185,6 +185,7 @@ fn typescript_lowering_intrinsics_link_through_the_production_registry_path() {
     let function = || {
         Expr::Function(Box::new(crate::FunctionExpr {
             name: None,
+            js_name: None,
             params: vec!["value".into()],
             captures: Vec::new(),
             body: Box::new(Expr::Return(Box::new(Expr::Variable("value".into())))),

@@ -783,6 +783,7 @@ impl Lowerer {
                         }),
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
                             name: None,
+                            js_name: None,
                             params: vec![pair.as_str().into()],
                             captures: Vec::new(),
                             body: Box::new(LashExpr::List(vec![at(1.0), at(0.0)])),
@@ -798,6 +799,7 @@ impl Lowerer {
                         }),
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
                             name: None,
+                            js_name: None,
                             params: vec![key.as_str().into()],
                             captures: Vec::new(),
                             body: Box::new(LashExpr::JavaScriptUnary {

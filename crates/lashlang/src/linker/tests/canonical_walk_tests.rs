@@ -112,6 +112,7 @@ fn canonical_walk_aligns_javascript_and_map_bindings_with_facets() {
             items: Box::new(Expr::List(vec![Expr::Number(1.0)])),
             function: Box::new(Expr::Function(Box::new(crate::FunctionExpr {
                 name: None,
+                js_name: None,
                 params: vec!["item".into()],
                 captures: Vec::new(),
                 body: Box::new(Expr::Variable("item".into())),

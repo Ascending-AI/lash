@@ -241,6 +241,7 @@ async fn finally_runs_on_normal_and_exceptional_paths_and_a_new_throw_replaces_t
 async fn throw_unwinds_function_frames_to_the_callers_handler() {
     let function = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
+        js_name: None,
         params: Vec::new(),
         captures: Vec::new(),
         body: Box::new(Expr::Throw(Box::new(Expr::String("from callee".into())))),
@@ -391,6 +392,7 @@ async fn execution_terminals_bypass_a_surrounding_catch() {
 
     let recursive = Expr::Function(Box::new(crate::FunctionExpr {
         name: Some("f".into()),
+        js_name: None,
         params: Vec::new(),
         captures: Vec::new(),
         body: Box::new(Expr::Call {
@@ -437,6 +439,7 @@ pub(super) fn exception_resource_call(operation: &str, value: Expr) -> Expr {
 pub(super) fn exception_function(body: Expr, captures: &[&str]) -> Expr {
     Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
+        js_name: None,
         params: Vec::new(),
         captures: captures.iter().map(|name| (*name).into()).collect(),
         body: Box::new(body),

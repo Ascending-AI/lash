@@ -32,6 +32,7 @@ fn private_builtin(name: &str, args: Vec<Expr>) -> Expr {
 fn callback_program() -> CompiledProgram {
     let callback = Expr::Function(Box::new(FunctionExpr {
         name: None,
+        js_name: None,
         params: vec!["value".into(), "key".into(), "receiver".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
@@ -85,6 +86,7 @@ fn callback_program() -> CompiledProgram {
 fn dynamic_call_program() -> CompiledProgram {
     let callback = Expr::Function(Box::new(FunctionExpr {
         name: None,
+        js_name: None,
         params: vec!["value".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
@@ -128,6 +130,7 @@ fn one_capture_program() -> CompiledProgram {
             target: AssignTarget::variable("f".into()),
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
+                js_name: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),
@@ -170,6 +173,8 @@ fn resume_validates_closures_in_active_frames_globals_and_nested_containers() {
             .allocate(HeapObject::Closure {
                 function: 0,
                 captures,
+                name: None,
+                length: None,
             })
             .expect("allocate malformed closure");
         expect_capture_count_error(&program, root_continuation(&program, heap, Some(closure)));
@@ -180,6 +185,8 @@ fn resume_validates_closures_in_active_frames_globals_and_nested_containers() {
         .allocate(HeapObject::Closure {
             function: 0,
             captures: Vec::new(),
+            name: None,
+            length: None,
         })
         .expect("allocate global closure");
     let mut global = root_continuation(&program, global_heap, None);
@@ -191,6 +198,8 @@ fn resume_validates_closures_in_active_frames_globals_and_nested_containers() {
         .allocate(HeapObject::Closure {
             function: 0,
             captures: Vec::new(),
+            name: None,
+            length: None,
         })
         .expect("allocate nested closure");
     let nested_record = nested_heap
@@ -213,6 +222,8 @@ fn resume_validates_closures_in_active_frames_globals_and_nested_containers() {
         .allocate(HeapObject::Closure {
             function: 0,
             captures: Vec::new(),
+            name: None,
+            length: None,
         })
         .expect("allocate frame closure");
     let function = &program.chunk.functions[0];
@@ -249,6 +260,8 @@ fn resume_reports_unknown_closure_function_indices_by_name() {
         .allocate(HeapObject::Closure {
             function: 99,
             captures: Vec::new(),
+            name: None,
+            length: None,
         })
         .expect("allocate unknown closure");
     assert!(matches!(

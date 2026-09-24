@@ -106,7 +106,18 @@ pub(crate) fn rebind_object(object: &mut HeapObject, rebind: &mut Rebind<'_>) ->
     match object {
         HeapObject::Tuple(values) | HeapObject::List(values) => rebind_values(values, rebind),
         HeapObject::Record(record) => rebind_record(record, rebind),
-        HeapObject::Closure { captures, .. } => rebind_values(captures, rebind),
+        HeapObject::Closure {
+            captures,
+            name,
+            length,
+            ..
+        } => {
+            let mut changed = rebind_values(captures, rebind);
+            for value in [name, length].into_iter().flatten() {
+                changed |= rebind_value(value, rebind);
+            }
+            changed
+        }
         HeapObject::Map(object) => {
             let mut changed = false;
             for (key, value) in &mut object.entries {

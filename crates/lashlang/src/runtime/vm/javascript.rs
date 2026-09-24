@@ -317,6 +317,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     "errors" => error.errors.is_some(),
                     _ => false,
                 },
+                HeapObject::Closure { name, length, .. } => match key.as_str() {
+                    "name" => name.is_some(),
+                    "length" => length.is_some(),
+                    _ => false,
+                },
                 _ => false,
             };
             self.stack.push(Value::Bool(has));

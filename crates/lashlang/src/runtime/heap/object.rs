@@ -1,5 +1,32 @@
 use super::*;
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum HeapObject {
+    Tuple(Vec<Value>),
+    List(Vec<Value>),
+    Record(Box<Record>),
+    Closure {
+        function: u32,
+        captures: Vec<Value>,
+        /// The ECMA-262 `name` own property's value. `None` after the guest
+        /// deletes it: the property is configurable but not writable, so a
+        /// write while it is present is the strict-mode TypeError, and only
+        /// `delete` clears the slot.
+        name: Option<Value>,
+        /// The ECMA-262 `length` own property's value — ExpectedArgumentCount
+        /// at creation; same writability and deletability as `name`.
+        length: Option<Value>,
+    },
+    RegExp(RegExpObject),
+    RegExpMatch(RegExpMatchObject),
+    Map(MapObject),
+    Set(SetObject),
+    Date(DateObject),
+    Error(ErrorObject),
+    Url(UrlObject),
+    UrlSearchParams(UrlSearchParamsObject),
+}
+
 pub(super) const OBJECT_HEADER_BYTES: u64 = 16;
 /// What one `Value` slot costs the budget.
 ///
@@ -129,9 +156,16 @@ impl HeapObject {
                     .saturating_add(name.len() as u64)
                     .saturating_add(value_logical_bytes(value))
             }),
-            Self::Closure { captures, .. } => 4_u64.saturating_add(
+            Self::Closure {
+                captures,
+                name,
+                length,
+                ..
+            } => 4_u64.saturating_add(
                 captures
                     .iter()
+                    .chain(name.iter())
+                    .chain(length.iter())
                     .map(value_logical_bytes)
                     .fold(0_u64, u64::saturating_add),
             ),
@@ -196,7 +230,12 @@ impl HeapObject {
         match self {
             Self::Tuple(values) | Self::List(values) => Box::new(values.iter()),
             Self::Record(record) => Box::new(record.values()),
-            Self::Closure { captures, .. } => Box::new(captures.iter()),
+            Self::Closure {
+                captures,
+                name,
+                length,
+                ..
+            } => Box::new(captures.iter().chain(name.iter()).chain(length.iter())),
             Self::RegExp(_) | Self::Date(_) | Self::UrlSearchParams(_) => {
                 Box::new(std::iter::empty())
             }
