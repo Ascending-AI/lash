@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::captures::BindingId;
 use super::{
     CallArg, Expr, FunctionBody, MemberProperty, Pattern, Stmt, is_reserved_name,
     reserved_identifier,
@@ -66,6 +67,8 @@ pub(super) enum BindingRole {
 
 #[derive(Clone, Debug)]
 pub(super) struct Binding {
+    /// The binding's key in the capture ledger.
+    pub(super) id: BindingId,
     pub(super) internal: String,
     pub(super) kind: BindingKind,
     pub(super) initialized: bool,
@@ -132,6 +135,7 @@ impl super::Lowerer {
         if owner_function == 0 && self.scopes.len() > self.root_scope_depth {
             self.private_bindings.insert(internal.clone());
         }
+        let id = self.declare_in_ledger(name, kind);
         #[expect(
             clippy::expect_used,
             reason = "the lowerer pushes the program root scope before any declaration and never pops past it"
@@ -140,6 +144,7 @@ impl super::Lowerer {
         scope.bindings.insert(
             name.to_string(),
             Binding {
+                id,
                 internal,
                 kind,
                 initialized,
@@ -248,8 +253,52 @@ impl super::Lowerer {
             for function in &mut self.functions[first_capturing_function..] {
                 function.captures.insert(binding.internal.clone());
             }
+            // The outermost capturing closure is the one the owning frame
+            // creates, so its creation is when the value is copied; the
+            // closures inside it copy from that copy.
+            let creation = self.functions[first_capturing_function].creation.clone();
+            self.capture_ledger.capture(binding.id, creation, span);
         }
         Ok(binding.internal)
+    }
+
+    /// Registers a binding with the capture ledger. A `var` (and an enum,
+    /// which is one) belongs to its whole function frame, so no loop makes it
+    /// fresh; every other binding is fresh in each loop around its
+    /// declaration.
+    pub(super) fn declare_in_ledger(&mut self, name: &str, kind: BindingKind) -> BindingId {
+        let loops = match kind {
+            BindingKind::Var => Vec::new(),
+            _ => self.position.loops.clone(),
+        };
+        self.capture_ledger.declare(name, loops)
+    }
+
+    /// Records an assignment to `binding` at the current point of its frame.
+    pub(super) fn record_write(&mut self, binding: BindingId) {
+        let site = self.capture_ledger.site(&self.position.loops);
+        self.capture_ledger.write(binding, site);
+    }
+
+    /// Records a `globalThis.name` write or delete, which lands on the root
+    /// slot `name`. At the root that is an ordinary write; inside a function
+    /// it runs whenever the function is called.
+    pub(super) fn record_global_write(&mut self, name: &str) {
+        let Some(binding) = self
+            .scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.bindings.values())
+            .find(|binding| binding.owner_function == 0 && binding.internal == name)
+            .map(|binding| binding.id)
+        else {
+            return;
+        };
+        if self.current_function() == 0 {
+            self.record_write(binding);
+        } else {
+            self.capture_ledger.write_anytime(binding);
+        }
     }
 
     pub(super) fn initialize(&mut self, name: &str) {

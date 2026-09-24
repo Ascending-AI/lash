@@ -27,23 +27,6 @@ fn finished(source: &str) -> Value {
 }
 
 #[test]
-fn assign_only_mutable_captures_reject_by_name() {
-    let cases = [
-        "let n = 0; const f = () => { n = 5; }; f(); finish(n);",
-        "let seen = 0; function f(): number { try { return 1; } finally { seen = 1; } } f(); finish(seen);",
-    ];
-    for source in cases {
-        assert_eq!(
-            lash_typescript::testing::compile(source)
-                .expect_err("mutable capture writes must reject")
-                .code,
-            lash_typescript::DiagnosticCode::MutableCaptureUnsupported,
-            "{source}"
-        );
-    }
-}
-
-#[test]
 fn catch_body_declarations_shadow_enclosing_function_slots() {
     assert_eq!(
         finished(

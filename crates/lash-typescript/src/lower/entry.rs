@@ -106,9 +106,11 @@ fn lower_with_ambient_kind(
     };
     let mut ambient_scope = Scope::default();
     for name in ambient.union(ambient_processes) {
+        let id = lowerer.capture_ledger.declare(name, Vec::new());
         ambient_scope.bindings.insert(
             name.clone(),
             Binding {
+                id,
                 internal: name.clone(),
                 kind: ambient_kind,
                 initialized: true,
@@ -124,6 +126,7 @@ fn lower_with_ambient_kind(
     lowerer.scopes.push(ambient_scope);
     lowerer.scopes.push(Scope::default());
     let expressions = lowerer.lower_statements(&program.statements, true)?;
+    lowerer.capture_ledger.refuse_stale_reads()?;
     let mut root_global_initializers = lowerer
         .intrinsic_global_slots
         .iter()

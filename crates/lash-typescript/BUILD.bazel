@@ -68,6 +68,7 @@ lash_rust_integration_test(
     extra_compile_data = [
         "//examples:codemode_parity_cells",
         "//:workflow_graph_schema",
+        "//:dialect_deviation_register",
     ],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",

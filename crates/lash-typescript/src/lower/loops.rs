@@ -95,6 +95,10 @@ impl Lowerer {
             reason = "the classic-for validation above refuses a loop without a condition"
         )]
         let condition = self.lower_expr(test.expect("validated classic for condition"))?;
+        // The increment is lowered ahead of the body on purpose: it writes the
+        // next iteration's copy of the binding (ECMA-262's
+        // CreatePerIterationEnvironment runs before it), so for the capture
+        // ledger it precedes every closure the body creates.
         let update = self.lower_update_statement(declaration_name, *delta)?;
         let body = self.with_loop(|lowerer| {
             lowerer.continue_epilogues.push(Some(update.clone()));

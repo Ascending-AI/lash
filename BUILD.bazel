@@ -34,6 +34,16 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# ADR 0062 holds the dialect's deviation register, which the lash-typescript
+# register census reads with `include_str!` to hold every promised refusal to a
+# probe.
+filegroup(
+    name = "dialect_deviation_register",
+    srcs = ["docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md"],
+    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "host_schemas",
     srcs = glob(["schemas/host/*/*.schema.json"]),

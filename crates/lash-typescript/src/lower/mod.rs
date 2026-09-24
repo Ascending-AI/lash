@@ -25,6 +25,7 @@ mod attribute_update;
 mod await_expr;
 mod binding;
 mod calls;
+mod captures;
 mod constructs;
 mod entry;
 mod graph;
@@ -36,6 +37,7 @@ mod spans;
 mod triggers;
 pub(crate) use attribute_update::attribute_update;
 use binding::*;
+use captures::{CaptureLedger, Site};
 use constructs::*;
 pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_workflow_fragment};
 use graph::{shortest_cycle_through, strongly_connected_components};
@@ -68,10 +70,12 @@ pub(super) fn completion_list(items: Vec<LashExpr>) -> LashExpr {
     }
 }
 
-#[derive(Default)]
 struct FunctionContext {
     id: usize,
     captures: BTreeSet<String>,
+    /// Where the enclosing frame creates this closure: the point its captures
+    /// are copied at.
+    creation: Site,
 }
 
 /// A hoisted function declaration awaiting a place in the emission order.
@@ -94,6 +98,10 @@ struct PositionContext {
     loop_depth: usize,
     await_depth: usize,
     iterable_sink_depth: usize,
+    /// The frame's loop statements enclosing the current position, outermost
+    /// first, by ledger id. Unlike `loop_depth`, a loop's test and head count
+    /// as inside it: they run again on every iteration.
+    loops: Vec<usize>,
 }
 
 #[derive(Default)]
@@ -128,6 +136,9 @@ struct Lowerer {
     intrinsic_global_slots: BTreeSet<String>,
     module_authority_roots: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
+    /// Where each closure copies its captures and where each binding is
+    /// assigned, judged once the program has lowered.
+    capture_ledger: CaptureLedger,
     /// The source-level names this program calls, computed once before
     /// lowering. A `const`-bound async arrow outside this set is a
     /// process-literal candidate (FIG-2997).
@@ -481,7 +492,10 @@ impl Lowerer {
                 output
             }
             Stmt::Enum { name, members } => {
-                let internal = self.binding(name)?.internal.clone();
+                let binding = self.binding(name)?;
+                let (internal, binding_id) = (binding.internal.clone(), binding.id);
+                // The first declaration of the enum assigns its object.
+                self.record_write(binding_id);
                 let variable = || LashExpr::Variable(internal.as_str().into());
                 let mut output = vec![LashExpr::If {
                     condition: Box::new(variable()),
@@ -551,24 +565,24 @@ impl Lowerer {
                         .unwrap_or_else(|| completion_list(vec![LashExpr::Undefined])),
                 ),
             }],
-            Stmt::While { test, body } => {
-                let body = self.with_loop(|lowerer| {
+            Stmt::While { test, body } => self.in_loop_statement(|lowerer| {
+                let body = lowerer.with_loop(|lowerer| {
                     lowerer.continue_epilogues.push(None);
                     let body = lowerer.lower_stmt_block(body);
                     lowerer.continue_epilogues.pop();
                     body
                 })?;
-                vec![LashExpr::While {
-                    condition: Box::new(self.lower_expr(test)?),
+                Ok(vec![LashExpr::While {
+                    condition: Box::new(lowerer.lower_expr(test)?),
                     body: Box::new(body),
-                }]
-            }
+                }])
+            })?,
             Stmt::DoWhile {
                 body,
                 test,
                 test_span,
-            } => {
-                let (epilogue, body) = self.with_loop(|lowerer| {
+            } => self.in_loop_statement(|lowerer| {
+                let (epilogue, body) = lowerer.with_loop(|lowerer| {
                     let condition = lowerer.lower_expr(test)?;
                     let condition = lowerer.span_markers.annotate(*test_span, condition);
                     let epilogue = LashExpr::If {
@@ -581,22 +595,19 @@ impl Lowerer {
                     lowerer.continue_epilogues.pop();
                     body.map(|body| (epilogue, body))
                 })?;
-                vec![LashExpr::While {
+                Ok(vec![LashExpr::While {
                     condition: Box::new(LashExpr::Bool(true)),
                     body: Box::new(LashExpr::Block(vec![body, epilogue])),
-                }]
-            }
+                }])
+            })?,
             Stmt::For {
                 init,
                 test,
                 update,
                 body,
-            } => vec![self.lower_classic_for(
-                init.as_deref(),
-                test.as_ref(),
-                update.as_ref(),
-                body,
-            )?],
+            } => vec![self.in_loop_statement(|lowerer| {
+                lowerer.lower_classic_for(init.as_deref(), test.as_ref(), update.as_ref(), body)
+            })?],
             Stmt::ForOf {
                 pattern,
                 kind,
@@ -612,14 +623,18 @@ impl Lowerer {
                         None,
                     ));
                 }
-                self.lower_for_each(pattern, *kind, iterable, body, false)?
+                self.in_loop_statement(|lowerer| {
+                    lowerer.lower_for_each(pattern, *kind, iterable, body, false)
+                })?
             }
             Stmt::ForIn {
                 pattern,
                 kind,
                 object,
                 body,
-            } => self.lower_for_each(pattern, *kind, object, body, true)?,
+            } => self.in_loop_statement(|lowerer| {
+                lowerer.lower_for_each(pattern, *kind, object, body, true)
+            })?,
             Stmt::Switch {
                 discriminant,
                 cases,
@@ -745,10 +760,13 @@ impl Lowerer {
         function: &Function,
         internal_name: Option<String>,
     ) -> Result<LashExpr, Diagnostic> {
+        // The closure is created here, in the enclosing frame: this is the
+        // point its captures are copied at.
+        let creation = self.capture_ledger.site(&self.position.loops);
         let outer_position = std::mem::take(&mut self.position);
         let outer_switch_breaks = std::mem::take(&mut self.switch_breaks);
         let outer_continue_epilogues = std::mem::take(&mut self.continue_epilogues);
-        let result = self.lower_function_body(function, internal_name);
+        let result = self.lower_function_body(function, internal_name, creation);
         self.position = outer_position;
         self.switch_breaks = outer_switch_breaks;
         self.continue_epilogues = outer_continue_epilogues;
@@ -759,12 +777,14 @@ impl Lowerer {
         &mut self,
         function: &Function,
         internal_name: Option<String>,
+        creation: Site,
     ) -> Result<LashExpr, Diagnostic> {
         self.next_function += 1;
         let id = self.next_function;
         self.functions.push(FunctionContext {
             id,
-            ..FunctionContext::default()
+            captures: BTreeSet::new(),
+            creation,
         });
         self.scopes.push(Scope::default());
         // ECMA binds a function's own name inside its body. A declaration
@@ -782,6 +802,7 @@ impl Lowerer {
             (_, internal_name) => internal_name,
         };
         if let (Some(source_name), Some(internal)) = (&function.name, &internal_name) {
+            let binding_id = self.declare_in_ledger(source_name, BindingKind::Function);
             #[expect(
                 clippy::unwrap_used,
                 reason = "the lowerer pushes the program root scope before any function and never pops past it"
@@ -789,6 +810,7 @@ impl Lowerer {
             self.scopes.last_mut().unwrap().bindings.insert(
                 source_name.clone(),
                 Binding {
+                    id: binding_id,
                     internal: internal.clone(),
                     kind: BindingKind::Function,
                     initialized: true,
@@ -1176,6 +1198,7 @@ impl Lowerer {
                         None,
                     ));
                 }
+                self.record_write(binding.id);
                 Ok(AssignTarget::variable(binding.internal.into()))
             }
             TsAssignTarget::Member { object, property } => {

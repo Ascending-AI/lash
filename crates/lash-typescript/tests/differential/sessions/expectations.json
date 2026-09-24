@@ -1376,6 +1376,83 @@
           }
         }
       ]
+    },
+    {
+      "id": "mutable-capture-read",
+      "about": "a closure made before its binding is reassigned is refused rather than reading its stale copy (FIG-3604)",
+      "probe": [
+        "x",
+        "f"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "let x = 1;\nconst f = () => x;\nx = 2;\nconsole.log(f());\n",
+          "reject": "TS_MUTABLE_CAPTURE_UNSUPPORTED",
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "rejected",
+            "prints": [],
+            "probes": {
+              "x": "unbound",
+              "f": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "capture-of-a-settled-binding",
+      "about": "a closure reads a binding nothing assigns after it, an earlier cell's global included (FIG-3604)",
+      "probe": [
+        "count",
+        "total",
+        "n",
+        "v"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "let count = 1;\ncount = count + 1;\nconsole.log([1, 2].map((n) => n * count));\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[2,4]"
+            ],
+            "probes": {
+              "count": "number 2",
+              "total": "unbound",
+              "n": "unbound",
+              "v": "unbound"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "let total = 0;\nfor (const n of [1, 2, 3]) {\n  total = total + n;\n}\nconsole.log([3, 6].map((v) => v / total + count));\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[2.5,3]"
+            ],
+            "probes": {
+              "count": "number 2",
+              "total": "number 6",
+              "n": "unbound",
+              "v": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
     }
   ]
 }

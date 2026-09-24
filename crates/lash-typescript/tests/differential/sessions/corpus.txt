@@ -438,3 +438,28 @@ const ordered = { zeta: 1, alpha: 2, mid: 3 };
 const nested = { b: { y: 1, x: 2 }, a: [{ q: 1, p: 2 }] };
 lash-restart {"outcome":"normal","prints":[],"probes":{"nested":"object {\"a\":[{\"p\":2,\"q\":1}],\"b\":{\"x\":2,\"y\":1}}","ordered":"object {\"alpha\":2,\"mid\":3,\"zeta\":1}"}}
 end
+
+session mutable-capture-read
+about a closure made before its binding is reassigned is refused rather than reading its stale copy (FIG-3604)
+probe x f
+cell reject TS_MUTABLE_CAPTURE_UNSUPPORTED
+let x = 1;
+const f = () => x;
+x = 2;
+console.log(f());
+end
+
+session capture-of-a-settled-binding
+about a closure reads a binding nothing assigns after it, an earlier cell's global included (FIG-3604)
+probe count total n v
+cell
+let count = 1;
+count = count + 1;
+console.log([1, 2].map((n) => n * count));
+cell
+let total = 0;
+for (const n of [1, 2, 3]) {
+  total = total + n;
+}
+console.log([3, 6].map((v) => v / total + count));
+end

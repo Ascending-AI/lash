@@ -62,6 +62,7 @@ pub enum DiagnosticCode {
     TriggerEventRemoved,
     TriggerInputsLiteralRequired,
     MethodUnsupported,
+    DateImmutable,
     ReturnOutsideFunction,
     LoopControlOutsideLoop,
     UnsupportedStatement,
@@ -138,6 +139,7 @@ impl DiagnosticCode {
         Self::TriggerEventRemoved,
         Self::TriggerInputsLiteralRequired,
         Self::MethodUnsupported,
+        Self::DateImmutable,
         Self::ReturnOutsideFunction,
         Self::LoopControlOutsideLoop,
         Self::UnsupportedStatement,
@@ -253,6 +255,7 @@ impl DiagnosticCode {
             Self::MethodUnsupported => {
                 "use a method the dialect's standard-library contract lists for this receiver"
             }
+            Self::DateImmutable => "build a new date instead: `new Date(d.getTime() + n)`",
             Self::UnsupportedStatement | Self::UnsupportedExpression => {
                 "rewrite with the constructs the dialect prompt lists"
             }
@@ -334,6 +337,7 @@ impl DiagnosticCode {
             | Self::MutualRecursionUnsupported
             | Self::MutableCaptureUnsupported
             | Self::NonLiftableCapture
+            | Self::DateImmutable
             // Rules about size, placement, and shape. No single construct to
             // name, but just as much a refusal: the runtime will not accept
             // this program however it is debugged.
@@ -433,6 +437,7 @@ impl DiagnosticCode {
             Self::TriggerEventRemoved => "TS_TRIGGER_EVENT_REMOVED",
             Self::TriggerInputsLiteralRequired => "TS_TRIGGER_INPUTS_LITERAL_REQUIRED",
             Self::MethodUnsupported => "TS_METHOD_UNSUPPORTED",
+            Self::DateImmutable => "TS_DATE_IMMUTABLE",
             Self::ReturnOutsideFunction => "TS_RETURN_OUTSIDE_FUNCTION",
             Self::LoopControlOutsideLoop => "TS_LOOP_CONTROL_OUTSIDE_LOOP",
             Self::UnsupportedStatement => "TS_STATEMENT_UNSUPPORTED",
@@ -696,6 +701,7 @@ mod tests {
             ("lower/mod.rs", include_str!("lower/mod.rs")),
             ("lower/binding.rs", include_str!("lower/binding.rs")),
             ("lower/calls.rs", include_str!("lower/calls.rs")),
+            ("lower/captures.rs", include_str!("lower/captures.rs")),
             ("lower/constructs.rs", include_str!("lower/constructs.rs")),
             ("lower/entry.rs", include_str!("lower/entry.rs")),
             ("lower/loops.rs", include_str!("lower/loops.rs")),

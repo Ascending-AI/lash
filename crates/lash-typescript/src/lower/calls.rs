@@ -567,8 +567,8 @@ impl Lowerer {
                 | "setUTCSeconds"
                 | "setUTCMilliseconds"
         ) {
-            return Err(Diagnostic::refusal(
-                DiagnosticCode::MethodUnsupported,
+            return Err(Diagnostic::new(
+                DiagnosticCode::DateImmutable,
                 format!(
                     "Unsupported: Date.{method}; durable Date values are immutable. Use new Date(d.getTime() + n)."
                 ),

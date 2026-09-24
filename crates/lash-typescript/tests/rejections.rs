@@ -403,7 +403,6 @@ fn date_rejections_name_the_deterministic_repair() {
     for (source, repair) in [
         ("new Date(0).getFullYear();", "d.getUTCFullYear()"),
         ("new Date(0).getHours();", "d.getUTCHours()"),
-        ("new Date(0).setUTCSeconds(1);", "new Date(d.getTime() + n)"),
         ("new Date(0).toDateString();", "toISOString()"),
         ("new Date(0).toLocaleString();", "d.toISOString()"),
     ] {
@@ -411,6 +410,15 @@ fn date_rejections_name_the_deterministic_repair() {
         assert_eq!(error.code, Code::MethodUnsupported, "{source}: {error}");
         assert!(error.to_string().contains(repair), "{source}: {error}");
     }
+    // A setter is refused by the name the register promises, the same code
+    // the runtime raises for it, not as a missing method.
+    let error = lash_typescript::validate("new Date(0).setUTCSeconds(1);")
+        .expect_err("Date setters remain rejected");
+    assert_eq!(error.code, Code::DateImmutable, "{error}");
+    assert!(
+        error.to_string().contains("new Date(d.getTime() + n)"),
+        "{error}"
+    );
 }
 
 // The prototype chain. The census has claimed
