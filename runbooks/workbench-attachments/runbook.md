@@ -62,10 +62,14 @@ cross-surface identity, not the quality of the model's image description.
    `env.sh`), the verified non-destructive same-configuration replacement named in this
    runbook's header. Require the PID to change while the data directory and session id
    remain unchanged.
-5. **The attachment facet is the same in both session modes.** The workbench always wires
-   `FileAttachmentStore`; SQLite/Postgres changes the session ledger, not attachment blob
-   storage. The deterministic companion gate reopens that file store and separately runs
-   the usage restart assertion against both session-store backends.
+5. **The attachment facet is the same in both session modes; the bytes' home is not.** The
+   backend the workbench boots owns blob storage: SQLite keeps attachment bytes in the
+   `attachment_blobs` table of the session catalog
+   (`<data-dir>/lash-sessions/durable-core.db`) and refuses a leftover
+   `<data-dir>/attachments/` directory as a prior store layout, while Postgres still wires
+   `FileAttachmentStore` under `<data-dir>/attachments`. The deterministic companion gate
+   reopens the backend's attachment store and separately runs the usage restart assertion
+   against both session-store backends.
 6. **The transcript image is the attachment contract.** The matching user row must contain
    exactly one `a.message-attachment[data-attachment-id]` wrapping exactly one `<img>` whose
    `src` equals the link's `href`; the id on the link and the URL on both must agree with the
@@ -95,10 +99,12 @@ cross-surface identity, not the quality of the model's image description.
 - UI truth: **attach png**, its attached filename state, transcript, running/idle pill.
 - API truth: `POST /api/attachments`, `POST /api/turn`,
   `GET /api/attachments/{attachment_id}`, and `GET /api/state`.
-- Disk truth: the active session backend's committed attachment-manifest row,
-  `<data-dir>/attachments/blake3/<first-two-id-characters>/<attachment-id>`, and
-  `<data-dir>/trace.jsonl`. SQLite calls the per-session table `attachment_manifest`;
-  Postgres calls the shared table `lash_attachment_manifest`.
+- Disk truth: the active session backend's committed attachment-manifest row, the stored
+  blob, and `<data-dir>/trace.jsonl`. SQLite keeps both in
+  `<data-dir>/lash-sessions/durable-core.db` — the manifest row in `attachment_manifest`,
+  the bytes as the `attachment_blobs` row under the same id — while Postgres names the
+  shared table `lash_attachment_manifest` and keeps bytes at
+  `<data-dir>/attachments/blake3/<first-two-id-characters>/<attachment-id>`.
 
 ## Phase 0 — Boot and identify the session
 
@@ -144,8 +150,10 @@ Complete the three-layer attachment cross-check before continuing:
    dimensions.
 2. **API state:** one matching user message and one attachment reference with the upload id
    and retrieval URL.
-3. **Durable state:** one committed manifest row for the session/id plus the content blob at
-   the expected `attachments/blake3/` path; hash and length must match the source.
+3. **Durable state:** one committed manifest row for the session/id plus the content blob in
+   the backend's attachment store — on the SQLite stack this scenario boots, exactly one
+   `attachment_blobs` row under the id in `<data-dir>/lash-sessions/durable-core.db`; byte
+   length and content must match the source exactly.
 
 From the matching trace turn, save the `llm_call_started` record as
 `02-provider-request.json`. Require one request attachment with `source: stored` and MIME
