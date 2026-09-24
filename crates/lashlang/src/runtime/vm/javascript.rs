@@ -107,6 +107,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             values.push(self.pop_stack()?);
         }
         values.reverse();
+        if let Some(Value::String(method)) = values.first()
+            && method.as_str() == "Lash.Apply"
+        {
+            values = self.applied_stdlib_arguments(values)?;
+        }
         if let [Value::String(method), value] = values.as_slice()
             && method.as_str() == "__jsonContainerKind"
         {
@@ -433,6 +438,26 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// under the limit but over the heap budget it is the typed memory
     /// diagnostic. Neither is a clamp: silently truncating to `u32::MAX` would
     /// hand the guest an array of a length it did not ask for.
+    /// `Lash.Apply(method, fixed..., arguments)`: a call with a spread
+    /// argument (FIG-3627). The arguments array, built by the caller from its
+    /// argument list, supplies the call's trailing arguments one by one, so
+    /// `Math.max(...xs)` dispatches exactly as `Math.max(x0, x1, ...)` does.
+    /// Its elements are read in place, so an object passed through a spread
+    /// keeps its identity.
+    fn applied_stdlib_arguments(&self, mut values: Vec<Value>) -> Result<Vec<Value>, RuntimeError> {
+        let arguments = match values.pop() {
+            Some(Value::List(items) | Value::Tuple(items)) => items.to_vec(),
+            Some(Value::Ref(id)) => match self.heap.get(id)? {
+                HeapObject::List(items) | HeapObject::Tuple(items) => items.clone(),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        values.remove(0);
+        values.extend(arguments);
+        Ok(values)
+    }
+
     fn array_like_elements(&mut self, record: &Record) -> Result<Vec<Value>, RuntimeError> {
         let length = record
             .get("length")
