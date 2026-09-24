@@ -324,7 +324,7 @@ pub(super) async fn run_once_trace_jsonl(
                     lash::tracing::TraceLevel::Standard
                 },
             };
-            let runtime = build_runtime_with_store(scenario, None, Some(trace_config)).await?;
+            let runtime = build_runtime(scenario, Some(trace_config)).await?;
             Ok((trace_root, trace_path, lashlang_trace_path, runtime))
         })
         .await?;

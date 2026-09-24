@@ -260,6 +260,7 @@ async fn run_error_return_case<F>(
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
+        invocation.process_env_store(),
         identity,
         trace_tool,
     ))

@@ -137,9 +137,7 @@ fn incorporating_context(
 /// applies nothing. Extending the cursor to rank 2 then journals a second
 /// record covering exactly that rank.
 ///
-/// On the in-memory tier nothing is journaled past the process, so the
-/// "replay" is a re-execution that reads the same consumed prefix — the same
-/// assertions hold. On tiers whose controller cannot journal this command the
+/// On tiers whose controller cannot journal this command the
 /// law asserts the cursorless rank read the record is built on and stops.
 #[expect(
     clippy::expect_used,
@@ -183,7 +181,7 @@ pub async fn a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ra
             &session_id,
             &group_key,
             &scenario.env_ref,
-            deferrable_routing(fixture.deferrable_routing, &host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&host, &admitted).await,
         ))
         .await

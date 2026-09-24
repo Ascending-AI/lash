@@ -645,10 +645,12 @@ async fn assert_blob(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStoreFactory>) {
+pub async fn attachment_owner_degraded_proof(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    backend: Arc<dyn crate::AttachmentStore>,
+) {
     use crate::store::MaintenanceReport;
     assert!(!factory.can_prove_process_owner_death());
-    let backend = crate::attachments::InMemoryAttachmentStore::new();
     let request = session_request(&SessionId::from("degraded-process-owner"));
     let store = factory.create_store(&request).await.expect("create store");
     let reference = backend
@@ -678,7 +680,7 @@ pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStor
         }
         let report = crate::reclaim_unreferenced_attachments(
             &*factory,
-            &backend,
+            backend.as_ref(),
             crate::AttachmentReclamationPolicy {
                 grace_period_ms: 0,
                 empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
@@ -701,10 +703,4 @@ pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStor
                 .contains(&reference.id)
         );
     }
-}
-
-#[cfg(test)]
-#[tokio::test]
-async fn memory_attachment_owner_degraded_proof_conformance() {
-    attachment_owner_degraded_proof(Arc::new(crate::InMemorySessionStoreFactory::new())).await;
 }

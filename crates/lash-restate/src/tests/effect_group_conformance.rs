@@ -326,7 +326,9 @@ pub(super) struct LiveConformanceHarness {
     ingress_url: String,
     host: Arc<RestateEffectHost>,
     executors: Arc<ConformanceExecutors>,
-    process_registry: Arc<lash_core::TestLocalProcessRegistry>,
+    /// The SQL store set the endpoint's processes and the laws' sessions live
+    /// in, beside the Restate host that journals the effects (ADR 0102, D2).
+    stores: Arc<dyn lash_core::StoreSet>,
     process_runner: Arc<LawProcessRunner>,
     shutdown_tx: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     server: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -376,7 +378,11 @@ impl LiveConformanceHarness {
             RestateEffectGroupRetryPolicy::infinite(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
         );
-        let process_registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let stores = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("open the live harness store set"),
+        ) as Arc<dyn lash_core::StoreSet>;
         let process_runner = Arc::new(LawProcessRunner::default());
         let listener = tokio::net::TcpListener::bind(bind_addr)
             .await
@@ -395,9 +401,8 @@ impl LiveConformanceHarness {
                 .bind(
                     LashProcessWorkflowImpl::new_for_test(
                         Arc::clone(&process_runner),
-                        Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
-                        Arc::clone(&process_registry)
-                            as Arc<dyn lash_core::ProcessContinuationStore>,
+                        stores.process_registry(),
+                        stores.process_continuations(),
                     )
                     .serve(),
                 )
@@ -429,7 +434,7 @@ impl LiveConformanceHarness {
             ingress_url,
             host,
             executors,
-            process_registry,
+            stores,
             process_runner,
             shutdown_tx: tokio::sync::Mutex::new(Some(shutdown_tx)),
             server: tokio::sync::Mutex::new(Some(server)),
@@ -455,25 +460,14 @@ impl LiveConformanceHarness {
             // the registry the orchestrating child's start recorded, so the
             // dispatched context and the workflow must share this one. Rows
             // do not collide because scenario prefixes keep process ids
-            // distinct. The process-exec-env store is a fresh SQLite memory
-            // backend's: the endpoint reads no environment itself.
+            // distinct. Every other port is the same store set's.
             make_processes: Arc::new({
-                let registry = Arc::clone(&self.process_registry);
+                let stores = Arc::clone(&self.stores);
                 move || {
-                    let registry = Arc::clone(&registry);
-                    Box::pin(async move {
-                        let backend = lash_sqlite_store::SqliteBackend::memory()
-                            .await
-                            .expect("tool-child process-exec-env backend");
-                        lash_conformance::ToolChildProcesses {
-                            registry: registry as Arc<dyn lash_core::ProcessRegistry>,
-                            process_env_store: backend.process_env_store()
-                                as Arc<dyn lash_core::ProcessExecutionEnvStore>,
-                        }
-                    })
+                    let stores = Arc::clone(&stores);
+                    Box::pin(async move { stores })
                 }
             }),
-            deferrable_routing: lash_conformance::ToolChildDeferrableRouting::Durable,
         }
     }
 
@@ -500,11 +494,10 @@ impl LiveConformanceHarness {
         )
     }
 
-    /// The registry the endpoint's `LashProcessWorkflow` writes terminals
-    /// into: a law whose processes run on the endpoint must register and
-    /// observe them here.
-    pub(super) fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
-        Arc::clone(&self.process_registry) as Arc<dyn lash_core::ProcessRegistry>
+    /// The store set the endpoint's processes live in: a law that builds a
+    /// runtime on this endpoint takes its sessions and ports from it.
+    pub(super) fn stores(&self) -> Arc<dyn lash_core::StoreSet> {
+        Arc::clone(&self.stores)
     }
 
     pub(super) fn effect_host_factory(

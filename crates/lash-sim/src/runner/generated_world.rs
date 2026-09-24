@@ -50,7 +50,7 @@ pub(super) struct GeneratedRuntimeWorld {
     finished_suspends: Vec<FinishedSuspend>,
     /// When set, the driver admits at most one live provider turn at a time
     /// (see `RuntimeCompletionState::serialize_provider_turns`). Enabled for the
-    /// cross-backend durable re-run; left off for the in-memory reference/search.
+    /// cross-backend durable re-run; left off for the memory reference/search.
     pub(super) serialize_provider_turns: bool,
 }
 
@@ -152,7 +152,7 @@ impl GeneratedRuntimeWorld {
             lease_ticks: BTreeMap::new(),
             backend_faults: GeneratedBackendFaultHarness::default(),
             provider_mutations: SimProviderMutationHarness::default(),
-            trigger_harness: SimTriggerHarness::default(),
+            trigger_harness: SimTriggerHarness::over(backend.trigger_store()),
             runtime_boundaries: RuntimeBoundaryHarness::new(
                 backend.session_store_factory(),
                 effect_replay_store,
@@ -1479,15 +1479,17 @@ impl SimProviderMutationHarness {
     }
 }
 
+/// Trigger boundaries delivered through the world backend's own trigger
+/// store.
 struct SimTriggerHarness {
-    store: Arc<lash_core::facade_support::InMemoryTriggerStore>,
+    store: Arc<dyn lash_core::TriggerStore>,
     registered_source_keys: BTreeSet<String>,
 }
 
-impl Default for SimTriggerHarness {
-    fn default() -> Self {
+impl SimTriggerHarness {
+    fn over(store: Arc<dyn lash_core::TriggerStore>) -> Self {
         Self {
-            store: Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+            store,
             registered_source_keys: BTreeSet::new(),
         }
     }

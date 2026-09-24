@@ -3,9 +3,8 @@
 //! Every benchmark core runs on one [`lash::Backend`]. The in-process lane
 //! is a SQLite memory backend; the durable lanes open a SQLite file or a
 //! PostgreSQL backend. A lane that measures persistence puts the perf store
-//! decorator in front of the backend's session catalog, and the start-gate
-//! scenario layers its retry fixture over the backend's host; every other
-//! port stays the backend's.
+//! decorator in front of the backend's session catalog; every other port
+//! stays the backend's.
 
 use std::sync::Arc;
 
@@ -31,18 +30,6 @@ impl PerfBackend {
     /// Serve sessions from `catalog`, the perf store decorator.
     pub(super) fn with_catalog(mut self, catalog: Arc<dyn SessionStoreFactory>) -> Self {
         self.catalog = catalog;
-        self
-    }
-
-    /// Run every effect through `layer` before the backend's host.
-    pub(super) fn with_effect_layer(
-        mut self,
-        layer: Arc<dyn lash_core::testing::EffectLayer>,
-    ) -> Self {
-        self.effect_host = Arc::new(lash_core::testing::LayeredEffectHost::new(
-            self.effect_host,
-            layer,
-        ));
         self
     }
 }

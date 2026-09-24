@@ -115,6 +115,7 @@ async fn run_after_commit_redrive<F, I>(
         SeamStore::wrap(raw, control.clone()),
         control.clone(),
         Arc::clone(&controller),
+        invocation.process_env_store(),
         &identity,
         TraceTool::default(),
     ))
@@ -167,6 +168,7 @@ async fn run_after_commit_redrive<F, I>(
         SeamStore::wrap(make(scenario), successor_control.clone()),
         successor_control.clone(),
         Arc::clone(&successor_controller),
+        successor_invocation.process_env_store(),
         &identity,
         TraceTool::default(),
         nominal_recovery_timings(),

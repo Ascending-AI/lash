@@ -72,8 +72,8 @@
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_open", "children": 1}}, "placement": "inside_call"},
-    "outcome": "The completed group-open result was lost before runtime progress; the receipt-less level-1 controller re-executes the external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The completed group-open result was lost before runtime progress; the journaled controller replays the recorded child outcome, so the external effect runs once.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "boundary"},
@@ -88,84 +88,84 @@
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "inside_call"},
-    "outcome": "The controller call returned but runtime progress was not durable; the receipt-less level-1 controller re-executes the external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The controller call returned but runtime progress was not durable; the journaled controller replays the recorded outcome, so the external effect runs once.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "boundary"},
-    "outcome": "The settlement wait never ran; the child's effect already executed and the receipt-less level-1 recovery re-executes it.",
-    "effect_executions_l1": 2
+    "outcome": "The settlement wait never ran; the child's effect already executed and recovery replays its journaled outcome instead of running it again.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "inside_call"},
-    "outcome": "The settlement read returned but its result was lost; the receipt-less level-1 recovery re-executes the child's external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The settlement read returned but its result was lost; recovery replays the child's journaled outcome instead of running it again.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_close"}}, "placement": "boundary"},
-    "outcome": "The group settled but was never closed; the receipt-less level-1 recovery re-executes the child's external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The group settled but was never closed; recovery replays the child's journaled outcome instead of running it again.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_close"}}, "placement": "inside_call"},
-    "outcome": "The close result was lost; the receipt-less level-1 recovery re-executes the settled child's external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The close result was lost; recovery replays the settled child's journaled outcome instead of running it again.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "afterwork"}}, "placement": "boundary"},
-    "outcome": "Tool progress is not durable; active input and queued work remain reclaimable and the effect re-executes.",
-    "effect_executions_l1": 2
+    "outcome": "Tool progress is not durable; active input and queued work remain reclaimable and the effect's journaled outcome replays.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "afterwork"}}, "placement": "inside_call"},
-    "outcome": "Checkpoint claims are pinned to the expired generation; the successor reclaims them and replays the uncommitted effect.",
-    "effect_executions_l1": 2
+    "outcome": "Checkpoint claims are pinned to the expired generation; the successor reclaims them and replays the uncommitted effect from its journaled outcome.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "provider", "operation": {"kind": "after_tool_request"}}, "placement": "boundary"},
-    "outcome": "No tool outcome or model continuation is durable; the whole model-tool prefix is replayed.",
-    "effect_executions_l1": 2
+    "outcome": "No model continuation is committed; the model-tool prefix is replayed and reuses the journaled tool outcome, so the effect runs once.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "provider", "operation": {"kind": "after_tool_mid_stream"}}, "placement": "provider_mid_stream"},
-    "outcome": "Partial post-tool provider output is discarded. Level 1 replays the receipt-less effect; level 2 reuses the durable outcome before replaying the request.",
-    "effect_executions_l1": 2,
+    "outcome": "Partial post-tool provider output is discarded. Recovery reuses the journaled effect outcome before replaying the request.",
+    "effect_executions_l1": 1,
     "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 1}}}
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "beforecompletion"}}, "placement": "boundary"},
-    "outcome": "The final checkpoint probe has not changed durable state; recovery replays the turn prefix.",
-    "effect_executions_l1": 2
+    "outcome": "The final checkpoint probe has not changed durable state; recovery replays the turn prefix. The journal recorded the tool outcome, so recovery replays it and the effect runs once.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "beforecompletion"}}, "placement": "inside_call"},
-    "outcome": "Any final checkpoint claims remain generation-reclaimable; no model or effect outcome was committed.",
-    "effect_executions_l1": 2
+    "outcome": "Any final checkpoint claims remain generation-reclaimable; no model or effect outcome was committed. The journal recorded the tool outcome, so recovery replays it and the effect runs once.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "authorize_turn_cancel_closure"}}, "placement": "boundary"},
-    "outcome": "The completion closure is not yet authorized; recovery replays the uncommitted turn prefix.",
-    "effect_executions_l1": 2
+    "outcome": "The completion closure is not yet authorized; recovery replays the uncommitted turn prefix. The journal recorded the tool outcome, so recovery replays it and the effect runs once.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "authorize_turn_cancel_closure"}}, "placement": "inside_call"},
-    "outcome": "The exact completion closure is durably authorized; recovery settles it under the same store authority before redriving unfinished ingress.",
-    "effect_executions_l1": 2
+    "outcome": "The exact completion closure is durably authorized; recovery settles it under the same store authority before redriving unfinished ingress. The journal recorded the tool outcome, so recovery replays it and the effect runs once.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "turn_control", "operation": {"kind": "resolve_base"}}, "placement": "boundary"},
-    "outcome": "The completion base gate is still open under the durable authorization; the successor settles the exact closure before replaying uncommitted ingress.",
-    "effect_executions_l1": 2
+    "outcome": "The completion base gate is still open under the durable authorization; the successor settles the exact closure before replaying uncommitted ingress. The journal recorded the tool outcome, so recovery replays it and the effect runs once.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "turn_control", "operation": {"kind": "resolve_base"}}, "placement": "inside_call"},
-    "outcome": "The completion base gate is sealed but input publication has not committed; recovery adopts the authorized winner and redrives the unfinished turn.",
-    "effect_executions_l1": 2
+    "outcome": "The completion base gate is sealed but input publication has not committed; recovery adopts the authorized winner and redrives the unfinished turn. The journal recorded the tool outcome, so recovery replays it and the effect runs once.",
+    "effect_executions_l1": 1
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "apply_turn_cancel_effects_and_consume"}}, "placement": "boundary"},
-    "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles its durable ingress claims with the recovered terminal turn.",
-    "effect_executions_l1": 2,
+    "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles its durable ingress claims with the recovered terminal turn. The journal recorded the tool outcome, so recovery replays it and the effect runs once.",
+    "effect_executions_l1": 1,
     "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 1}}}
   },
   {

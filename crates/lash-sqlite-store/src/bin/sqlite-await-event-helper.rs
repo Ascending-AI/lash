@@ -147,8 +147,11 @@ async fn run_turn_action(
     nonce: &str,
     marker: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let store = Arc::new(lash_sqlite_store::Store::open(database).await?)
-        as Arc<dyn lash_core_execution::RuntimePersistence>;
+    let store = Arc::new(lash_sqlite_store::Store::open(database).await?);
+    // The store's own database keeps the turn's execution environments.
+    let process_env_store =
+        Arc::clone(&store) as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>;
+    let store = store as Arc<dyn lash_core_execution::RuntimePersistence>;
     let effect_database = database.with_extension("effects.db");
     let scope = lash_conformance::cold_process_turn_scope(nonce);
     let controller = Arc::new(
@@ -165,7 +168,15 @@ async fn run_turn_action(
         )
         .await?,
     );
-    lash_conformance::cold_process_real_turn_driver(store, controller, nonce, action, marker).await;
+    lash_conformance::cold_process_real_turn_driver(
+        store,
+        controller,
+        process_env_store,
+        nonce,
+        action,
+        marker,
+    )
+    .await;
     Ok(())
 }
 

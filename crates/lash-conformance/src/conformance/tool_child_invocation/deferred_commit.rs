@@ -187,7 +187,7 @@ async fn deferred_close_while_held(fixture: &ToolChildLawFixture, prefix: &str, 
             &group_key,
             &scenario.env_ref,
             LEAF_DEFERRED,
-            deferrable_routing(fixture.deferrable_routing, &host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
         )
     };

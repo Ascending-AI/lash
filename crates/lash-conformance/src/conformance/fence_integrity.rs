@@ -22,8 +22,8 @@ pub struct FenceIntegrityObservation {
 }
 
 /// Backend-owned seam for injecting and observing otherwise-invalid durable
-/// counter values. SQL harnesses mutate their private tables directly; the
-/// in-memory reference uses its testing-only raw-state seam.
+/// counter values. Every harness mutates its backend's private tables directly
+/// through raw SQL.
 #[async_trait::async_trait]
 pub trait FenceIntegrityInjector: Send + Sync {
     async fn inject_raw_value(&self, target: &FenceIntegrityTarget, value: i64);

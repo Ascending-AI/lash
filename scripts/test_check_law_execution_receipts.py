@@ -530,6 +530,8 @@ class ParkedEntryTests(unittest.TestCase):
                 "tests::conformance_and_poison::turn_crash_matrix_error_return_fail_stop",
                 "--skip",
                 "tests::conformance_and_poison::turn_crash_matrix_level_1",
+                "--skip",
+                "tests::conformance_and_poison::turn_crash_trace_drift_check",
             ],
         )
         self.assertEqual(MODULE.parked_skips("no_such_crate", MODULE.load_macros()), [])

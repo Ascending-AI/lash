@@ -10,7 +10,8 @@ lash_conformance::effect_host_cold_await_event_tests!({
     reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
-    (database_lock, move || {
+    let catalog_url = database_url.clone();
+    let make = move || {
         let database_url = database_url.clone();
         let storage = sync_await(async move {
             PostgresStorage::connect(&database_url)
@@ -18,7 +19,17 @@ lash_conformance::effect_host_cold_await_event_tests!({
                 .expect("cold PostgreSQL effect host")
         });
         Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
-    })
+    };
+    let make_catalog = move || {
+        let database_url = catalog_url.clone();
+        let storage = sync_await(async move {
+            PostgresStorage::connect(&database_url)
+                .await
+                .expect("cold PostgreSQL session catalog")
+        });
+        Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+    };
+    (database_lock, make, make_catalog)
 });
 
 lash_conformance::effect_host_tests!({
@@ -50,12 +61,19 @@ lash_conformance::tool_batch_parallelism_tests!({
         return;
     };
     reset(storage.pool()).await;
-    let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let backend = lash_postgres_store::PostgresBackend::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+    );
+    let host = backend.effect_host() as Arc<dyn EffectHost>;
+    let stores = Arc::new(backend.stores().clone()) as Arc<dyn lash_core_execution::StoreSet>;
     let storage = Arc::new(storage);
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres",
         Arc::clone(&host),
+        stores,
         // Every producer this tier reaches: the turn's own parallel model tool
         // calls, `Promise.all` on the RLM cell bridge, and the same aggregate
         // on the process bridge.
@@ -106,10 +124,17 @@ lash_conformance::turn_work_driver_tests!({
         return;
     };
     reset(storage.pool()).await;
-    let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let backend = lash_postgres_store::PostgresBackend::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+    );
+    let host = backend.effect_host() as Arc<dyn EffectHost>;
+    let stores = Arc::new(backend.stores().clone()) as Arc<dyn lash_core_execution::StoreSet>;
     (
-        database_lock,
+        (database_lock, attachments),
         host,
+        stores,
         lash_conformance::await_event_registration_observed,
     )
 });
@@ -124,8 +149,10 @@ lash_conformance::effect_host_await_event_tests!({
     reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
+    let foreign = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let foreign_backends = Arc::clone(&foreign);
     (
-        database_lock,
+        (database_lock, foreign),
         move || {
             let database_url = database_url.clone();
             let storage = sync_await(async move {
@@ -136,11 +163,25 @@ lash_conformance::effect_host_await_event_tests!({
             Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
         },
         lash_conformance::effect_host_journaled_wait_registration_witness,
+        // A SQLite memory backend is another substrate, so another registry.
+        move || {
+            let backend = sync_await(async {
+                lash_sqlite_store::SqliteBackend::memory()
+                    .await
+                    .expect("foreign SQLite memory backend")
+            });
+            let host = backend.effect_host() as Arc<dyn EffectHost>;
+            foreign_backends
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(backend);
+            host
+        },
     )
 });
 
-// The durable PostgreSQL tier answers the effect-group contract the same way
-// the in-memory reference host does (FIG-1564).
+// The durable PostgreSQL tier answers the effect-group contract every
+// backend answers (FIG-1564).
 lash_conformance::effect_group_host_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!(
@@ -275,14 +316,15 @@ lash_conformance::effect_group_runtime_retirement_tests!({
     )
 });
 
-/// The turn-driving laws' fixture: a reset database's effect host and process
-/// registry, a native process-work substrate over that registry, and a runner
-/// that scopes each turn on the same host.
+/// The turn-driving laws' fixture: a reset database as one backend, its
+/// effect host and the store set it journals beside, a native process-work
+/// substrate over that set's registry, and a runner that scopes each turn on
+/// the same host.
 type PostgresTurnRunnerFixture = (
-    SharedDatabaseLock,
+    (SharedDatabaseLock, tempfile::TempDir),
     &'static str,
     Arc<dyn EffectHost>,
-    Arc<dyn ProcessRegistry>,
+    Arc<dyn lash_core_execution::StoreSet>,
     Arc<dyn lash_core_execution::ProcessWorkSubstrate>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
     fn(&'static str) -> std::future::Ready<()>,
@@ -291,17 +333,22 @@ type PostgresTurnRunnerFixture = (
 async fn postgres_turn_runner_fixture() -> Option<PostgresTurnRunnerFixture> {
     let (database_lock, storage) = storage().await?;
     reset(storage.pool()).await;
-    let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let backend = lash_postgres_store::PostgresBackend::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+    );
+    let host = backend.effect_host() as Arc<dyn EffectHost>;
+    let stores = Arc::new(backend.stores().clone()) as Arc<dyn lash_core_execution::StoreSet>;
     let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
-        Arc::clone(&registry),
+        stores.process_registry(),
     )) as Arc<dyn lash_core_execution::ProcessWorkSubstrate>;
     let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
     Some((
-        database_lock,
+        (database_lock, attachments),
         "postgres-turn-runner",
         host,
-        registry,
+        stores,
         process_work,
         runner,
         // The Postgres host owns no post-law assertion beyond the shared checks.
@@ -339,8 +386,13 @@ lash_conformance::migrated_tools_redrive_tests!({
         return;
     };
     reset(storage.pool()).await;
-    let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let backend = lash_postgres_store::PostgresBackend::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+    );
+    let host = backend.effect_host() as Arc<dyn EffectHost>;
+    let stores = Arc::new(backend.stores().clone()) as Arc<dyn lash_core_execution::StoreSet>;
     let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
     let orchestration: Vec<Arc<dyn lash_core_execution::facade_support::PluginFactory>> = vec![
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
@@ -354,10 +406,10 @@ lash_conformance::migrated_tools_redrive_tests!({
         ))),
     ];
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres-migrated-tools",
         host,
-        registry,
+        stores,
         runner,
         orchestration,
     )

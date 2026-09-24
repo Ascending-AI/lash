@@ -12,10 +12,12 @@ pub mod law_receipt;
 mod macros;
 mod response_derivation_macros;
 use lash_core::testing::conformance_support::default_queued_drain_policy;
+#[cfg(test)]
+mod file_attachment_store_tests;
 #[cfg(feature = "lashlang")]
 pub mod fused_artifact_store;
 #[cfg(test)]
-mod in_memory;
+mod live_replay_store_tests;
 
 /// Locate a dev-only recovery helper for a conformance test.
 ///

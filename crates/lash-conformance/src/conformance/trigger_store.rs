@@ -2249,32 +2249,3 @@ async fn hostile_trigger_namespaces(store: Arc<dyn crate::TriggerStore>) {
         "hostile identifiers must not mutate subscription namespaces"
     );
 }
-
-#[cfg(test)]
-mod trigger_retention_law_tests {
-    use super::*;
-
-    fn store() -> Arc<dyn crate::TriggerStore> {
-        Arc::new(crate::InMemoryTriggerStore::default())
-    }
-
-    #[tokio::test]
-    async fn session_scope_waits_for_owner_frontier_and_last_delivery() {
-        session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(store()).await;
-    }
-
-    #[tokio::test]
-    async fn host_scope_retains_the_permanent_revive_fence() {
-        host_tombstone_remains_a_permanent_revive_fence(store()).await;
-    }
-
-    #[tokio::test]
-    async fn committed_zero_match_fan_out_is_reclaimed() {
-        zero_match_occurrence_reconciles_without_deliveries(store()).await;
-    }
-
-    #[tokio::test]
-    async fn occurrence_with_a_live_delivery_is_retained() {
-        occurrence_with_live_delivery_survives_reconciliation(store()).await;
-    }
-}

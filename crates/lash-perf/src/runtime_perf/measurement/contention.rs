@@ -200,7 +200,10 @@ mod contention_tests {
     #[tokio::test]
     async fn gate_bypass_second_completer_hits_receipt_conflict_then_rebuilds_after_backoff() {
         let session_id = "commit-admission-bypass";
-        let factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
+        let factory = lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open a SQLite memory backend")
+            .session_store_factory();
         let store = factory
             .create_store(&runtime_perf_session_create_request(&SessionId::from(
                 session_id,
@@ -383,7 +386,7 @@ pub(crate) async fn run_once_writer_contention(
     let total_before_alloc = allocator_stats();
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
-    let mut runtime = build_runtime_with_store(scenario, None, None).await?;
+    let mut runtime = build_runtime(scenario, None).await?;
     let main_session = runtime.session();
     let mut peer_sessions = Vec::with_capacity(workers);
     for worker in 0..workers {
@@ -539,7 +542,7 @@ pub(crate) async fn run_once_async_process_settlement(
     let total_before_alloc = allocator_stats();
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
-    let mut runtime = build_runtime_with_store(scenario, None, None).await?;
+    let mut runtime = build_runtime(scenario, None).await?;
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
     let after_build_memory = process_memory_sample();

@@ -362,16 +362,16 @@ with open(sys.argv[1], encoding="utf-8") as stream:
         if (
             event.get("reason") == "compiler-artifact"
             and event.get("package_id", "").endswith(
-                "/crates/lash-conformance#lash-internal-conformance@0.0.0-dev"
+                "/crates/lash-sqlite-store#lash-internal-sqlite-store@0.0.0-dev"
             )
-            and target.get("name") == "lash_conformance"
-            and "lib" in target.get("kind", [])
+            and target.get("name") == "conformance_memory"
+            and "test" in target.get("kind", [])
             and event.get("profile", {}).get("test")
             and event.get("executable")
         ):
             executables.append(event["executable"])
 if len(executables) != 1:
-    raise SystemExit(f"expected one lash-conformance lib test executable, found {executables!r}")
+    raise SystemExit(f"expected one SQLite memory conformance test executable, found {executables!r}")
 print(executables[0])
 PY
 )"

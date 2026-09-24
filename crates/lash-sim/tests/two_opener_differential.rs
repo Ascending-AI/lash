@@ -29,9 +29,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_core::facade_support::{
-    DirectCompletion, DirectCompletionClient, DirectRequest, InMemoryTriggerStore, LeaseTimings,
-    PluginFactory, PluginHost, SessionAttachmentStore, SystemClock, TriggerRouter,
+    DirectCompletion, DirectCompletionClient, DirectRequest, LeaseTimings, PluginFactory,
+    PluginHost, SessionAttachmentStore, SystemClock, TriggerRouter,
 };
 use lash_core::runtime::effect::RuntimeEffectControllerHandle;
 use lash_core::runtime::effect::effect_replay_driver::{OfferedChildSelection, StoreReplayAdapter};
@@ -53,19 +54,18 @@ use lash_core::{
     AdmittedScope, ArtifactOwner, AttemptOutcome, AttemptRecord, AttemptUsageDisposition,
     AwaitEventKey, AwaitEventResolver, CancellationToken, ChildDrainOutcome, EffectAddress,
     EffectHost, EffectOpener, EmitProcessEventIntent, ExecutionScope, FrameNodeId,
-    GroupDrainReport, GroupExecutors, GroupWakePolicy, InMemoryProcessDefinitionRegistry,
-    InMemoryProcessExecutionEnvStore, LlmCallId, LlmCallRecord, LoserPolicy, OnParentEnd,
-    ParentScope, PendingCompletion, PluginOptions, PreparedToolCall, ProcessEngineRegistry,
-    ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessId,
-    ProcessIncarnation, ProcessInput, ProcessLifecyclePolicy, ProcessOriginator, ProcessRef,
-    ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessService,
-    ProcessStartDeclaration, ProtocolPosition, RecoveryContract, Resolution, RuntimeAttribution,
-    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
-    SessionId, SessionPolicy, StartProcessIntent, StoreEffectGroupDrain, TestLocalProcessRegistry,
-    ToolAttemptOutcome, ToolCatalog, ToolContract, ToolDefinition, ToolExecutionGrant, ToolFailure,
-    ToolFailureClass, ToolId, ToolIntent, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone,
-    ToolProvider, ToolRegistry, ToolRetryPolicy, TurnBudget, TurnContext, TurnControlBindingId,
+    GroupDrainReport, GroupExecutors, GroupWakePolicy, LlmCallId, LlmCallRecord, LoserPolicy,
+    OnParentEnd, ParentScope, PendingCompletion, PluginOptions, PreparedToolCall,
+    ProcessEngineRegistry, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessId, ProcessIncarnation, ProcessInput, ProcessLifecyclePolicy, ProcessOriginator,
+    ProcessRef, ProcessRegistration, ProcessRegistry, ProcessService, ProcessStartDeclaration,
+    ProtocolPosition, RecoveryContract, Resolution, RuntimeAttribution, RuntimeEffectCommand,
+    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController, SessionId, SessionPolicy,
+    StartProcessIntent, StoreEffectGroupDrain, ToolAttemptOutcome, ToolCatalog, ToolContract,
+    ToolDefinition, ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolId, ToolIntent,
+    ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone, ToolProvider, ToolRegistry,
+    ToolRetryPolicy, TurnBudget, TurnContext, TurnControlBindingId,
 };
 use lash_sansio::sync::MutexExt as _;
 use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
@@ -202,7 +202,7 @@ struct OpenerDeployment {
     processes: Arc<dyn ProcessService>,
     /// The registry `processes` serves, kept so intent realization can be
     /// observed on A's and proven absent on B's.
-    process_registry: Arc<TestLocalProcessRegistry>,
+    process_registry: Arc<dyn ProcessRegistry>,
     /// `RebindField::TriggerRouter` — A none, B a real router over its own
     /// trigger store.
     trigger_router: Option<TriggerRouter>,
@@ -846,8 +846,7 @@ fn install_child_host(
 }
 
 /// The cancellation authority the opener records on a child at group
-/// formation: what this host derives for the child's admitted scope — or
-/// `None` where the controller participates locally.
+/// formation: what this host derives for the child's admitted scope.
 #[expect(
     clippy::expect_used,
     reason = "test support: a durable participant's binding derives; a refusal panics the harness with its case name by design"
@@ -857,11 +856,6 @@ async fn recorded_cancellation_authority(
     admitted: &AdmittedScope,
 ) -> Option<TurnControlBindingId> {
     let scoped = host.scoped(admitted.clone()).expect("the scope binds");
-    if scoped.controller().effect_journaling()
-        != lash_core::runtime::effect::EffectJournaling::Journaled
-    {
-        return None;
-    }
     let binding = host
         .turn_control_binding(&scoped)
         .await
@@ -1094,10 +1088,16 @@ async fn fixture(
     Arc<dyn lash_core::ProcessExecutionEnvStore>,
 ) {
     let group_key = format!("{prefix}-group");
-    // One shared environment store carrying both sides' specs: the retained
+    // Each opener deployment is a SQLite memory backend of its own; one
+    // shared environment store, A's, carries both sides' specs: the retained
     // references differ and both resolve on every host.
-    let env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        Arc::new(InMemoryProcessExecutionEnvStore::new());
+    let backend_a = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("A's memory backend");
+    let backend_b = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("B's memory backend");
+    let env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> = backend_a.process_env_store();
     let owner = ArtifactOwner::host(format!("{prefix}-env"));
     let env_spec_a = ProcessExecutionEnvSpec::new(
         PluginOptions::default(),
@@ -1126,7 +1126,7 @@ async fn fixture(
     let binding_b = recorded_cancellation_authority(&probe, &admitted_b).await;
     drop(probe);
 
-    let registry_a = Arc::new(TestLocalProcessRegistry::default());
+    let registry_a: Arc<dyn ProcessRegistry> = backend_a.process_registry();
     let intent_target_a = ProcessId::from(format!("{prefix}-intent-target-a"));
     registry_a
         .register_process_with_observers(
@@ -1148,7 +1148,7 @@ async fn fixture(
         )
         .await
         .expect("register the intent target on A's registry");
-    let registry_b = Arc::new(TestLocalProcessRegistry::default());
+    let registry_b: Arc<dyn ProcessRegistry> = backend_b.process_registry();
 
     let process_b = ProcessRef::new(
         "process-b",
@@ -1187,10 +1187,7 @@ async fn fixture(
         ),
         catalog_definitions: leaf_definitions(),
         session_host: Arc::new(MockSessionManager::default()),
-        processes: effect_backed_process_service(
-            Arc::clone(&registry_a) as Arc<dyn ProcessRegistry>,
-            Arc::clone(&env_store),
-        ),
+        processes: effect_backed_process_service(Arc::clone(&registry_a), Arc::clone(&env_store)),
         process_registry: registry_a,
         trigger_router: None,
         process_definitions: None,
@@ -1230,18 +1227,13 @@ async fn fixture(
         ),
         catalog_definitions: b_catalog_definitions(),
         session_host: Arc::new(MockSessionManager::default()),
-        processes: effect_backed_process_service(
-            Arc::clone(&registry_b) as Arc<dyn ProcessRegistry>,
-            Arc::clone(&env_store),
-        ),
+        processes: effect_backed_process_service(Arc::clone(&registry_b), Arc::clone(&env_store)),
         process_registry: registry_b,
         trigger_router: Some(TriggerRouter::new(
-            Arc::new(InMemoryTriggerStore::default()),
-            process_work_wiring_for_registry(
-                Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>
-            ),
+            backend_b.trigger_store(),
+            process_work_wiring_for_registry(backend_b.process_registry()),
         )),
-        process_definitions: Some(Arc::new(InMemoryProcessDefinitionRegistry::default())
+        process_definitions: Some(backend_b.process_definition_registry()
             as Arc<dyn lash_core::ProcessDefinitionRegistry>),
         process_engines: process_engine_fixture(),
         completion_log: Arc::default(),
@@ -1261,9 +1253,8 @@ async fn fixture(
         clock: Arc::new(TestClock::new(1_700_000_000_000)),
         opener: EffectOpener::process(process_b.clone()),
         admitted_scope: admitted_b,
-        routing: ToolChildCompletionRouting::ProcessLifetime {
-            issuer: TurnControlBindingId::new("binding-b-issuer").expect("a valid binding id"),
-        },
+        // Differs from A's durable routing on the recorded axis.
+        routing: ToolChildCompletionRouting::Inline,
         enclosing_process: Some(process_b),
         tag: "b",
     };
@@ -1601,17 +1592,28 @@ async fn a_child_runs_under_the_opener_that_admitted_it_not_the_one_reoffering_i
         1,
         "the started process rides the settlement's possession"
     );
-    let a_events = a.process_registry.raw_state_for_testing().await.events;
+    let a_events = a
+        .process_registry
+        .full_event_window(&a.provider.intent_target, 0)
+        .await
+        .expect("read A's intent-target events");
     assert!(
         a_events
             .iter()
-            .any(|(_, event)| event.event_type == INTENT_EVENT_TYPE),
+            .any(|event| event.event_type == INTENT_EVENT_TYPE),
         "the declared process event landed on A's registry: {a_events:?}"
     );
-    let b_events = b.process_registry.raw_state_for_testing().await.events;
+    let b_processes = b
+        .process_registry
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..Default::default()
+        })
+        .await
+        .expect("list B's processes");
     assert!(
-        b_events.is_empty(),
-        "B's registry received no intent realization: {b_events:?}"
+        b_processes.is_empty(),
+        "B's registry received no intent realization: {b_processes:?}"
     );
 
     // The gate settlement carries A's cancel: the cooperative token that

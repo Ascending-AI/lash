@@ -14,9 +14,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_conformance::{
-    ToolChildDeferrableRouting, ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec,
-};
+use lash_conformance::{ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec};
 use lash_core_execution::EffectHost;
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
@@ -75,27 +73,29 @@ lash_conformance::tool_child_invocation_tests!({
     // so one registry over the shared database cannot confuse two scenarios;
     // connecting per call keeps the handle inside the caller's runtime.
     let registry_url = url.clone();
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let attachment_base = attachments.path().to_path_buf();
     let make_processes: lash_conformance::ToolChildProcessesFactory = Arc::new(move || {
         let url = registry_url.clone();
+        let attachment_root = attachment_base.join(uuid::Uuid::new_v4().to_string());
         Box::pin(async move {
             let storage = PostgresStorage::connect(&url)
                 .await
                 .expect("PostgreSQL tool-child process registry storage");
-            lash_conformance::ToolChildProcesses {
-                registry: Arc::new(storage.process_registry())
-                    as Arc<dyn lash_core_execution::ProcessRegistry>,
-                process_env_store: Arc::new(storage.process_env_store())
-                    as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
-            }
+            Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                &storage,
+                Arc::new(
+                    lash_core_execution::facade_support::FileAttachmentStore::new(attachment_root),
+                ),
+            )) as Arc<dyn lash_core_execution::StoreSet>
         })
     });
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres",
         ToolChildLawFixture {
             make_world,
             make_processes,
-            deferrable_routing: ToolChildDeferrableRouting::Durable,
         },
     )
 });
@@ -123,27 +123,29 @@ lash_conformance::tool_batch_group_tests!({
             Box::pin(async move { world(url, spec).await })
         });
     let registry_url = url.clone();
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let attachment_base = attachments.path().to_path_buf();
     let make_processes: lash_conformance::ToolChildProcessesFactory = Arc::new(move || {
         let url = registry_url.clone();
+        let attachment_root = attachment_base.join(uuid::Uuid::new_v4().to_string());
         Box::pin(async move {
             let storage = PostgresStorage::connect(&url)
                 .await
                 .expect("PostgreSQL tool-batch-group process registry storage");
-            lash_conformance::ToolChildProcesses {
-                registry: Arc::new(storage.process_registry())
-                    as Arc<dyn lash_core_execution::ProcessRegistry>,
-                process_env_store: Arc::new(storage.process_env_store())
-                    as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
-            }
+            Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                &storage,
+                Arc::new(
+                    lash_core_execution::facade_support::FileAttachmentStore::new(attachment_root),
+                ),
+            )) as Arc<dyn lash_core_execution::StoreSet>
         })
     });
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres",
         ToolChildLawFixture {
             make_world,
             make_processes,
-            deferrable_routing: ToolChildDeferrableRouting::Durable,
         },
     )
 });

@@ -91,7 +91,7 @@ impl EffectLayer for YieldBeforeCancelWatch {
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-async fn build_in_memory(n_scripts: usize) -> (LashCore, Arc<ScriptedLlmHttpTransport>) {
+async fn build_sqlite_memory(n_scripts: usize) -> (LashCore, Arc<ScriptedLlmHttpTransport>) {
     build_core(
         lash_sim::backend::memory_backend()
             .await
@@ -357,7 +357,7 @@ async fn cross_backend_active_turn_cancel_then_turn_agrees() {
 
     // Variant B: cancel BEFORE turn 1 runs (closest to the recorded trace
     // timing: cancel precedes turn 1's AfterWork checkpoint).
-    let (mem_core, mem_tx) = build_in_memory(8).await;
+    let (mem_core, mem_tx) = build_sqlite_memory(8).await;
     let (b_mem, b_mem_cancel) =
         drive_cancel_before_turn(&mem_core, &mem_tx, &SessionId::from("mem-B")).await;
     let (sq_core, sq_tx) = build_sqlite(&tmp.path().join("sqlite-B"), 8).await;
@@ -365,7 +365,7 @@ async fn cross_backend_active_turn_cancel_then_turn_agrees() {
         drive_cancel_before_turn(&sq_core, &sq_tx, &SessionId::from("sql-B")).await;
 
     // Variant A: cancel AFTER turn 1 (task-literal ordering).
-    let (mem_core_a, mem_tx_a) = build_in_memory(8).await;
+    let (mem_core_a, mem_tx_a) = build_sqlite_memory(8).await;
     let (a_mem, a_mem_cancel) =
         drive_cancel_after_turn(&mem_core_a, &mem_tx_a, &SessionId::from("mem-A")).await;
     let (sq_core_a, sq_tx_a) = build_sqlite(&tmp.path().join("sqlite-A"), 8).await;
@@ -373,7 +373,7 @@ async fn cross_backend_active_turn_cancel_then_turn_agrees() {
         drive_cancel_after_turn(&sq_core_a, &sq_tx_a, &SessionId::from("sql-A")).await;
 
     // Variant C: no cancel control (active-turn input should be claimed).
-    let (mem_core_c, mem_tx_c) = build_in_memory(8).await;
+    let (mem_core_c, mem_tx_c) = build_sqlite_memory(8).await;
     let c_mem = drive_no_cancel_control(&mem_core_c, &mem_tx_c, &SessionId::from("mem-C")).await;
     let (sq_core_c, sq_tx_c) = build_sqlite(&tmp.path().join("sqlite-C"), 8).await;
     let c_sq = drive_no_cancel_control(&sq_core_c, &sq_tx_c, &SessionId::from("sql-C")).await;
@@ -397,7 +397,7 @@ async fn cross_backend_active_turn_cancel_then_turn_agrees() {
     println!("  sqlite    turns:  {c_sq:#?}");
 
     // Variant D: claim-then-cancel (cancel observes post-claim terminal state).
-    let (mem_core_d, mem_tx_d) = build_in_memory(8).await;
+    let (mem_core_d, mem_tx_d) = build_sqlite_memory(8).await;
     let (d_mem, d_mem_cancel) =
         drive_claim_then_cancel(&mem_core_d, &mem_tx_d, &SessionId::from("mem-D")).await;
     let (sq_core_d, sq_tx_d) = build_sqlite(&tmp.path().join("sqlite-D"), 8).await;
@@ -515,7 +515,7 @@ async fn drive_first_party_cancel_before_start(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cross_backend_first_party_turn_cancel_agrees() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let (mem_core, _) = build_in_memory(2).await;
+    let (mem_core, _) = build_sqlite_memory(2).await;
     let memory =
         drive_first_party_cancel_before_start(&mem_core, &SessionId::from("turn-cancel-memory"))
             .await;

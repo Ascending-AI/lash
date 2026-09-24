@@ -1,10 +1,5 @@
-use lash_sansio::{SessionId, TurnId, sync::MutexExt};
-use std::{
-    collections::HashMap,
-    fmt::Write as _,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use lash_sansio::{SessionId, TurnId};
+use std::{fmt::Write as _, path::PathBuf, sync::Arc};
 
 use lash::{
     LashCore, TurnOutcome,
@@ -168,10 +163,10 @@ impl BenchmarkRuntime {
 
     #[expect(
         clippy::expect_used,
-        reason = "the in-memory store is installed by set_up before measurement begins; the accessor is the panicking half of the Option field"
+        reason = "the memory lane installs its session store before measurement begins; the accessor is the panicking half of the Option field"
     )]
     pub(crate) fn store(&self) -> Arc<RuntimePerfStore> {
-        Arc::clone(self.store.as_ref().expect("runtime perf in-memory store"))
+        Arc::clone(self.store.as_ref().expect("runtime perf memory-lane store"))
     }
 
     pub(crate) fn store_metrics(&self) -> Arc<RuntimePerfStoreMetrics> {
@@ -233,8 +228,8 @@ impl BenchmarkRuntime {
         if let Some(session) = self.session.take() {
             session.close().await?;
         }
-        // The perf catalog serves this runtime's one root store for the
-        // session, so the seeded state lands in `self.store()`.
+        // The session's store and `self.store()` share one SQLite memory
+        // database, so the seeded state is what `self.store()` reads.
         self.session = Some(
             self.core
                 .open_session_with_state(
@@ -837,21 +832,38 @@ fn benchmark_plugin_factories(
     factories
 }
 
-/// The in-process lane's backend: a SQLite memory backend whose
-/// session catalog is the perf store decorator over `store`.
-async fn perf_store_backend(store: Arc<RuntimePerfStore>) -> anyhow::Result<PerfBackend> {
-    Ok(PerfBackend::over(memory_backend().await?)
-        .with_catalog(Arc::new(RuntimePerfStoreFactory::new(store))))
+/// The in-process lane's backend: a SQLite memory backend whose session
+/// catalog is the perf store decorator over its own.
+async fn perf_store_backend() -> anyhow::Result<(PerfBackend, RuntimePerfStoreFactory)> {
+    let backend = memory_backend().await?;
+    let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
+        backend.session_store_factory(),
+    );
+    Ok((
+        PerfBackend::over(backend).with_catalog(Arc::new(factory.clone())),
+        factory,
+    ))
+}
+
+/// A decorated root session store on its own SQLite memory backend, for the
+/// store-level scenarios that drive no runtime.
+pub(crate) async fn memory_perf_store(
+    session_id: &SessionId,
+) -> anyhow::Result<Arc<RuntimePerfStore>> {
+    let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
+        memory_backend().await?.session_store_factory(),
+    );
+    Ok(factory.root_store(session_id).await?)
 }
 
 pub(crate) async fn build_embed_core(
     scenario: RuntimePerfScenario,
-    store: Arc<RuntimePerfStore>,
-) -> anyhow::Result<BenchmarkCore> {
-    let backend: Arc<dyn lash::Backend> = Arc::new(perf_store_backend(store).await?);
+) -> anyhow::Result<(BenchmarkCore, RuntimePerfStoreFactory)> {
+    let (backend, factory) = perf_store_backend().await?;
+    let backend: Arc<dyn lash::Backend> = Arc::new(backend);
     let effect_host = backend.effect_host();
     let provider = benchmark_provider(scenario).into_handle();
-    match scenario.execution_mode() {
+    let core = match scenario.execution_mode() {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider)
             .with_explicit_ephemeral_facets()
             .build(runtime_perf_owner())
@@ -869,12 +881,12 @@ pub(crate) async fn build_embed_core(
         .build(runtime_perf_owner())
         .map(BenchmarkCore::Rlm)
         .map_err(anyhow::Error::from),
-    }
+    }?;
+    Ok((core, factory))
 }
 
-pub(crate) async fn build_runtime_with_store(
+pub(crate) async fn build_runtime(
     scenario: RuntimePerfScenario,
-    store: Option<Arc<RuntimePerfStore>>,
     trace_config: Option<RuntimePerfTraceConfig>,
 ) -> anyhow::Result<BenchmarkRuntime> {
     let wiring = scenario.wiring();
@@ -905,13 +917,7 @@ pub(crate) async fn build_runtime_with_store(
             let (provider, control) = benchmark_provider_with_control(scenario);
             (provider.into_handle(), control)
         };
-    let store = store.unwrap_or_else(|| Arc::new(RuntimePerfStore::default()));
-    // Every scenario measures the same host; the start-gate scenario layers
-    // its retry fixture over it rather than swapping the host out.
-    let mut perf_backend = perf_store_backend(Arc::clone(&store)).await?;
-    if wiring.turn_start_gate {
-        perf_backend = perf_backend.with_effect_layer(Arc::new(StartGateRetryLayer::default()));
-    }
+    let (perf_backend, store_factory) = perf_store_backend().await?;
     let backend: Arc<dyn lash::Backend> = Arc::new(perf_backend);
     let effect_host = backend.effect_host();
     let settlement_control = scenario
@@ -944,8 +950,8 @@ pub(crate) async fn build_runtime_with_store(
                 builder = builder.trace_level(config.trace_level);
             }
             if !wiring.queued_work {
-                // Scenarios without a queued-work lane still use the retained
-                // perf store installed above.
+                // Scenarios without a queued-work lane still use the decorated
+                // catalog installed above.
                 builder = builder.without_queued_work();
             }
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
@@ -970,18 +976,20 @@ pub(crate) async fn build_runtime_with_store(
                 builder = builder.trace_level(config.trace_level);
             }
             if !wiring.queued_work {
-                // Scenarios without a queued-work lane still use the retained
-                // perf store installed above.
+                // Scenarios without a queued-work lane still use the decorated
+                // catalog installed above.
                 builder = builder.without_queued_work();
             }
             BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
         }
     };
-    let session = core
-        .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
-        .await?;
+    let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
+    let session = core.open_session(session_id.clone()).await?;
+    let store = store_factory
+        .session_store(&session_id)
+        .ok_or_else(|| anyhow::anyhow!("runtime perf session store was not opened"))?;
     Ok(BenchmarkRuntime {
-        store_metrics: store.metrics(),
+        store_metrics: store_factory.metrics(),
         core,
         session: Some(session),
         store: Some(store),
@@ -991,35 +999,6 @@ pub(crate) async fn build_runtime_with_store(
         tool_catalog_observer,
         _openai_compat_server: openai_compat_server,
     })
-}
-
-/// Fails the first two peeks of each turn-cancel gate so the start gate's
-/// bounded retry wrapper is on the measured path.
-#[derive(Default)]
-struct StartGateRetryLayer {
-    attempts_by_key: Mutex<HashMap<String, usize>>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::testing::EffectLayer for StartGateRetryLayer {
-    async fn peek_await_event(
-        &self,
-        inner: &dyn lash_core::AwaitEventResolver,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        if matches!(key.wait, lash_core::AwaitEventWaitIdentity::TurnCancelGate) {
-            let mut attempts = self.attempts_by_key.lock_recover();
-            let attempt = attempts.entry(key.key_id.clone()).or_default();
-            *attempt += 1;
-            if *attempt < 3 {
-                return Err(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RuntimePerfStartGateRetry,
-                    "deterministic start-gate retry fixture",
-                ));
-            }
-        }
-        inner.peek_await_event(key).await
-    }
 }
 
 struct BenchmarkWorkbenchTriggerPluginFactory;

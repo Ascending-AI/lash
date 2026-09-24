@@ -187,6 +187,63 @@ impl EffectHost for RecordingEffectHost {
     }
 }
 
+#[cfg(test)]
+mod recording_effect_host_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[tokio::test]
+    async fn non_enumerable_effect_host_reports_typed_unsupported() {
+        let error = RecordingEffectHost::default()
+            .list_outstanding_await_event_keys(&SessionId::from("unsupported-session"))
+            .await
+            .expect_err("the default host implementation must not claim an empty registry");
+        assert_eq!(error.code, crate::RuntimeErrorCode::AwaitEventUnsupported);
+    }
+
+    #[tokio::test]
+    async fn recording_effect_host_records_selected_scope_and_envelope() {
+        let host = RecordingEffectHost::default();
+        let scope = ExecutionScope::runtime_operation("trigger:button-1");
+        let scoped = host
+            .scoped(admit(scope.clone()))
+            .expect("scoped controller");
+        let envelope = RuntimeEffectEnvelope::new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(scope.clone(), "trigger:button-1:sleep-effect")
+                    .expect("valid recording address"),
+                RuntimeAttribution::for_session("session-1"),
+                "sleep-effect",
+            ),
+            RuntimeEffectCommand::Sleep {
+                spec: lash_core::SleepSpec::For { duration_ms: 0 },
+            },
+        );
+
+        let outcome = scoped
+            .controller()
+            .execute_effect(envelope, RuntimeEffectLocalExecutor::unavailable())
+            .await
+            .expect("execute sleep");
+
+        assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
+        assert_eq!(host.selected_scopes(), vec![scope.clone()]);
+        let records = host.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].execution_scope, scope);
+        assert_eq!(
+            records[0].runtime_attribution,
+            RuntimeAttribution::for_session("session-1")
+        );
+        assert_eq!(records[0].effect_id, "sleep-effect");
+        assert_eq!(records[0].effect_kind, RuntimeEffectKind::Sleep);
+        assert_eq!(
+            records[0].replay_key.as_deref(),
+            Some("trigger:button-1:sleep-effect")
+        );
+    }
+}
+
 /// This suite checks the deployment-level contract: execution scopes must carry
 /// stable semantic identity, empty ids must fail loudly, and hosts that expose
 /// a static scoped controller must preserve the same scope metadata. It does
@@ -228,7 +285,6 @@ where
     let second = make();
     assert_fresh_instances(&first, &second, "effect_host_await_events");
     drop((first, second));
-    effect_host_local_turn_control_resolves_on_minting_host(make()).await;
     effect_host_await_event_key_is_stable(make()).await;
     effect_host_await_event_accepts_early_resolution(make()).await;
     effect_host_await_event_duplicate_resolution_is_terminal(make()).await;
@@ -442,44 +498,49 @@ pub async fn effect_controller_segmentation_vector(
     );
 }
 
-/// How a substrate treats completed effects when an invocation is redriven.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConformanceEffectRedrive {
-    /// The successor reads completed effects from the engine journal.
-    ReplaysJournal,
-    /// An uncommitted effect is executed again by the successor invocation.
-    ReexecutesUncommitted,
-}
-
 /// One live engine invocation used by controller conformance contracts.
 ///
 /// Redrive consumes the current invocation, runs its explicit end control, and
-/// returns a controller bound to the successor invocation. There is no ended
-/// state that can still expose a controller.
+/// returns a controller bound to the successor invocation, which reads the
+/// effects the predecessor completed from the journal (every host journals,
+/// ADR 0102). There is no ended state that can still expose a controller.
 pub struct ConformanceInvocation {
     controller: Arc<dyn RuntimeEffectController>,
     execution_scope: ExecutionScope,
-    effect_redrive: ConformanceEffectRedrive,
-    /// The controller's effect-journal fault injector, when it is a journaled
-    /// controller exposing one (FIG-3524); `None` for native controllers.
+    /// The process-exec-env store of the controller's substrate: where a
+    /// runtime driving this invocation publishes its tool children's
+    /// execution environments.
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    /// The controller's effect-journal fault injector, when the controller
+    /// exposes one (FIG-3524).
     journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
     end: Arc<dyn Fn() + Send + Sync>,
-    redrive: Arc<dyn Fn() -> Arc<dyn RuntimeEffectController> + Send + Sync>,
+    redrive: Arc<dyn Fn() -> InvocationSuccessor + Send + Sync>,
+}
+
+/// What a redrive hands the successor worker: its controller, and the
+/// process-exec-env store it publishes through. A successor is a new worker,
+/// so a fixture whose substrate is reached through connections gives it
+/// connections of its own rather than the ones its predecessor held.
+pub struct InvocationSuccessor {
+    pub controller: Arc<dyn RuntimeEffectController>,
+    pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
 }
 
 impl ConformanceInvocation {
-    /// Build an invocation from its scoped controller and lifecycle controls.
+    /// Build an invocation from its scoped controller, the process-exec-env
+    /// store of the controller's substrate, and lifecycle controls.
     pub fn new(
         controller: Arc<dyn RuntimeEffectController>,
         execution_scope: ExecutionScope,
-        effect_redrive: ConformanceEffectRedrive,
+        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
         end: impl Fn() + Send + Sync + 'static,
-        redrive: impl Fn() -> Arc<dyn RuntimeEffectController> + Send + Sync + 'static,
+        redrive: impl Fn() -> InvocationSuccessor + Send + Sync + 'static,
     ) -> Self {
         Self {
             controller,
             execution_scope,
-            effect_redrive,
+            process_env_store,
             journal_faults: None,
             end: Arc::new(end),
             redrive: Arc::new(redrive),
@@ -517,30 +578,20 @@ impl ConformanceInvocation {
         &self.execution_scope
     }
 
-    /// Describe what a successor does with a completed pre-crash effect.
-    pub fn effect_redrive(&self) -> ConformanceEffectRedrive {
-        self.effect_redrive
-    }
-
-    pub fn native() -> Self {
-        Self::new(
-            Arc::new(crate::NativeRuntimeEffectController::default()),
-            ExecutionScope::runtime_operation("native-conformance"),
-            ConformanceEffectRedrive::ReexecutesUncommitted,
-            || {},
-            || Arc::new(crate::NativeRuntimeEffectController::default()),
-        )
+    /// The process-exec-env store of the controller's substrate.
+    pub fn process_env_store(&self) -> Arc<dyn crate::ProcessExecutionEnvStore> {
+        Arc::clone(&self.process_env_store)
     }
 
     #[must_use]
     /// End this invocation and construct its successor.
     pub fn redrive(self) -> Self {
         (self.end)();
-        let controller = (self.redrive)();
+        let successor = (self.redrive)();
         Self {
-            controller,
+            controller: successor.controller,
             execution_scope: self.execution_scope,
-            effect_redrive: self.effect_redrive,
+            process_env_store: successor.process_env_store,
             journal_faults: self.journal_faults,
             end: self.end,
             redrive: self.redrive,
@@ -1214,100 +1265,6 @@ async fn effect_host_static_scope_preserves_metadata_when_available(host: Arc<dy
     };
     assert_eq!(scoped.execution_scope(), &scope);
     assert_eq!(scoped.scope_id(), "static-runtime-op");
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(super) async fn effect_host_local_turn_control_resolves_on_minting_host(
-    host: Arc<dyn EffectHost>,
-) {
-    let scope = ExecutionScope::turn(
-        format!("local-control-{}", uuid::Uuid::new_v4()),
-        "local-turn",
-    );
-    let local = crate::runtime::NativeRuntimeEffectController::default();
-    let local_scoped = ScopedEffectController::borrowed(&local, admit(scope.clone()))
-        .expect("local turn-control scope");
-    let binding = host
-        .turn_control_binding(&local_scoped)
-        .await
-        .expect("local turn-control binding");
-    let crate::TurnControlBinding::HostOwned { resolver, .. } = binding else {
-        panic!("local turn-control binding must be host-owned");
-    };
-    for identity in [
-        AwaitEventWaitIdentity::TurnCancelGate,
-        AwaitEventWaitIdentity::TurnTerminal,
-    ] {
-        let key = resolver
-            .await_event_key(&scope, identity)
-            .await
-            .expect("mint local turn-control key through binding");
-        let resolution = Resolution::Ok(serde_json::json!({"control": "ready"}));
-        resolver
-            .resolve_await_event(&key, resolution.clone())
-            .await
-            .expect("resolve local turn-control key through minting resolver");
-        let result = host
-            .await_await_event(&key, tokio_util::sync::CancellationToken::new(), None)
-            .await;
-        assert_eq!(
-            result.expect("minting host must accept its local turn-control key"),
-            resolution
-        );
-    }
-}
-
-#[cfg(test)]
-mod local_control_conformance_tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct ForeignResolverHost {
-        host: crate::NativeEffectHost,
-        foreign: crate::NativeEffectHost,
-    }
-
-    #[async_trait::async_trait]
-    impl crate::AwaitEventResolver for ForeignResolverHost {
-        async fn await_await_event(
-            &self,
-            key: &crate::AwaitEventKey,
-            cancel: tokio_util::sync::CancellationToken,
-            deadline: Option<std::time::Instant>,
-        ) -> Result<Resolution, crate::RuntimeError> {
-            self.host.await_await_event(key, cancel, deadline).await
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl EffectHost for ForeignResolverHost {
-        fn turn_control_binding_id(&self) -> String {
-            "conformance-foreign-resolver".to_string()
-        }
-
-        fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
-            &self.foreign
-        }
-
-        fn scoped<'run>(
-            &'run self,
-            scope: crate::AdmittedScope,
-        ) -> Result<ScopedEffectController<'run>, crate::RuntimeError> {
-            self.host.scoped(scope)
-        }
-    }
-
-    #[tokio::test]
-    #[should_panic(expected = "minting host must accept its local turn-control key")]
-    async fn effect_host_conformance_rejects_foreign_turn_control_resolver() {
-        effect_host_local_turn_control_resolves_on_minting_host(Arc::new(
-            ForeignResolverHost::default(),
-        ))
-        .await;
-    }
 }
 
 #[expect(

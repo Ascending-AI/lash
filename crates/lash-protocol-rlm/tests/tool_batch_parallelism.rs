@@ -89,10 +89,12 @@ mod sqlite_memory {
             .await
             .expect("open the memory tool-batch parallelism backend");
         let host = backend.effect_host() as Arc<dyn EffectHost>;
+        let stores = Arc::new(backend.stores().clone()) as Arc<dyn lash_core::StoreSet>;
         (
             backend,
             "sqlite-memory",
             Arc::clone(&host),
+            stores,
             vec![
                 lash_conformance::rlm_promise_all_producer(cell_bridge_factories()),
                 // Each scenario opens its own session, so it also opens its
@@ -119,22 +121,21 @@ mod sqlite {
 
     lash_conformance::tool_batch_parallelism_tests!({
         let dir = tempfile::tempdir().expect("tempdir");
-        let host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(
-                &dir.path().join("rlm-tool-batch-parallelism.db"),
-            )
+        let backend = lash_sqlite_store::SqliteBackend::open(dir.path().join("backend"))
             .await
-            .expect("open the SQLite tool-batch parallelism effect host"),
-        ) as Arc<dyn EffectHost>;
+            .expect("open the SQLite tool-batch parallelism backend");
+        let host = backend.effect_host() as Arc<dyn EffectHost>;
+        let stores = Arc::new(backend.stores().clone()) as Arc<dyn lash_core::StoreSet>;
         // Each scenario opens its own session, so it also opens its own
         // registry: a durable registry carried across scenarios would let one
         // scenario's rows decide the next one's admission.
         let registry_root = dir.path().to_path_buf();
         let opened = Arc::new(AtomicUsize::new(0));
         (
-            dir,
+            (dir, backend),
             "sqlite",
             Arc::clone(&host),
+            stores,
             vec![
                 lash_conformance::rlm_promise_all_producer(cell_bridge_factories()),
                 lash_conformance::lashlang_process_aggregate_producer(

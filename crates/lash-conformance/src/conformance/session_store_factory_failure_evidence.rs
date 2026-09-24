@@ -15,9 +15,10 @@ use std::sync::Arc;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn session_store_factory_mid_stream_failure_evidence(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    backend: Arc<dyn crate::Backend>,
     advance_commit_clock: impl FnOnce(),
 ) {
+    let factory = backend.session_store_factory();
     const SESSION_ID: &str = "failure-evidence-session";
     const PARTIAL_TEXT: &str = "provider-visible prefix before the stream failed";
 
@@ -74,12 +75,11 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         })
         .build()
         .into_handle();
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let mut host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+    let effect_host = backend.effect_host();
+    let mut host = crate::conformance::backend_host_config(
+        backend.as_ref(),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    host = host.with_effect_host(Arc::clone(&effect_host));
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = request.policy.clone();
     policy.session_id = Some(SessionId::from(SESSION_ID.to_string()));

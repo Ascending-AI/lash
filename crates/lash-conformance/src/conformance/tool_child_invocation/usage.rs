@@ -82,7 +82,7 @@ fn usage_group(
 /// must find the parked child unrunnable: nothing bills under an opener the
 /// request never recorded.
 ///
-/// Durable tiers only: the in-memory host journals nothing past the crash.
+/// Drain-bearing tiers only: the crash and its successor drain are the law.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -106,7 +106,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
     let opener_b = crate::EffectOpener::for_scope(&crate::admit(scope_b.clone()))
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-usage-group");
-    let process_env_store = (fixture.make_processes)().await.process_env_store;
+    let process_env_store = (fixture.make_processes)().await.process_env_store();
     let env_ref = crate::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
 
     let probe_world = (fixture.make_world)(ToolChildWorldSpec {
@@ -132,6 +132,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
     };
 
     crashed_world(fixture, {
+        let fixture_processes = Arc::clone(&fixture.make_processes);
         let scope = scope_a.clone();
         let session_id = session_a.clone();
         let group_key = group_key.clone();
@@ -139,7 +140,6 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
         let env_ref = env_ref.clone();
         let observation = Arc::clone(&observation);
         let parked_call = parked_call.clone();
-        let routing_kind = fixture.deferrable_routing;
         let opener = opener_a.clone();
         let provider = provider(&session_a);
         move |world| {
@@ -149,7 +149,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
                     &world.host,
                     &scope,
                     provider,
-                    Arc::new(crate::TestLocalProcessRegistry::default()),
+                    fixture_processes().await.process_registry(),
                     env_store,
                     opener,
                     tokio_util::sync::CancellationToken::new(),
@@ -165,7 +165,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
                         &session_id,
                         &group_key,
                         &env_ref,
-                        deferrable_routing(routing_kind, &world.host),
+                        ToolChildCompletionRouting::Durable,
                         recorded_cancellation_authority(&world.host, &crate::admit(scope.clone()))
                             .await,
                     ))
@@ -237,7 +237,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
         &successor.host,
         &scope_b,
         provider(&session_b),
-        Arc::new(crate::TestLocalProcessRegistry::default()),
+        (fixture.make_processes)().await.process_registry(),
         Arc::clone(&process_env_store),
         opener_b,
         tokio_util::sync::CancellationToken::new(),
@@ -266,7 +266,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
         &successor.host,
         &scope_a,
         provider(&session_a),
-        (fixture.make_processes)().await.registry,
+        (fixture.make_processes)().await.process_registry(),
         Arc::clone(&process_env_store),
         opener_a,
         tokio_util::sync::CancellationToken::new(),
@@ -329,7 +329,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
             &session_a,
             &group_key,
             &env_ref,
-            deferrable_routing(fixture.deferrable_routing, &successor.host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&successor.host, &crate::admit(scope_a.clone())).await,
         ))
         .await
@@ -464,7 +464,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
             &session_a,
             &group_key,
             &env_ref,
-            deferrable_routing(fixture.deferrable_routing, &successor.host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&successor.host, &crate::admit(scope_a.clone())).await,
         ))
         .await

@@ -1,8 +1,9 @@
 //! SQLite registration of the queue-drain end laws.
 //!
-//! The world carries the session store the drain commits to, the process
-//! registry the runtime and the sweep share, and the factory the sweep
-//! re-opens the session through to read `drain_end_exists`. The group seam is
+//! The world carries the session store the drain commits to and the
+//! backend's store set: the process registry the runtime and the sweep share,
+//! and the factory the sweep re-opens the session through to read
+//! `drain_end_exists`. The group seam is
 //! real on this tier: `effect_host` is the host the drain's scope is minted
 //! from and `group_host` a second `SqliteEffectHost` over the same journal,
 //! so L7's closing group holds a lease foreign to the draining runtime and
@@ -12,7 +13,7 @@ use std::sync::Arc;
 
 use lash_conformance::{DrainEndWorld, DrainEndWorldFactory};
 use lash_core_execution::store::RuntimePersistence;
-use lash_core_execution::{EffectHost, ProcessRegistry, SessionStoreFactory};
+use lash_core_execution::{EffectHost, SessionStoreFactory as _, StoreSet};
 use lash_sansio::SessionId;
 
 use super::{Retained, SUBSTRATE};
@@ -35,13 +36,14 @@ async fn sqlite_drain_end_world(retained: Retained) -> DrainEndWorld {
     let group_host = backend.reopen().await.effect_host();
     let world = DrainEndWorld {
         store: store as Arc<dyn RuntimePersistence>,
-        registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
-        session_factory: backend.session_store_factory() as Arc<dyn SessionStoreFactory>,
+        stores: Arc::new(backend.stores().clone()) as Arc<dyn StoreSet>,
         effect_host: lash_conformance::install_drain_end_executors(
-            backend.effect_host() as Arc<dyn EffectHost>
+            backend.effect_host() as Arc<dyn EffectHost>,
+            backend.process_env_store(),
         ),
         group_host: Some(lash_conformance::install_drain_end_executors(
             group_host as Arc<dyn EffectHost>,
+            backend.process_env_store(),
         )),
     };
     // The store connections the world returns read and write the backend

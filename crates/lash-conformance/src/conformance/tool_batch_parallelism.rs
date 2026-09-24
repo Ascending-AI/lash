@@ -840,10 +840,30 @@ struct ScenarioWorld {
     factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     model_calls: Arc<AtomicUsize>,
     effect_host: Arc<dyn crate::EffectHost>,
+    /// The store set the tier's host journals beside: the session store,
+    /// the runtime's ports and the process worker's sessions.
+    stores: Arc<dyn crate::StoreSet>,
     session_id: lash_sansio::SessionId,
     /// The tier's process registry, present only for a producer that issues
     /// its batch from inside a process.
     process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
+}
+
+/// The tier a scenario runs on: its effect host and the store set the host
+/// journals beside.
+#[derive(Clone)]
+struct ScenarioTier {
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+}
+
+impl ScenarioTier {
+    fn of(effect_host: &Arc<dyn crate::EffectHost>, stores: &Arc<dyn crate::StoreSet>) -> Self {
+        Self {
+            effect_host: Arc::clone(effect_host),
+            stores: Arc::clone(stores),
+        }
+    }
 }
 
 #[expect(
@@ -852,7 +872,7 @@ struct ScenarioWorld {
 )]
 async fn run_scenario(
     prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
+    tier: ScenarioTier,
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     producer: &ToolBatchProducer,
     plan: &ToolBatchPlan,
@@ -887,7 +907,7 @@ async fn run_scenario(
                 Box::pin(async move {
                     let observed = run_scenario_on_session(
                         session_id,
-                        effect_host,
+                        tier,
                         Some(turn_controller),
                         &producer,
                         &plan,
@@ -912,13 +932,17 @@ async fn run_scenario(
 /// [`tool_batch_turn_id`] itself and hands it in (FIG-3398).
 async fn run_scenario_on_session(
     session_id: lash_sansio::SessionId,
-    effect_host: Arc<dyn crate::EffectHost>,
+    tier: ScenarioTier,
     turn_controller: Option<crate::ScopedEffectController<'_>>,
     producer: &ToolBatchProducer,
     plan: &ToolBatchPlan,
     gated: bool,
     dependencies: BTreeMap<String, Vec<String>>,
 ) -> ScenarioObservations {
+    let ScenarioTier {
+        effect_host,
+        stores,
+    } = tier;
     let leaf_names = plan
         .leaves
         .iter()
@@ -962,6 +986,7 @@ async fn run_scenario_on_session(
         factories,
         model_calls: Arc::new(AtomicUsize::new(0)),
         effect_host,
+        stores,
         session_id,
         process_registry: producer.process_registry.as_ref().map(|make| make()),
     };
@@ -1076,15 +1101,13 @@ async fn drive_turn(
             }
         })
         .build();
-    // Constructed on the tier's host rather than `in_memory` with the field
-    // overwritten: `RuntimeHostConfig::new` installs the tool-child resolver
-    // on the effect host it is given, and a later `control.effect_host` swap
-    // would leave the resolver registered on the discarded host.
-    let mut host = crate::RuntimeHostConfig::new(
+    // Constructed on the tier's host: `RuntimeHostConfig::new` installs the
+    // tool-child resolver on the effect host it is given, and a later
+    // `control.effect_host` swap would leave the resolver registered on the
+    // discarded host.
+    let mut host = crate::conformance::store_set_host_config(
+        world.stores.as_ref(),
         Arc::clone(&world.effect_host),
-        Arc::new(crate::InMemoryAttachmentStore::new()),
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
-        crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver =
@@ -1131,7 +1154,7 @@ async fn drive_turn(
                         world.factories.clone(),
                     )),
                     host.clone(),
-                    Arc::new(crate::InMemorySessionStoreFactory::new()),
+                    world.stores.session_store_factory(),
                     lash_core_worker::WorkerProcessWork::SelfNative(watched),
                     Arc::new(crate::NoQueuedWork::new()),
                     crate::testing::runtime_lease_owner(),
@@ -1148,7 +1171,19 @@ async fn drive_turn(
             .with_initial_state(state)
             .with_runtime_host(host)
             .with_plugin_host(plugin_host)
-            .with_store(Arc::new(crate::InMemorySessionStore::new()))
+            .with_store(
+                world
+                    .stores
+                    .session_store_factory()
+                    .create_store(&crate::SessionStoreCreateRequest {
+                        pending_observer_intents: Vec::new(),
+                        session_id: world.session_id.clone(),
+                        relation: crate::SessionRelation::Root,
+                        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                    })
+                    .await
+                    .expect("create the tool-batch parallelism session store"),
+            )
             .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
             .build(),
     )
@@ -1285,7 +1320,8 @@ pub struct ToolBatchMeasurement {
     pub model_calls: usize,
 }
 
-/// Drives one width-`width` batch through `producer` on `effect_host` under
+/// Drives one width-`width` batch through `producer` on `effect_host` and
+/// the store set it journals beside, under
 /// `session_id` and measures it (FIG-3398 baseline).
 ///
 /// The plan is the plain one: every leaf takes the catalogue route and the
@@ -1301,6 +1337,7 @@ pub struct ToolBatchMeasurement {
 pub async fn measure_tool_batch(
     session_id: lash_sansio::SessionId,
     effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
     turn_controller: Option<crate::ScopedEffectController<'_>>,
     producer: &ToolBatchProducer,
     width: usize,
@@ -1310,7 +1347,10 @@ pub async fn measure_tool_batch(
     let started = Instant::now();
     let observed = run_scenario_on_session(
         session_id,
-        effect_host,
+        ScenarioTier {
+            effect_host,
+            stores,
+        },
         turn_controller,
         producer,
         &plan,
@@ -1397,12 +1437,13 @@ fn assert_activation_shape(context: &str, plan: &ToolBatchPlan, observed: &Scena
 /// The cross-tier tool-batch parallelism law.
 ///
 /// `prefix` namespaces the sessions this law opens on the supplied tier;
-/// `effect_host` is the tier under test; `producer` is the product surface that
+/// `effect_host` and `stores` are the tier under test; `producer` is the product surface that
 /// issues the batch. See the module documentation for what is proven and why it
 /// is proven by rendezvous rather than by wall time.
 pub async fn tool_batch_cross_tier_parallelism(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     producer: ToolBatchProducer,
 ) {
@@ -1419,7 +1460,7 @@ pub async fn tool_batch_cross_tier_parallelism(
         );
         let observed = run_scenario(
             prefix,
-            Arc::clone(&effect_host),
+            ScenarioTier::of(&effect_host, &stores),
             &runner,
             &producer,
             &plan,
@@ -1444,7 +1485,7 @@ pub async fn tool_batch_cross_tier_parallelism(
         }
         run_scenario(
             prefix,
-            Arc::clone(&effect_host),
+            ScenarioTier::of(&effect_host, &stores),
             &runner,
             &producer,
             &reverse,
@@ -1497,7 +1538,7 @@ pub async fn tool_batch_cross_tier_parallelism(
         );
         let observed = run_scenario(
             prefix,
-            Arc::clone(&effect_host),
+            ScenarioTier::of(&effect_host, &stores),
             &runner,
             &producer,
             &routes,
@@ -1524,7 +1565,7 @@ pub async fn tool_batch_cross_tier_parallelism(
     let differential = plan("differential", &leaf_routes(8), ToolBatchEntry::Direct);
     let concurrent = run_scenario(
         prefix,
-        Arc::clone(&effect_host),
+        ScenarioTier::of(&effect_host, &stores),
         &runner,
         &producer,
         &differential,
@@ -1534,7 +1575,7 @@ pub async fn tool_batch_cross_tier_parallelism(
     .await;
     let serial_safe = run_scenario(
         prefix,
-        Arc::clone(&effect_host),
+        ScenarioTier::of(&effect_host, &stores),
         &runner,
         &producer,
         &differential,

@@ -3,20 +3,46 @@ use lash_sansio::SessionId;
 
 /// Agreement alone misses a missing-root defect shared by every backend.
 /// Apply the same independent byte-survival and rollback oracle to all three.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn cross_owner_attachment_adoption(
     sqlite_root: &Path,
     postgres: &PostgresStorage,
 ) {
+    let memory = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("SQLite memory backend");
     let factories: [Arc<dyn SessionStoreFactory>; 3] = [
-        Arc::new(InMemorySessionStoreFactory::new()),
+        memory.session_store_factory(),
         Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             sqlite_root.join("cross-owner"),
         )),
         Arc::new(postgres.session_store_factory()),
     ];
-    for factory in factories {
-        Box::pin(lash_conformance::cross_owner_attachment_adoption_conformance(factory)).await;
+    for (index, factory) in factories.into_iter().enumerate() {
+        Box::pin(
+            lash_conformance::cross_owner_attachment_adoption_conformance(
+                factory,
+                fresh_file_bytes(sqlite_root.join(format!("cross-owner-bytes-{index}"))),
+            ),
+        )
+        .await;
     }
+}
+
+/// Fresh, empty attachment byte stores, each a filesystem store in its own
+/// directory under `root`: the byte side of the root-set law, held apart
+/// from the three session stores it compares.
+fn fresh_file_bytes(root: PathBuf) -> lash_conformance::AttachmentBytesFactory {
+    let next = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    Arc::new(move || {
+        let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            root.join(format!("bytes-{ordinal}")),
+        )) as Arc<dyn lash_core::AttachmentStore>
+    })
 }
 
 pub(super) fn fence_precedence_case() -> GeneratedCase {
@@ -303,14 +329,14 @@ pub(super) async fn selected_observer_intents(
     let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(&path, &root)
         .await
         .expect("SQLite observer registry");
+    let memory = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("SQLite memory observer backend");
     let backends: Vec<(
         Arc<dyn SessionStoreFactory>,
         Arc<dyn lash_core::ProcessRegistry>,
     )> = vec![
-        (
-            Arc::new(InMemorySessionStoreFactory::new()),
-            Arc::new(lash_core::TestLocalProcessRegistry::default()),
-        ),
+        (memory.session_store_factory(), memory.process_registry()),
         (
             Arc::new(
                 lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(root, path),

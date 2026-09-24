@@ -148,10 +148,6 @@ impl ColdProcessTurnAction {
     fn is_cancel_crash(self) -> bool {
         Self::CANCEL_CRASH_ACTIONS.contains(&self)
     }
-
-    fn uses_store_owned_turn_control(self) -> bool {
-        self.is_cancel_crash() || self == Self::CancelRecover
-    }
 }
 
 /// The eight real-process cancellation closure cuts: immediately before and
@@ -243,6 +239,7 @@ pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
 )]
 async fn recover_turn_cancel_closure(
     store: Arc<dyn RuntimePersistence>,
+    effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
 ) {
     super::super::bind_conformance_session(&store, &identity.session_id).await;
@@ -270,10 +267,15 @@ async fn recover_turn_cancel_closure(
     })
     .await
     .expect("cancellation recovery lane becomes reclaimable");
-    let authority = crate::concrete_turn_cancellation_authority(
-        &store
-            .turn_cancellation_authority()
-            .expect("persistent backend exposes reopenable cancellation authority"),
+    // The crashed owner's turn control was run-scoped to its journaled
+    // controller, so the successor adopts the binding through a controller
+    // over the same journal.
+    let host = InvocationEffectHost {
+        inner: effect_controller,
+    };
+    let authority = crate::TurnCancellationAuthority::new(
+        crate::EffectHost::turn_control_binding_id(&host),
+        Arc::new(host) as Arc<dyn crate::AwaitEventResolver>,
     );
     let admitted_scope = crate::ExecutionScope::turn(&identity.session_id, &identity.turn_id);
     store
@@ -438,6 +440,7 @@ async fn recover_turn_cancel_closure(
 pub async fn cold_process_real_turn_driver(
     store: Arc<dyn RuntimePersistence>,
     effect_controller: Arc<dyn RuntimeEffectController>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     scenario: &str,
     action: &str,
     external_effect_marker: Option<std::path::PathBuf>,
@@ -469,14 +472,6 @@ pub async fn cold_process_real_turn_driver(
         "turn_cancel_recover" => ColdProcessTurnAction::CancelRecover,
         other => panic!("unknown cold-process real-turn action `{other}`"),
     };
-    let effect_controller: Arc<dyn RuntimeEffectController> =
-        if action.uses_store_owned_turn_control() {
-            Arc::new(StoreOwnedTurnControlController {
-                inner: effect_controller,
-            })
-        } else {
-            effect_controller
-        };
     let identity = ReferenceIdentity::for_scenario(scenario);
     let control = SeamControl::default();
     let recovers_existing_turn = matches!(
@@ -489,8 +484,9 @@ pub async fn cold_process_real_turn_driver(
     if !recovers_existing_turn {
         seed_reference_ingress(&store, &identity, scenario).await;
         if action.is_cancel_crash() {
-            let host: Arc<dyn crate::EffectHost> =
-                Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller)));
+            let host: Arc<dyn crate::EffectHost> = Arc::new(InvocationEffectHost {
+                inner: Arc::clone(&effect_controller),
+            });
             let receipt = crate::TurnWorkDriver::for_session(
                 host,
                 identity.session_id.to_string(),
@@ -514,7 +510,7 @@ pub async fn cold_process_real_turn_driver(
             ));
         }
     } else if action == ColdProcessTurnAction::CancelRecover {
-        recover_turn_cancel_closure(store, &identity).await;
+        recover_turn_cancel_closure(store, effect_controller, &identity).await;
         return;
     } else if action == ColdProcessTurnAction::PeerReclaim {
         let owner =
@@ -669,12 +665,25 @@ pub async fn cold_process_real_turn_driver(
         marker: external_effect_marker,
         ..TraceTool::default()
     };
+    // The journaled controller owns turn control, so a cancellation cut at a
+    // turn-control resolution is placed on the controller's seam.
+    let effect_controller: Arc<dyn RuntimeEffectController> = if action.is_cancel_crash() {
+        Arc::new(SeamEffectController {
+            inner: effect_controller,
+            control: control.clone(),
+            executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            journal_faults: None,
+        })
+    } else {
+        effect_controller
+    };
     let reader = Arc::clone(&store);
     let decorated = SeamStore::wrap(store, control.clone());
     let runtime = Box::pin(build_runtime(
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
+        Arc::clone(&process_env_store),
         &identity,
         trace_tool,
     ))

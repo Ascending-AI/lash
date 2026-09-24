@@ -66,6 +66,7 @@ impl RecordingWorkerFaultSink {
 )]
 pub(super) fn lifecycle_worker(
     registry: Arc<dyn ProcessRegistry>,
+    session_factory: Arc<dyn lash_core::SessionStoreFactory>,
     owner: LeaseOwnerIdentity,
     runtime_host: lash_core::facade_support::RuntimeHostConfig,
     policy: lash_core::SessionPolicy,
@@ -78,7 +79,7 @@ pub(super) fn lifecycle_worker(
                 lash_protocol_standard::StandardProtocolPluginFactory::new(),
             )])),
             runtime_host,
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            session_factory,
             WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             owner,

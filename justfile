@@ -407,17 +407,17 @@ test-changed base='origin/main':
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
 store-contract-soak cases='256':
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-conformance:lash-conformance__unit_test -- store_contract_state_machine --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance_memory__test -- store_contract_state_machine --nocapture
   LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- store_contract_state_machine --nocapture
   LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- store_contract_state_machine --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-conformance:lash-conformance__unit_test -- session_graph_state_machine --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance_memory__test -- session_graph_state_machine --nocapture
   LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- session_graph_state_machine --nocapture
   LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- session_graph_state_machine --nocapture
 
 # Opt-in runtime-persistence property soak. PostgreSQL executes when its
 # standard LASH_POSTGRES_DATABASE_URL configuration is present.
 runtime-persistence-soak cases='256':
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-conformance:lash-conformance__unit_test -- runtime_persistence_state_machine --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance_memory__test -- runtime_persistence_state_machine --nocapture
   LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- runtime_persistence_state_machine --nocapture
   LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- runtime_persistence_state_machine --nocapture
 

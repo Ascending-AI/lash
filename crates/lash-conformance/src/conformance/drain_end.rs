@@ -23,10 +23,7 @@
 //! registry and SQL session store, so the SQL protocol is its twin — and a
 //! tier whose group seam is absent answers these laws the way
 //! `tool_child_invocation` treats a `None` drain: the suite is simply not
-//! registered there. On the in-memory tier the receipt, the ledger row and
-//! the sweep are the same code in the same process, which is what the laws
-//! assert; the protected-obligation law documents how the foreign-lease
-//! `Pending` shape collapses there.
+//! registered there.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -55,28 +52,33 @@ use crate::{
     EffectHost, LashRuntime, LeaseOwnerIdentity, OnParentEnd, ParentScope, PendingTurnInputDraft,
     PluginError, ProcessId, ProcessInput, ProcessLifecyclePolicy, ProcessProvenance, ProcessRecord,
     ProcessRegistration, ProcessRegistry, QueuedTurnDrain, RecoveryContract,
-    ScopedEffectController, SessionCommitStore, SessionStoreFactory, TurnInput, TurnInputIngress,
-    TurnOptions,
+    ScopedEffectController, SessionCommitStore, TurnInput, TurnInputIngress, TurnOptions,
 };
 
 /// The session every drain-end law exercises.
 pub(crate) const SESSION_ID: &str = "root";
 
 /// What a law needs the next world to carry: the session store the drain
-/// commits to, the process registry the runtime and the sweep share, the
-/// factory that re-opens that session store for the sweep's end-evidence
-/// read, the effect host the drain's admitted scope is minted from, and — for
-/// the protected-obligation law — a second host whose group table the
+/// commits to, the store set it belongs to (the process registry the runtime
+/// and the sweep share, the factory that re-opens that session store for the
+/// sweep's end-evidence read, and the runtime's attachment and exec-env
+/// ports), the effect host the drain's admitted scope is minted from, and —
+/// for the protected-obligation law — a second host whose group table the
 /// runtime's host shares.
 pub struct DrainEndWorld {
     pub store: Arc<dyn RuntimePersistence>,
-    pub registry: Arc<dyn ProcessRegistry>,
-    pub session_factory: Arc<dyn SessionStoreFactory>,
+    pub stores: Arc<dyn crate::StoreSet>,
     pub effect_host: Arc<dyn EffectHost>,
     /// A second host over the same group table, so a closing group's live
     /// obligation is owed to a lease this runtime does not hold. `None` on a
     /// tier whose group seam is absent.
     pub group_host: Option<Arc<dyn EffectHost>>,
+}
+
+impl DrainEndWorld {
+    fn registry(&self) -> Arc<dyn ProcessRegistry> {
+        self.stores.process_registry()
+    }
 }
 
 /// Wires a drain-end world's host: the product tool-child resolver, so the
@@ -88,10 +90,13 @@ pub struct DrainEndWorld {
     clippy::expect_used,
     reason = "conformance-law fixture: a fresh host has no resolver yet"
 )]
-pub fn install_drain_end_executors(host: Arc<dyn EffectHost>) -> Arc<dyn EffectHost> {
+pub fn install_drain_end_executors(
+    host: Arc<dyn EffectHost>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+) -> Arc<dyn EffectHost> {
     host.install_tool_child_host(crate::facade_support::ToolChildHost::new(
         &host,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        process_env_store,
     ))
     .expect("a fresh host takes the tool-child resolver")
     .with_law_fallback(
@@ -257,9 +262,14 @@ async fn drain_runtime_with_budget(
 ) -> LashRuntime {
     // `with_effect_host`, not a field overwrite: it installs the tool-child
     // resolver on the drain's host, where the drain's tool groups open.
-    let mut host =
-        crate::RuntimeHostConfig::in_memory(commit_budget, crate::QueuedWorkBatchingConfig::new(1))
-            .with_effect_host(Arc::clone(&world.effect_host));
+    let mut host = crate::RuntimeHostConfig::new(
+        Arc::clone(&world.effect_host),
+        world.stores.attachment_store(),
+        world.stores.process_env_store(),
+        commit_budget,
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(world.stores.clock());
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(SessionId::from(SESSION_ID));
@@ -316,12 +326,12 @@ async fn drive_drain(
     reason = "conformance-law fixture: the worker over the world's registry always builds"
 )]
 fn drain_sweep(world: &DrainEndWorld) -> lash_core_worker::DurableProcessWorker {
-    let watched = crate::facade_support::watch_process_registry(Arc::clone(&world.registry));
-    let host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+    let watched = crate::facade_support::watch_process_registry(world.registry());
+    let host = crate::conformance::store_set_host_config(
+        world.stores.as_ref(),
+        Arc::clone(&world.effect_host),
         crate::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_effect_host(Arc::clone(&world.effect_host));
+    );
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(SessionId::from(SESSION_ID));
     lash_core_worker::DurableProcessWorker::new(
@@ -330,7 +340,7 @@ fn drain_sweep(world: &DrainEndWorld) -> lash_core_worker::DurableProcessWorker 
                 crate::testing::test_standard_protocol_factories(),
             )),
             host,
-            Arc::clone(&world.session_factory),
+            world.stores.session_store_factory(),
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             crate::testing::runtime_lease_owner(),
@@ -421,7 +431,7 @@ pub async fn a_multi_frame_drain_sweeps_children_only_at_its_own_end(
 ) {
     let drain_id = format!("{prefix}-l1-drain");
     let child_id = format!("{prefix}-l1-child");
-    register_drain_child(&world.registry, &drain_id, &child_id, OnParentEnd::Cancel).await;
+    register_drain_child(&world.registry(), &drain_id, &child_id, OnParentEnd::Cancel).await;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "run a two-frame drain").await;
 
@@ -482,7 +492,7 @@ pub async fn a_multi_frame_drain_sweeps_children_only_at_its_own_end(
 
     let mut runtime = drain_runtime(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         provider.into_handle(),
         vec![tool_plugin],
         crate::testing::runtime_lease_owner(),
@@ -512,11 +522,13 @@ pub async fn a_multi_frame_drain_sweeps_children_only_at_its_own_end(
     // Frame 0's commit wrote its *turn* parent-end row, not the drain's: the
     // drain owner has not ended, so its child carries no cancel request.
     assert!(
-        cancel_origin(&child(&world.registry, &child_id).await).is_none(),
+        cancel_origin(&child(&world.registry(), &child_id).await).is_none(),
         "a mid-drain physical-turn commit must not sweep the drain's children"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_none(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_none(),
         "the drain's ledger row lands only at the drain's own end"
     );
     release_tx.send(()).expect("release the follow-on frame");
@@ -533,13 +545,15 @@ pub async fn a_multi_frame_drain_sweeps_children_only_at_its_own_end(
         "a completed drain writes its end receipt"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_some(),
         "a completed drain writes its parent-end ledger row"
     );
 
     run_sweep(&world).await;
     assert_eq!(
-        cancel_origin(&child(&world.registry, &child_id).await),
+        cancel_origin(&child(&world.registry(), &child_id).await),
         Some(crate::CancelOrigin::ParentEnded),
         "the drain's end sweeps its Cancel child"
     );
@@ -563,14 +577,14 @@ pub async fn a_drain_end_cancels_cancel_children_and_leaves_abandon_ones(
         (cancel_id.clone(), OnParentEnd::Cancel),
         (abandon_id.clone(), OnParentEnd::Abandon),
     ] {
-        register_drain_child(&world.registry, &drain_id, &id, on_parent_end).await;
+        register_drain_child(&world.registry(), &drain_id, &id, on_parent_end).await;
     }
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "run a one-frame drain").await;
 
     let mut runtime = drain_runtime(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         fixed_text_provider("done"),
         Vec::new(),
         crate::testing::runtime_lease_owner(),
@@ -582,17 +596,19 @@ pub async fn a_drain_end_cancels_cancel_children_and_leaves_abandon_ones(
     assert!(matches!(result, QueuedTurnDrain::Ran(_)), "the drain ran");
     assert!(
         drain_ended(&world.store, &drain_id).await
-            && drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+            && drain_ledger_row(&world.registry(), &drain_id)
+                .await
+                .is_some(),
         "the drain wrote its end"
     );
 
     run_sweep(&world).await;
     assert_eq!(
-        cancel_origin(&child(&world.registry, &cancel_id).await),
+        cancel_origin(&child(&world.registry(), &cancel_id).await),
         Some(crate::CancelOrigin::ParentEnded),
         "the sweep requests ParentEnded on the drain's Cancel child"
     );
-    let abandon = child(&world.registry, &abandon_id).await;
+    let abandon = child(&world.registry(), &abandon_id).await;
     assert!(
         abandon.cancel_request.is_none(),
         "an Abandon child owes the ended drain nothing and stays host-managed"
@@ -617,15 +633,14 @@ pub async fn a_crash_after_the_drain_receipt_recovers_its_ledger_row(
 ) {
     let drain_id = format!("{prefix}-l3-drain");
     let child_id = format!("{prefix}-l3-child");
-    register_drain_child(&world.registry, &drain_id, &child_id, OnParentEnd::Cancel).await;
+    register_drain_child(&world.registry(), &drain_id, &child_id, OnParentEnd::Cancel).await;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "run under a crash-injected ledger").await;
 
     // The injected failure IS the crash window: the epilogue's receipt commit
     // has already landed when `record_parent_end` answers Err, which is the
     // exact durable shape a crash between the two writes leaves.
-    let faulting =
-        crate::fail_parent_end_once(Arc::clone(&world.registry), drain_parent(&drain_id));
+    let faulting = crate::fail_parent_end_once(world.registry(), drain_parent(&drain_id));
     let mut runtime = drain_runtime(
         &world,
         faulting,
@@ -642,21 +657,25 @@ pub async fn a_crash_after_the_drain_receipt_recovers_its_ledger_row(
         "the receipt committed before the injected crash"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_none(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_none(),
         "the crash took the ledger-row write"
     );
     assert!(
-        cancel_origin(&child(&world.registry, &child_id).await).is_none(),
+        cancel_origin(&child(&world.registry(), &child_id).await).is_none(),
         "nothing has swept the child yet"
     );
 
     run_sweep(&world).await;
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_some(),
         "the sweep re-derived the missing ledger row from the durable receipt"
     );
     assert_eq!(
-        cancel_origin(&child(&world.registry, &child_id).await),
+        cancel_origin(&child(&world.registry(), &child_id).await),
         Some(crate::CancelOrigin::ParentEnded),
         "the re-derived row sweeps the drain's Cancel child"
     );
@@ -676,7 +695,7 @@ pub async fn an_empty_drain_writes_nothing_and_a_retried_one_ends(
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     let mut runtime = drain_runtime(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         fixed_text_provider("unreached"),
         Vec::new(),
         crate::testing::runtime_lease_owner(),
@@ -696,13 +715,13 @@ pub async fn an_empty_drain_writes_nothing_and_a_retried_one_ends(
         "a fresh empty poll writes no end receipt"
     );
     assert!(
-        drain_ledger_row(&world.registry, &fresh).await.is_none(),
+        drain_ledger_row(&world.registry(), &fresh).await.is_none(),
         "a fresh empty poll writes no ledger row"
     );
 
     let retried = format!("{prefix}-l4-retried");
     register_drain_child(
-        &world.registry,
+        &world.registry(),
         &retried,
         &format!("{prefix}-l4-child"),
         OnParentEnd::Cancel,
@@ -720,7 +739,9 @@ pub async fn an_empty_drain_writes_nothing_and_a_retried_one_ends(
         "a drain that already owns children ends on its empty retry"
     );
     assert!(
-        drain_ledger_row(&world.registry, &retried).await.is_some(),
+        drain_ledger_row(&world.registry(), &retried)
+            .await
+            .is_some(),
         "the empty retry writes the ledger row"
     );
 }
@@ -741,7 +762,7 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
 ) {
     let drain_id = format!("{prefix}-l5-drain");
     let child_id = format!("{prefix}-l5-child");
-    register_drain_child(&world.registry, &drain_id, &child_id, OnParentEnd::Cancel).await;
+    register_drain_child(&world.registry(), &drain_id, &child_id, OnParentEnd::Cancel).await;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "fail once, then commit").await;
 
@@ -766,7 +787,7 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
     ));
     let mut runtime = drain_runtime(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         fixed_text_provider("the retry commits"),
         vec![abort_plugin],
         crate::testing::runtime_lease_owner(),
@@ -781,10 +802,12 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
         "a failed run writes no end receipt"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_none(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_none(),
         "a failed run writes no ledger row"
     );
-    let live = child(&world.registry, &child_id).await;
+    let live = child(&world.registry(), &child_id).await;
     assert!(
         live.status.is_live() && live.cancel_request.is_none(),
         "the interrupted drain's children stay live"
@@ -799,7 +822,9 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
         "the retry completes the interrupted drain's end"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_some(),
         "the retry writes the ledger row"
     );
 }
@@ -816,7 +841,7 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
 pub async fn an_interrupted_drain_is_ended_by_its_retry(prefix: &str, world: DrainEndWorld) {
     let drain_id = format!("{prefix}-l6-drain");
     register_drain_child(
-        &world.registry,
+        &world.registry(),
         &drain_id,
         &format!("{prefix}-l6-child"),
         OnParentEnd::Cancel,
@@ -828,7 +853,7 @@ pub async fn an_interrupted_drain_is_ended_by_its_retry(prefix: &str, world: Dra
     let armed = Arc::new(AtomicBool::new(true));
     let mut runtime = drain_runtime(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         fixed_text_provider("committed before the crash"),
         Vec::new(),
         crate::testing::runtime_lease_owner(),
@@ -855,7 +880,9 @@ pub async fn an_interrupted_drain_is_ended_by_its_retry(prefix: &str, world: Dra
         "the interrupted drain wrote no end receipt"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_none(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_none(),
         "the interrupted drain wrote no ledger row"
     );
 
@@ -869,7 +896,7 @@ pub async fn an_interrupted_drain_is_ended_by_its_retry(prefix: &str, world: Dra
     until_lane_claimable(&world.store).await;
     let mut retry_runtime = drain_runtime(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         fixed_text_provider("the retry commits"),
         Vec::new(),
         crate::LeaseOwnerIdentity::opaque(
@@ -886,7 +913,9 @@ pub async fn an_interrupted_drain_is_ended_by_its_retry(prefix: &str, world: Dra
         "the retry completes the interrupted drain's end"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_some(),
         "the retry writes the ledger row"
     );
 }
@@ -951,10 +980,9 @@ impl crate::RuntimeTurnPhaseProbe for EpilogueKillProbe {
 /// On the SQL tiers the group is opened on a *second* host over the same
 /// journal, so its blocked loser's lease is foreign to the draining runtime
 /// and `resume_closing_groups` reports `Pending` — the drain declines
-/// promptly. On the in-memory tier both hosts share one controller, so the
-/// same shape reads as a locally running obligation the finalizer waits on:
-/// the drain parks inside its epilogue instead of declining. The law carries
-/// both shapes — the drain must not have ended while the obligation stands,
+/// promptly. A tier whose hosts share one controller reads the same shape as
+/// a locally running obligation the finalizer waits on: the drain parks
+/// inside its epilogue instead of declining. The law carries both shapes — the drain must not have ended while the obligation stands,
 /// however the tier reports it — and the release is what ends it.
 #[expect(
     clippy::expect_used,
@@ -977,7 +1005,7 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
     // registry, and an `Abandon` child is exactly the child a drain can own
     // while a closing group withholds its end.
     register_drain_child(
-        &world.registry,
+        &world.registry(),
         &drain_id,
         &format!("{prefix}-l7-abandon-child"),
         OnParentEnd::Abandon,
@@ -1013,7 +1041,7 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
     let epilogue_entered = Arc::new(tokio::sync::Notify::new());
     let mut runtime = drain_runtime(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         fixed_text_provider("ran while the group was still closing"),
         Vec::new(),
         crate::testing::runtime_lease_owner(),
@@ -1037,7 +1065,7 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
 
     // The withheld shape: give the drain a grace window to either decline
     // (Pending, the SQL-tier answer) or stay parked in the finalizer's wait
-    // (the in-memory answer). It must not have ended either way.
+    // (the shared-controller answer). It must not have ended either way.
     let mut drain = Some(drain);
     let mut declined = false;
     for _ in 0..200 {
@@ -1065,7 +1093,9 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
         "a closing group's unsettled obligation withholds the drain's end"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_none(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_none(),
         "a withheld drain writes no ledger row"
     );
 
@@ -1076,7 +1106,7 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
     until_group_settled(&closing, &group_key).await;
 
     if !declined {
-        // The in-memory shape: the parked drain's resume now completes.
+        // The shared-controller shape: the parked drain's resume now completes.
         drain
             .take()
             .expect("the drain task")
@@ -1086,7 +1116,7 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
     } else {
         let mut retry_runtime = drain_runtime(
             &world,
-            Arc::clone(&world.registry),
+            world.registry(),
             fixed_text_provider("the retry ends the drain"),
             Vec::new(),
             crate::LeaseOwnerIdentity::opaque(
@@ -1104,7 +1134,9 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
         "the drain ends once its protected obligation settles"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_some(),
         "the end writes the ledger row"
     );
 }
@@ -1136,7 +1168,13 @@ pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
     };
     let drain_id = format!("{prefix}-l8-drain");
     let cancel_id = format!("{prefix}-l8-cancel");
-    register_drain_child(&world.registry, &drain_id, &cancel_id, OnParentEnd::Cancel).await;
+    register_drain_child(
+        &world.registry(),
+        &drain_id,
+        &cancel_id,
+        OnParentEnd::Cancel,
+    )
+    .await;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "a drain that fails terminally").await;
 
@@ -1169,7 +1207,7 @@ pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
     let epilogue_entered = Arc::new(tokio::sync::Notify::new());
     let mut runtime = drain_runtime_with_budget(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         fixed_text_provider("a turn too large to commit"),
         Vec::new(),
         crate::testing::runtime_lease_owner(),
@@ -1220,13 +1258,15 @@ pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
         "the durably Failed drain wrote its end receipt"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_some(),
         "the durably Failed drain wrote its ledger row"
     );
 
     run_sweep(&world).await;
     assert_eq!(
-        cancel_origin(&child(&world.registry, &cancel_id).await),
+        cancel_origin(&child(&world.registry(), &cancel_id).await),
         Some(crate::CancelOrigin::ParentEnded),
         "the ended drain's Cancel child is swept"
     );
@@ -1258,7 +1298,13 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
     };
     let drain_id = format!("{prefix}-l9-drain");
     let cancel_id = format!("{prefix}-l9-cancel");
-    register_drain_child(&world.registry, &drain_id, &cancel_id, OnParentEnd::Cancel).await;
+    register_drain_child(
+        &world.registry(),
+        &drain_id,
+        &cancel_id,
+        OnParentEnd::Cancel,
+    )
+    .await;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "a drain its host abandons").await;
 
@@ -1276,7 +1322,7 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
     ));
     let mut runtime = drain_runtime(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         fixed_text_provider("unreached"),
         vec![refuse],
         crate::testing::runtime_lease_owner(),
@@ -1376,13 +1422,15 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
         "the abandoned drain wrote its end receipt"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_some(),
         "the abandoned drain wrote its ledger row"
     );
 
     run_sweep(&world).await;
     assert_eq!(
-        cancel_origin(&child(&world.registry, &cancel_id).await),
+        cancel_origin(&child(&world.registry(), &cancel_id).await),
         Some(crate::CancelOrigin::ParentEnded),
         "the abandoned drain's Cancel child is swept"
     );
@@ -1400,8 +1448,8 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
 /// drain id is never replayed.
 ///
 /// As in L7 the group is opened on the second host, so on the SQL tiers its
-/// loser's lease is foreign and the epilogue declines at once. On the
-/// in-memory tier both hosts share one controller: the obligation reads as
+/// loser's lease is foreign and the epilogue declines at once. Where both
+/// hosts share one controller, the obligation reads as
 /// this host's running work, the epilogue parks on it, and the release ends
 /// the drain there — the owed end never arises, and the law holds the same
 /// end state.
@@ -1419,7 +1467,13 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
     };
     let drain_id = format!("{prefix}-l10-drain");
     let cancel_id = format!("{prefix}-l10-cancel");
-    register_drain_child(&world.registry, &drain_id, &cancel_id, OnParentEnd::Cancel).await;
+    register_drain_child(
+        &world.registry(),
+        &drain_id,
+        &cancel_id,
+        OnParentEnd::Cancel,
+    )
+    .await;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(
         &world.store,
@@ -1456,7 +1510,7 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
     let epilogue_entered = Arc::new(tokio::sync::Notify::new());
     let mut runtime = drain_runtime_with_budget(
         &world,
-        Arc::clone(&world.registry),
+        world.registry(),
         fixed_text_provider("a turn too large to commit"),
         Vec::new(),
         crate::testing::runtime_lease_owner(),
@@ -1479,7 +1533,8 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
     .expect("the durably Failed drain reaches its end epilogue");
 
     // The withheld shape, as L7 reads it: declined (SQL) or parked
-    // (in-memory). Either way the run is settled and the drain has not ended.
+    // (shared controller). Either way the run is settled and the drain has
+    // not ended.
     let mut drain = Some(drain);
     let mut declined = false;
     for _ in 0..200 {
@@ -1519,7 +1574,9 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
         "the foreign obligation withholds the settled drain's end"
     );
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_none(),
+        drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_none(),
         "a withheld drain writes no ledger row"
     );
 
@@ -1545,7 +1602,10 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
         .await
         .expect("the parent-end pass runs");
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        while drain_ledger_row(&world.registry, &drain_id).await.is_none() {
+        while drain_ledger_row(&world.registry(), &drain_id)
+            .await
+            .is_none()
+        {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
     })
@@ -1561,7 +1621,7 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
         .await
         .expect("the parent-end sweep runs");
     assert_eq!(
-        cancel_origin(&child(&world.registry, &cancel_id).await),
+        cancel_origin(&child(&world.registry(), &cancel_id).await),
         Some(crate::CancelOrigin::ParentEnded),
         "the ended drain's Cancel child is swept"
     );

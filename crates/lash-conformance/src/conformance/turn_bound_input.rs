@@ -11,8 +11,8 @@
 //! (`orphaned_direct_turn_input_is_drivable_by_another_worker`).
 
 use super::direct_turn_acceptance::{
-    Journal, abort_before_commit_plugin, acceptance_runtime, applications, direct_input,
-    enqueue_next_turn, pending_input_ids, recording_provider,
+    Journal, abort_before_commit_plugin, acceptance_runtime, applications, enqueue_next_turn,
+    pending_input_ids, recording_provider,
 };
 use crate::admit;
 use lash_sansio::SessionId;
@@ -126,10 +126,11 @@ async fn drain_as_another_worker(
 )]
 pub async fn aborted_direct_turn_input_is_bound_until_its_redrive(
     prefix: &str,
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-bound-until-redrive"));
-    let journal = Journal::new();
+    let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("answered by the redrive");
     let accepted =
         abort_direct_turn(&journal, &store, provider.clone(), &turn_id, "bound words").await;
@@ -179,11 +180,12 @@ pub async fn aborted_direct_turn_input_is_bound_until_its_redrive(
 )]
 pub async fn later_direct_turn_never_folds_in_a_bound_input(
     prefix: &str,
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let aborted_turn = TurnId::from(format!("{prefix}-aborted"));
     let later_turn = TurnId::from(format!("{prefix}-later"));
-    let journal = Journal::new();
+    let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("answered the later turn");
     let accepted = abort_direct_turn(
         &journal,
@@ -239,11 +241,12 @@ pub async fn later_direct_turn_never_folds_in_a_bound_input(
 )]
 pub async fn cancelling_a_bound_input_returns_its_drive_to_the_queue(
     prefix: &str,
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-absorbing-aborted"));
     let earlier = enqueue_next_turn(&store, "earlier words").await;
-    let journal = Journal::new();
+    let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("answered the earlier input");
     let accepted = abort_direct_turn(
         &journal,
@@ -314,79 +317,6 @@ pub async fn cancelling_a_bound_input_returns_its_drive_to_the_queue(
     assert!(pending_input_ids(&store).await.is_empty());
 }
 
-/// On an effect host that journals nothing, the aborted turn's redrive runs its
-/// drive a second time; it re-takes the rows bound to it and commits once.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn journal_less_redrive_retakes_its_bound_drive(
-    prefix: &str,
-    store: Arc<dyn crate::RuntimePersistence>,
-) {
-    let turn_id = TurnId::from(format!("{prefix}-journal-less-redrive"));
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let (provider, requests) = recording_provider("answered by the redrive");
-    let run = |plugins: Vec<Arc<dyn crate::facade_support::PluginFactory>>| {
-        let store = Arc::clone(&store);
-        let effect_host = Arc::clone(&effect_host);
-        let provider = provider.clone();
-        let turn_id = turn_id.clone();
-        async move {
-            let mut runtime = acceptance_runtime(
-                &store,
-                &effect_host,
-                provider,
-                plugins,
-                crate::testing::runtime_lease_owner(),
-            )
-            .await;
-            let scope = effect_host
-                .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
-                .expect("scope the direct turn");
-            runtime
-                .stream_turn(
-                    direct_input(&turn_id, "unjournaled words"),
-                    crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
-                )
-                .await
-        }
-    };
-    run(vec![abort_before_commit_plugin()])
-        .await
-        .expect_err("the first execution aborts before its commit");
-    let accepted = pending_input_ids(&store)
-        .await
-        .into_iter()
-        .next()
-        .expect("the aborted turn's input is open");
-    assert_eq!(
-        statuses(&store).await,
-        vec![(accepted.clone(), bound_to(&turn_id, &accepted))]
-    );
-
-    let redriven = run(Vec::new())
-        .await
-        .expect("the redrive re-takes its bound drive and commits");
-    assert!(
-        matches!(redriven.outcome, crate::TurnOutcome::Finished(_)),
-        "{:?}",
-        redriven.outcome
-    );
-    let requests = requests.lock().expect("request lock").clone();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(
-        requests[0].matches("unjournaled words").count(),
-        1,
-        "{requests:?}"
-    );
-    let applied = applications(&store).await;
-    assert_eq!(applied.len(), 1, "{applied:?}");
-    assert_eq!(applied[0].input_id, accepted);
-    assert_eq!(applied[0].turn_id, turn_id);
-    assert!(pending_input_ids(&store).await.is_empty());
-}
-
 /// The drive's body claimed the accepted row and the worker then lost the
 /// drive's outcome, so the turn aborts without ever holding its drive claim.
 /// The abort binds the claim the accepted row carries under the turn's lease
@@ -398,10 +328,11 @@ pub async fn journal_less_redrive_retakes_its_bound_drive(
 )]
 pub async fn lost_drive_outcome_still_binds_its_claimed_input(
     prefix: &str,
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-lost-drive-outcome"));
-    let journal = Journal::new();
+    let journal = Journal::new(&backend);
     journal
         .controller
         .lose_outcome_at_next(crate::RuntimeEffectKind::ClaimAcceptedTurnInput);

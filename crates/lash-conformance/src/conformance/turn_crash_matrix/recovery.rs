@@ -16,7 +16,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
     pressure: RenewalPressure,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> super::super::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> super::super::ConformanceInvocation,
 {
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = make(scenario);
@@ -24,31 +24,35 @@ pub(super) async fn run_crash_matrix_case<F, I>(
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
-    let invocation = make_invocation(scenario);
-    let effect_redrive = invocation.effect_redrive();
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
-        control: control.clone(),
-        executions: Arc::clone(&executions),
-        journal_faults: None,
+    // The crashed worker is a process of its own: everything it spawned dies
+    // with it, and its successor opens its own controller.
+    let invocation = make_invocation(scenario, drive_scope(&identity));
+    crashing_process(async {
+        let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
+            inner: invocation.controller_handle(),
+            control: control.clone(),
+            executions: Arc::clone(&executions),
+            journal_faults: None,
+        });
+        let runtime = Box::pin(build_runtime(
+            decorated,
+            control.clone(),
+            Arc::clone(&effect_controller),
+            invocation.process_env_store(),
+            &identity,
+            TraceTool::default(),
+        ))
+        .await;
+        control.arm(entry.point.clone());
+        let task_identity = identity.clone();
+        let task = crate::task::spawn(async move {
+            Box::pin(drive_turn(runtime, effect_controller, &task_identity)).await
+        });
+        control.wait_for_hit().await;
+        control.simulate_process_crash();
+        task.abort();
+        let _ = task.await;
     });
-    let runtime = Box::pin(build_runtime(
-        decorated,
-        control.clone(),
-        Arc::clone(&effect_controller),
-        &identity,
-        TraceTool::default(),
-    ))
-    .await;
-    control.arm(entry.point.clone());
-    let task_identity = identity.clone();
-    let task = crate::task::spawn(async move {
-        Box::pin(drive_turn(runtime, effect_controller, &task_identity)).await
-    });
-    control.wait_for_hit().await;
-    control.simulate_process_crash();
-    task.abort();
-    let _ = task.await;
     let successor_invocation = invocation.redrive();
 
     let predecessor_claimed = !matches!(
@@ -85,6 +89,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
         Arc::clone(&successor_store),
         successor_control.clone(),
         Arc::clone(&successor_effect_controller),
+        successor_invocation.process_env_store(),
         &identity,
         TraceTool::default(),
         successor_timings,
@@ -100,7 +105,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
         &identity,
     ))
     .await;
-    let starved_reexecution = if pressure == RenewalPressure::Starved {
+    if pressure == RenewalPressure::Starved {
         let error = recovered.expect_err("a lapsed lane cannot commit the admitted run");
         assert_eq!(error.code, crate::RuntimeErrorCode::QueuedRunPending);
         assert!(
@@ -138,6 +143,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
             SeamStore::wrap(make(scenario), control.clone()),
             control,
             Arc::clone(&controller),
+            redrive.process_env_store(),
             &identity,
             TraceTool::default(),
             nominal_recovery_timings(),
@@ -147,16 +153,11 @@ pub(super) async fn run_crash_matrix_case<F, I>(
             .await
             .unwrap_or_else(|error| panic!("starved run redrive failed for {scenario}: {error}"));
         redrive.end();
-        usize::from(matches!(
-            effect_redrive,
-            super::super::ConformanceEffectRedrive::ReexecutesUncommitted
-        ))
     } else {
         recovered
             .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
         successor_invocation.end();
-        0
-    };
+    }
 
     let reader = make(scenario);
     super::super::bind_conformance_session(&reader, &identity.session_id).await;
@@ -254,16 +255,11 @@ pub(super) async fn run_crash_matrix_case<F, I>(
         "{scenario} ({entry:?}): recovery settles durable queued-run ownership"
     );
     let effect_count = executions.load(std::sync::atomic::Ordering::SeqCst);
-    let expected_effect_count = match effect_redrive {
-        super::super::ConformanceEffectRedrive::ReplaysJournal => {
-            usize::from(matches!(
-                entry.point.placement,
-                CrashPlacement::AfterExternalEffectBeforeOutcome
-            )) + 1
-        }
-        super::super::ConformanceEffectRedrive::ReexecutesUncommitted => entry.effect_executions_l1,
-    } + starved_reexecution
-        + drain_turns * DRAIN_TURN_EFFECT_EXECUTIONS;
+    // The ruled level-1 count is the journaled one: a successor replays every
+    // effect the crashed turn completed, so only an effect whose outcome the
+    // crash lost runs again (ADR 0102, D1).
+    let expected_effect_count =
+        entry.effect_executions_l1 + drain_turns * DRAIN_TURN_EFFECT_EXECUTIONS;
     assert_eq!(
         effect_count, expected_effect_count,
         "{scenario}: {}",
@@ -281,7 +277,7 @@ async fn drive_drain_turn<F, I>(
     executions: &Arc<std::sync::atomic::AtomicUsize>,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> super::super::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> super::super::ConformanceInvocation,
 {
     // The drain turn is a new turn, not a recovery of the crashed one, so it
     // gets its own turn identity: reusing the recovered turn's id would collide
@@ -293,7 +289,7 @@ async fn drive_drain_turn<F, I>(
     let identity = &identity;
     let control = SeamControl::default();
     let store = SeamStore::wrap(make(scenario), control.clone());
-    let invocation = make_invocation(&identity.turn_id);
+    let invocation = make_invocation(scenario, drive_scope(identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -304,6 +300,7 @@ async fn drive_drain_turn<F, I>(
         store,
         control.clone(),
         Arc::clone(&effect_controller),
+        invocation.process_env_store(),
         identity,
         TraceTool::default(),
         nominal_recovery_timings(),

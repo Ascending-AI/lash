@@ -25,7 +25,7 @@ pub(super) struct RuntimeCompletionState {
     /// anywhere. This is enabled ONLY for the cross-backend durable re-run
     /// (SQLite/Postgres), where preserved cross-session concurrency would let the
     /// async store's mid-op await points interleave differently from the
-    /// synchronous in-memory reference and change a timing-sensitive
+    /// memory reference and change a timing-sensitive
     /// `next_turn` `claim_and_run_pending` lease race — drifting the exchange
     /// count. Durable-state equivalence is well-posed under serial execution. The
     /// model-store generated SEARCH lane leaves this OFF and keeps full preserved

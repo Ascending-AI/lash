@@ -701,6 +701,8 @@ pub use runtime::EffectSummaryAppendFaults;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ProcessEventLogTestSupport;
 #[cfg(any(test, feature = "testing"))]
+pub use runtime::ProcessRegistryFaults;
+#[cfg(any(test, feature = "testing"))]
 pub use runtime::ProcessRegistryTestSupport;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestLocalProcessRegistry;

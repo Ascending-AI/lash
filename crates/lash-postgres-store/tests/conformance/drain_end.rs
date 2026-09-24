@@ -1,10 +1,10 @@
 //! PostgreSQL registration of the queue-drain end laws (FIG-3419).
 //!
 //! One `PostgresStorage` is the world's whole durable substrate: the session
-//! store the drain commits to, the process registry the runtime and the sweep
-//! share, the session-store factory the sweep re-opens the session through
-//! for `drain_end_exists`, and the journal `effect_host`/`group_host` both
-//! connect to. The two hosts are distinct `PostgresEffectHost`s over the same
+//! store the drain commits to, the store set over it (the process registry
+//! the runtime and the sweep share, and the session-store factory the sweep
+//! re-opens the session through for `drain_end_exists`), and the journal
+//! `effect_host`/`group_host` both connect to. The two hosts are distinct `PostgresEffectHost`s over the same
 //! database, so L7's closing group holds a lease foreign to the draining
 //! runtime and `resume_closing_groups` answers `Pending`.
 
@@ -13,13 +13,18 @@ use std::time::Duration;
 
 use lash_conformance::{DrainEndWorld, DrainEndWorldFactory};
 use lash_core_execution::store::RuntimePersistence;
-use lash_core_execution::{EffectHost, ProcessRegistry, SessionStoreFactory};
-use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
+use lash_core_execution::{EffectHost, SessionStoreFactory as _, StoreSet};
+use lash_postgres_store::{
+    PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage, PostgresStoreSet,
+};
 use lash_sansio::SessionId;
 
 use super::{SharedDatabaseLock, database_url, reset};
 
-fn postgres_drain_end_host(storage: &PostgresStorage) -> Arc<dyn EffectHost> {
+fn postgres_drain_end_host(
+    storage: &PostgresStorage,
+    stores: &PostgresStoreSet,
+) -> Arc<dyn EffectHost> {
     let ttl = Duration::from_secs(30);
     let host = PostgresEffectHost::with_options(
         storage,
@@ -29,12 +34,19 @@ fn postgres_drain_end_host(storage: &PostgresStorage) -> Arc<dyn EffectHost> {
             drain_budget: Default::default(),
         },
     );
-    lash_conformance::install_drain_end_executors(Arc::new(host))
+    lash_conformance::install_drain_end_executors(Arc::new(host), stores.process_env_store())
 }
 
-async fn postgres_drain_end_world(storage: PostgresStorage) -> DrainEndWorld {
-    let store_factory = storage.session_store_factory_with_shared_process_registry();
-    let store = store_factory
+async fn postgres_drain_end_world(
+    storage: PostgresStorage,
+    attachment_root: std::path::PathBuf,
+) -> DrainEndWorld {
+    let stores = PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachment_root)),
+    );
+    let store = stores
+        .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
@@ -47,10 +59,9 @@ async fn postgres_drain_end_world(storage: PostgresStorage) -> DrainEndWorld {
         .expect("create the drain-end session store");
     DrainEndWorld {
         store: store as Arc<dyn RuntimePersistence>,
-        registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
-        session_factory: Arc::new(store_factory) as Arc<dyn SessionStoreFactory>,
-        effect_host: postgres_drain_end_host(&storage),
-        group_host: Some(postgres_drain_end_host(&storage)),
+        effect_host: postgres_drain_end_host(&storage, &stores),
+        group_host: Some(postgres_drain_end_host(&storage, &stores)),
+        stores: Arc::new(stores) as Arc<dyn StoreSet>,
     }
 }
 
@@ -68,14 +79,17 @@ lash_conformance::drain_end_tests!({
             .pool(),
     )
     .await;
-    let make: DrainEndWorldFactory = Arc::new(move |_label| {
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let attachment_root = attachments.path().to_path_buf();
+    let make: DrainEndWorldFactory = Arc::new(move |label| {
         let url = url.clone();
+        let attachment_root = attachment_root.join(label);
         Box::pin(async move {
             let storage = PostgresStorage::connect(&url)
                 .await
                 .expect("connect the drain-end world's storage");
-            postgres_drain_end_world(storage).await
+            postgres_drain_end_world(storage, attachment_root).await
         })
     });
-    (database_lock, "postgres-drain-end", make)
+    ((database_lock, attachments), "postgres-drain-end", make)
 });

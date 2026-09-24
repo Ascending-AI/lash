@@ -2104,11 +2104,3 @@ async fn expired_is_a_typed_discard(
         "retryable_failures": report.retryable_failures,
     }));
 }
-
-#[async_trait::async_trait]
-impl crate::WakeDeliveryOrderingGroupFaultInjector for lash_core::TestLocalProcessRegistry {
-    async fn discard_without_reason(&self, delivery_id: &str) {
-        self.discard_wake_without_reason_for_testing(delivery_id)
-            .await;
-    }
-}

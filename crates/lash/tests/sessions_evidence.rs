@@ -1001,7 +1001,9 @@ fn drain_area_witnesses() {
     // W0222: lash_conformance::turn_crash_matrix_level_1 [function]
     let _ = lash_conformance::turn_crash_matrix_level_1(
         |_: &str| -> std::sync::Arc<dyn lash::persistence::RuntimePersistence> { todo!() },
-        |_: &str| -> lash_conformance::ConformanceInvocation { todo!() },
+        |_: &str, _: lash::runtime::ExecutionScope| -> lash_conformance::ConformanceInvocation {
+            todo!()
+        },
     );
     // W0223: lash::turn::AssistantOutput [struct]
     type_witness::<lash::turn::AssistantOutput>();

@@ -177,18 +177,38 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     );
 }
 
-#[test]
-fn conformance_invocation_lifecycle_control_is_consumable_cross_crate() {
-    use lash_conformance::{ConformanceEffectRedrive, ConformanceInvocation};
+#[tokio::test]
+async fn conformance_invocation_lifecycle_control_is_consumable_cross_crate() {
+    use lash_conformance::ConformanceInvocation;
 
-    let invocation = ConformanceInvocation::native();
-    assert_eq!(
-        ConformanceInvocation::effect_redrive(&invocation),
-        ConformanceEffectRedrive::ReexecutesUncommitted
+    let scope = durable_turn_scope("invocation-lifecycle", "turn");
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("memory backend");
+    let controller = backend
+        .open_effect_controller(scope.clone())
+        .await
+        .expect("journaled controller");
+    let live: Arc<dyn lash_core_execution::RuntimeEffectController> = Arc::new(controller.clone());
+    let env_store: Arc<dyn lash_core_execution::ProcessExecutionEnvStore> =
+        backend.process_env_store();
+    let invocation = ConformanceInvocation::new(
+        live,
+        scope,
+        env_store.clone(),
+        || {},
+        move || {
+            controller.start_replay();
+            lash_conformance::InvocationSuccessor {
+                controller: Arc::new(controller.clone())
+                    as Arc<dyn lash_core_execution::RuntimeEffectController>,
+                process_env_store: env_store.clone(),
+            }
+        },
     );
-    let _journaled_redrive = ConformanceEffectRedrive::ReplaysJournal;
     let _controller = ConformanceInvocation::controller(&invocation);
     let _controller_handle = ConformanceInvocation::controller_handle(&invocation);
+    let _process_env_store = ConformanceInvocation::process_env_store(&invocation);
     let successor = ConformanceInvocation::redrive(invocation);
     ConformanceInvocation::end(successor);
 }

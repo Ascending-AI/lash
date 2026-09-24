@@ -143,7 +143,7 @@ pub(super) async fn drive_generated_workload(
     Ok((events, final_summary))
 }
 
-/// The serialized in-memory reference summary for the cross-backend check.
+/// The serialized SQLite-memory reference summary for the cross-backend check.
 ///
 /// This drives the workload through the SAME `serialize_provider_turns` discipline
 /// as the durable re-run, differing ONLY in the backend store (ephemeral
@@ -172,7 +172,7 @@ pub async fn replay_workload_serialized_reference(
 /// dynamic runtime driver under the SAME serialized-provider-turn discipline, but
 /// backed by the real `lash-sqlite-store` session store factory and the SQLite
 /// durable-effect replay controller, and return the resulting abstract world
-/// summary. The caller compares it against the serialized in-memory reference
+/// summary. The caller compares it against the serialized SQLite-memory reference
 /// (`replay_workload_serialized_reference`); equality proves the SQLite store
 /// reproduces identical observable runtime behavior. Both runs serialize provider
 /// turns and the serialized driver holds boundary delivery across a live turn's
@@ -314,7 +314,7 @@ pub async fn run_generated_postgres_replay_for_seeds(
         let rerun = replay_workload_on_postgres(&workload, database_url, &case_dir).await?;
         let actual = rerun.summary;
         // The reported verdict is the first failure: durable content read back
-        // from Postgres, then equivalence with the in-memory reference.
+        // from Postgres, then equivalence with the SQLite-memory reference.
         let verdict = if rerun.content.is_passed() {
             replay_determinism(&reference, &actual)
         } else {
@@ -379,7 +379,7 @@ pub async fn run_generated_postgres_replay_for_seeds(
         });
         if !matches_reference && first_failure.is_none() {
             first_failure = Some(format!(
-                "generated Postgres re-run for seed {seed} ({profile}) diverged from the serialized in-memory reference: {}; wrote {}",
+                "generated Postgres re-run for seed {seed} ({profile}) diverged from the serialized SQLite-memory reference: {}; wrote {}",
                 verdict.message,
                 report_path.display()
             ));

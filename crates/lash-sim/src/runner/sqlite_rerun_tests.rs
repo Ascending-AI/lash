@@ -1,4 +1,4 @@
-//! The durable SQLite re-run agrees with the serialized in-memory reference and
+//! The durable SQLite re-run agrees with the serialized SQLite-memory reference and
 //! keeps committed content intact when read back cold.
 
 use super::*;
@@ -9,7 +9,7 @@ async fn divergent_seed_cross_backend_durable_state_agrees() {
     // cross-backend re-run previously hung (a `next_turn` queued ingress ran an
     // unmodeled native turn under serialized execution) and then diverged (a
     // slow async store let later boundaries overtake a live turn's completion,
-    // drifting the seeded delivery order). The serialized in-memory reference
+    // drifting the seeded delivery order). The serialized SQLite-memory reference
     // and the SQLite durable re-run share the serialize-provider-turn discipline
     // and differ only in the store, so their abstract durable-state summaries
     // must be byte-identical.
@@ -17,7 +17,7 @@ async fn divergent_seed_cross_backend_durable_state_agrees() {
     let workload = generate_workload(seed, "full-random", 384).expect("workload");
     let reference = replay_workload_serialized_reference(&workload)
         .await
-        .expect("serialized in-memory reference");
+        .expect("serialized SQLite-memory reference");
     let tmp = tempfile::tempdir().expect("tempdir");
     let DurableRerun {
         summary: sqlite_summary,
@@ -45,7 +45,7 @@ async fn absolute_fence_drift_seed_cross_backend_semantics_agree() {
     let workload = generate_workload(seed, "full-random", 384).expect("workload");
     let reference = replay_workload_serialized_reference(&workload)
         .await
-        .expect("serialized in-memory reference");
+        .expect("serialized SQLite-memory reference");
     let tmp = tempfile::tempdir().expect("tempdir");
     let DurableRerun {
         summary: sqlite_summary,

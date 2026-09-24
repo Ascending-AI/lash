@@ -349,9 +349,9 @@ pub use process::{
 #[cfg(any(test, feature = "testing"))]
 pub use process::{
     ConformanceProcessRegistry, EffectSummaryAppendFaults, PROCESS_REFUSAL_FIXTURE_PROCESS_ID,
-    ProcessEventLogTestSupport, ProcessRegistryTestSupport, TestLocalProcessRegistry,
-    TestProcessRegistryWriteExt, accepted_process_registration, fail_parent_end_once,
-    refused_process_registrations,
+    ProcessEventLogTestSupport, ProcessRegistryFaults, ProcessRegistryTestSupport,
+    TestLocalProcessRegistry, TestProcessRegistryWriteExt, accepted_process_registration,
+    fail_parent_end_once, refused_process_registrations,
 };
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{

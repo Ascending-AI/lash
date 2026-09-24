@@ -12,12 +12,21 @@ use pretty_assertions::assert_eq;
 
 pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 10;
 
+/// A session-store factory over the host's substrate, with `session_ids`
+/// created: the catalog a turn-work driver resolves each session's store
+/// through.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreFactory> {
-    let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
+async fn catalog_with_sessions<C>(
+    make_catalog: &C,
+    session_ids: &[&str],
+) -> Arc<dyn crate::SessionStoreFactory>
+where
+    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
+{
+    let factory = make_catalog();
     for session_id in session_ids {
         let session_id = SessionId::from(*session_id);
         let request = super::session_store_request(
@@ -25,11 +34,10 @@ async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreF
             "conformance-turn-control",
             crate::SessionRelation::Root,
         );
-        let store = factory
+        factory
             .create_store(&request)
             .await
             .expect("create explicit conformance session store");
-        super::bind_conformance_session(&store, &session_id).await;
     }
     factory
 }
@@ -41,12 +49,17 @@ async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreF
 /// over one substrate, so the active-wait law is witnessed through the store
 /// journal; an engine supplies its own witness through
 /// [`effect_host_await_events_cold_instance_with_active_wait_witness`].
-pub async fn effect_host_await_events_cold_instance<F>(make: F)
+///
+/// `make_catalog` returns a fresh session-store factory over the same
+/// substrate: the catalog a turn-work driver resolves sessions through.
+pub async fn effect_host_await_events_cold_instance<F, C>(make: F, make_catalog: C)
 where
     F: Fn() -> Arc<dyn EffectHost>,
+    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
 {
     effect_host_await_events_cold_instance_with_active_wait_witness(
         make,
+        make_catalog,
         super::effect_host::effect_host_journaled_wait_registration_witness,
     )
     .await;
@@ -54,11 +67,13 @@ where
 
 /// Run the durable multi-host AwaitEvent suite with an
 /// implementation-owned witness for the active-wait quiescence law.
-pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, W, WFut>(
+pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, C, W, WFut>(
     make: F,
+    make_catalog: C,
     witness: W,
 ) where
     F: Fn() -> Arc<dyn EffectHost>,
+    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
     W: FnOnce(Arc<dyn EffectHost>, super::effect_host::ActiveWaitRetirementAssertion) -> WFut,
     WFut: std::future::Future<Output = ()>,
 {
@@ -66,7 +81,6 @@ pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, 
     let second = make();
     assert_fresh_instances(&first, &second, "effect_host_await_events_cold_instance");
     drop((first, second));
-    super::effect_host::effect_host_local_turn_control_resolves_on_minting_host(make()).await;
     witness(
         make(),
         super::effect_host::boxed_active_wait_retirement_assertion,
@@ -75,14 +89,14 @@ pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, 
     super::effect_host::effect_host_when_quiescent_waits_for_executing_effects(make()).await;
     let prefix = format!("cold-await-{}", uuid::Uuid::new_v4());
     cold_mint_resolve_observe_all_identities(&make, &prefix).await;
-    cold_first_writer_wins(&make, &prefix).await;
+    cold_first_writer_wins(&make, &make_catalog, &prefix).await;
     cold_replayed_parked_owner(&make, &prefix).await;
     cold_key_stability(&make, &prefix).await;
     cold_auth_tamper_matrix(&make, &prefix).await;
     cold_revocation_survives_reopen(&make, &prefix).await;
     cold_scope_retirement_survives_reopen(&make, &prefix).await;
     cold_cancel_sweep_excludes_turn_control(&make, &prefix).await;
-    cold_terminal_attach_both_orders(&make, &prefix).await;
+    cold_terminal_attach_both_orders(&make, &make_catalog, &prefix).await;
     super::effect_host::effect_host_lists_registered_unresolved_waits(make(), make(), make()).await;
 }
 
@@ -243,9 +257,10 @@ where
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn cold_first_writer_wins<F>(make: &F, prefix: &str)
+async fn cold_first_writer_wins<F, C>(make: &F, make_catalog: &C, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
+    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
 {
     let address = durable_turn_address(
         format!("{prefix}-race-session"),
@@ -255,7 +270,7 @@ where
     let active = ActiveTurnControl::new(owner_host.as_ref(), address.clone())
         .await
         .expect("owner creates cancellation gate");
-    let store_factory = in_memory_catalog(&[address.session_id.as_str()]).await;
+    let store_factory = catalog_with_sessions(make_catalog, &[address.session_id.as_str()]).await;
     let cancel_driver = crate::TurnWorkDriver::for_catalog(make(), Arc::clone(&store_factory));
     let (settled, cancelled) = tokio::join!(
         active.settle_before_commit(owner_host.as_ref(), false, None),
@@ -553,9 +568,10 @@ where
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn cold_terminal_attach_both_orders<F>(make: &F, prefix: &str)
+async fn cold_terminal_attach_both_orders<F, C>(make: &F, make_catalog: &C, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
+    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
 {
     let after = durable_turn_address(
         format!("{prefix}-attach-after-session"),
@@ -581,7 +597,7 @@ where
         )
         .await
         .expect("publish before attach");
-    let store_factory = in_memory_catalog(&[after.session_id.as_str()]).await;
+    let store_factory = catalog_with_sessions(make_catalog, &[after.session_id.as_str()]).await;
     let attached_after = crate::TurnWorkDriver::for_catalog(make(), Arc::clone(&store_factory))
         .await_terminal(&after)
         .await
@@ -603,7 +619,7 @@ where
     };
     let attach_address = before.clone();
     let attach_host = make();
-    let store_factory = in_memory_catalog(&[before.session_id.as_str()]).await;
+    let store_factory = catalog_with_sessions(make_catalog, &[before.session_id.as_str()]).await;
     let attacher_factory = Arc::clone(&store_factory);
     let attacher = crate::task::spawn(async move {
         crate::TurnWorkDriver::for_catalog(attach_host, attacher_factory)

@@ -72,7 +72,10 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
         postgres_session_id,
     ) = run
         .build(async {
-            let memory_factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
+            let memory_backend = lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+            let memory_factory = memory_backend.session_store_factory();
             let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
             let sqlite_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&sqlite_root);
             let postgres = lash_postgres_store::PostgresStorage::connect_with(
@@ -100,7 +103,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                 .await?;
 
             let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
-                Arc::new(lash_core::TestLocalProcessRegistry::default());
+                memory_backend.process_registry();
             let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(
                 lash_sqlite_store::SqliteProcessRegistry::open(
                     &sqlite_root.join("process-registry.sqlite"),
@@ -616,7 +619,10 @@ mod store_hardening_tests {
 
     #[tokio::test]
     async fn process_prune_is_scoped_to_the_hardening_batch() {
-        let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let registry = lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open a SQLite memory backend")
+            .process_registry();
         let unrelated_process_id = "perf-prune-unrelated";
         registry
             .register_process(lash_core::ProcessRegistration::new(

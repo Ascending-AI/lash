@@ -2079,6 +2079,7 @@ dependencies = [
  "lash-internal-lashlang",
  "lash-internal-plugin-tool-output-budget",
  "lash-internal-sansio",
+ "lash-internal-sqlite-store",
  "pretty_assertions",
  "proptest",
  "rmp-serde",

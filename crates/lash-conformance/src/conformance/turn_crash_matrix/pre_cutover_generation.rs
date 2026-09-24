@@ -31,7 +31,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
 ) where
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
     let scenario = "pre-cutover-generation-redrive";
     let make_runtime = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
@@ -41,7 +41,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
-    let invocation = make_invocation(scenario);
+    let invocation = make_invocation(scenario, drive_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -52,6 +52,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
+        invocation.process_env_store(),
         &identity,
         TraceTool::default(),
     ))
@@ -114,6 +115,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
         successor_store,
         successor_control.clone(),
         successor_effect_controller,
+        successor_invocation.process_env_store(),
         &identity,
         TraceTool::default(),
         nominal_recovery_timings(),
@@ -183,7 +185,7 @@ pub async fn pre_cutover_generation_turn_claim_is_refused_typed<F, S, I>(
 ) where
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
     for (scenario, path) in [
         ("pre-cutover-generation-claim-direct", ClaimPath::Direct),
@@ -201,14 +203,14 @@ async fn refuse_claim<F, S, I>(make: &F, make_invocation: &I, scenario: &str, pa
 where
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = make(scenario) as Arc<dyn RuntimePersistence>;
     seed_reference_ingress(&raw, &identity, scenario).await;
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let invocation = make_invocation(scenario);
+    let invocation = make_invocation(scenario, drive_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -219,6 +221,7 @@ where
         SeamStore::wrap(raw, control.clone()),
         control.clone(),
         Arc::clone(&effect_controller),
+        invocation.process_env_store(),
         &identity,
         TraceTool::default(),
     ))

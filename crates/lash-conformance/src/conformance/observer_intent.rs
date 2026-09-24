@@ -11,11 +11,12 @@ use lash_sansio::SessionId;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::SessionStoreFactory>) {
+pub async fn fork_observer_intent_transient_failure(backend: Arc<dyn crate::Backend>) {
     const SESSION_ID: &str = "fork-observer-transient-session";
     const PROCESS_ID: &str = "fork-observer-transient-process";
 
-    let registry = crate::TestLocalProcessRegistry::default();
+    let factory = backend.session_store_factory();
+    let registry = crate::ProcessRegistryFaults::new(backend.process_registry());
     registry
         .register_process(crate::ProcessRegistration::new(
             PROCESS_ID,
@@ -47,11 +48,9 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
         .await
         .expect("create fork session with pending observer intent");
 
-    registry
-        .set_process_read_error(Some(crate::PluginError::Session(
-            "transient registry read failure".to_string(),
-        )))
-        .await;
+    registry.set_process_read_error(Some(crate::PluginError::Session(
+        "transient registry read failure".to_string(),
+    )));
     crate::runtime::reconcile_session_process_observer_intents(
         Some(&registry),
         &SessionId::from(SESSION_ID),
@@ -59,7 +58,7 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
     )
     .await
     .expect("transient registry failure must not fail fork observer settlement");
-    registry.set_process_read_error(None).await;
+    registry.set_process_read_error(None);
 
     assert!(
         registry

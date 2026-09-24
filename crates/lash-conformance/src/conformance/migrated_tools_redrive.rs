@@ -196,10 +196,11 @@ fn literal_outputs(turn: &crate::AssembledTurn) -> Vec<(String, serde_json::Valu
 pub async fn public_migrated_tools_redrive_to_literal_outcomes(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     orchestration: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
+    let registry = stores.process_registry();
     let session_id = SessionId::from(format!("{prefix}-session"));
     let turn_id = TurnId::from(format!("{prefix}-turn"));
     let target = ProcessId::from(format!("{prefix}-control-target"));
@@ -225,11 +226,11 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         .expect("register the cancel_process target");
 
     let (model, model_calls) = migrated_model(prefix, &target);
-    let mut host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+    let mut host = crate::conformance::store_set_host_config(
+        stores.as_ref(),
+        Arc::clone(&effect_host),
         crate::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_effect_host(Arc::clone(&effect_host));
+    );
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let echo: Arc<dyn crate::ToolProvider> = Arc::new(crate::testing::FixtureTools);
@@ -248,7 +249,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(crate::facade_support::PluginHost::new(factories.clone())),
             host.clone(),
-            Arc::new(crate::InMemorySessionStoreFactory::new()),
+            stores.session_store_factory(),
             lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
             Arc::new(crate::NoQueuedWork::new()),
             crate::testing::runtime_lease_owner(),
@@ -259,7 +260,16 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         session_id: session_id.clone(),
         host,
         factories,
-        store: Arc::new(crate::InMemorySessionStore::new()),
+        store: stores
+            .session_store_factory()
+            .create_store(&crate::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: session_id.clone(),
+                relation: crate::SessionRelation::Root,
+                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("create the migrated-tools session store"),
         registry: Arc::clone(watched.registry()),
         process_work: runner.process_work(watched, worker),
     };

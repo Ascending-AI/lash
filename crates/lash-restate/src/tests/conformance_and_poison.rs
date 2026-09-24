@@ -47,12 +47,31 @@ lash_conformance::turn_work_driver_tests!({
     let context = Arc::new(RecordingContext::default());
     let registration_context = Arc::clone(&context);
     let host: Arc<dyn EffectHost> = Arc::new(RestateRuntimeEffectController::new_for_test(context));
-    ((), host, move |_host, session_id, key| async move {
+    // The Restate host journals the turn-control promises; one SQL store set
+    // holds the sessions beside it (ADR 0102, D2).
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open the turn-control store set"),
+    ) as Arc<dyn lash_core::StoreSet>;
+    ((), host, stores, move |_host, session_id, key| async move {
         registration_context
             .wait_for_await_event_registration(&session_id, &key)
             .await;
     })
 });
+
+/// The process-exec-env store of the SQL store set a recording-context
+/// Restate host journals beside (ADR 0102, D2).
+fn conformance_process_env_store() -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
+    sync_await(async {
+        lash_core::StoreSet::process_env_store(
+            &lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("open the conformance store set"),
+        )
+    })
+}
 
 pub(super) fn replayable_conformance_invocation(
     context: Arc<ReplayableRecordingContext>,
@@ -63,19 +82,23 @@ pub(super) fn replayable_conformance_invocation(
     lash_conformance::ConformanceInvocation::new(
         controller,
         ExecutionScope::runtime_operation("restate-replay-conformance"),
-        lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
+        conformance_process_env_store(),
         || {},
         move || {
             context.start_replay();
-            Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
-                &context,
-            ))) as Arc<dyn RuntimeEffectController>
+            lash_conformance::InvocationSuccessor {
+                controller: Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
+                    &context,
+                ))) as Arc<dyn RuntimeEffectController>,
+                process_env_store: conformance_process_env_store(),
+            }
         },
     )
 }
 
 pub(super) fn crash_redrive_conformance_invocation(
     _scenario: &str,
+    _scope: ExecutionScope,
 ) -> lash_conformance::ConformanceInvocation {
     let context = Arc::new(ReplayableRecordingContext::default());
     let controller: Arc<dyn RuntimeEffectController> = Arc::new(
@@ -84,13 +107,16 @@ pub(super) fn crash_redrive_conformance_invocation(
     lash_conformance::ConformanceInvocation::new(
         controller,
         ExecutionScope::runtime_operation("restate-crash-redrive-conformance"),
-        lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
+        conformance_process_env_store(),
         || {},
         move || {
             context.start_replay_allowing_journal_extension();
-            Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
-                &context,
-            ))) as Arc<dyn RuntimeEffectController>
+            lash_conformance::InvocationSuccessor {
+                controller: Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
+                    &context,
+                ))) as Arc<dyn RuntimeEffectController>,
+                process_env_store: conformance_process_env_store(),
+            }
         },
     )
 }
@@ -254,13 +280,18 @@ lash_conformance::turn_runner_tests!(
             effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
-        let registry =
-            Arc::new(lash_core::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
+        // The Restate host journals the effects; one SQL store set holds the
+        // sessions and the process registry beside it (ADR 0102, D2).
+        let stores = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("open the turn-runner store set"),
+        ) as Arc<dyn lash_core::StoreSet>;
         let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
             serde_json::json!({"signal": "observed"}),
         ));
         let (process_work, wait_transport) =
-            conformance_restate_process_work(Arc::clone(&registry), terminal);
+            conformance_restate_process_work(stores.process_registry(), terminal);
         let verify_transport = Arc::clone(&wait_transport);
         // Restate state outlives a run: a fixed prefix would reopen the last
         // run's retired group and replay its settlement instead of running
@@ -273,7 +304,7 @@ lash_conformance::turn_runner_tests!(
             (harness, wait_transport),
             prefix,
             effect_host,
-            registry,
+            stores,
             process_work,
             turn_runner,
             // Only the signal law waits on a process terminal through the
@@ -298,7 +329,7 @@ lash_conformance::migrated_tools_redrive_tests!(
             effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
-        let registry = harness.process_registry();
+        let stores = harness.stores();
         // Restate state outlives a run: a fixed prefix would reopen the last
         // run's workflows and groups, so each run names its own.
         let prefix: &'static str =
@@ -318,28 +349,62 @@ lash_conformance::migrated_tools_redrive_tests!(
             harness,
             prefix,
             effect_host,
-            registry,
+            stores,
             turn_runner,
             orchestration,
         )
     }
 );
 
+/// Discards a claimed wake delivery with no reason, straight in the store
+/// set's registry database: the corruption the ordering law's group fault
+/// needs.
+struct StoreSetWakeDeliveryFault {
+    stores: lash_sqlite_store::SqliteStoreSet,
+}
+
+#[async_trait::async_trait]
+impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector for StoreSetWakeDeliveryFault {
+    async fn discard_without_reason(&self, delivery_id: &str) {
+        let conn = rusqlite::Connection::open(
+            self.stores
+                .database_uri(lash_sqlite_store::SqliteDatabase::ProcessRegistry),
+        )
+        .expect("open the store set's registry database");
+        conn.busy_timeout(Duration::from_secs(15))
+            .expect("set the raw connection's busy timeout");
+        assert_eq!(
+            conn.execute(
+                "UPDATE process_wake_deliveries
+                 SET state = 'discarded', claim_token = NULL, discard_reason = NULL
+                 WHERE delivery_id = ?1 AND state = 'enqueuing'",
+                rusqlite::params![delivery_id],
+            )
+            .expect("inject a reasonless wake discard"),
+            1
+        );
+    }
+}
+
 lash_conformance::wake_delivery_ordering_tests!({
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    // The Restate host journals the effects; one SQL store set holds the
+    // process registry beside it (ADR 0102, D2).
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("open the wake-ordering store set");
+    let registry = lash_core::StoreSet::process_registry(&stores);
     let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
         serde_json::json!({"terminal_wait": "observed"}),
     ));
-    let (process_work, wait_transport) = conformance_restate_process_work(
-        Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
-        terminal,
-    );
+    let (process_work, wait_transport) =
+        conformance_restate_process_work(Arc::clone(&registry), terminal);
     let verify_transport = Arc::clone(&wait_transport);
     let barrier_transport = Arc::clone(&wait_transport);
     (
         wait_transport,
-        Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
-        registry as Arc<dyn lash_conformance::WakeDeliveryOrderingGroupFaultInjector>,
+        registry,
+        Arc::new(StoreSetWakeDeliveryFault { stores })
+            as Arc<dyn lash_conformance::WakeDeliveryOrderingGroupFaultInjector>,
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Reattach,
         move || async move {
@@ -398,7 +463,7 @@ lash_conformance::wake_delivery_crash_tests!({
 type RestateCrashFixture = (
     tempfile::TempDir,
     Box<dyn Fn(&str) -> Arc<dyn lash_core::RuntimePersistence>>,
-    fn(&str) -> lash_conformance::ConformanceInvocation,
+    fn(&str, ExecutionScope) -> lash_conformance::ConformanceInvocation,
     fn(&str, ExecutionScope) -> lash_conformance::ConformanceInvocation,
 );
 
@@ -420,16 +485,14 @@ fn restate_turn_crash_fixture() -> RestateCrashFixture {
         crash_redrive_conformance_invocation,
         // The Restate recording controller has no SQLite/Postgres effect
         // journal: only the tool-attempt error-return placement runs here.
-        |scenario: &str, _scope: ExecutionScope| crash_redrive_conformance_invocation(scenario),
+        crash_redrive_conformance_invocation,
     )
 }
 
-lash_conformance::turn_crash_trace_tests!({ restate_turn_crash_fixture() });
-
-// The crash-and-recover laws drive a turn whose tool call opens an effect
-// group, which the recording context cannot host; they move to the live
-// harness under FIG-3561.
-lash_conformance::turn_crash_recovery_tests!(
+// Every turn-crash law drives a turn whose tool call opens an effect group,
+// which the recording context cannot host; they move to the live harness under
+// FIG-3561.
+lash_conformance::turn_crash_matrix_tests!(
     #[ignore = "parked: needs the live Restate harness for effect groups (FIG-3561)"]
     {
         restate_turn_crash_fixture()
@@ -531,12 +594,15 @@ lash_conformance::effect_host_await_event_witness_tests!(
     {
         let harness = Arc::new(effect_group_conformance::LiveConformanceHarness::start().await);
         let make = harness.effect_host_factory();
+        let stores = harness.stores();
+        let make_catalog = move || stores.session_store_factory();
         let witness_harness = Arc::clone(&harness);
         let teardown_harness = Arc::clone(&harness);
         (
             harness,
             Duration::from_secs(240),
             make,
+            make_catalog,
             move |host, assert_retirement| async move {
                 witness_harness
                     .run_active_wait_registration_witnesses(host, assert_retirement)

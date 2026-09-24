@@ -358,7 +358,7 @@ pub(super) fn write_generated_backend_regression_fixtures(
         std::fs::copy(&source_trace_path, &fixture_trace_path)?;
         let package_path = package_dir.join("package.json");
         let static_backend_replay_policy = "not_claimed_for_generated_scheduler_traces";
-        let backend_equivalence_contract = "source seed passed the dynamic generated workload rerun against the serialized in-memory reference and lash-sqlite-store; static SQLite/Postgres replay is a different fixed-order trace contract and is not inferred from this generated trace";
+        let backend_equivalence_contract = "source seed passed the dynamic generated workload rerun against the serialized SQLite-memory reference and lash-sqlite-store; static SQLite/Postgres replay is a different fixed-order trace contract and is not inferred from this generated trace";
         let package = GeneratedBackendRegressionPackage {
             schema: "lash.sim.generated-backend-regression-package.v1",
             fixture_id: spec.fixture_id,

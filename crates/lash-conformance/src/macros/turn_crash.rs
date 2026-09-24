@@ -19,9 +19,9 @@ macro_rules! __turn_crash_matrix_register {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, make, _make_invocation, _make_error_invocation) = $fixture;
+            let (_guard, make, make_invocation, _make_error_invocation) = $fixture;
             let _ = $label;
-            Box::pin($crate::registration_macro_support::$law(make)).await;
+            Box::pin($crate::registration_macro_support::$law(make, make_invocation)).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };

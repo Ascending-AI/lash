@@ -89,7 +89,7 @@ async fn assert_nothing_landed(sink: &IntentSink, context: &str) {
 ///   The successor's drain replays the sealed drain input — the body never
 ///   runs again — and a reopen serves the success terminal at rank 0, not the
 ///   cancelled failure the close asked for.
-/// * On the in-memory tier the same protection holds in-process: the close
+/// * On a drain-less tier the same protection holds in-process: the close
 ///   decides no committed position, the child's held drain finishes once
 ///   released, and the intents land in declaration order. A closed group's
 ///   ranks are unreadable by contract on this tier, so the landed intents and
@@ -117,7 +117,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
     .await;
 
     if probe.drain.is_none() {
-        // The in-memory half: the close's cancel token must not interrupt the
+        // The drain-less half: the close's cancel token must not interrupt the
         // committed child's drain.
         let host = probe.host;
         let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
@@ -151,7 +151,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
                 &scenario.env_ref,
                 1,
                 crate::LoserPolicy::Cancel,
-                deferrable_routing(fixture.deferrable_routing, &host),
+                ToolChildCompletionRouting::Durable,
                 recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
             ))
             .await
@@ -199,7 +199,6 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         let intent_target = intent_target.clone();
         let observation = Arc::clone(&observation);
         let sink = Arc::clone(&crash_sink);
-        let routing_kind = fixture.deferrable_routing;
         let opener = opener.clone();
         let make_processes = Arc::clone(&fixture.make_processes);
         move |world| {
@@ -213,12 +212,12 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
                     start_metadata: serde_json::Value::Null,
                 });
                 let crash_processes = make_processes().await;
-                let env_store = crash_processes.process_env_store;
+                let env_store = crash_processes.process_env_store();
                 let env_ref =
                     crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
                 let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
                     inner: crate::testing::effect_backed_process_service(
-                        crash_processes.registry,
+                        crash_processes.process_registry(),
                         Arc::clone(&env_store),
                     ),
                     sink: Arc::clone(&sink),
@@ -245,7 +244,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
                         &env_ref,
                         1,
                         crate::LoserPolicy::Cancel,
-                        deferrable_routing(routing_kind, &world.host),
+                        ToolChildCompletionRouting::Durable,
                         recorded_cancellation_authority(&world.host, &crate::admit(scope.clone()))
                             .await,
                     ))
@@ -280,7 +279,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         lease_ttl_ms: LIVE_LEASE_MS,
     })
     .await;
-    let env_store = (fixture.make_processes)().await.process_env_store;
+    let env_store = (fixture.make_processes)().await.process_env_store();
     let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
     install_child_host(&successor.host, &env_store);
     until_claims_lapse(&successor, &group_key).await;
@@ -343,7 +342,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
             &env_ref,
             1,
             crate::LoserPolicy::Cancel,
-            deferrable_routing(fixture.deferrable_routing, &successor.host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
         ))
         .await
@@ -457,7 +456,6 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
             let intent_target = intent_target.clone();
             let observation = Arc::clone(&observation);
             let sink = Arc::clone(&crash_sink);
-            let routing_kind = fixture.deferrable_routing;
             let opener = opener.clone();
             let make_processes = Arc::clone(&fixture.make_processes);
             move |world| {
@@ -472,12 +470,12 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
                         start_metadata: serde_json::Value::Null,
                     });
                     let crash_processes = make_processes().await;
-                    let env_store = crash_processes.process_env_store;
+                    let env_store = crash_processes.process_env_store();
                     let env_ref =
                         crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
                     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
                         inner: crate::testing::effect_backed_process_service(
-                            crash_processes.registry,
+                            crash_processes.process_registry(),
                             Arc::clone(&env_store),
                         ),
                         sink: Arc::clone(&sink),
@@ -504,7 +502,7 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
                             &env_ref,
                             2,
                             crate::LoserPolicy::RunToCompletion,
-                            deferrable_routing(routing_kind, &world.host),
+                            ToolChildCompletionRouting::Durable,
                             recorded_cancellation_authority(
                                 &world.host,
                                 &crate::admit(scope.clone()),
@@ -558,7 +556,7 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
             lease_ttl_ms: LIVE_LEASE_MS,
         })
         .await;
-        let env_store = (fixture.make_processes)().await.process_env_store;
+        let env_store = (fixture.make_processes)().await.process_env_store();
         let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
         install_child_host(&successor.host, &env_store);
         until_claims_lapse(&successor, &group_key).await;
@@ -636,7 +634,7 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
                 &env_ref,
                 2,
                 crate::LoserPolicy::RunToCompletion,
-                deferrable_routing(fixture.deferrable_routing, &successor.host),
+                ToolChildCompletionRouting::Durable,
                 recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone()))
                     .await,
             ))
@@ -698,7 +696,7 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
             &scenario.env_ref,
             2,
             crate::LoserPolicy::RunToCompletion,
-            deferrable_routing(fixture.deferrable_routing, &host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
         ))
         .await
@@ -849,7 +847,7 @@ pub async fn a_drain_held_at_the_barrier_parks_under_a_frozen_dispatch_clock(
             &scenario.env_ref,
             2,
             crate::LoserPolicy::RunToCompletion,
-            deferrable_routing(fixture.deferrable_routing, &host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
         ))
         .await

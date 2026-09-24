@@ -24,11 +24,14 @@ pub struct RuntimePersistenceStateMachineHandles {
 }
 
 impl RuntimePersistenceStateMachineHandles {
+    /// Handles over `session_factory`, whose blobs `attachment_backend`
+    /// holds: the backend's own attachment store, or the byte backend the
+    /// tier composes with a store that keeps none.
     pub async fn create(
         session_factory: Arc<dyn crate::SessionStoreFactory>,
+        attachment_backend: Arc<dyn crate::AttachmentStore>,
         process_owner_liveness_wired: bool,
     ) -> Result<Self, crate::StoreError> {
-        let attachment_backend = Arc::new(crate::InMemoryAttachmentStore::new());
         let runtime = session_factory
             .create_store(&super::session_store_request(
                 &SessionId::from(SESSION_ID),

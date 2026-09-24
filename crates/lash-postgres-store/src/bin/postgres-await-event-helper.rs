@@ -161,7 +161,17 @@ async fn run_turn_action(
             drain_budget: Default::default(),
         },
     ));
-    lash_conformance::cold_process_real_turn_driver(store, controller, nonce, action, marker).await;
+    let process_env_store = Arc::new(storage.process_env_store())
+        as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>;
+    lash_conformance::cold_process_real_turn_driver(
+        store,
+        controller,
+        process_env_store,
+        nonce,
+        action,
+        marker,
+    )
+    .await;
     Ok(())
 }
 

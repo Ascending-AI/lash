@@ -64,7 +64,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
     make_invocation: I,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
     let scenario = "direct-acceptance-after-store-commit";
     let identity = ReferenceIdentity::for_scenario(scenario);
@@ -76,7 +76,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let acceptance_bodies = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let invocation = make_invocation(scenario);
+    let invocation = make_invocation(scenario, drive_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -87,6 +87,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
         SeamStore::wrap(counted(make(scenario), &acceptance_bodies), control.clone()),
         control.clone(),
         Arc::clone(&effect_controller),
+        invocation.process_env_store(),
         &identity,
         TraceTool::default(),
     ))
@@ -139,6 +140,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
         ),
         successor_control.clone(),
         Arc::clone(&successor_effect_controller),
+        successor_invocation.process_env_store(),
         &identity,
         TraceTool::default(),
         nominal_recovery_timings(),

@@ -48,10 +48,12 @@
 //!
 //! The outcome table is hand-written in `turn_crash_outcomes.json`. Its rulings
 //! follow ADR 0029's reclaim-mediated LAW/NON-LAW split, ADR 0045's stateless
-//! service rule, and the current-head CAS/floor semantics. In particular, a
-//! crash after an external effect but before its outcome reaches the runtime
-//! must re-execute that effect; this suite deliberately asserts at-least-once
-//! behavior rather than fictional exactly-once suppression.
+//! service rule, and the current-head CAS/floor semantics. Every tier journals
+//! its effects (ADR 0102, D1), so a crash after an effect whose outcome the
+//! journal recorded replays that outcome and the effect runs once. A crash
+//! inside the tool body, before any outcome is recorded, must re-execute the
+//! effect; this suite deliberately asserts at-least-once behavior there rather
+//! than fictional exactly-once suppression.
 //!
 //! Non-goals:
 //!
@@ -61,7 +63,8 @@
 //! - in-process points between seam operations are durably equivalent to the
 //!   next seam boundary: no durable fact can change between two seam calls, so
 //!   killing anywhere in that interval recovers from the same durable prefix.
-//! - level 1 uses task cancellation to check every generated semantic point;
+//! - level 1 runs the crashed worker on a runtime of its own and drops it at
+//!   every generated semantic point, so everything the worker spawned dies;
 //!   level 2 uses a separate process and `SIGKILL` at the selected durable-risk
 //!   points.
 //! - a level-2 known-defect ruling is not a skip: it requires a ticket and an
@@ -125,9 +128,7 @@ pub use pre_cutover_generation::{
     pre_cutover_generation_turn_redrive_is_refused_before_any_effect,
 };
 use pretty_assertions::assert_eq;
-pub(crate) use seam_controllers::{
-    CrashAfterCheckpointExecutionController, SeamEffectController, StoreOwnedTurnControlController,
-};
+pub(crate) use seam_controllers::{CrashAfterCheckpointExecutionController, SeamEffectController};
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
@@ -137,6 +138,37 @@ const RECOVERY_RENEW: Duration = Duration::from_millis(100);
 const NOMINAL_RECOVERY_TTL: Duration = Duration::from_secs(5);
 const CRASHED_TURN_TTL: Duration = Duration::from_secs(60);
 const HIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Run `phase` as a worker process that dies when it returns.
+///
+/// The phase runs on a runtime of its own, on a thread of its own, and the
+/// runtime is dropped as soon as the phase returns. Every task the phase
+/// spawned (a group drain, an effect-claim renewer) dies with it, as it would
+/// in a real crash: a successor must reclaim that work by lease expiry, not
+/// wait behind a renewer that outlived its turn.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: a crashing process that cannot start fails the law"
+)]
+fn crashing_process<'a, T: Send>(phase: impl Future<Output = T> + Send + 'a) -> T {
+    tokio::task::block_in_place(|| {
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let runtime = tokio::runtime::Builder::new_multi_thread()
+                        .worker_threads(2)
+                        .enable_all()
+                        .build()
+                        .expect("the crashing process gets a runtime of its own");
+                    let outcome = runtime.block_on(phase);
+                    runtime.shutdown_timeout(HIT_TIMEOUT);
+                    outcome
+                })
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        })
+    })
+}
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Host owner id every runtime built by this harness leases under
 /// ([`crate::testing::runtime_lease_owner`]), so the recovery probe can tell a
@@ -1489,6 +1521,12 @@ fn provider_handle(control: SeamControl) -> ProviderHandle {
     })))
 }
 
+/// The scope a reference turn's drive is admitted under: the scope its
+/// journaled controller is opened for.
+fn drive_scope(identity: &ReferenceIdentity) -> crate::ExecutionScope {
+    crate::ExecutionScope::queue_drain(&identity.session_id, identity.turn_id.as_str())
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1508,6 +1546,7 @@ async fn build_runtime(
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     identity: &ReferenceIdentity,
     trace_tool: TraceTool,
 ) -> crate::LashRuntime {
@@ -1515,6 +1554,7 @@ async fn build_runtime(
         store,
         control,
         effect_controller,
+        process_env_store,
         identity,
         trace_tool,
         crashed_turn_timings(),
@@ -1530,6 +1570,7 @@ async fn build_runtime_with_lease_timings(
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     identity: &ReferenceIdentity,
     trace_tool: TraceTool,
     lease_timings: crate::LeaseTimings,
@@ -1538,6 +1579,7 @@ async fn build_runtime_with_lease_timings(
         store,
         control,
         effect_controller,
+        process_env_store,
         identity,
         trace_tool,
         lease_timings,
@@ -1548,44 +1590,35 @@ async fn build_runtime_with_lease_timings(
 
 /// Build the reference runtime, returning the builder's refusal instead of
 /// panicking on it: session admission runs inside `build`.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn try_build_runtime_with_lease_timings(
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     identity: &ReferenceIdentity,
     mut trace_tool: TraceTool,
     lease_timings: crate::LeaseTimings,
 ) -> Result<crate::LashRuntime, crate::SessionError> {
     super::bind_conformance_session(&store, &identity.session_id).await;
-    // The live host watcher must share the turn controller's await-event registry.
-    let effect_host: Arc<dyn crate::EffectHost> = match effect_controller.effect_journaling() {
-        crate::EffectJournaling::Local => {
-            lash_core::facade_support::bind_store_turn_control_authority(
-                Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller))),
-                store.as_ref(),
-            )
-            .expect("bind crash fixture cancellation authority")
-        }
-        crate::EffectJournaling::Journaled => {
-            assert!(
-                effect_controller
-                    .await_event_authority_binding_id()
-                    .is_some(),
-                "durable crash fixture identifies its promise authority"
-            );
-            Arc::new(InvocationEffectHost {
-                inner: Arc::clone(&effect_controller),
-            })
-        }
-    };
+    // The live host watcher must share the turn controller's await-event
+    // registry, so the host is a projection over the invocation's journaled
+    // controller.
+    assert!(
+        effect_controller
+            .await_event_authority_binding_id()
+            .is_some(),
+        "the crash fixture's journaled controller identifies its promise authority"
+    );
+    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(InvocationEffectHost {
+        inner: Arc::clone(&effect_controller),
+    });
+    // The reference turn writes no attachment, so that port refuses; its
+    // tool children publish their execution environment to the invocation's
+    // substrate.
     let mut host = crate::RuntimeHostConfig::new(
         effect_host,
-        Arc::new(crate::InMemoryAttachmentStore::new()),
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        Arc::new(crate::attachments::UnavailableAttachmentStore),
+        process_env_store,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     )
@@ -1731,9 +1764,10 @@ fn golden_trace() -> Vec<TurnSeamOperation> {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn turn_crash_trace_drift_check<F>(make: F)
+pub async fn turn_crash_trace_drift_check<F, I>(make: F, make_invocation: I)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    I: Fn(&str, crate::ExecutionScope) -> super::ConformanceInvocation,
 {
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1741,8 +1775,9 @@ where
     let identity = ReferenceIdentity::for_scenario("trace-drift");
     seed_reference_ingress(&raw, &identity, "trace-drift").await;
     let decorated = SeamStore::wrap(raw, control.clone());
+    let invocation = make_invocation("trace-drift", drive_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::NativeRuntimeEffectController::default()),
+        inner: invocation.controller_handle(),
         control: control.clone(),
         executions,
         journal_faults: None,
@@ -1751,6 +1786,7 @@ where
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
+        invocation.process_env_store(),
         &identity,
         TraceTool::default(),
         nominal_recovery_timings(),
@@ -1764,6 +1800,7 @@ where
         .await
         .expect("reference turn succeeds")
         .expect("reference ingress produces a turn");
+    invocation.end();
     assert_eq!(turn.assistant_output.safe_text, "trace turn complete");
     assert_eq!(
         control.trace(),
@@ -1905,9 +1942,9 @@ fn pending_input_text(read: &crate::PendingTurnInputRead) -> String {
 pub async fn turn_crash_matrix_level_1<F, I>(make: F, make_invocation: I)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> super::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> super::ConformanceInvocation,
 {
-    Box::pin(turn_crash_trace_drift_check(&make)).await;
+    Box::pin(turn_crash_trace_drift_check(&make, &make_invocation)).await;
     for entry in turn_crash_matrix_outcomes() {
         let scenario = point_key(&entry.point);
         Box::pin(run_crash_matrix_case(

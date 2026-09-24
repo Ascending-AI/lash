@@ -1,9 +1,9 @@
 //! Durable session-config command conformance.
 
 use super::*;
-#[cfg(test)]
 use crate::Clock;
 use pretty_assertions::assert_eq;
+use std::future::Future;
 
 #[expect(
     clippy::expect_used,
@@ -169,14 +169,25 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
     );
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn commit_session_command_claim(
     store: &dyn crate::RuntimePersistence,
     request: &crate::SessionStoreCreateRequest,
     claim: crate::QueuedWorkClaim,
+) {
+    commit_session_command_claim_with(store, request, claim, |_| {}).await;
+}
+
+/// [`commit_session_command_claim`], with `adjust` applied to the state the
+/// settling commit writes.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn commit_session_command_claim_with(
+    store: &dyn crate::RuntimePersistence,
+    request: &crate::SessionStoreCreateRequest,
+    claim: crate::QueuedWorkClaim,
+    adjust: impl FnOnce(&mut crate::RuntimeSessionState),
 ) {
     let mut state = crate::load_persisted_session_state(store)
         .await
@@ -187,6 +198,7 @@ async fn commit_session_command_claim(
             ..crate::RuntimeSessionState::new(request.policy.clone())
         });
     state.ensure_agent_frame_initialized();
+    adjust(&mut state);
     let first_batch_id = claim
         .batches
         .first()
@@ -209,9 +221,8 @@ async fn commit_session_command_claim(
 }
 
 /// Virtual clock for runtime settlement tests. Its sleeps advance the same
-/// epoch used by the in-memory store and yield once, so settlement deadlines
+/// epoch the backend's stores stamp from and yield once, so settlement deadlines
 /// are exercised without waiting on wall time.
-#[cfg(test)]
 #[derive(Debug)]
 struct ConfigSettlementClock {
     epoch_ms: std::sync::atomic::AtomicU64,
@@ -219,7 +230,6 @@ struct ConfigSettlementClock {
     epoch_origin_ms: u64,
 }
 
-#[cfg(test)]
 impl ConfigSettlementClock {
     fn new(epoch_ms: u64) -> Self {
         Self {
@@ -229,6 +239,10 @@ impl ConfigSettlementClock {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     fn advance(&self, duration: std::time::Duration) {
         let duration_ms = u64::try_from(duration.as_millis()).expect("clock duration fits u64");
         self.epoch_ms
@@ -236,7 +250,6 @@ impl ConfigSettlementClock {
     }
 }
 
-#[cfg(test)]
 #[async_trait::async_trait]
 impl crate::Clock for ConfigSettlementClock {
     fn now(&self) -> std::time::Instant {
@@ -278,21 +291,39 @@ fn config_settlement_clock_wall_clock_faces_agree() {
     assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
-#[cfg(test)]
-async fn config_settlement_store(
-    clock: Arc<ConfigSettlementClock>,
+/// The law's store: a fresh backend, and `request`'s store from its
+/// factory. The backend is returned so the runtime takes its ports from it.
+///
+/// The backend keeps its own clock. Only the runtime's settlement wait runs
+/// on the law's virtual clock: a backend on it would advance that clock with
+/// every lease-renewal sleep of its own and blur the bound the law measures.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn config_settlement_store<M, Fut>(
+    make: &M,
     request: &crate::SessionStoreCreateRequest,
-) -> Arc<dyn crate::RuntimePersistence> {
-    let factory =
-        crate::InMemorySessionStoreFactory::with_clock(Arc::clone(&clock) as Arc<dyn crate::Clock>);
-    factory
+) -> (Arc<dyn crate::Backend>, Arc<dyn crate::RuntimePersistence>)
+where
+    M: Fn() -> Fut,
+    Fut: Future<Output = Arc<dyn crate::Backend>>,
+{
+    let backend = make().await;
+    let store = backend
+        .session_store_factory()
         .create_store(request)
         .await
-        .expect("create in-memory config-settlement store")
+        .expect("create config-settlement store");
+    (backend, store)
 }
 
-#[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn runtime_for_config_settlement(
+    backend: &dyn crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
     request: &crate::SessionStoreCreateRequest,
     clock: Arc<ConfigSettlementClock>,
@@ -316,12 +347,10 @@ async fn runtime_for_config_settlement(
         None => host.build_session(request.session_id.clone()),
     }
     .expect("config-settlement plugins");
-    let host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_clock(clock as Arc<dyn crate::Clock>);
-    let runtime_host = crate::EmbeddedRuntimeHost::new(host);
+    let host =
+        crate::conformance::backend_host_config(backend, crate::QueuedWorkBatchingConfig::new(1))
+            .with_clock(clock as Arc<dyn crate::Clock>);
+    let runtime_host = crate::conformance::backend_embedded_host(backend, host);
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
         store,
@@ -339,7 +368,10 @@ async fn runtime_for_config_settlement(
     .expect("build config-settlement runtime")
 }
 
-#[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn enqueue_config_settlement_blocker(
     store: &dyn crate::RuntimePersistence,
     session_id: &SessionId,
@@ -358,7 +390,10 @@ async fn enqueue_config_settlement_blocker(
         .expect("enqueue config-settlement blocker");
 }
 
-#[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn config_settlement_patch(model_id: &str) -> crate::SessionConfigPatch {
     crate::SessionConfigPatch {
         model: Some(
@@ -371,18 +406,30 @@ fn config_settlement_patch(model_id: &str) -> crate::SessionConfigPatch {
     }
 }
 
-#[cfg(test)]
-pub(super) async fn session_config_settlement_timeout_is_typed() {
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn session_config_settlement_timeout_is_typed<M, Fut>(make: M)
+where
+    M: Fn() -> Fut,
+    Fut: Future<Output = Arc<dyn crate::Backend>>,
+{
     let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
         &SessionId::from("config-settlement-timeout"),
         "config-settlement-original",
         crate::SessionRelation::Root,
     );
-    let store = config_settlement_store(Arc::clone(&clock), &request).await;
+    let (backend, store) = config_settlement_store(&make, &request).await;
     enqueue_config_settlement_blocker(store.as_ref(), &request.session_id).await;
-    let mut runtime =
-        runtime_for_config_settlement(Arc::clone(&store), &request, Arc::clone(&clock)).await;
+    let mut runtime = runtime_for_config_settlement(
+        backend.as_ref(),
+        Arc::clone(&store),
+        &request,
+        Arc::clone(&clock),
+    )
+    .await;
     let original_model = runtime.export_persistence_state().policy.model.clone();
     let started = clock.now();
     let error = runtime
@@ -393,9 +440,12 @@ pub(super) async fn session_config_settlement_timeout_is_typed() {
         matches!(error, crate::SessionError::SessionCommandPending(_)),
         "blocked config setter returned {error:?}"
     );
+    // Every sleep on the virtual clock advances it, the runtime's own
+    // lease-renewal sleeps between settlement polls included, so the setter
+    // is held to answering once the bound has elapsed, never before it.
     assert!(
-        clock.now().saturating_duration_since(started) == std::time::Duration::from_secs(30),
-        "the injected 30s settlement bound must not hang the facade writer"
+        clock.now().saturating_duration_since(started) >= std::time::Duration::from_secs(30),
+        "the setter answered pending before the injected 30s settlement bound elapsed"
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
@@ -403,18 +453,30 @@ pub(super) async fn session_config_settlement_timeout_is_typed() {
     );
 }
 
-#[cfg(test)]
-pub(super) async fn cancelled_session_config_settlement_is_typed() {
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn cancelled_session_config_settlement_is_typed<M, Fut>(make: M)
+where
+    M: Fn() -> Fut,
+    Fut: Future<Output = Arc<dyn crate::Backend>>,
+{
     let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
         &SessionId::from("config-settlement-cancelled"),
         "config-settlement-original",
         crate::SessionRelation::Root,
     );
-    let store = config_settlement_store(Arc::clone(&clock), &request).await;
+    let (backend, store) = config_settlement_store(&make, &request).await;
     enqueue_config_settlement_blocker(store.as_ref(), &request.session_id).await;
-    let runtime =
-        runtime_for_config_settlement(Arc::clone(&store), &request, Arc::clone(&clock)).await;
+    let runtime = runtime_for_config_settlement(
+        backend.as_ref(),
+        Arc::clone(&store),
+        &request,
+        Arc::clone(&clock),
+    )
+    .await;
     let original_model = runtime.export_persistence_state().policy.model.clone();
     let setter = crate::task::spawn(async move {
         let mut runtime = runtime;
@@ -470,17 +532,29 @@ pub(super) async fn cancelled_session_config_settlement_is_typed() {
 /// settled config command before the facade writer observes settlement, the
 /// facade writer adopts the newer durable head as-is — it never re-publishes
 /// its own older patch values over that head residently.
-#[cfg(test)]
-pub(super) async fn superseded_config_settlement_adopts_the_newer_head() {
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn superseded_config_settlement_adopts_the_newer_head<M, Fut>(make: M)
+where
+    M: Fn() -> Fut,
+    Fut: Future<Output = Arc<dyn crate::Backend>>,
+{
     let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
         &SessionId::from("config-settlement-superseded"),
         "config-settlement-original",
         crate::SessionRelation::Root,
     );
-    let store = config_settlement_store(Arc::clone(&clock), &request).await;
-    let runtime =
-        runtime_for_config_settlement(Arc::clone(&store), &request, Arc::clone(&clock)).await;
+    let (backend, store) = config_settlement_store(&make, &request).await;
+    let runtime = runtime_for_config_settlement(
+        backend.as_ref(),
+        Arc::clone(&store),
+        &request,
+        Arc::clone(&clock),
+    )
+    .await;
 
     // A second writer holds the session-execution lease for the whole test,
     // so the facade writer can neither drain inline nor drain from its
@@ -533,35 +607,19 @@ pub(super) async fn superseded_config_settlement_adopts_the_newer_head() {
             .any(|batch| batch.batch_id == command_batch.batch_id),
         "the superseding writer drains the facade writer's command"
     );
-    commit_session_command_claim(store.as_ref(), &request, claim).await;
-
-    // ...then advances the durable head again with a newer model before the
-    // facade writer observes settlement.
+    // ...and, in the same commit that settles it, advances the durable head
+    // with a newer model. One commit keeps the law independent of when the
+    // facade writer polls: it can only ever observe its command settled under
+    // the newer head.
     let superseding_model = crate::ModelSpec::builder("second-newer")
         .context_window_tokens(32_000)
         .build()
         .expect("superseding model");
-    let mut newer = crate::load_persisted_session_state(store.as_ref())
-        .await
-        .expect("load superseding state")
-        .expect("superseding state present");
-    newer.policy.model = superseding_model.clone();
-    store
-        .commit_runtime_state(
-            crate::RuntimeCommit::persisted_state_with_operation_for_testing(
-                &newer,
-                &[],
-                crate::OperationId::new(
-                    crate::ExecutionScope::runtime_operation(format!(
-                        "session:{}:boundary:superseding-writer",
-                        request.session_id
-                    )),
-                    "supersede-config",
-                ),
-            ),
-        )
-        .await
-        .expect("commit superseding model");
+    let newer_model = superseding_model.clone();
+    commit_session_command_claim_with(store.as_ref(), &request, claim, move |state| {
+        state.policy.model = newer_model;
+    })
+    .await;
 
     let (result, runtime) = setter.await.expect("superseded setter task");
     result.expect("superseded config setter settles durably");

@@ -37,6 +37,9 @@ lash-protocol-standard = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
+# Raw SQL over a SQLite backend's databases, for the scenarios that inject a
+# substrate fault the store has no seam for.
+rusqlite = { version = "0.37", features = ["bundled"] }
 lash-subagents = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -55,4 +58,3 @@ lash-provider-anthropic = { workspace = true, features = ["testing"] }
 lash-provider-google = { workspace = true, features = ["testing"] }
 lash-provider-openai = { workspace = true, features = ["testing"] }
 rmp-serde = { workspace = true }
-rusqlite = { version = "0.37", features = ["bundled"] }

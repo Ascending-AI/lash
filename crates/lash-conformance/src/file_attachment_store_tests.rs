@@ -1,6 +1,10 @@
+//! The filesystem attachment backend's registration of the reopenable
+//! attachment-store laws.
+
 use crate::*;
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
+
 crate::attachment_store_reopenable_tests!({
     use crate::conformance::ReopenableAttachmentStore;
 

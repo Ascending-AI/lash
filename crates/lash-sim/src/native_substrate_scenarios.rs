@@ -11,17 +11,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::facade_support::{
-    CommitBudget, InMemorySessionStoreFactory, PluginHost, ProcessAdmissionIntake,
-    ProcessEngineRegistry, ProcessRecoveryOperation, ProcessWorkerFault, QueuedWorkBatchingConfig,
-    RuntimeHostConfig, watch_process_registry,
+    CommitBudget, PluginHost, ProcessAdmissionIntake, ProcessEngineRegistry,
+    ProcessRecoveryOperation, ProcessWorkerFault, QueuedWorkBatchingConfig, RuntimeHostConfig,
+    watch_process_registry,
 };
 use lash_core::sync::MutexExt as _;
 use lash_core::{
     LeaseOwnerIdentity, NativeProcessWork, NativeSubstrateConfig, NoQueuedWork, ProcessAwaitOutput,
     ProcessEngine, ProcessEngineRunContext, ProcessInfraError, ProcessInput, ProcessLease,
     ProcessLeaseClaimOutcome, ProcessRegistration, ProcessRegistry, ProcessRunOutcome,
-    ProcessStatus, ProcessWorkSubstrate, RecoveryContract, SessionPolicy, TestLocalProcessRegistry,
-    ToolCallOutput, TurnBudget, WorkCadencePolicy, WorkerSweepPolicy,
+    ProcessStatus, ProcessWorkSubstrate, RecoveryContract, SessionPolicy, ToolCallOutput,
+    TurnBudget, WorkCadencePolicy, WorkerSweepPolicy,
 };
 use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use serde_json::{Value, json};
@@ -200,7 +200,8 @@ impl AdmissionFaultSink {
 }
 
 struct ProcessAdmissionScenario {
-    raw_registry: Arc<TestLocalProcessRegistry>,
+    /// The scenario's whole substrate: a SQLite memory backend.
+    backend: Arc<lash_sqlite_store::SqliteBackend>,
     registry: Arc<dyn ProcessRegistry>,
     process_work: NativeProcessWork,
     engine_started: Arc<tokio::sync::Notify>,
@@ -213,8 +214,10 @@ struct ProcessAdmissionScenario {
 
 impl ProcessAdmissionScenario {
     async fn new() -> Self {
-        let raw_registry = Arc::new(TestLocalProcessRegistry::default());
-        let registry: Arc<dyn ProcessRegistry> = raw_registry.clone();
+        let backend = crate::backend::memory_backend()
+            .await
+            .expect("native process admission memory backend");
+        let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
         let watched = watch_process_registry(registry);
         let registry = Arc::clone(watched.registry());
         let engine_started = Arc::new(tokio::sync::Notify::new());
@@ -227,7 +230,10 @@ impl ProcessAdmissionScenario {
         });
         let fault_sink = AdmissionFaultSink::default();
 
-        let mut runtime_host = RuntimeHostConfig::in_memory(
+        let mut runtime_host = RuntimeHostConfig::new(
+            backend.effect_host(),
+            backend.attachment_store(),
+            backend.process_env_store(),
             CommitBudget::bounded(1024 * 1024, 512),
             QueuedWorkBatchingConfig::new(1),
         );
@@ -298,7 +304,7 @@ impl ProcessAdmissionScenario {
                 lash_protocol_standard::StandardProtocolPluginFactory::new(),
             )])),
             runtime_host,
-            Arc::new(InMemorySessionStoreFactory::new()),
+            backend.session_store_factory(),
             WorkerProcessWork::SelfNative(watched.clone()),
             Arc::new(NoQueuedWork::new()),
             LeaseOwnerIdentity::opaque(
@@ -316,7 +322,7 @@ impl ProcessAdmissionScenario {
         let process_work = NativeProcessWork::new(&watched, worker);
 
         Self {
-            raw_registry,
+            backend,
             registry,
             process_work,
             engine_started,
@@ -408,11 +414,27 @@ impl ProcessAdmissionScenario {
     }
 
     async fn inject_fault(&mut self) -> Value {
-        self.raw_registry
-            .set_process_terminal_write_error(Some(lash_core::PluginError::Session(
-                "injected native process admission terminal-write failure".to_string(),
-            )))
-            .await;
+        // The registry database refuses the held row's terminal write: the
+        // admitted row's recovery write reaches a real backend error.
+        let registry_database = rusqlite::Connection::open(
+            self.backend
+                .database_uri(lash_sqlite_store::SqliteDatabase::ProcessRegistry),
+        )
+        .expect("open the scenario registry database");
+        registry_database
+            .busy_timeout(Duration::from_secs(15))
+            .expect("set the raw connection's busy timeout");
+        registry_database
+            .execute_batch(&format!(
+                "CREATE TRIGGER native_process_admission_terminal_write_fault
+                 BEFORE UPDATE OF status ON processes
+                 WHEN NEW.process_id = '{HELD_PROCESS_ID}'
+                   AND NEW.status NOT IN ('running', 'waiting')
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected native process admission terminal-write failure');
+                 END;"
+            ))
+            .expect("arm the terminal-write fault");
         self.engine_release.add_permits(1);
         let fault = self.fault_sink.await_first().await;
         let ProcessWorkerFault::RecoveryBackendError {

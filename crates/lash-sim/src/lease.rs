@@ -28,7 +28,10 @@ mod tests {
     #[tokio::test]
     async fn runtime_lease_survives_starvation_while_deliberate_lease_expires() {
         let clock = SimClock::new();
-        let store = lash_core::facade_support::InMemorySessionStore::with_clock(clock.clone());
+        let backend = crate::backend::sim_memory_backend(clock.clone())
+            .await
+            .expect("sim memory backend");
+        let store = backend.open_store().await.expect("durable-core store");
         let owner = LeaseOwnerIdentity::opaque("sim-owner", "sim-owner:001");
         let runtime_timings = sim_runtime_lease_timings();
         let runtime_lease = match store

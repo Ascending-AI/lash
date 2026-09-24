@@ -143,7 +143,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
         &group_key,
         &scenario.env_ref,
         &parent,
-        deferrable_routing(fixture.deferrable_routing, &host),
+        ToolChildCompletionRouting::Durable,
         recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
     );
     let scoped = host

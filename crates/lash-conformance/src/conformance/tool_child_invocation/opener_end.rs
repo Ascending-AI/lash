@@ -284,7 +284,7 @@ pub async fn a_cancelled_aggregates_committed_loser_is_incorporated_by_its_opene
 /// * On a durable tier the first end dies with its runtime while parked in
 ///   finalization, so the host's own finalizer dies with it and `closing` is
 ///   all the journal holds.
-/// * On the in-memory tier the first end is abandoned mid-finalization, and
+/// * On a drain-less tier the first end is abandoned mid-finalization, and
 ///   the retried end runs while the loser's drain is still held — so the law
 ///   can see that the end waits for the obligation rather than skipping a
 ///   group it did not open in this process.
@@ -408,14 +408,14 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
                     start_metadata: serde_json::Value::Null,
                 });
                 let crash_processes = make_processes().await;
-                let env_store = crash_processes.process_env_store;
+                let env_store = crash_processes.process_env_store();
                 let _env_ref =
                     crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
                 let sink = Arc::new(IntentSink::default());
                 sink.hold_all();
                 let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
                     inner: crate::testing::effect_backed_process_service(
-                        crash_processes.registry,
+                        crash_processes.process_registry(),
                         Arc::clone(&env_store),
                     ),
                     sink: Arc::clone(&sink),

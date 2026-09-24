@@ -13,15 +13,15 @@ use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
 use pretty_assertions::assert_eq;
 
-pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::SessionStoreFactory>) {
-    Box::pin(session_graph_append_tolerates_an_advanced_head(&factory)).await;
+pub async fn session_graph_append_branch_liveness(backend: Arc<dyn crate::Backend>) {
+    Box::pin(session_graph_append_tolerates_an_advanced_head(&backend)).await;
     Box::pin(session_graph_service_append_tolerates_an_advanced_head(
-        &factory,
+        &backend,
     ))
     .await;
-    Box::pin(session_graph_append_rejects_an_abandoned_branch(&factory)).await;
+    Box::pin(session_graph_append_rejects_an_abandoned_branch(&backend)).await;
     Box::pin(session_graph_service_append_rejects_an_abandoned_branch(
-        &factory,
+        &backend,
     ))
     .await;
 }
@@ -37,9 +37,8 @@ pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::Sessio
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_graph_append_tolerates_an_advanced_head(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
-) {
+async fn session_graph_append_tolerates_an_advanced_head(backend: &Arc<dyn crate::Backend>) {
+    let factory = backend.session_store_factory();
     let request = session_store_request(
         &SessionId::from("append-advanced-head"),
         "append-fence-model",
@@ -49,7 +48,7 @@ async fn session_graph_append_tolerates_an_advanced_head(
         .create_store(&request)
         .await
         .expect("create advanced-head session store");
-    let mut runtime = append_conformance_runtime(&store, &request).await;
+    let mut runtime = append_conformance_runtime(backend.as_ref(), &store, &request).await;
 
     // The base a derive-then-append caller reads and derives from.
     let observed_base = Box::pin(append_conformance_plugin_node(
@@ -90,8 +89,9 @@ async fn session_graph_append_tolerates_an_advanced_head(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_graph_service_append_tolerates_an_advanced_head(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    backend: &Arc<dyn crate::Backend>,
 ) {
+    let factory = backend.session_store_factory();
     let request = session_store_request(
         &SessionId::from("service-append-advanced-head"),
         "append-fence-model",
@@ -101,7 +101,7 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
         .create_store(&request)
         .await
         .expect("create service advanced-head session store");
-    let mut runtime = append_conformance_runtime(&store, &request).await;
+    let mut runtime = append_conformance_runtime(backend.as_ref(), &store, &request).await;
     let observed_base = Box::pin(append_conformance_plugin_node(
         &mut runtime,
         "observe-base",
@@ -145,11 +145,11 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_graph_append_rejects_an_abandoned_branch(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
-) {
-    let scenario = Box::pin(abandoned_branch_scenario(factory, "append-abandoned")).await;
-    let mut runtime = append_conformance_runtime(&scenario.branch, &scenario.branch_request).await;
+async fn session_graph_append_rejects_an_abandoned_branch(backend: &Arc<dyn crate::Backend>) {
+    let scenario = Box::pin(abandoned_branch_scenario(backend, "append-abandoned")).await;
+    let mut runtime =
+        append_conformance_runtime(backend.as_ref(), &scenario.branch, &scenario.branch_request)
+            .await;
     let before = read_conformance_session(&scenario.branch).await;
 
     let result = Box::pin(runtime.append_session_nodes(derived_append_request(
@@ -175,14 +175,16 @@ async fn session_graph_append_rejects_an_abandoned_branch(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_graph_service_append_rejects_an_abandoned_branch(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    backend: &Arc<dyn crate::Backend>,
 ) {
     let scenario = Box::pin(abandoned_branch_scenario(
-        factory,
+        backend,
         "service-append-abandoned",
     ))
     .await;
-    let runtime = append_conformance_runtime(&scenario.branch, &scenario.branch_request).await;
+    let runtime =
+        append_conformance_runtime(backend.as_ref(), &scenario.branch, &scenario.branch_request)
+            .await;
     let service = runtime
         .session_graph_service()
         .expect("session graph service");
@@ -220,9 +222,10 @@ struct AbandonedBranchScenario {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn abandoned_branch_scenario(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    backend: &Arc<dyn crate::Backend>,
     prefix: &str,
 ) -> AbandonedBranchScenario {
+    let factory = backend.session_store_factory();
     let source_request = session_store_request(
         &SessionId::from(format!("{prefix}-source")),
         "append-fence-model",
@@ -232,7 +235,8 @@ async fn abandoned_branch_scenario(
         .create_store(&source_request)
         .await
         .expect("create abandoned-branch source store");
-    let mut source_runtime = append_conformance_runtime(&source, &source_request).await;
+    let mut source_runtime =
+        append_conformance_runtime(backend.as_ref(), &source, &source_request).await;
     let fork_point = Box::pin(append_conformance_plugin_node(
         &mut source_runtime,
         "fork-point",
@@ -430,6 +434,7 @@ async fn assert_stale_branch_changed_nothing(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn append_conformance_runtime(
+    backend: &dyn crate::Backend,
     store: &Arc<dyn crate::RuntimePersistence>,
     request: &crate::SessionStoreCreateRequest,
 ) -> crate::LashRuntime {
@@ -453,10 +458,10 @@ async fn append_conformance_runtime(
         None => host.build_session(request.session_id.clone()),
     }
     .expect("append conformance plugin session");
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    ));
+    let runtime_host = crate::conformance::backend_embedded_host(
+        backend,
+        crate::conformance::backend_host_config(backend, crate::QueuedWorkBatchingConfig::new(1)),
+    );
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
         Arc::clone(store),
@@ -515,18 +520,19 @@ pub async fn append_usage_cancellation_publishes_exactly_once<A, W, R>(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
-    store: Arc<dyn crate::RuntimePersistence>,
+    backend: Arc<dyn crate::Backend>,
     rewrite_receipt: F,
 ) where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    let store = super::turn_ingress_store(backend.as_ref(), "root").await;
     let request = session_store_request(
         &SessionId::from("root"),
         "old-format-append-receipt-model",
         crate::SessionRelation::Root,
     );
-    let mut runtime = append_conformance_runtime(&store, &request).await;
+    let mut runtime = append_conformance_runtime(backend.as_ref(), &store, &request).await;
     Box::pin(
         runtime.append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: "old-format-append-receipt-seed".to_string(),

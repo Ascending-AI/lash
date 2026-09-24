@@ -349,15 +349,15 @@ async fn run_generated_evidence_profile(
         // SAME dynamic, concurrency-faithful runtime driver, backed by the real
         // `lash-sqlite-store` (session store + SQLite durable-effect controller),
         // and require the resulting observable Lash STATE (the abstract world
-        // summary) to match the in-memory reference run exactly. Because both runs
-        // share one driver and one scheduling discipline and differ ONLY in the
-        // store, the comparison is apples-to-apples by construction: there is no
+        // summary) to match the SQLite-memory reference run exactly. Because both
+        // runs share one driver and one scheduling discipline and differ ONLY in
+        // the store, the comparison is apples-to-apples by construction: there is no
         // separate fixed-order, provider-event-gated re-drive that can deadlock or
         // spuriously diverge on active-turn / next-turn ingress timing. The
         // workload is regenerated deterministically from the seed (the original
         // was consumed by the reference run).
         let sqlite_workload = generate_workload(seed, profile, boundary_limit)?;
-        // The cross-backend equivalence reference is a SERIALIZED in-memory run of
+        // The cross-backend equivalence reference is a SERIALIZED SQLite-memory run of
         // the same workload: it shares the durable re-run's serialize-provider-turn
         // discipline and differs ONLY in the backend store, so equality is a
         // well-posed durable-state check. (The concurrency-preserving search-lane
@@ -410,7 +410,7 @@ async fn run_generated_evidence_profile(
         )?;
         if !backend_verdict.is_passed() {
             return Err(FixedScriptRunnerError::Assertion(format!(
-                "cross-backend SQLite re-run for seed {seed} ({profile}) diverged from the serialized in-memory reference: {}; wrote {}",
+                "cross-backend SQLite re-run for seed {seed} ({profile}) diverged from the serialized SQLite-memory reference: {}; wrote {}",
                 backend_verdict.message,
                 sqlite_replay_report_path.display()
             )));

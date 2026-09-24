@@ -11,6 +11,10 @@
 //!
 //! * `sqlite` opens a fresh file `SqliteBackend` rooted at `--db-path` and
 //!   counts the delta in its effect journal's tables per rep.
+//!
+//! Every lane runs the measured turn over a store set: the SQLite and
+//! PostgreSQL lanes over their backend's own, the Restate probe over a
+//! SQLite memory store set, since Restate supplies only the effect host.
 //! * `postgres` connects to `LASH_POSTGRES_DATABASE_URL` (or `--database-url`),
 //!   creates an isolated database, and counts the same tables under their
 //!   `lash_` names. The build carries lash-postgres-store's `testing` feature,
@@ -312,6 +316,7 @@ async fn run_sqlite(
     }
     let backend = lash_sqlite_store::SqliteBackend::open(&db_path).await?;
     let host = backend.effect_host() as Arc<dyn lash_core::EffectHost>;
+    let stores = Arc::new(backend.stores().clone()) as Arc<dyn lash_core::StoreSet>;
     let counter = SqliteJournalCounter {
         path: db_path.join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name()),
     };
@@ -324,6 +329,7 @@ async fn run_sqlite(
                 let measurement = lash_conformance::measure_tool_batch(
                     lash_sansio::SessionId::from(session.clone()),
                     Arc::clone(&host),
+                    Arc::clone(&stores),
                     None,
                     producer,
                     width,
@@ -358,6 +364,15 @@ async fn run_postgres(
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
     let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
     let host = Arc::new(storage.effect_host()) as Arc<dyn lash_core::EffectHost>;
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            std::env::temp_dir().join(format!(
+                "tool-batch-baseline-attachments-{}",
+                uuid::Uuid::new_v4()
+            )),
+        )),
+    )) as Arc<dyn lash_core::StoreSet>;
     let counter = PostgresJournalCounter {
         pool: storage.pool().clone(),
     };
@@ -370,6 +385,7 @@ async fn run_postgres(
                 let measurement = lash_conformance::measure_tool_batch(
                     lash_sansio::SessionId::from(session.clone()),
                     Arc::clone(&host),
+                    Arc::clone(&stores),
                     None,
                     producer,
                     width,
@@ -478,9 +494,15 @@ impl ToolBatchProbe for ToolBatchProbeImpl {
         // A panic in the measurement must fail the invocation terminally: an
         // unwinding panic would read as retryable and the workflow would
         // redrive the same broken rep forever.
+        let stores = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .map_err(TerminalError::from_error)?,
+        ) as Arc<dyn lash_core::StoreSet>;
         let measurement = AssertUnwindSafe(lash_conformance::measure_tool_batch(
             session_id,
             host,
+            stores,
             Some(scoped),
             producer,
             request.width,

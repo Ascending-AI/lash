@@ -29,16 +29,27 @@ use crate::{
 /// while the retry sleep is still parked on every tier, live Restate included.
 const RETRY_AFTER_MS: u64 = 3_000;
 
-/// A store the turn-work driver and the runtime share, carrying the host's
-/// turn-cancel authority so a cancel request resolves the durable gate.
-fn cancellable_store(host: &Arc<dyn EffectHost>) -> Arc<dyn crate::RuntimePersistence> {
-    let authority = crate::TurnCancellationAuthority::new(
-        host.turn_control_binding_id(),
-        Arc::clone(host) as Arc<dyn crate::AwaitEventResolver>,
-    );
-    Arc::new(
-        crate::InMemorySessionStore::new().with_turn_cancellation_authority_for_testing(authority),
-    )
+/// The session store the turn-work driver and the runtime share: the store
+/// set's own, created for `session_id`, whose turn control the tier's host
+/// owns.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn session_store(
+    stores: &Arc<dyn crate::StoreSet>,
+    session_id: &SessionId,
+) -> Arc<dyn crate::RuntimePersistence> {
+    stores
+        .session_store_factory()
+        .create_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create the tool-child turn-cancel session store")
 }
 
 #[expect(
@@ -47,17 +58,17 @@ fn cancellable_store(host: &Arc<dyn EffectHost>) -> Arc<dyn crate::RuntimePersis
 )]
 async fn build_runtime(
     host: &Arc<dyn EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
     store: Arc<dyn crate::RuntimePersistence>,
-    registry: Arc<dyn crate::ProcessRegistry>,
     session_id: &SessionId,
     plugin: Arc<dyn crate::facade_support::PluginFactory>,
     model: crate::testing::TestProvider,
 ) -> crate::LashRuntime {
-    let mut config = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+    let mut config = crate::conformance::store_set_host_config(
+        stores.as_ref(),
+        Arc::clone(host),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    config = config.with_effect_host(Arc::clone(host));
     config.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let mut policy = crate::testing::mock_session_policy();
@@ -84,7 +95,9 @@ async fn build_runtime(
                 .collect(),
         )
         .with_store(store)
-        .with_process_work(crate::testing::process_work_wiring_for_registry(registry))
+        .with_process_work(crate::testing::process_work_wiring_for_registry(
+            stores.process_registry(),
+        ))
         .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
         .build(),
     )
@@ -252,7 +265,7 @@ impl crate::ToolProvider for RetryOnceTool {
 pub async fn an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration(
     prefix: &str,
     host: Arc<dyn EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     // These laws start no process; the substrate is part of the shared
     // turn-runner fixture.
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
@@ -273,11 +286,11 @@ pub async fn an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteratio
         tool_call("retry-call-1", "conformance_retry_once"),
         text("finished after the retry"),
     ]);
-    let store = cancellable_store(&host);
+    let store = session_store(&stores, &session_id).await;
     let runtime = build_runtime(
         &host,
+        &stores,
         Arc::clone(&store),
-        registry,
         &session_id,
         plugin,
         model,
@@ -442,7 +455,7 @@ impl crate::ToolProvider for FollowOnPendingTools {
 pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate(
     prefix: &str,
     host: Arc<dyn EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     // These laws start no process; the substrate is part of the shared
     // turn-runner fixture.
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
@@ -468,8 +481,8 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
         tool_call("pending-in-follow-on", "conformance_follow_on_pending"),
         text("finished after the follow-on wait"),
     ]);
-    let store = cancellable_store(&host);
-    let runtime = build_runtime(&host, store, registry, &session_id, plugin, model).await;
+    let store = session_store(&stores, &session_id).await;
+    let runtime = build_runtime(&host, &stores, store, &session_id, plugin, model).await;
     let mut turn = spawn_turn(
         runner,
         runtime,
@@ -624,7 +637,7 @@ impl crate::ToolProvider for IgnoresCancellationTool {
 pub async fn a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation(
     prefix: &str,
     host: Arc<dyn EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     // These laws start no process; the substrate is part of the shared
     // turn-runner fixture.
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
@@ -650,11 +663,11 @@ pub async fn a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation(
         tool_call("ignores-cancel-call", "conformance_ignores_cancellation"),
         text("unreachable after the cancel"),
     ]);
-    let store = cancellable_store(&host);
+    let store = session_store(&stores, &session_id).await;
     let runtime = build_runtime(
         &host,
+        &stores,
         Arc::clone(&store),
-        registry,
         &session_id,
         plugin,
         model,

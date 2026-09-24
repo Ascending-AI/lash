@@ -16,10 +16,7 @@
 //! the store-backed effect-replay driver. Restate holds no group row — its
 //! engine-side `EffectGroupIndex` `Closed`/`Retired` states are the twin — so
 //! [`EffectHost::effect_group_closing`] answers `None` there and the suite is
-//! not registered, the way `tool_child_invocation` treats a `None` drain. The
-//! native tier answers the same vocabulary against its in-memory group table,
-//! but a crashed-runtime law has no journal to leave `closing` in, so the
-//! crash windows are asserted here rather than through it.
+//! not registered, the way `tool_child_invocation` treats a `None` drain.
 
 use std::future::Future;
 use std::sync::Arc;

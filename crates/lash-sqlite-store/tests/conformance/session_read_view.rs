@@ -12,6 +12,6 @@ lash_conformance::session_read_view_tests!({
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
     .await;
-    let factory = backend.session_store_factory();
-    (backend, factory, move || clock.advance(1))
+    let law_backend = backend.dyn_backend();
+    (backend, law_backend, move || clock.advance(1))
 });

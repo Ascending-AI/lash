@@ -90,8 +90,10 @@ pub(crate) async fn collect_process_events(
 pub(crate) const EFFECT_SCOPE_ID: &str = "lash-sim-runtime-boundaries";
 const LEASE_TTL_MS: u64 = 30_000;
 
+/// Where the harness journals durable effects and keeps its worker registry.
 #[derive(Clone)]
 pub enum RuntimeEffectReplayStore {
+    /// A SQLite memory backend of the harness's own, on the simulator clock.
     Memory,
     SqliteFile(PathBuf),
     Postgres(Arc<lash_postgres_store::PostgresStorage>),
@@ -159,6 +161,8 @@ pub struct RuntimeBoundaryHarness {
     durable_entries: BTreeMap<String, DurableEntry>,
     worker_process_registry: Option<Arc<dyn ProcessRegistry>>,
     worker_process_continuations: Option<Arc<dyn lash_core::ProcessContinuationStore>>,
+    /// The memory lane's backend, opened on first use.
+    memory_backend: Option<Arc<lash_sqlite_store::SqliteBackend>>,
     clock: Arc<SimClock>,
 }
 
@@ -175,6 +179,7 @@ impl RuntimeBoundaryHarness {
             durable_entries: BTreeMap::new(),
             worker_process_registry: None,
             worker_process_continuations: None,
+            memory_backend: None,
             clock,
         }
     }
@@ -994,16 +999,19 @@ impl RuntimeBoundaryHarness {
     ///
     /// The recorded facts (terminal, writer, evidence, independently-observed
     /// lease/authorization) are the ground truth the `process_never_double_started`
-    /// and `abandoned_requires_evidence` oracles verify. The registry is in-memory
-    /// (independent of the session-store backend), so the recorded observation is
-    /// identical across the cross-backend replay lanes.
+    /// and `abandoned_requires_evidence` oracles verify. The rows live in a
+    /// SQLite memory backend of the event's own (independent of the lane's
+    /// session-store backend), so the recorded observation is identical across
+    /// the cross-backend replay lanes.
     pub async fn run_process_lifecycle(
         &mut self,
         event: &BoundaryEvent,
     ) -> Result<Value, RuntimeBoundaryError> {
         let session = boundary_session_alias(event);
-        let registry: Arc<dyn lash_core::ProcessRegistry> =
-            Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let backend = crate::backend::sim_memory_backend(self.clock.clone())
+            .await
+            .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?;
+        let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
 
         // A sweep claimant and a crashed holder with distinct incarnations.
         let sweep_owner =
@@ -1012,7 +1020,10 @@ impl RuntimeBoundaryHarness {
             LeaseOwnerIdentity::opaque("sim-dead-owner", format!("before-the-crash:{session}"));
         let silent_owner =
             LeaseOwnerIdentity::opaque("sim-silent-owner", format!("sim-silent-owner:{session}"));
-        let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+            backend.effect_host(),
+            backend.attachment_store(),
+            backend.process_env_store(),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
@@ -1091,6 +1102,7 @@ impl RuntimeBoundaryHarness {
         let fault_sink = RecordingWorkerFaultSink::default();
         let worker = lifecycle_worker(
             Arc::clone(&registry),
+            backend.session_store_factory(),
             sweep_owner.clone(),
             runtime_host,
             policy,
@@ -1408,6 +1420,19 @@ impl RuntimeBoundaryHarness {
         })
     }
 
+    async fn ensure_memory_backend(
+        &mut self,
+    ) -> Result<Arc<lash_sqlite_store::SqliteBackend>, RuntimeBoundaryError> {
+        if let Some(backend) = &self.memory_backend {
+            return Ok(Arc::clone(backend));
+        }
+        let backend = crate::backend::sim_memory_backend(self.clock.clone())
+            .await
+            .map_err(|err| RuntimeBoundaryError::new(format!("open memory backend: {err}")))?;
+        self.memory_backend = Some(Arc::clone(&backend));
+        Ok(backend)
+    }
+
     async fn ensure_worker_process_registry(
         &mut self,
     ) -> Result<Arc<dyn ProcessRegistry>, RuntimeBoundaryError> {
@@ -1417,9 +1442,9 @@ impl RuntimeBoundaryHarness {
         let (registry, continuations): (
             Arc<dyn ProcessRegistry>,
             Arc<dyn lash_core::ProcessContinuationStore>,
-        ) = match &self.effect_replay_store {
+        ) = match &self.effect_replay_store.clone() {
             RuntimeEffectReplayStore::Memory => {
-                let store = Arc::new(lash_core::TestLocalProcessRegistry::default());
+                let store = self.ensure_memory_backend().await?.process_registry();
                 (store.clone(), store)
             }
             RuntimeEffectReplayStore::SqliteFile(path) => {
@@ -1467,27 +1492,15 @@ impl RuntimeBoundaryHarness {
             return Ok(controller.clone());
         }
         let scope = ExecutionScope::runtime_operation(EFFECT_SCOPE_ID);
-        let controller: Arc<dyn RuntimeEffectController> = match &self.effect_replay_store {
+        let controller: Arc<dyn RuntimeEffectController> = match &self.effect_replay_store.clone() {
             RuntimeEffectReplayStore::Memory => Arc::new(
-                lash_sqlite_store::SqliteBackend::memory_with_options_and_clock(
-                    crate::backend::sim_sqlite_options(
-                        lash_sqlite_store::SqliteBackendOptions::memory(),
-                    ),
-                    self.clock.clone(),
-                )
-                .await
-                .map_err(|err| {
-                    RuntimeBoundaryError::new(format!(
-                        "open in-memory SQLite backend failed: {err}"
-                    ))
-                })?
-                .open_effect_controller(scope)
-                .await
-                .map_err(|err| {
-                    RuntimeBoundaryError::new(format!(
-                        "open in-memory effect replay controller failed: {err}"
-                    ))
-                })?,
+                self.ensure_memory_backend()
+                    .await?
+                    .open_effect_controller(scope)
+                    .await
+                    .map_err(|err| {
+                        RuntimeBoundaryError::new(format!("open memory journal: {err}"))
+                    })?,
             ),
             RuntimeEffectReplayStore::SqliteFile(path) => {
                 if let Some(parent) = path.parent() {

@@ -60,6 +60,16 @@ const GATED_SESSION_TRAITS: &[&str] = &[
 /// both this list and the harness fails `store_trait_surface_is_fully_gated`.
 const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
     (
+        "record_turn_park",
+        "turn-park surface; owned by the runtime-persistence \
+         `turn_park_lives_while_its_turn_holds_work` law",
+    ),
+    (
+        "load_turn_park",
+        "turn-park surface; owned by the runtime-persistence \
+         `turn_park_lives_while_its_turn_holds_work` law",
+    ),
+    (
         "validate_turn_cancellation_binding",
         "turn-cancellation surface: this fixture wires no TurnCancellationAuthority, so the \
          binding is never valid on any backend; owned by the turn_control conformance suite",
@@ -117,7 +127,8 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
 /// their durable surface is the attachment *manifest* row, which the
 /// residue digest already covers. The blob store itself is compared by
 /// `attachment_blob_store_differential_agrees` in the same crate, which runs
-/// the same three-backend comparison over file, S3, and in-memory blob stores.
+/// the same three-backend comparison over SQLite memory, file and S3 blob
+/// stores.
 const ATTACHMENT_STORE_EXCLUSIONS: &[(&str, &str)] = &[
     (
         "put",

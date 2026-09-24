@@ -1,14 +1,16 @@
 //! Registration macros for turn-ingress laws: direct-turn acceptance
 //! (ADR 0069), the aborted turn's bound input (FIG-3589), the cancelled
 //! turn's withheld input (FIG-3531), and the redrive that cedes rows it
-//! restored from its journal (FIG-3552). All take
-//! the same `(guard, prefix, store)` fixture, so they share one catalogue arm.
+//! restored from its journal (FIG-3552). All take the same `(guard, prefix,
+//! backend)` fixture and run their laws over a store the backend's factory
+//! creates for the suite's session, so they share one catalogue arm.
 
 /// Register one independently reported test per direct-turn acceptance law.
 #[macro_export]
 macro_rules! direct_turn_acceptance_tests {
     ($fixture:block) => {
-        $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
+        $crate::direct_turn_acceptance_tests!(@catalogue $fixture;
+            $crate::registration_macro_support::DIRECT_TURN_ACCEPTANCE_SESSION_ID; [
             (direct_turn_accepts_before_driving, "direct-turn-accepts-before-driving"),
             (orphaned_direct_turn_input_is_drivable_by_another_worker, "direct-turn-orphan-recovery"),
             (direct_turn_acceptance_mints_no_idempotency_key, "direct-turn-identity"),
@@ -25,17 +27,21 @@ macro_rules! direct_turn_acceptance_tests {
             (aborted_direct_turn_input_is_bound_until_its_redrive, "direct-turn-bound-until-redrive"),
             (later_direct_turn_never_folds_in_a_bound_input, "direct-turn-bound-later-turn"),
             (cancelling_a_bound_input_returns_its_drive_to_the_queue, "direct-turn-bound-cancel"),
-            (journal_less_redrive_retakes_its_bound_drive, "direct-turn-bound-journal-less-redrive"),
             (lost_drive_outcome_still_binds_its_claimed_input, "direct-turn-bound-lost-drive-outcome"),
         ]);
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+    (@catalogue $fixture:block; $session:expr; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, prefix, store) = $fixture;
+                let (_fixture_guard, prefix, backend) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(prefix, store).await;
+                let store = $crate::registration_macro_support::turn_ingress_store(
+                    backend.as_ref(),
+                    $session,
+                )
+                .await;
+                $crate::registration_macro_support::$law(prefix, backend, store).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -48,7 +54,8 @@ macro_rules! direct_turn_acceptance_tests {
 #[macro_export]
 macro_rules! cancelled_turn_withheld_input_tests {
     ($fixture:block) => {
-        $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
+        $crate::direct_turn_acceptance_tests!(@catalogue $fixture;
+            $crate::registration_macro_support::CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID; [
             (immediate_cancel_defers_withheld_inject_now_input, "cancel-defers-withheld-input"),
         ]);
     };
@@ -60,7 +67,8 @@ macro_rules! cancelled_turn_withheld_input_tests {
 #[macro_export]
 macro_rules! restored_claim_cede_tests {
     ($fixture:block) => {
-        $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
+        $crate::direct_turn_acceptance_tests!(@catalogue $fixture;
+            $crate::registration_macro_support::RESTORED_CLAIM_CEDE_SESSION_ID; [
             (a_redrive_commits_nothing_for_input_a_recovery_drain_answered, "restored-claim-recovery-answered-input"),
             (a_redrive_commits_nothing_for_work_a_recovery_checkpoint_answered, "restored-claim-recovery-answered-work"),
             (a_redrive_cedes_checkpoint_input_a_peer_reclaimed, "restored-claim-cede-input"),

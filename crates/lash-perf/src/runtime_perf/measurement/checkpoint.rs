@@ -123,13 +123,13 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 CHECKPOINT_STATE_BINDINGS,
                 CHECKPOINT_STATE_BODY_BYTES,
             )?;
-            let store = lash_core::runtime::InMemorySessionStore::new();
             let runtime_state = RuntimeSessionState {
                 session_id: SessionId::from("runtime-perf-checkpoint-state"),
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                 ))
             };
+            let store = memory_perf_store(&runtime_state.session_id).await?;
             store
                 .admit_and_bind_session(&lash_core::SessionBinding::root(
                     runtime_state.session_id.clone(),
@@ -778,12 +778,15 @@ pub(crate) async fn run_once_embed(
     let mut run = RunRecorder::start(scenario, chat_turns);
     let (store, session) = run
         .build(async {
-            let store = Arc::new(RuntimePerfStore::default());
-            let core = build_embed_core(scenario, Arc::clone(&store)).await?;
+            let (core, store_factory) = build_embed_core(scenario).await?;
+            let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
             let session = core
-                .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
+                .open_session(session_id.clone())
                 .await
                 .with_context(|| format!("open embed session for {}", scenario.name()))?;
+            let store = store_factory
+                .session_store(&session_id)
+                .ok_or_else(|| anyhow::anyhow!("embed session store was not opened"))?;
             Ok((store, session))
         })
         .await?;

@@ -51,7 +51,8 @@ impl crate::ToolProvider for SignalIntentProvider {
 }
 
 /// Runs a literal parked-signal law through a real provider, coordinator, and
-/// runtime turn over the supplied durable effect host and process registry.
+/// runtime turn over the supplied durable effect host and the store set it
+/// journals beside.
 /// The turn runs where the tier runs turns (`turn_runner`): scoped on the host
 /// in process, inside a handler on Restate.
 #[expect(
@@ -61,10 +62,11 @@ impl crate::ToolProvider for SignalIntentProvider {
 pub async fn public_signal_intent_wakes_parked_process(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     turn_runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
+    let registry = stores.process_registry();
     let session_id = SessionId::from(format!("{prefix}-session"));
     let turn_id = TurnId::from(format!("{prefix}-turn"));
     let process_id = ProcessId::from(format!("{prefix}-target"));
@@ -179,11 +181,11 @@ pub async fn public_signal_intent_wakes_parked_process(
             }
         })
         .build();
-    let mut host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+    let mut host = crate::conformance::store_set_host_config(
+        stores.as_ref(),
+        Arc::clone(&effect_host),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    host = host.with_effect_host(Arc::clone(&effect_host));
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let mut policy = crate::testing::mock_session_policy();
@@ -209,7 +211,18 @@ pub async fn public_signal_intent_wakes_parked_process(
                 .chain([tool_plugin])
                 .collect(),
         )
-        .with_store(Arc::new(crate::InMemorySessionStore::new()))
+        .with_store(
+            stores
+                .session_store_factory()
+                .create_store(&crate::SessionStoreCreateRequest {
+                    pending_observer_intents: Vec::new(),
+                    session_id: session_id.clone(),
+                    relation: crate::SessionRelation::Root,
+                    policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                })
+                .await
+                .expect("create the signal-intent session store"),
+        )
         .with_process_work(crate::testing::process_work_wiring_for_registry(
             Arc::clone(&registry),
         ))

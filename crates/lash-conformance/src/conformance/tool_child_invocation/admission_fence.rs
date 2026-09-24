@@ -301,7 +301,7 @@ fn fence_group(
 /// refuses a `RegisterDefinition` admission with the typed
 /// `RuntimeEffectGroupChildCancelDecided`. On a durable tier the reopen half
 /// serves rank 0 as the cancelled terminal the close committed; on the
-/// in-memory and Restate tiers the group's ranks are unreadable by contract
+/// drain-less Restate tier the group's ranks are unreadable by contract
 /// once closed, so the probe's typed refusal and the untouched sinks are the
 /// evidence.
 #[expect(
@@ -328,8 +328,7 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
     .await;
     let host = world.host;
     let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
-    let definitions: Arc<dyn crate::ProcessDefinitionRegistry> =
-        Arc::new(crate::InMemoryProcessDefinitionRegistry::default());
+    let definitions = Arc::clone(&scenario.process_definitions);
     let sink = Arc::new(IntentSink::default());
     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
         inner: crate::testing::effect_backed_process_service(
@@ -361,7 +360,7 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
         &session_id,
         &group_key,
         &scenario.env_ref,
-        deferrable_routing(fixture.deferrable_routing, &host),
+        ToolChildCompletionRouting::Durable,
         recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
     );
     let handle = scoped
@@ -513,7 +512,7 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
                 &session_id,
                 &group_key,
                 &scenario.env_ref,
-                deferrable_routing(fixture.deferrable_routing, &host),
+                ToolChildCompletionRouting::Durable,
                 recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
             );
             let mut handle = scoped

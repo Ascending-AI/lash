@@ -24,6 +24,10 @@ pub use queued_run::{
 mod attachment_fence;
 #[path = "session_store_factory_config_commands.rs"]
 mod config_commands;
+pub use config_commands::{
+    cancelled_session_config_settlement_is_typed, session_config_settlement_timeout_is_typed,
+    superseded_config_settlement_adopts_the_newer_head,
+};
 mod state_version;
 mod turn_cancel;
 
@@ -76,12 +80,21 @@ turn_cancel_law! {
 /// reclaim itself (its handle is always bound, so it has no unbound sweep to
 /// police), not a licence to skip the contract. The skip is logged as a
 /// `tracing` warning naming the backend so it can never pass unnoticed.
-pub async fn session_store_factory<F>(
+///
+/// `make_attached` returns a fresh factory together with the attachment byte
+/// store of the same substrate, for the laws that sweep bytes against the
+/// factory's roots.
+pub async fn session_store_factory<F, A>(
     backend: &str,
     unbound_store: Option<Arc<dyn crate::store::StoreMaintenance>>,
     make: F,
+    make_attached: A,
 ) where
     F: Fn() -> Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    A: Fn() -> (
+        Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+        Arc<dyn crate::AttachmentStore>,
+    ),
 {
     let first = make();
     let second = make();
@@ -102,10 +115,12 @@ pub async fn session_store_factory<F>(
     config_commands::session_store_factory_bounds_config_command_claims(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
-    attachment_reference_lifecycle(make()).await;
+    let (factory, attachments) = make_attached();
+    attachment_reference_lifecycle_with_store(factory, attachments).await;
     session_store_factory_attachment_large_cutoff_conformance(make()).await;
     attachment_fence::session_store_factory_attachment_gc_fence_state_machine(make()).await;
-    session_store_factory_fenced_sweep_collects_and_records_reclaimed(make()).await;
+    let (factory, attachments) = make_attached();
+    session_store_factory_fenced_sweep_collects_and_records_reclaimed(factory, attachments).await;
     session_store_factory_rejects_cross_session_graph_parents(make()).await;
     session_store_factory_fork_semantics(make()).await;
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
@@ -114,21 +129,6 @@ pub async fn session_store_factory<F>(
     session_store_factory_unbound_vacuum_is_typed_error(backend, unbound_store).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
-}
-
-#[cfg(test)]
-pub(crate) async fn session_config_settlement_timeout_is_typed() {
-    Box::pin(config_commands::session_config_settlement_timeout_is_typed()).await;
-}
-
-#[cfg(test)]
-pub(crate) async fn cancelled_session_config_settlement_is_typed() {
-    config_commands::cancelled_session_config_settlement_is_typed().await;
-}
-
-#[cfg(test)]
-pub(crate) async fn superseded_config_settlement_adopts_the_newer_head() {
-    Box::pin(config_commands::superseded_config_settlement_adopts_the_newer_head()).await;
 }
 
 /// Hold a backend to the read-only session-view contract.
@@ -1010,14 +1010,6 @@ pub async fn process_prune_deletes_owned_session_stores(
 /// Exercise the shared-bytes attachment contract: identical bytes across
 /// sessions dedup to one blob, reads resolve across session boundaries, and
 /// mark-and-sweep GC collects a blob only once no retained root references it.
-pub async fn attachment_reference_lifecycle(factory: Arc<dyn crate::SessionStoreFactory>) {
-    attachment_reference_lifecycle_with_store(
-        factory,
-        Arc::new(crate::InMemoryAttachmentStore::new()),
-    )
-    .await;
-}
-
 #[expect(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -2241,7 +2233,8 @@ fn assert_session_id_was_used_and_deleted(error: crate::StoreError, session_id: 
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    backend: Arc<dyn crate::AttachmentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("attachment-gc-fenced-sweep"),
@@ -2252,9 +2245,8 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
         .create_store(&request)
         .await
         .expect("create session store");
-    let backend = crate::attachments::InMemoryAttachmentStore::new();
     let orphan = crate::AttachmentStore::put(
-        &backend,
+        backend.as_ref(),
         b"conformance-fenced-orphan".to_vec(),
         lash_sansio::AttachmentCreateMeta::new(
             lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
@@ -2267,7 +2259,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
 
     let report = crate::attachments::reclaim_unreferenced_attachments(
         &*factory,
-        &backend,
+        backend.as_ref(),
         crate::AttachmentReclamationPolicy {
             grace_period_ms: 0,
             empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
@@ -2292,7 +2284,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
         report.deleted_while_referenced
     );
     assert!(matches!(
-        crate::AttachmentStore::get(&backend, &orphan.id).await,
+        crate::AttachmentStore::get(backend.as_ref(), &orphan.id).await,
         Err(crate::AttachmentStoreError::NotFound(_))
     ));
     if crate::AttachmentRootSet::fence(&*factory) == crate::AttachmentGcFence::BestEffort {

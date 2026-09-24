@@ -23,7 +23,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     make_invocation: I,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
     let scenario = "held-turn-input-visibility";
     let identity = ReferenceIdentity::for_scenario(scenario);
@@ -32,7 +32,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
-    let invocation = make_invocation(scenario);
+    let invocation = make_invocation(scenario, drive_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -43,6 +43,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
+        invocation.process_env_store(),
         &identity,
         TraceTool::default(),
     ))
@@ -149,6 +150,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
         successor_store,
         successor_control.clone(),
         Arc::clone(&successor_effect_controller),
+        successor_invocation.process_env_store(),
         &identity,
         TraceTool::default(),
         nominal_recovery_timings(),
