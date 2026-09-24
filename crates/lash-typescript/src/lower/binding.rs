@@ -98,7 +98,19 @@ impl super::Lowerer {
         initialized: bool,
         preserve_name: bool,
     ) -> Result<(), Diagnostic> {
-        if matches!(name, "undefined" | "NaN" | "Infinity") {
+        let owner_function = self.current_function();
+        // A binding declared in a block of the cell's top level ends with its
+        // block (ECMA-262 lexical scoping), so it never becomes a session
+        // global. A function frame's locals are never globals to begin with.
+        let block_private = owner_function == 0 && self.scopes.len() > self.root_scope_depth;
+        // `undefined`, `NaN` and `Infinity` are the reserved *value*
+        // identifiers: a bare read of one lowers to its literal, so a
+        // session-global slot of that name would shadow the literal (and tsc
+        // refuses the top-level redeclare — TS2397/TS2403/TS2451). Any nested
+        // scope — a function, a block, a `catch` — may bind the name, as Node
+        // and tsc accept.
+        if owner_function == 0 && !block_private && matches!(name, "undefined" | "NaN" | "Infinity")
+        {
             return Err(Diagnostic::new(
                 DiagnosticCode::ReservedIdentifier,
                 format!(
@@ -110,11 +122,6 @@ impl super::Lowerer {
         if is_reserved_name(name) {
             return Err(reserved_identifier(name));
         }
-        let owner_function = self.current_function();
-        // A binding declared in a block of the cell's top level ends with its
-        // block (ECMA-262 lexical scoping), so it never becomes a session
-        // global. A function frame's locals are never globals to begin with.
-        let block_private = owner_function == 0 && self.scopes.len() > self.root_scope_depth;
         // Mangling exists to stop an inner scope from overwriting an outer slot
         // of the same name. Where nothing of that name is visible there is
         // nothing to protect, and a mangled root-level binding would be a

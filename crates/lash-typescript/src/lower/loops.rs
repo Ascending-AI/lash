@@ -15,17 +15,20 @@ impl Lowerer {
                 None,
             ));
         }
-        let Some(Stmt::Var {
-            kind: VarKind::Let,
-            declarations,
-        }) = init
-        else {
+        let Some(Stmt::Var { kind, declarations }) = init else {
             return Err(Diagnostic::new(
                 DiagnosticCode::ForUnsupported,
                 "classic for requires `let i = start; i < end; i++` in v1",
                 None,
             ));
         };
+        if !matches!(kind, VarKind::Let | VarKind::Var) {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ForUnsupported,
+                "classic for requires `let` or `var` in v1",
+                None,
+            ));
+        }
         let [declaration] = declarations.as_slice() else {
             return Err(Diagnostic::new(
                 DiagnosticCode::ForUnsupported,
@@ -87,7 +90,16 @@ impl Lowerer {
         }
 
         self.scopes.push(Scope::default());
-        self.declare(declaration_name, BindingKind::Let, true, false)?;
+        if *kind == VarKind::Let {
+            self.declare(declaration_name, BindingKind::Let, true, false)?;
+        } else {
+            // A `var` head names the binding its function (or the cell)
+            // hoisted — `function_var_names` collects the head's names — and
+            // its initializer is an assignment of that one binding, as a
+            // `var x = init` statement's is. The loop declares nothing.
+            let binding = self.binding(declaration_name)?.id;
+            self.record_write(binding);
+        }
         let internal = self.binding(declaration_name)?.internal.clone();
         let start = self.lower_expr(start)?;
         #[expect(

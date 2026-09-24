@@ -1297,7 +1297,7 @@ impl Lowerer {
 
     fn lower_assign_target(&mut self, target: &TsAssignTarget) -> Result<AssignTarget, Diagnostic> {
         match target {
-            TsAssignTarget::Ident(name) => {
+            TsAssignTarget::Ident(name) | TsAssignTarget::ParenIdent(name) => {
                 let Some(binding) = self
                     .scopes
                     .iter()
@@ -1307,7 +1307,10 @@ impl Lowerer {
                 else {
                     return Err(self.unknown_binding(name, None));
                 };
-                if binding.kind != BindingKind::Let {
+                // `let`, `var`, parameters and `catch` bindings are mutable:
+                // reassigning them is ordinary ECMA-262. `const` (tsc TS2588)
+                // and function-declaration bindings stay refused.
+                if matches!(binding.kind, BindingKind::Const | BindingKind::Function) {
                     return Err(Diagnostic::new(
                         DiagnosticCode::AssignConst,
                         format!("cannot assign to `{name}`"),

@@ -323,6 +323,23 @@ rejection_test!(
     Code::ReservedIdentifier
 );
 
+/// FIG-3703: `undefined`, `NaN` and `Infinity` stay reserved only where a
+/// declaration would create a *session-global* slot — the cell's top level —
+/// matching tsc's global-only redeclare refusals (TS2397, TS2403, TS2451).
+/// Nested scopes bind them freely, as `ecma_regressions` shows.
+#[test]
+fn reserved_value_identifiers_refuse_only_at_the_top_level() {
+    for source in [
+        "var undefined = 1;",
+        "let NaN = 1;",
+        "const Infinity = 1;",
+        "function undefined() {}",
+    ] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        assert_eq!(error.code, Code::ReservedIdentifier, "{source}: {error}");
+    }
+}
+
 #[test]
 fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
     for source in [

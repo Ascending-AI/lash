@@ -351,7 +351,7 @@ impl Checker {
 
     fn assign_target(&mut self, target: &AssignTarget) -> Result<(), Diagnostic> {
         match target {
-            AssignTarget::Ident(_) => Ok(()),
+            AssignTarget::Ident(_) | AssignTarget::ParenIdent(_) => Ok(()),
             AssignTarget::Member { object, property } => {
                 self.expr(object)?;
                 self.member_property(property)

@@ -80,9 +80,13 @@ pub(super) fn function_var_names(statements: &[Stmt]) -> Vec<String> {
                 pattern_names(pattern, names);
                 visit(body, names);
             }
+            // A classic `for` head's `var` also declares the hoisted binding.
+            Stmt::For { init, body, .. } => {
+                init.iter().for_each(|init| visit(init, names));
+                visit(body, names);
+            }
             Stmt::While { body, .. }
             | Stmt::DoWhile { body, .. }
-            | Stmt::For { body, .. }
             | Stmt::ForOf { body, .. }
             | Stmt::ForIn { body, .. } => visit(body, names),
             Stmt::Switch { cases, .. } => {
@@ -765,7 +769,7 @@ impl Lowerer {
         target: &TsAssignTarget,
     ) -> Result<(Vec<LashExpr>, LashExpr, AssignTarget), Diagnostic> {
         match target {
-            TsAssignTarget::Ident(_) => {
+            TsAssignTarget::Ident(_) | TsAssignTarget::ParenIdent(_) => {
                 let target = self.lower_assign_target(target)?;
                 Ok((Vec::new(), LashExpr::Variable(target.root.clone()), target))
             }
@@ -834,12 +838,12 @@ impl Lowerer {
         value: &Expr,
     ) -> Result<LashExpr, Diagnostic> {
         if matches!(op, AssignOp::Assign)
-            && let TsAssignTarget::Ident(name) = target
+            && let TsAssignTarget::Ident(name) | TsAssignTarget::ParenIdent(name) = target
         {
+            let named = target.named_evaluation();
             let target = self.lower_assign_target(target)?;
             let result = LashExpr::Variable(target.root.clone());
-            // NamedEvaluation: `f = function() {}` takes the assigned name.
-            let value = self.lower_named_expr(value, Some(name.as_str()))?;
+            let value = self.lower_named_expr(value, named)?;
             self.clear_process_handle_role(name)?;
             // The assignment statement, closed by the value an assignment
             // expression evaluates to.
@@ -895,11 +899,11 @@ impl Lowerer {
             output.push(Self::variable(&result));
             return Ok(LashExpr::Block(output));
         }
-        let assigned_name = match target {
-            TsAssignTarget::Ident(name) => Some(name.as_str()),
-            _ => None,
-        };
+        let assigned_name = target.ident();
         let member = matches!(target, TsAssignTarget::Member { .. });
+        // `f ??= () => {}` below is a NamedEvaluation position only for a
+        // bare identifier — a covered `(f)` names nothing.
+        let named = target.named_evaluation();
         let (mut output, old, target) = self.reference(target)?;
         let result = self.temporary("assignment_result");
         match op {
@@ -951,7 +955,7 @@ impl Lowerer {
                     }
                 };
                 // `f ??= () => {}` (and `||=`/`&&=`) is also a NamedEvaluation position.
-                let rhs = self.lower_named_expr(value, assigned_name)?;
+                let rhs = self.lower_named_expr(value, named)?;
                 let write = LashExpr::Block(vec![
                     Self::temp_assignment(&result, rhs),
                     LashExpr::Assign {
@@ -979,10 +983,7 @@ impl Lowerer {
         delta: f64,
         prefix: bool,
     ) -> Result<LashExpr, Diagnostic> {
-        let assigned_name = match target {
-            TsAssignTarget::Ident(name) => Some(name.as_str()),
-            _ => None,
-        };
+        let assigned_name = target.ident();
         let (mut output, old, target) = self.reference(target)?;
         if let Some(name) = assigned_name {
             self.clear_process_handle_role(name)?;
