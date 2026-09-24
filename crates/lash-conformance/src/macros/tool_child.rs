@@ -258,6 +258,22 @@ macro_rules! tool_child_invocation_tests {
     };
 }
 
+/// Register the live-fault laws (FIG-3575): a store fault while a tool child
+/// resolves its environment is never its recorded outcome, and a park is.
+///
+/// The fixture is [`tool_child_invocation_tests!`]'s. Registered by an
+/// engine that re-runs a child whose run hit a live fault.
+#[macro_export]
+macro_rules! tool_child_live_fault_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
+            (a_process_env_store_fault_is_never_the_childs_recorded_outcome,
+             "tool-child-env-store-fault"));
+        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
+            (a_divergent_child_settles_with_its_park, "tool-child-divergent-park"));
+    };
+}
+
 /// Register one shared tool-child invocation law.
 #[macro_export]
 macro_rules! __tool_child_invocation_register {

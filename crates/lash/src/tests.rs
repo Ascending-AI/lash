@@ -2329,6 +2329,7 @@ pub(crate) use harness::{
     run_async_test_on_stack_budget, run_async_test_on_stack_size, sqlite_queued_run_count,
     sqlite_queued_work_claims, sqlite_turn_input_states,
 };
+mod aborted_turn_groups;
 mod agent_scenarios;
 #[cfg(feature = "rlm")]
 mod aggregate_await_comprehension;
