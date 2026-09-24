@@ -1083,6 +1083,201 @@ class PrTailLabelTests(unittest.TestCase):
         )
 
 
+class RestateSuiteSelectionTests(unittest.TestCase):
+    """`restate_suites` selects the live Restate board on a pull request.
+
+    The suites ran on `workflow_dispatch` alone, so #2106 (FIG-3699) and
+    #2148 (FIG-3697) merged past them and broke main, and #2085's workbench
+    regression went unseen. The family answers "can this path move a live
+    Restate suite" and the workflow runs the Restate legs when a trusted
+    pull request selects it.
+    """
+
+    def plan(self, *paths: str) -> dict[str, str]:
+        return ci_plan.classify([("M", path) for path in paths])
+
+    def test_the_registry_derives_the_suite_owners(self) -> None:
+        self.assertEqual(
+            {"crates/lash-restate", "examples/agent-workbench"},
+            set(ci_plan.restate_suite_dirs()),
+        )
+
+    def test_a_lash_restate_change_selects_the_suites(self) -> None:
+        self.assertEqual(
+            "true",
+            self.plan("crates/lash-restate/src/effect_host.rs")["restate_suites"],
+        )
+
+    def test_the_restate_execution_path_selects_the_suites(self) -> None:
+        for path in (
+            # #2106's diff: the effect-group dispatch path and the workers
+            # runbook binary.
+            "crates/lash-core-execution/src/runtime/effect/group_drain.rs",
+            "crates/lash-core-execution/src/tool_dispatch.rs",
+            "crates/lash-core-execution/src/session/tool_execution.rs",
+            "runbooks/restate-postgres-workers/src/bin/worker.rs",
+            # The kernel mirror under tests/ is the same subsystem.
+            "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/tool_child_driver.rs",
+            # #2148's turn-driver change.
+            "crates/lash-core/src/runtime/turn_driver/tools.rs",
+            "crates/lash-core/src/runtime/turn_loop.rs",
+            # The suite's law catalogue expands into its test binary.
+            "crates/lash-conformance/src/lib.rs",
+            # The endpoints and runbooks the suites mount.
+            "crates/lash-restate/src/effect_group/dispatch.rs",
+            "examples/agent-service/src/main.rs",
+            "examples/agent-workbench/src/main.rs",
+            "runbooks/process-operations/docker-compose.yml",
+            # A shared crate's manifest can change the suites' build.
+            "crates/lash-core-execution/Cargo.toml",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual("true", self.plan(path)["restate_suites"])
+
+    def test_docs_only_and_unrelated_paths_do_not_select_them(self) -> None:
+        for path in (
+            "docs/guide.md",
+            "README.md",
+            # Inside the shared crates but outside the execution subtrees.
+            "crates/lash-core-execution/src/backend.rs",
+            "crates/lash-core/src/runtime/assembly.rs",
+            # `lashlang` is a dependency of the suites, not the execution
+            # path they cover: the dependency closure of the suite owners
+            # covers most of the workspace, so selecting it would run the
+            # board on nearly every diff. The language's own suites and the
+            # merge group's full board still cover it.
+            "crates/lashlang/src/lib.rs",
+            "crates/lash-sim/src/lib.rs",
+            "examples/slack-clone/src/bot.rs",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual("false", self.plan(path)["restate_suites"])
+
+    def test_the_selected_packages_and_subtrees_exist_in_the_tree(self) -> None:
+        tracked = subprocess.run(
+            ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        for package in ci_plan.RESTATE_SUITE_PACKAGES | ci_plan.restate_suite_dirs():
+            with self.subTest(package=package):
+                self.assertTrue((ROOT / package).is_dir(), package)
+        for package, subtrees in ci_plan.RESTATE_CORE_SUBTREES.items():
+            for subtree in subtrees:
+                with self.subTest(package=package, subtree=subtree):
+                    self.assertTrue(
+                        any(
+                            path.startswith(f"{package}/")
+                            and ci_plan._contains_stem_run(path, subtree)
+                            for path in tracked
+                        ),
+                        f"no tracked path under {package} matches {subtree}",
+                    )
+
+    def test_an_underivable_registry_fails_open(self) -> None:
+        with mock.patch.object(
+            ci_plan, "restate_suite_dirs", side_effect=OSError("no registry")
+        ):
+            plan = self.plan("crates/lash-s3-store/src/lib.rs")
+        self.assertEqual("true", plan["fail_open"])
+        self.assertEqual("true", plan["restate_suites"])
+
+    def test_the_pr_legs_run_only_on_a_selected_trusted_pull_request(self) -> None:
+        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        term = (
+            "github.event_name == 'pull_request'"
+            " && needs.plan.outputs.bazel_trusted == 'true'"
+            " && needs.plan.outputs.restate_suites == 'true'"
+        )
+        for job in (
+            "functional-e2e",
+            "functional-e2e-process-operations",
+            "worker-artifacts",
+            "restate-postgres-workers",
+            "restate-postgres-workers-summary",
+        ):
+            with self.subTest(job=job):
+                condition = " ".join(jobs[job]["if"].split())
+                self.assertIn(term, condition)
+                # The merge group keeps the board it had.
+                self.assertNotIn("merge_group", condition)
+        self.assertEqual(
+            "${{ steps.classify.outputs.restate_suites }}",
+            jobs["plan"]["outputs"]["restate_suites"],
+        )
+
+    def test_only_the_restate_legs_run_on_a_pull_request(self) -> None:
+        job = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
+            "functional-e2e"
+        ]
+        legs = job["strategy"]["matrix"]["include"]
+        self.assertEqual(
+            {"agent-service", "agent-workbench", "effect-group-conformance"},
+            {leg["name"] for leg in legs if leg["restate"]},
+        )
+        # A leg the selection leaves off runs only its explanation step.
+        for step in job["steps"]:
+            self.assertIn("RUN_FUNCTIONAL_E2E", str(step.get("if", "")))
+
+    def test_a_selected_pull_request_runs_the_restate_board(self) -> None:
+        needs = apply_event_deferrals(successful_needs(), "pull_request")
+        for job in ci_plan.RESTATE_SUITE_JOBS | ci_plan.WORKERS_E2E_JOBS:
+            self.assertEqual("success", needs[job]["result"])
+        self.assertEqual(
+            [],
+            ci_plan.evaluate_conclusion(
+                needs, "pull_request", workers_e2e_enabled=False
+            ),
+        )
+        for job in sorted(ci_plan.RESTATE_SUITE_JOBS | ci_plan.WORKERS_E2E_JOBS):
+            for result in ("skipped", "failure", "cancelled"):
+                with self.subTest(job=job, result=result):
+                    trial = apply_event_deferrals(successful_needs(), "pull_request")
+                    trial[job]["result"] = result
+                    problems = ci_plan.evaluate_conclusion(
+                        trial, "pull_request", workers_e2e_enabled=False
+                    )
+                    self.assertTrue(any(job in p for p in problems), problems)
+
+    def test_other_events_keep_the_board_deferred(self) -> None:
+        # An untrusted pull request cannot stage the suite binaries from the
+        # shared cache, and the merge group runs the same board it had.
+        for event, trusted in (("pull_request", False), ("merge_group", True)):
+            with self.subTest(event=event):
+                needs = apply_event_deferrals(
+                    successful_needs(), event, trusted=trusted
+                )
+                for job in ci_plan.RESTATE_SUITE_JOBS:
+                    self.assertEqual("skipped", needs[job]["result"])
+                for job in ci_plan.WORKERS_E2E_JOBS:
+                    needs[job]["result"] = "skipped"
+                needs["workspace-tests"]["result"] = "success" if not trusted else "skipped"
+                needs["check"]["result"] = "success" if not trusted else "skipped"
+                for job in ci_plan.BAZEL_TEST_JOBS | {ci_plan.FEATURE_LANES_JOB}:
+                    if not trusted:
+                        needs[job]["result"] = "skipped"
+                self.assertEqual(
+                    [],
+                    ci_plan.evaluate_conclusion(
+                        needs,
+                        event,
+                        workers_e2e_enabled=False,
+                        bazel_is_trusted=trusted,
+                    ),
+                )
+
+    def test_an_unselected_pull_request_keeps_them_deferred(self) -> None:
+        needs = successful_needs()
+        needs["plan"]["outputs"]["restate_suites"] = "false"
+        apply_event_deferrals(needs, "pull_request")
+        for job in ci_plan.RESTATE_SUITE_JOBS | ci_plan.WORKERS_E2E_JOBS:
+            needs[job]["result"] = "skipped"
+        self.assertEqual(
+            [],
+            ci_plan.evaluate_conclusion(
+                needs, "pull_request", workers_e2e_enabled=False
+            ),
+        )
+
+
 def successful_needs() -> dict[str, dict[str, object]]:
     plan_outputs = {family: "true" for family in ci_plan.FAMILIES}
     plan_outputs.update({"docs_only": "false", "fail_open": "false"})
@@ -1100,13 +1295,18 @@ def successful_needs() -> dict[str, dict[str, object]]:
     return needs
 
 
-def apply_event_deferrals(needs: dict, event: str) -> dict:
+def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict:
     """Give every event-deferred job the result `event` expects of it."""
 
     for job in ci_plan.DISPATCH_ONLY_JOBS:
         needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
     if event == "pull_request":
         needs["bazel-tests-tail"]["result"] = "skipped"
+        # A trusted pull request whose plan selects `restate_suites` runs the
+        # live Restate legs rather than deferring them.
+        if trusted and needs["plan"]["outputs"].get("restate_suites") == "true":
+            for job in ci_plan.RESTATE_SUITE_JOBS:
+                needs[job]["result"] = "success"
     return needs
 
 
@@ -1259,6 +1459,10 @@ class ConclusionTests(unittest.TestCase):
 class ProducerConclusionTests(unittest.TestCase):
     def event_needs(self, event, enabled=True):
         needs = successful_needs()
+        if not enabled:
+            # `enabled` models the event's opt-ins, so an unlabeled pull
+            # request is also one whose diff did not select the suites.
+            needs["plan"]["outputs"]["restate_suites"] = "false"
         apply_event_deferrals(needs, event)
         if not enabled:
             for job in ci_plan.WORKERS_E2E_JOBS:
@@ -2045,7 +2249,7 @@ class FeatureLanesTests(unittest.TestCase):
     """
 
     def board(self, event: str, trusted: bool = True, rust: bool = True) -> dict:
-        needs = apply_event_deferrals(successful_needs(), event)
+        needs = apply_event_deferrals(successful_needs(), event, trusted=trusted)
         needs["plan"]["outputs"]["rust"] = str(rust).lower()
         if not trusted:
             for job in ci_plan.BAZEL_TEST_JOBS:

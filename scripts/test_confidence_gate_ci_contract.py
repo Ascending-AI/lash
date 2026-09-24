@@ -626,6 +626,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "docs_only": "false",
             "fail_open": "false",
         }
+        # This scenario exercises deferral, so it is the unselected case: a
+        # trusted pull request that does select `restate_suites` runs the live
+        # Restate legs instead (asserted below and in test_ci_plan.py).
+        needs["plan"]["outputs"]["restate_suites"] = "false"
         needs["workspace-tests"]["result"] = "skipped"
         # Trusted events seal the API inside `bazel-tests`.
         needs["check"]["result"] = "skipped"
@@ -635,6 +639,29 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(evaluate(needs, "pull_request"), [])
         needs["bazel-tests-tail"] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group"), [])
+        # The exception to the dispatch-only ruling: on a trusted pull request
+        # whose diff selects `restate_suites`, the functional-e2e Restate legs
+        # run and must succeed — skipping them is a conclusion failure. The
+        # merge group still defers them.
+        restate_needs = {
+            job: {**value, "outputs": dict(value.get("outputs", {}))}
+            for job, value in needs.items()
+        }
+        restate_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
+        restate_needs["plan"]["outputs"]["restate_suites"] = "true"
+        self.assertEqual(evaluate(restate_needs, "merge_group"), [])
+        restate_needs["bazel-tests-tail"]["result"] = "skipped"
+        restate_needs["functional-e2e"]["result"] = "success"
+        restate_needs["functional-e2e-process-operations"]["result"] = "success"
+        self.assertEqual(evaluate(restate_needs, "pull_request"), [])
+        restate_needs["functional-e2e"]["result"] = "skipped"
+        self.assertEqual(
+            evaluate(restate_needs, "pull_request"),
+            [
+                "dispatch-only job functional-e2e ended with 'skipped' on a"
+                " pull_request event, expected success"
+            ],
+        )
         dispatch_needs = {
             job: {"result": "success", "outputs": dict(value.get("outputs", {}))}
             for job, value in needs.items()
