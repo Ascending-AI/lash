@@ -134,16 +134,25 @@ mod tests {
             .join(" | ")
     }
 
+    /// The witness plans against a database of its own, created from the DDL
+    /// artifact for this test alone: no rows, no `ANALYZE` history, no
+    /// autovacuum statistics. On a shared database the planner costs these
+    /// statements from whatever rows and statistics earlier tests left behind,
+    /// and PR CI once chose a bitmap scan of `idx_lash_processes_parent_scope`
+    /// plus a sort for the first page (FIG-3687). A fresh database fixes every
+    /// planner input except the statement text and the schema, which are what
+    /// this asserts on. `enable_seqscan = off` is still needed, because an
+    /// empty table would otherwise be scanned whatever the indexes say.
     #[tokio::test]
     async fn worklist_plans_put_both_cursor_bounds_in_the_partial_index_condition() {
         let Some(database_url) = crate::postgres_test_support::database_url() else {
             eprintln!("skipping worklist plan check: database URL is not set");
             return;
         };
-        let _lock = crate::postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-        let storage = crate::PostgresStorage::connect(&database_url)
+        let database = crate::testing::IsolatedDatabase::create(&database_url).await;
+        let storage = crate::PostgresStorage::connect(database.url())
             .await
-            .expect("connect PostgreSQL worklist plan test");
+            .expect("connect PostgreSQL worklist plan database");
         let mut tx = storage
             .pool
             .begin()
