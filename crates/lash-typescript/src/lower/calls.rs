@@ -459,12 +459,12 @@ impl Lowerer {
                     | Expr::Function(_)
             ) {
                 let label = if index == 0 { "pattern" } else { "flags" };
-                return Err(Diagnostic::with_repair(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     format!("RegExp {label} must be a string, a RegExp, or undefined"),
-                    "pass an explicit string",
                     None,
-                ));
+                )
+                .with_hint("pass an explicit string"));
             }
         }
         let mut values = vec![LashExpr::String("construct".into())];
