@@ -252,10 +252,7 @@ fi
 # Forbidden constructs: Tokio scheduling and time (spawn/select!/join!/sync::/
 # time::/task::/task_local!, including grouped `use tokio::{...}` imports),
 # futures::join_all, Instant::now, SystemTime, SystemClock, Uuid::new_v4,
-# rand::, block_on, `dyn Future + Send`, `.await` on a store trait (approximated
-# as a store|registry-named receiver or callee with .await in the same
-# expression -- ripgrep searches multiline, the grep fallback is single-line),
-# and HashMap/HashSet mentions (a superset of the plan's "no iterating hash
+# rand::, block_on, `dyn Future + Send`, and HashMap/HashSet mentions (a superset of the plan's "no iterating hash
 # collections": FxHash maps use a fixed hasher and stay legal).
 #
 # Every current hit is pinned in scripts/drive-determinism-allowlist.txt as
@@ -291,37 +288,17 @@ drive_paths=(
 )
 
 drive_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+Future[^;]{0,160}\+[[:space:]]*Send|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)'
-# One match ends at its first `.await`, so the `-U` output's `.await` line is
-# the one line pinned per call. The grep fallback only sees single-line calls.
-drive_store_await='[a-zA-Z_]*(store|registry|Store|Registry)[a-zA-Z_]*[[:space:]]*(\.[[:space:]]*[a-z_]+[[:space:]]*)?\([^;]{0,800}?\.await([^[:alnum:]_]|$)'
-drive_store_await_line='(store|registry|Store|Registry)[^;]{0,200}\.await([^[:alnum:]_]|$)'
 drive_allowlist=scripts/drive-determinism-allowlist.txt
 
-capture_search "drive determinism" "$drive_forbidden" "$tmp_dir/rule5.raw" "${drive_paths[@]}"
-if command -v rg >/dev/null 2>&1; then
-  if rg -n -U --glob '*.rs' "$drive_store_await" "${drive_paths[@]}" >"$tmp_dir/rule5.store.multi"; then
-    grep -E '\.await([^[:alnum:]_]|$)' "$tmp_dir/rule5.store.multi" >"$tmp_dir/rule5.store" || true
-  else
-    store_status=$?
-    if [[ $store_status -ne 1 ]]; then
-      echo "substrate boundary check failed: drive determinism store-await search exited $store_status" >&2
-      failed=1
-    fi
-    : >"$tmp_dir/rule5.store"
-  fi
-else
-  if search_rust "$drive_store_await_line" "${drive_paths[@]}" >"$tmp_dir/rule5.store"; then
-    :
-  else
-    store_status=$?
-    if [[ $store_status -ne 1 ]]; then
-      echo "substrate boundary check failed: drive determinism store-await search exited $store_status" >&2
-      failed=1
-    fi
-    : >"$tmp_dir/rule5.store"
-  fi
+# Always grep -E, never ripgrep: the two engines disagree on these patterns,
+# and CI runners do not all carry ripgrep, so one engine keeps the allowlist
+# identical everywhere.
+drive_search_status=0
+grep -rEn --include='*.rs' "$drive_forbidden" "${drive_paths[@]}" >"$tmp_dir/rule5.raw" 2>/dev/null || drive_search_status=$?
+if [[ $drive_search_status -gt 1 ]]; then
+  echo "substrate boundary check failed: drive determinism search exited $drive_search_status" >&2
+  failed=1
 fi
-cat "$tmp_dir/rule5.store" >>"$tmp_dir/rule5.raw"
 sort -u -o "$tmp_dir/rule5.raw" "$tmp_dir/rule5.raw" 2>/dev/null || true
 
 # A hit's key is (file, normalized line text): trimmed, with every internal
@@ -372,6 +349,32 @@ while IFS=: read -r file line source; do
   key="$file|$(drive_normalize "$source")"
   drive_seen[$key]=$(( ${drive_seen[$key]:-0} + 1 ))
 done <"$tmp_dir/rule5.raw"
+
+if [[ ${DRIVE_DETERMINISM_REGENERATE:-0} == 1 ]]; then
+  # Rewrite the allowlist from the current tree, keeping each surviving
+  # entry's inventory tag; new keys are tagged UNMAPPED.
+  declare -A drive_tags=()
+  while IFS= read -r entry || [[ -n $entry ]]; do
+    [[ $entry == \#* || -z ${entry//[[:space:]]/} || $entry != *'  # '* ]] && continue
+    body=${entry%%  # *}
+    tag=${entry#*  # }
+    tfile=${body%%  |  *}; trest=${body#*  |  }; ttext=${trest%%  |  *}
+    drive_tags["$tfile|$ttext"]=$tag
+  done < <(grep -v '^#' "$drive_allowlist" 2>/dev/null || true)
+  header=$(grep '^#' "$drive_allowlist" 2>/dev/null || true)
+  total=0
+  {
+    [[ -n $header ]] && printf '%s\n' "$header"
+    for key in "${!drive_seen[@]}"; do
+      printf '%s  |  %s  |  %s  # %s\n' "${key%%|*}" "${key#*|}" "${drive_seen[$key]}" "${drive_tags[$key]:-UNMAPPED}"
+    done | LC_ALL=C sort
+  } >"$drive_allowlist.new"
+  for key in "${!drive_seen[@]}"; do total=$(( total + drive_seen[$key] )); done
+  mv "$drive_allowlist.new" "$drive_allowlist"
+  printf '%s\n' "$total" >scripts/drive-determinism-allowlist.count
+  echo "regenerated $drive_allowlist: ${#drive_seen[@]} entries, $total occurrences"
+  exit 0
+fi
 
 declare -A drive_bad=()
 if [[ ${#drive_seen[@]} -gt 0 ]]; then

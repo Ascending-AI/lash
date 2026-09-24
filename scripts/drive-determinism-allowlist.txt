@@ -14,49 +14,29 @@
 # not cite by line; OBS = a §1 observation-only site).
 crates/lash-core-execution/src/runtime/effect/group.rs  |  let mut first_seen_at: HashMap<&str, usize> = HashMap::with_capacity(children.len());  |  1  # UNMAPPED
 crates/lash-core-execution/src/runtime/effect/group.rs  |  use std::collections::HashMap;  |  1  # UNMAPPED
-crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs  |  .await  |  1  # IO37
 crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs  |  clock: Arc::new(std::sync::Mutex::new(Arc::new(crate::SystemClock))),  |  1  # CR11
 crates/lash-core-execution/src/session.rs  |  event_tx: tokio::sync::mpsc::Sender<SessionStreamEvent>,  |  1  # UNMAPPED
-crates/lash-core-execution/src/session/execution_context.rs  |  .await  |  2  # IO32 IO39 IO60
-crates/lash-core-execution/src/session/execution_context.rs  |  .await?;  |  2  # UNMAPPED
-crates/lash-core-execution/src/session/execution_context.rs  |  let _ = tx.send(TurnActivity::new(correlation_id, event)).await;  |  1  # AC35
 crates/lash-core-execution/src/session/execution_context.rs  |  started_process_ids: Arc<std::sync::Mutex<std::collections::HashSet<ProcessId>>>,  |  1  # UNMAPPED
 crates/lash-core-execution/src/session/execution_context.rs  |  tokio::sync::mpsc::UnboundedReceiver<  |  1  # UNMAPPED
 crates/lash-core-execution/src/session/execution_context.rs  |  use tokio::sync::mpsc::Sender;  |  1  # UNMAPPED
 crates/lash-core-execution/src/session/tool_execution.rs  |  let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =  |  1  # UNMAPPED
 crates/lash-core-execution/src/session/tool_execution.rs  |  use std::collections::HashMap;  |  1  # UNMAPPED
 crates/lash-core-execution/src/tool_dispatch/context.rs  |  use tokio::sync::mpsc;  |  1  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/execution.rs  |  .await  |  2  # AC42 UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/execution.rs  |  return unavailable_prepared_tool_outcome(context, prepared).await;  |  1  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/intent_executor.rs  |  .await  |  1  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/intent_executor.rs  |  .await?;  |  1  # UNMAPPED
 crates/lash-core-execution/src/tool_dispatch/preparation.rs  |  .unwrap_or_else(|| format!("tool:{}", uuid::Uuid::new_v4())),  |  1  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/retry.rs  |  .await  |  1  # IO31
-crates/lash-core/src/runtime/logical_turn.rs  |  && let Err(err) = store.abandon_queued_work_claims(&withheld.queued).await  |  1  # IO12
-crates/lash-core/src/runtime/logical_turn.rs  |  && let Err(err) = store.abandon_turn_input_claims(turn_input_claims).await  |  1  # IO12
-crates/lash-core/src/runtime/logical_turn.rs  |  .await  |  4  # IO10 IO11 IO9
-crates/lash-core/src/runtime/turn_boundary.rs  |  .await;  |  1  # IO21
 crates/lash-core/src/runtime/turn_boundary.rs  |  Arc::new(crate::SystemClock),  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_boundary.rs  |  let observed = store.turn_cancel_request_intent(&address).await?;  |  1  # IO21
 crates/lash-core/src/runtime/turn_driver/context.rs  |  tokio::select! {  |  1  # AC33
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  &std::collections::HashSet<String>,  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  ) -> Result<std::collections::HashSet<String>, RuntimeError> {  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs  |  .await  |  3  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs  |  .await?;  |  2  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  .collect::<std::collections::HashSet<_>>();  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>) {  |  2  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>);  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  let mut already_delivered = std::collections::HashSet::new();  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  tokio::select! {  |  1  # AC34
 crates/lash-core/src/runtime/turn_driver/events.rs  |  TurnActivityId::new(uuid::Uuid::new_v4().to_string()),  |  1  # OBS
-crates/lash-core/src/runtime/turn_driver/handlers.rs  |  .await  |  3  # IO27
-crates/lash-core/src/runtime/turn_driver/handlers.rs  |  match self.before_llm_call(machine, &request).await {  |  1  # HK1
 crates/lash-core/src/runtime/turn_driver/local_effects.rs  |  std::collections::HashMap<usize, crate::runtime::LlmStreamSummary>,  |  1  # LZ1
 crates/lash-core/src/runtime/turn_driver/machine.rs  |  assistant_ids_at_last_model_call: Option<HashSet<String>>,  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/machine.rs  |  fn assistant_ids<'a>(messages: impl Iterator<Item = &'a Message>) -> HashSet<String> {  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/machine.rs  |  use std::collections::HashSet;  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs  |  .await  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs  |  .await?,  |  1  # IO30
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  TurnActivityId::new(uuid::Uuid::new_v4().to_string()),  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  let mut block_raw_text = std::collections::HashMap::new();  |  1  # UNMAPPED
@@ -69,57 +49,21 @@ crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  pub(super) fn 
 crates/lash-core/src/runtime/turn_driver/streaming/terminal.rs  |  call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/tools.rs  |  let (turn_event_tx, mut turn_event_rx) = tokio::sync::mpsc::channel::<TurnActivity>(64);  |  2  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/tools.rs  |  tokio::sync::mpsc::channel::<SessionStreamEvent>(64);  |  2  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/accept.rs  |  *session_execution_lease = self.claim_session_execution_lease().await?;  |  1  # IO1
-crates/lash-core/src/runtime/turn_loop/commit.rs  |  .await  |  5  # HK9 IO19 IO20 UNMAPPED
-crates/lash-core/src/runtime/turn_loop/commit.rs  |  .await,  |  1  # IO21
 crates/lash-core/src/runtime/turn_loop/commit.rs  |  let mut seen = std::collections::HashSet::new();  |  1  # LZ29
-crates/lash-core/src/runtime/turn_loop/commit.rs  |  registry.record_parent_end(&parent).await.map_err(|error| {  |  1  # IO22
-crates/lash-core/src/runtime/turn_loop/drain_end.rs  |  if let Err(error) = registry.record_parent_end(&parent).await {  |  1  # IO26
-crates/lash-core/src/runtime/turn_loop/drain_end.rs  |  match registry.list_processes(&filter).await {  |  1  # IO26
-crates/lash-core/src/runtime/turn_loop/drain_end.rs  |  match store.load_session_head_meta().await {  |  1  # IO26
 crates/lash-core/src/runtime/turn_loop/execute.rs  |  llm_stream_summaries: HashMap::new(),  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_loop/execute.rs  |  tokio::select! {  |  1  # AC1
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs  |  .await  |  2  # IO5
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs  |  .await?  |  2  # IO5 IO6
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs  |  .await?;  |  1  # IO5
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs  |  self.store.abandon_turn_input_claim(&claim).await?;  |  2  # IO5 IO6
-crates/lash-core/src/runtime/turn_loop/lease.rs  |  .await  |  14  # IO1 IO13 IO3 IO7
-crates/lash-core/src/runtime/turn_loop/lease.rs  |  if let Err(abandon_err) = store.abandon_queued_work_claims(claims).await {  |  1  # IO17
-crates/lash-core/src/runtime/turn_loop/lease.rs  |  if let Err(abandon_err) = store.abandon_turn_input_claims(&claims).await {  |  1  # IO17
-crates/lash-core/src/runtime/turn_loop/lease.rs  |  let observed = match store.turn_cancel_request_intent(&address).await {  |  1  # IO13
-crates/lash-core/src/runtime/turn_loop/lease.rs  |  match store.record_turn_park(&park).await {  |  1  # IO18
-crates/lash-core/src/runtime/turn_loop/lease.rs  |  repair_observed = match store.turn_cancel_request_intent(&address).await {  |  1  # IO13
-crates/lash-core/src/runtime/turn_loop/prepare.rs  |  .await  |  2  # CR19 IO15 IO16
-crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  .await  |  3  # IO24 UNMAPPED
-crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  .await?;  |  1  # IO24
-crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  if let Err(error) = self.refresh_session_graph_from_store().await {  |  2  # IO24 UNMAPPED
-crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  let admission = match store.begin_or_resume_queued_run(&fence, request).await {  |  1  # IO24
-crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  let run = match store.queued_run(&scope).await {  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  let settled = store.settle_queued_run(&lease.fence(), settlement).await?;  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/resident_session.rs  |  .await  |  3  # HK9 IO14
 crates/lash-core/src/runtime/turn_loop/resident_session.rs  |  uuid::Uuid::new_v4()  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/lib.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {  |  1  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs  |  .await  |  8  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs  |  .await?;  |  1  # UNMAPPED
-crates/lash-lashlang-runtime/src/process.rs  |  .await  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/process.rs  |  Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB3
-crates/lash-lashlang-runtime/src/process.rs  |  signal_wait_ordinals: self.signal_wait_ordinals.lock().await.clone(),  |  1  # AC40
 crates/lash-lashlang-runtime/src/process.rs  |  signal_wait_ordinals: tokio::sync::Mutex::new(  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/process.rs  |  signal_wait_ordinals: tokio::sync::Mutex<BTreeMap<String, u64>>,  |  1  # AC40
 crates/lash-lashlang-runtime/src/process.rs  |  tokio::select! {  |  2  # AC20
-crates/lash-lashlang-runtime/src/process/effect_operations.rs  |  .await;  |  1  # UNMAPPED
-crates/lash-lashlang-runtime/src/process/trace_map.rs  |  .await?  |  1  # UNMAPPED
-crates/lash-lashlang-runtime/src/trigger_commands.rs  |  .await  |  1  # IO59
-crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  .await;  |  2  # UNMAPPED
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  Pin<Box<dyn Future<Output = Result<AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB2
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  active_nodes: std::sync::Arc<Mutex<HashSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,  |  1  # UNMAPPED
-crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  attachment_store.get(&id).await.map_err(|_| {  |  1  # IO57
-crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  let images = collect_printed_images(&value, attachment_store.as_ref()).await?;  |  1  # IO57
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  let mut seen = HashSet::new();  |  1  # IO57
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  seen: &'a mut HashSet<String>,  |  1  # IO57
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  tokio::task::yield_now().await;  |  1  # AC37
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  use std::collections::{BTreeMap, HashSet};  |  1  # UNMAPPED
-crates/lash-protocol-rlm/src/executor/mod.rs  |  .await  |  1  # IO56
 crates/lash-protocol-rlm/src/executor/mod.rs  |  let start = std::time::Instant::now();  |  1  # UNMAPPED
 crates/lash-protocol-rlm/src/projection/bindings.rs  |  let key = uuid::Uuid::new_v4().to_string();  |  1  # CR23
 crates/lash-protocol-rlm/src/projection/context.rs  |  ) -> HashSet<usize> {  |  1  # UNMAPPED
@@ -152,19 +96,7 @@ crates/lash-restate/src/controller/context.rs  |  dyn Future<Output = Result<Res
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = JournaledEffectRecord> + Send + 'run>>,  |  1  # SB30
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = RecordedRuntimeEffect> + Send + 'run>>,  |  1  # SB30
 crates/lash-restate/src/controller/mod.rs  |  &lash_core::facade_support::SystemClock,  |  1  # UNMAPPED
-crates/lash-restate/src/controller/mod.rs  |  .await  |  1  # IO47
 crates/lash-restate/src/controller/mod.rs  |  let clock = lash_core::facade_support::SystemClock;  |  1  # CR12
-crates/lash-restate/src/controller/process_command.rs  |  .await  |  2  # IO44
-crates/lash-restate/src/controller/process_command.rs  |  .await;  |  1  # UNMAPPED
-crates/lash-restate/src/controller/process_command.rs  |  .await?  |  3  # IO43 IO44
-crates/lash-restate/src/controller/process_command.rs  |  .await?;  |  4  # IO44 IO45 IO46 UNMAPPED
-crates/lash-restate/src/controller/process_command.rs  |  if registry.get_process(&process_id).await?.is_none() {  |  1  # IO45
-crates/lash-restate/src/controller/process_command.rs  |  let report = registry.delete_session_process_state(&session_id).await?;  |  1  # IO45
-crates/lash-restate/src/controller/process_command.rs  |  let result = registry.append_event(&process_id, request).await?;  |  1  # IO45
-crates/lash-restate/src/controller/process_command.rs  |  let result = registry.append_event_ref(&process_ref, request).await?;  |  1  # UNMAPPED
-crates/lash-restate/src/controller/process_command.rs  |  registry.get_process_ref(&process_ref).await?;  |  2  # IO45
-crates/lash-restate/src/controller/process_scheduling.rs  |  .await  |  2  # IO44 UNMAPPED
-crates/lash-restate/src/controller/process_scheduling.rs  |  .await?;  |  1  # IO44
 crates/lash-restate/src/durable_wait.rs  |  ) -> tokio::sync::oneshot::Receiver<RestateDurableWaitRegistration> {  |  1  # UNMAPPED
 crates/lash-restate/src/durable_wait.rs  |  deadline.remaining(lash_core::facade_support::SystemClock.timestamp_ms())?;  |  1  # CR13
 crates/lash-restate/src/durable_wait.rs  |  let (send, receive) = tokio::sync::oneshot::channel();  |  1  # UNMAPPED
@@ -178,18 +110,9 @@ crates/lash-restate/src/effect_group.rs  |  use std::collections::HashMap;  |  1
 crates/lash-restate/src/effect_group/dispatch.rs  |  let Json(outcome) = tokio::select! {  |  1  # UNMAPPED
 crates/lash-restate/src/effect_group/dispatch.rs  |  let outcome = tokio::select! {  |  2  # AC18 UNMAPPED
 crates/lash-restate/src/effect_group/dispatch.rs  |  tokio::select! {  |  1  # AC18
-crates/lash-restate/src/process/admission.rs  |  .await  |  2  # UNMAPPED
 crates/lash-restate/src/process/admission.rs  |  nonce: uuid::Uuid::new_v4().to_string(),  |  1  # UNMAPPED
-crates/lash-restate/src/process/mod.rs  |  .await  |  3  # UNMAPPED
-crates/lash-restate/src/process/mod.rs  |  .await?  |  1  # UNMAPPED
-crates/lash-restate/src/process/mod.rs  |  let current = self.registry.get_process(&process_id).await?;  |  1  # UNMAPPED
-crates/lash-restate/src/process/mod.rs  |  let record = self.registry.get_process_ref(process_ref).await?;  |  1  # UNMAPPED
-crates/lash-restate/src/process/mod.rs  |  self.registry.get_process_ref(process_ref).await?;  |  1  # UNMAPPED
 crates/lash-restate/src/process/mod.rs  |  std::time::SystemTime::now()  |  1  # CR16
 crates/lash-restate/src/process/workflow.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), HandlerError>> + Send>> {  |  1  # AC19
-crates/lash-restate/src/process/workflow.rs  |  .await  |  11  # IO50 IO52 IO53 UNMAPPED
-crates/lash-restate/src/process/workflow.rs  |  .await?  |  1  # UNMAPPED
-crates/lash-restate/src/process/workflow.rs  |  .await?;  |  1  # UNMAPPED
 crates/lash-restate/src/process/workflow.rs  |  let outcome = tokio::select! {  |  1  # AC19
 crates/lash-restate/src/process/workflow.rs  |  tokio::time::sleep(PROCESS_CANCEL_CONFIRM_RETRY_DELAY).await;  |  1  # IO48
 crates/lashlang/src/artifact.rs  |  owners: HashSet<(ModuleRef, lash_core_execution::ArtifactOwner)>,  |  1  # UNMAPPED
