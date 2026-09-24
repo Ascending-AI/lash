@@ -5,7 +5,9 @@
 Accepted. Amended 2026-08-10 (FIG-1195): the inline-versus-leaf line comes from
 a named constant rather than a store blob profile. Amended 2026-08-11
 (FIG-1257): that line applies to every value shape. Amended 2026-08-21
-(FIG-1728): RLM snapshot v14 removes the scratch-file section.
+(FIG-1728): RLM snapshot v14 removes the scratch-file section. Amended
+2026-09-24 (FIG-3605, FIG-3606): a global's value body is a durable heap
+fragment, and a record's fields keep their property order.
 
 ## Context
 
@@ -42,6 +44,24 @@ section and file-body leaves from the execution-state root. The remaining root
 contains globals and deferred resolutions; older snapshots fail closed with the
 standard drain-or-recreate remedy. References to files below record the
 superseded v13 decision rather than a compatibility path.
+
+**Amendment (2026-09-24, FIG-3605, FIG-3606).** RLM snapshot v23 persists the
+session's runtime roots and heap rather than their host view, which omitted
+every binding with no host shape (a `Map`, `Date`, `URL` and the other
+TypeScript exotics) and exported each binding as a separate tree, so one object
+named by two bindings came back as two. The root gains a small heap header —
+the Lashlang snapshot version and the heap's counters — and each global's value
+body is that binding's durable fragment: its value and the heap objects it
+carries. Every live object is carried by exactly one fragment, the first root
+in name order whose walk reaches it, and a reference to an object another
+fragment carries is its heap id, so sharing survives the round trip. A capture
+re-encodes a fragment only when its value, its set of carried objects, or one
+of those objects changed since the previous capture; the heap stamps every
+write, which is what makes a write through any alias visible to that test.
+The inline-versus-leaf line applies to fragment bodies unchanged. One encoding
+rule below is narrowed: a record's fields are written in property order, never
+sorted, because `Object.keys`, `JSON.stringify` and `for...in` observe that
+order; every other dynamic map is still sorted.
 
 The checkpoint-component contract is a keyed set rather than three fixed
 slots. An execution-state root is a small typed component with sections for
@@ -100,8 +120,8 @@ raw bytes. Encoding observes these normative rules:
 - values that cannot be represented fail at encode time with a typed error
   naming the path to the offending value; they are never silently replaced
   with null and never first discovered during restore;
-- dynamic maps are sorted, only typed structs are encoded, and
-  `#[serde(flatten)]` is forbidden;
+- dynamic maps are sorted, except a record's fields, which keep property
+  order; only typed structs are encoded, and `#[serde(flatten)]` is forbidden;
 - byte fields use `serde_bytes` rather than MessagePack integer arrays; and
 - the minimum encoder version is pinned, including the rmp-serde fix from PR
   257, and named-field encoding is pinned by conformance test.

@@ -229,7 +229,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         } else {
             slots.extras.remove(name.as_str()).is_some()
         };
-        self.assigned_globals.insert(name.to_string());
         self.stack.push(Value::Bool(deleted));
         Ok(())
     }
@@ -301,7 +300,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         } else {
             slots.extras.insert(name.to_string(), value.clone());
         }
-        self.assigned_globals.insert(name.to_string());
         self.stack.push(value);
         Ok(())
     }

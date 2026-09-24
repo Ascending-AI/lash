@@ -6,6 +6,7 @@ mod closure_reach;
 mod id;
 mod javascript_exotics;
 mod object;
+mod partition;
 mod reference_assignment;
 mod url_objects;
 mod validation;
@@ -24,6 +25,7 @@ pub(crate) use javascript_exotics::{
     DateObject, ErrorKind, ErrorObject, MAX_JAVASCRIPT_LENGTH, MapObject, RegExpMatchObject,
     RegExpObject, SetObject, canonical_regexp_flags, regexp_source, regexp_string, same_value_zero,
 };
+pub(crate) use partition::DurablePartition;
 pub(crate) use url_objects::{
     UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,
 };
@@ -87,6 +89,29 @@ pub(crate) struct Heap {
     /// an uncached walk would have counted.
     materialized: FxHashMap<HeapId, (Value, usize)>,
     logical_byte_limit: u64,
+    /// The write stamp of every object written since this heap was built.
+    ///
+    /// The durable partition compares stamps against the ones it recorded at
+    /// the previous capture to learn which roots' objects changed, without
+    /// re-encoding the heap to find out. Reference semantics make a stamp on
+    /// the object the only sound signal: a write through any alias — a member
+    /// assignment, a `Map.prototype.set`, a push through a local — changes an
+    /// object some root carries without assigning that root. Stamps come from
+    /// one process-wide clock, so no two writes anywhere share one, and a
+    /// clone that diverges from its original can never present a stamp the
+    /// other recorded for different contents. Not part of the heap's value:
+    /// equality ignores them and no wire carries them.
+    revisions: FxHashMap<HeapId, u64>,
+    /// The stamp every object not in `revisions` answers with: drawn when the
+    /// heap is built, so a heap rebuilt from a wire reads as entirely unlike
+    /// any capture taken before, rather than as unwritten.
+    base_revision: u64,
+}
+
+/// The next write stamp; see [`Heap::revisions`].
+fn next_revision() -> u64 {
+    static CLOCK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    CLOCK.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 pub(crate) struct HeapRestoreWire {
@@ -113,6 +138,8 @@ impl Default for Heap {
             boundary_identities: FxHashMap::default(),
             materialized: FxHashMap::default(),
             logical_byte_limit: DEFAULT_HEAP_LOGICAL_BYTE_LIMIT,
+            revisions: FxHashMap::default(),
+            base_revision: next_revision(),
         }
     }
 }
@@ -320,10 +347,23 @@ impl Heap {
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })
     }
 
+    /// The one mutable access to a heap object, so every write stamps it.
     fn entry_mut(&mut self, id: HeapId) -> Result<&mut HeapEntry, RuntimeError> {
-        self.entries
+        let entry = self
+            .entries
             .get_mut(&id)
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        self.revisions.insert(id, next_revision());
+        Ok(entry)
+    }
+
+    /// The stamp of the last write to `id`, or the heap's own stamp if it has
+    /// not been written since the heap was built.
+    pub(crate) fn revision(&self, id: HeapId) -> u64 {
+        self.revisions
+            .get(&id)
+            .copied()
+            .unwrap_or(self.base_revision)
     }
 
     /// Production allocation goes through the staged paths — `import_values`
@@ -1523,6 +1563,7 @@ impl Heap {
             self.forget(*id);
         }
         self.entries.retain(|id, _| marked.contains(id));
+        self.revisions.retain(|id, _| marked.contains(id));
         for (id, children, logical_bytes) in dead {
             self.retarget_parent_edges(id, &children, &[]);
             self.parents.remove(&id);
@@ -1626,6 +1667,8 @@ impl Clone for Heap {
             boundary_identities: FxHashMap::default(),
             materialized: FxHashMap::default(),
             logical_byte_limit: self.logical_byte_limit,
+            revisions: self.revisions.clone(),
+            base_revision: self.base_revision,
         }
     }
 }

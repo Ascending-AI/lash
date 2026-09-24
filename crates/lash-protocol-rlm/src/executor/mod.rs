@@ -262,10 +262,6 @@ impl RlmCheckpointPerfFixture {
         Ok(())
     }
 
-    pub fn absorb_dirty_assignments(&mut self) {
-        self.state.absorb_pending_assignments_for_perf();
-    }
-
     pub fn restore(state: &lash_core::plugin::HydratedExecutionState) -> Result<(), SessionError> {
         let mut restored = RlmExecutionState::for_engine("typescript");
         restored
@@ -400,11 +396,13 @@ async fn execute_code_inner(
         }
     };
 
+    // Every binding the session holds, read from the roots that own them: a
+    // `Map` or a `Date` has no host view, but a later cell names it all the
+    // same (ADR 0076: no existence decision reads the view).
     let mut live_global_names = state
         .rlm
-        .globals()
-        .iter()
-        .map(|(name, _)| name.to_string())
+        .binding_names()
+        .map(str::to_string)
         .collect::<BTreeSet<_>>();
     live_global_names.insert("history".to_string());
     live_global_names.extend(session_projected_bindings.names());
@@ -536,7 +534,6 @@ async fn execute_code_inner(
         }
     };
     let projected_names = projected.names().collect::<Vec<_>>();
-    state.mark_globals_removed(projected_names.iter().map(String::as_str));
     prune_projected_binding_names(&mut state.rlm, projected_names.iter().map(String::as_str));
     let deferred_execution_grants = deferred_execution_grants(&state.deferred_resolutions);
     let lashlang_execution_trace = foreground_lashlang_execution_trace(

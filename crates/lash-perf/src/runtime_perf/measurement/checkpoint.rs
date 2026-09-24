@@ -187,13 +187,6 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             );
         }
 
-        let (_, phase) =
-            measure_runtime_perf_phase("checkpoint_state.dirty_binding_update", || {
-                fixture.absorb_dirty_assignments();
-                Ok(())
-            })?;
-        phase_profile.insert(phase.0, phase.1);
-
         let (snapshot, phase) =
             measure_runtime_perf_phase("checkpoint_state.incremental_capture", || {
                 fixture.capture().map_err(anyhow::Error::from)

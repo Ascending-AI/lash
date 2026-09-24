@@ -670,10 +670,7 @@ impl Heap {
                 attempted: next_live,
             });
         }
-        let entry = self
-            .entries
-            .get_mut(&id)
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let entry = self.entry_mut(id)?;
         let old_children = entry.object.child_refs();
         let new_children = object.child_refs();
         entry.object = object;

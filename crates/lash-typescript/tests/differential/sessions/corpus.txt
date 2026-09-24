@@ -267,12 +267,23 @@ console.log(JSON.stringify(record), list.length);
 end
 
 session exotic-globals
-about Map and Set bindings stay live across cells
-probe seen tags
-cell defect exotic-session-globals
+about every exotic built-in bound at the top level stays live, and mutable, in later cells
+probe seen tags when pattern site query first
+cell
 const seen = new Map([["a", 1]]);
 const tags = new Set(["x"]);
-lash {"outcome":"normal","prints":[],"probes":{"seen":"unbound","tags":"unbound"}}
+const when = new Date(Date.UTC(2020, 0, 2, 3, 4, 5));
+const pattern = /a(b+)/g;
+const site = new URL("https://example.com/a?x=1");
+const query = new URLSearchParams("a=1&b=2");
+cell
+seen.set("b", 2);
+tags.add("y");
+const first = pattern.exec("abbxab");
+site.searchParams.append("y", "2");
+query.set("a", "3");
+cell
+console.log(seen.size, seen.get("b"), tags.has("y"), when.toISOString(), pattern.lastIndex, first[1], first.index, site.href, query.toString());
 end
 
 session var-loop-head
@@ -325,8 +336,7 @@ const worker = async () => {
   return 1;
 };
 console.log(typeof worker);
-lash-resident {"outcome":"normal","prints":["object"],"probes":{"worker":"object {\"$lash_process\":true,\"process_name\":\"__process_<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0},\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\"}"}}
-lash-restart {"outcome":"normal","prints":["object"],"probes":{"worker":"object {\"$lash_process\":true,\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_name\":\"__process_<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0}}"}}
+lash {"outcome":"normal","prints":["object"],"probes":{"worker":"object {\"$lash_process\":true,\"process_name\":\"__process_<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0},\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\"}"}}
 end
 
 session mutation-through-session-globals
@@ -433,10 +443,12 @@ end
 session key-order-across-cells
 about an object's property order is its insertion order, in every later cell
 probe ordered nested
-cell defect durable-key-order
+cell
 const ordered = { zeta: 1, alpha: 2, mid: 3 };
 const nested = { b: { y: 1, x: 2 }, a: [{ q: 1, p: 2 }] };
-lash-restart {"outcome":"normal","prints":[],"probes":{"nested":"object {\"a\":[{\"p\":2,\"q\":1}],\"b\":{\"x\":2,\"y\":1}}","ordered":"object {\"alpha\":2,\"mid\":3,\"zeta\":1}"}}
+cell
+ordered.beta = 4;
+console.log(Object.keys(ordered), JSON.stringify(nested));
 end
 
 session mutable-capture-read

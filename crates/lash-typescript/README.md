@@ -478,16 +478,7 @@ rulings: each corpus row that shows one states the current wrong answer, and
 the row fails once the defect is fixed, until it is promoted to an ordinary
 row. They are listed here so no divergence is silent while its fix is owed.
 
-- `exotic-session-globals`: a top-level binding holding a `Map`, `Set`,
-  `Date`, `RegExp`, `URL` or `URLSearchParams` is live in the session's
-  runtime roots but absent from its host view, and a later cell links against
-  the view, so the name is refused as unknown (`TS_UNKNOWN_BINDING`); the RLM
-  snapshot also persists only the view, so such a binding would not survive a
-  reload even if it linked.
-- `durable-key-order`: the durable snapshot encodes records with sorted keys,
-  so after a reload an object's property order is alphabetical rather than
-  its insertion order, and `JSON.stringify`, `Object.keys` and `for...in`
-  answer differently than before the reload.
+No defect is open.
 
 ## Syntax, iteration, and Node traps
 

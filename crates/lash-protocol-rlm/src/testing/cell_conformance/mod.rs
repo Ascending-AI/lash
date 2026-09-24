@@ -20,12 +20,16 @@
 //!   harness mode that restarts between every pair of cells.
 //! * [`generative`] — randomized cell sequences checked against a model of
 //!   what the session should hold, with a fixed seed and a bounded budget.
+//! * [`durable_values`] — the values the host view cannot carry (the
+//!   TypeScript exotics, shared objects, property order) across cells and
+//!   reloads, checked against Node.
 //!
 //! Every scenario is its own `#[test]`, so `nextest` shards them and a failure
 //! names one cell sequence rather than a bundle. The whole suite runs with a
 //! filter on its module path, for example
 //! `-E 'test(/cell_conformance::/)'`.
 
+mod durable_values;
 mod gc_boundary;
 mod generative;
 mod harness;

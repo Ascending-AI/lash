@@ -112,6 +112,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     let root = RlmSnapshotRoot {
         version: RLM_SNAPSHOT_VERSION,
         engine: "lashlang".to_string(),
+        state_header: vec![1],
         globals: BTreeMap::from([
             (
                 "inline".to_string(),
@@ -136,6 +137,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         &[
             "version",
             "engine",
+            "state_header",
             "globals",
             "deferred_resolutions",
             "deferred_trigger_resolutions",
@@ -408,8 +410,7 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
             FlowValue::String(format!("changed-{}", "y".repeat(100 * 1024)).into()),
         )
         .expect("seed a global");
-    state.dirty_globals.insert("page_0".to_string());
-    state.root_dirty = true;
+    state.mark_execution_started();
     let changed = state.snapshot_execution_state().expect("changed snapshot");
     let retained_bytes = state
         .rlm
@@ -433,21 +434,40 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
         "FIG1257_LARGE_SCALAR retained_bytes={retained_bytes} changed_commit_bytes={changed_bytes} initial_leaves={initial_leaves} changed_bodies={changed_bodies}"
     );
 
-    assert_eq!(retained_bytes, 5_122_602);
+    // The seeded state is heap-backed from its first host write (FIG-3605),
+    // so the retained snapshot carries the heap form's counters and roots.
+    assert_eq!(retained_bytes, 5_122_708);
     // Snapshot v19's separate empty trigger-resolution record adds 43 fixed
     // root bytes, and v20's pinned child attempt bound adds 20 more, without
     // retaining any additional session payload. The single-language cutover
     // added the last two: the checkpoint carries the engine id, and
-    // `typescript` is two bytes longer than the retired `lashlang`.
-    assert_eq!(changed_bytes, 117_977);
+    // `typescript` is two bytes longer than the retired `lashlang`. Snapshot
+    // v23 (FIG-3605) adds the durable heap header, with the heap's counters,
+    // to the root and writes the changed binding as a durable fragment instead
+    // of a one-binding snapshot.
+    assert_eq!(changed_bytes, 118_080);
     assert_eq!(initial_leaves, 50);
     assert_eq!(changed_bodies, 1);
 }
 
+/// The durable fragment one binding holding `value` encodes to.
+fn fragment_body(value: FlowValue) -> Vec<u8> {
+    let mut state = FlowState::new();
+    state
+        .insert_global("value", value)
+        .expect("seed the fragment's binding");
+    let mut parts = state
+        .durable_parts(&DurableBaseline::default())
+        .expect("encode the fragment");
+    match parts.fragments.remove("value") {
+        Some(DurableFragment::Changed(body)) => body,
+        other => panic!("a fresh capture must encode every fragment, got {other:?}"),
+    }
+}
+
 fn canonical_string_global_body(body_len: usize) -> Vec<u8> {
     for string_len in 0..=body_len {
-        let body = snapshot_runtime_value(&FlowValue::String("x".repeat(string_len).into()))
-            .expect("canonical string global body");
+        let body = fragment_body(FlowValue::String("x".repeat(string_len).into()));
         if body.len() == body_len {
             return body;
         }
@@ -727,17 +747,18 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 #[test]
 fn previous_snapshot_version_is_typed_rejection_for_missing_child_attempt_bound() {
     // v19 is the last envelope written without the child attempt bound; v20
-    // added it. v21 is the single-language cutover (ADR 0096) and v22 the
-    // nested-tool-definition cutover (FIG-1210), which sit on top without
-    // touching this envelope's other fields, so the gap to the reader is
-    // three rather than one. The rejection asserted below is unchanged.
+    // added it. v21 is the single-language cutover (ADR 0096), v22 the
+    // nested-tool-definition cutover (FIG-1210) and v23 the durable-heap
+    // cutover (FIG-3605), which sit on top without touching this envelope's
+    // other fields, so the gap to the reader is four rather than one. The
+    // rejection asserted below is unchanged.
     const PREVIOUS_SNAPSHOT_VERSION: u32 = 19;
     assert_eq!(
         RLM_SNAPSHOT_VERSION,
-        PREVIOUS_SNAPSHOT_VERSION + 3,
-        "the child attempt-bound snapshot bump, the single-language cutover \
-         and the tool-definition nesting are the only versions between this \
-         envelope and the current reader"
+        PREVIOUS_SNAPSHOT_VERSION + 4,
+        "the child attempt-bound snapshot bump, the single-language cutover, \
+         the tool-definition nesting and the durable-heap cutover are the only \
+         versions between this envelope and the current reader"
     );
 
     #[derive(Serialize)]
@@ -904,7 +925,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-22 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-23 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -915,24 +936,24 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_22_root_encodes_to_golden_bytes() {
+fn version_23_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "86a776657273696f6e16a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282",
-        "a46b696e64a6696e6c696e65a4626f6479c43e82a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565",
-        "a576616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f7369746582a4",
-        "6b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f653233376136",
-        "6232376637663439353936616562343139363238363461656363303436633466626662323664336439316239333161313430",
-        "3262636665363937b464656665727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657981a76164647265737382af",
-        "657865637574696f6e5f73636f706583a474797065a47475726eaa73657373696f6e5f6964ae73657373696f6e2d676f6c64",
-        "656ea77475726e5f6964a67475726e2d37aa7265706c61795f6b6579a87265706c61792d31ab7265736f6c7574696f6e7382",
-        "a97765622e666574636884a46b696e64a87265736f6c766564aa646566696e6974696f6e82a86d616e696665737483a26964",
-        "aa746f6f6c3a6665746368a46e616d65a56665746368ab6465736372697074696f6eae4665746368206f6e652055524c2ea8",
-        "636f6e747261637482ac696e7075745f736368656d6181a963616e6f6e6963616c82aa70726f7065727469657381a375726c",
-        "81a474797065a6737472696e67a474797065a66f626a656374ad6f75747075745f736368656d6181a963616e6f6e6963616c",
-        "81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562b1657865637574696f6e5f62696e",
-        "64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f617661696c61626c65bc",
-        "64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380b26368696c645f6d",
-        "61785f617474656d70747305",
+        "87a776657273696f6e17a6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
+        "08a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
+        "6582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d706f7369",
+        "746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f6366",
+        "3737383234633263313231663030663133626563343139626164306464663766653930646639313730653732303139643938",
+        "633732356164653966363561b464656665727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657981a76164647265",
+        "737382af657865637574696f6e5f73636f706583a474797065a47475726eaa73657373696f6e5f6964ae73657373696f6e2d",
+        "676f6c64656ea77475726e5f6964a67475726e2d37aa7265706c61795f6b6579a87265706c61792d31ab7265736f6c757469",
+        "6f6e7382a97765622e666574636884a46b696e64a87265736f6c766564aa646566696e6974696f6e82a86d616e6966657374",
+        "83a26964aa746f6f6c3a6665746368a46e616d65a56665746368ab6465736372697074696f6eae4665746368206f6e652055",
+        "524c2ea8636f6e747261637482ac696e7075745f736368656d6181a963616e6f6e6963616c82aa70726f7065727469657381",
+        "a375726c81a474797065a6737472696e67a474797065a66f626a656374ad6f75747075745f736368656d6181a963616e6f6e",
+        "6963616c81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562b1657865637574696f6e",
+        "5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f617661696c61",
+        "626c65bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380b2636869",
+        "6c645f6d61785f617474656d70747305",
     );
 
     let mut resolutions = BTreeMap::new();
@@ -957,7 +978,7 @@ fn version_22_root_encodes_to_golden_bytes() {
     let prior_leaf_keys = BTreeSet::new();
     let mut changed_leaves = BTreeMap::new();
     let inline_global = persist_value_body(
-        snapshot_runtime_value(&FlowValue::String("small".into())).expect("inline body"),
+        fragment_body(FlowValue::String("small".into())),
         &prior_leaf_keys,
         &mut changed_leaves,
     );
@@ -975,6 +996,10 @@ fn version_22_root_encodes_to_golden_bytes() {
     let root = RlmSnapshotRoot {
         version: RLM_SNAPSHOT_VERSION,
         engine: "lashlang".to_string(),
+        state_header: FlowState::new()
+            .durable_parts(&DurableBaseline::default())
+            .expect("encode the plain state's header")
+            .header,
         globals,
         deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord {
             link_key: Some(lash_lashlang_runtime::DeferredResolutionLinkKey {
@@ -1001,7 +1026,7 @@ fn version_22_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-22 root encoding changed; decide on a version bump before updating the golden"
+        "the version-23 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =
@@ -1010,12 +1035,77 @@ fn version_22_root_encodes_to_golden_bytes() {
     assert_eq!(
         root_leaf_keys(&decoded),
         [
-            "execution_state/blake3/e237a6b27f7f49596aeb41962864aecc046c4fbfb26d3d91b931a1402bcfe697"
+            "execution_state/blake3/cf77824c2c121f00f13bec419bad0ddf7fe90df9170e72019d98c725ade9f65a"
                 .to_string(),
         ]
         .into_iter()
         .collect()
     );
+}
+
+/// A real version-22 capture, written by the build before the durable-heap
+/// cutover (FIG-3605) for the cell
+/// `const kept = [1, 2]; const order = { zeta: 1, alpha: 2 };` in the
+/// cell-conformance harness. Both bodies are inline one-binding host-view
+/// snapshots at Lashlang snapshot version 7, and the `order` body lists
+/// `alpha` before `zeta`: the sorted order FIG-3606 removes.
+const V22_PREDECESSOR_ROOT_HEX: &str = concat!(
+    "86a776657273696f6e16a6656e67696e65aa74797065736372697074a7676c6f62616c7382a46b65707482a46b696e64",
+    "a6696e6c696e65a4626f6479c46f82a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565a57661",
+    "6c756582a46b696e64a46c697374a56974656d739282a46b696e64a66e756d626572a576616c7565cb3ff00000000000",
+    "0082a46b696e64a66e756d626572a576616c7565cb4000000000000000a56f7264657282a46b696e64a6696e6c696e65",
+    "a4626f6479c49582a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565a576616c756582a46b69",
+    "6e64a67265636f7264a66669656c64739282a46e616d65a5616c706861a576616c756582a46b696e64a66e756d626572",
+    "a576616c7565cb400000000000000082a46e616d65a47a657461a576616c756582a46b696e64a66e756d626572a57661",
+    "6c7565cb3ff0000000000000b464656665727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657981a7616464",
+    "7265737382af657865637574696f6e5f73636f706583a474797065a47475726eaa73657373696f6e5f6964b863656c6c",
+    "2d636f6e666f726d616e63652d73657373696f6ea77475726e5f6964b563656c6c2d636f6e666f726d616e63652d7475",
+    "726eaa7265706c61795f6b6579d923657865632d636f64653a63656c6c2d636f6e666f726d616e63653a303030303030",
+    "3030ab7265736f6c7574696f6e7380bc64656665727265645f747269676765725f7265736f6c7574696f6e7382a86c69",
+    "6e6b5f6b657981a76164647265737382af657865637574696f6e5f73636f706583a474797065a47475726eaa73657373",
+    "696f6e5f6964b863656c6c2d636f6e666f726d616e63652d73657373696f6ea77475726e5f6964b563656c6c2d636f6e",
+    "666f726d616e63652d7475726eaa7265706c61795f6b6579d923657865632d636f64653a63656c6c2d636f6e666f726d",
+    "616e63653a3030303030303030ab7265736f6c7574696f6e7380b26368696c645f6d61785f617474656d707473c0",
+);
+
+fn decode_hex(hex: &str) -> Vec<u8> {
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).expect("fixture hex"))
+        .collect()
+}
+
+/// The clean cutover refuses a predecessor's capture with the typed version
+/// boundary before anything is restored, and leaves its stamp readable, so a
+/// host can tell which sessions predate this build.
+#[test]
+fn a_predecessor_v22_capture_is_refused_by_its_version_before_anything_is_restored() {
+    let root = decode_hex(V22_PREDECESSOR_ROOT_HEX);
+    assert_eq!(
+        probe_snapshot_version(&root).expect("the predecessor's stamp is readable"),
+        22
+    );
+    let (_, mut live) = leaf_bearing_hydration_and_live_target();
+    let error = live
+        .restore_execution_state(&lash_core::plugin::HydratedExecutionState {
+            root: root.into(),
+            components: BTreeMap::new(),
+        })
+        .expect_err("a version-22 capture must not restore");
+    assert!(
+        matches!(
+            &error,
+            RlmSnapshotError::VersionMismatch {
+                expected: RLM_SNAPSHOT_VERSION,
+                found: 22,
+            }
+        ),
+        "{error:?}"
+    );
+    let message = error.to_string();
+    assert!(message.contains("drain in-flight sessions on the old build"));
+    assert!(message.contains("recreate development/test stores"));
+    assert_live_state_untouched(&live);
 }
 
 /// A leaf-bearing hydration plus a distinct live target, so a rejected

@@ -1360,7 +1360,7 @@ symbols = [
 [[surface]]
 constant = "RLM_SNAPSHOT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/executor/snapshot.rs"
-description = "canonical typed MessagePack RLM execution snapshot for globals and deferred resolutions"
+description = "canonical typed MessagePack RLM execution snapshot: the Lashlang durable heap header, one durable fragment per global, and deferred resolutions"
 manifest = "RlmSnapshotEnvelope"
 
 [[surface.guard]]
@@ -1490,7 +1490,7 @@ must_cover = ["VmContinuation"]
 [[surface]]
 constant = "LASHLANG_SNAPSHOT_VERSION"
 constant_path = "crates/lashlang/src/runtime/state.rs"
-description = "canonical MessagePack Lashlang snapshot: globals, heap, and value leaves"
+description = "canonical MessagePack Lashlang snapshot: globals, heap, and value leaves, whole or as a durable header and per-root fragments"
 manifest = "LashlangSnapshot"
 
 # Every Serde carrier in the state module belongs to the canonical snapshot

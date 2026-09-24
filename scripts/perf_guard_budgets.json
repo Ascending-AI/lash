@@ -21,10 +21,6 @@
               "budget_ms": 5.96,
               "required": true
             },
-            "checkpoint_state.dirty_binding_update": {
-              "budget_ms": 0.754,
-              "required": true
-            },
             "checkpoint_state.incremental_capture": {
               "budget_ms": 21.998,
               "required": true

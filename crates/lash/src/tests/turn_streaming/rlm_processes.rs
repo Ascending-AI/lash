@@ -96,6 +96,8 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
 pub(super) struct RlmExecutionSnapshotProbe {
     version: u32,
     engine: String,
+    #[serde(with = "serde_bytes")]
+    state_header: Vec<u8>,
     globals: std::collections::BTreeMap<String, RlmPersistedValueProbe>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
 }
@@ -120,15 +122,22 @@ impl RlmExecutionSnapshotProbe {
         state: &lash_core::plugin::HydratedExecutionState,
         name: &str,
     ) -> Option<lashlang::Value> {
-        let body = match self.globals.get(name)? {
-            RlmPersistedValueProbe::Inline { body } => body.as_slice(),
-            RlmPersistedValueProbe::Leaf { component } => state.components.get(component)?.as_ref(),
-        };
-        lashlang::Snapshot::from_canonical_bytes(body)
-            .ok()?
-            .globals()
-            .get("value")
-            .cloned()
+        let fragments = self
+            .globals
+            .iter()
+            .map(|(global, persisted)| {
+                let body = match persisted {
+                    RlmPersistedValueProbe::Inline { body } => body.as_slice(),
+                    RlmPersistedValueProbe::Leaf { component } => {
+                        state.components.get(component)?.as_ref()
+                    }
+                };
+                Some((global.as_str(), body))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let (reloaded, _) =
+            lashlang::State::from_durable_parts(&self.state_header, fragments).ok()?;
+        reloaded.globals().get(name).cloned()
     }
 }
 

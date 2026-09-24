@@ -251,7 +251,6 @@ pub struct Vm<'a, H> {
     active_execution_elapsed: Duration,
     pub(crate) heap: Heap,
     heap_initialized: bool,
-    assigned_globals: std::collections::BTreeSet<String>,
     pending_tools: std::collections::BTreeMap<lash_sansio::handle::HandleId, Option<Value>>,
     /// Identity of this execution, stamped into every pending-tool handle it
     /// mints and required back at await, so a handle kept from an earlier
@@ -343,7 +342,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         .is_none()
                         .then_some(&self.projected_bindings),
                 )?;
-                self.record_assignment(name);
                 self.last_value = Some(value);
             }
             Instruction::BuildTuple(len) => {
@@ -802,7 +800,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     let target = Value::Ref(*id);
                     let index = self.heap.export(&index)?;
                     let value = self.heap.add_assign_index_number(&target, &index, right)?;
-                    self.record_assignment(slot);
                     self.last_value = Some(value);
                 } else {
                     self.add_assign_index_number(slot, &index, right)?;
@@ -814,7 +811,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     let target = Value::Ref(*id);
                     let index = self.heap.export(&index)?;
                     let value = self.heap.add_assign_index_number(&target, &index, right)?;
-                    self.record_assignment(slot);
                     self.last_value = Some(value);
                 } else {
                     self.add_assign_index_number(slot, &index, right)?;
@@ -1053,7 +1049,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         })?;
                 assign_path(root, path, indexes, value, &self.chunk.names)?;
                 self.stack.truncate(index_start);
-                self.record_assignment(slot);
                 self.last_value = Some(last_value);
             }
             Instruction::HeapPathAssign { slot, path } => {
@@ -1375,7 +1370,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     let value = self
                         .heap
                         .push_list(&target, item.take().expect("push item should be available"))?;
-                    self.record_assignment(slot);
                     self.last_value = Some(value);
                 } else {
                     let fast_value = {
@@ -1396,7 +1390,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         }
                     };
                     if let Some(value) = fast_value {
-                        self.record_assignment(slot);
                         self.last_value = Some(value);
                     } else {
                         let item = item.expect("push item should be available");
@@ -1414,7 +1407,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                                 .is_none()
                                 .then_some(&self.projected_bindings),
                         )?;
-                        self.record_assignment(slot);
                         self.last_value = Some(value);
                     }
                 }
@@ -1578,18 +1570,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             .then_some(&self.projected_bindings)
     }
 
-    fn record_assignment(&mut self, slot: usize) {
-        if self.active_function.is_some()
-            || self.chunk.private_slots.get(slot).copied().unwrap_or(false)
-        {
-            return;
-        }
-        let name = &self.chunk.slot_names[slot].text;
-        if !self.assigned_globals.contains(name.as_ref()) {
-            self.assigned_globals.insert(name.to_string());
-        }
-    }
-
     /// Materializes host-visible globals, omitting any entire binding that
     /// contains a function value at any depth.
     pub fn into_globals(mut self) -> Result<Record, RuntimeError> {
@@ -1620,7 +1600,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         self.iter_stack.clear();
         scratch.stack = std::mem::take(&mut self.stack);
         scratch.iter_stack = std::mem::take(&mut self.iter_stack);
-        scratch.assigned_globals = std::mem::take(&mut self.assigned_globals);
         let globals = self.slots.into_globals(
             &self.chunk.slot_names,
             &self.chunk.private_slots,

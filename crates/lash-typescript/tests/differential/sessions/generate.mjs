@@ -162,6 +162,11 @@ const SETUP = `(() => {
 function realm() {
   const state = { prints: [], finish: undefined, sentinel: undefined, reach: undefined };
   const context = vm.createContext({
+    // `URL` and `URLSearchParams` are dialect built-ins that Node provides as
+    // host globals rather than ECMA-262 intrinsics, so a bare realm lacks
+    // them; the host's own constructors stand in.
+    URL,
+    URLSearchParams,
     __lashOracleHost: {
       print: (text) => state.prints.push(text),
       finish: (json) => {

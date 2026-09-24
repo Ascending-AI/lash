@@ -81,33 +81,57 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
     ));
 }
 
+/// The globals are a name table, so their order is normalized; a NaN's payload
+/// is normalized too. A record's field order is its property order, which a
+/// program can observe, so it is kept exactly — two records that differ only
+/// in field order are different values on the wire and each decodes back in
+/// its own order (FIG-3606).
 #[test]
-fn canonical_encoding_is_deterministic_for_map_order_and_nan_payload() {
+fn canonical_encoding_sorts_globals_normalizes_nan_and_keeps_property_order() {
     let left_nan = f64::from_bits(0x7ff0_0000_0000_0001);
     let right_nan = f64::from_bits(0xfff8_0000_0000_0042);
 
-    let mut left_record = Record::new();
-    left_record.insert("z".to_string(), Value::Number(left_nan));
-    left_record.insert("a".to_string(), Value::String("same\0\u{fffd}".into()));
-    let mut left_globals = Record::new();
-    left_globals.insert("z-last".to_string(), Value::Bool(true));
-    left_globals.insert("session".to_string(), Value::Record(Arc::new(left_record)));
+    let record = |fields: &[(&str, Value)]| {
+        let mut record = Record::new();
+        for (name, value) in fields {
+            record.insert((*name).to_string(), value.clone());
+        }
+        Value::Record(Arc::new(record))
+    };
+    let text = Value::String("same\0\u{fffd}".into());
+    let globals = |first: (&str, Value), second: (&str, Value)| {
+        let mut globals = Record::new();
+        globals.insert(first.0.to_string(), first.1);
+        globals.insert(second.0.to_string(), second.1);
+        globals
+    };
 
-    let mut right_record = Record::new();
-    right_record.insert("a".to_string(), Value::String("same\0\u{fffd}".into()));
-    right_record.insert("z".to_string(), Value::Number(right_nan));
-    let mut right_globals = Record::new();
-    right_globals.insert("session".to_string(), Value::Record(Arc::new(right_record)));
-    right_globals.insert("z-last".to_string(), Value::Bool(true));
-
-    let left = Snapshot::new(left_globals)
+    let z_first = record(&[("z", Value::Number(left_nan)), ("a", text.clone())]);
+    let left = Snapshot::new(globals(("z-last", Value::Bool(true)), ("session", z_first)))
         .to_canonical_bytes()
         .expect("left encode");
-    let right = Snapshot::new(right_globals)
-        .to_canonical_bytes()
-        .expect("right encode");
+    let z_first_again = record(&[("z", Value::Number(right_nan)), ("a", text.clone())]);
+    let right = Snapshot::new(globals(
+        ("session", z_first_again),
+        ("z-last", Value::Bool(true)),
+    ))
+    .to_canonical_bytes()
+    .expect("right encode");
+    assert_eq!(left, right, "global order and NaN payload are normalized");
 
-    assert_eq!(left, right);
+    let a_first = record(&[("a", text), ("z", Value::Number(left_nan))]);
+    let reordered = Snapshot::new(globals(("session", a_first), ("z-last", Value::Bool(true))))
+        .to_canonical_bytes()
+        .expect("reordered encode");
+    assert_ne!(left, reordered, "property order is part of the value");
+
+    for (bytes, expected) in [(&left, ["z", "a"]), (&reordered, ["a", "z"])] {
+        let decoded = Snapshot::from_canonical_bytes(bytes).expect("decode");
+        let Some(Value::Record(session)) = decoded.globals().get("session") else {
+            panic!("the session record decodes");
+        };
+        assert_eq!(session.keys().collect::<Vec<_>>(), expected);
+    }
 }
 
 #[test]
@@ -435,9 +459,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x1e, 0xee, 0x25, 0xca, 0xe4, 0x1c, 0x2f, 0xe9, 0x46, 0x5f, 0x33, 0x6f, 0x61, 0xc7,
-            0xf0, 0xa9, 0x7f, 0x9b, 0x10, 0xca, 0xa1, 0xe9, 0x31, 0x49, 0x36, 0xc6, 0xb4, 0xca,
-            0x2d, 0xae, 0x6d, 0xe2,
+            0x9b, 0x46, 0x10, 0x85, 0xe7, 0xad, 0xea, 0xc1, 0x11, 0x56, 0xe3, 0x2b, 0x99, 0xe8,
+            0x58, 0xf2, 0xb2, 0xe5, 0x89, 0x13, 0x21, 0xe2, 0xa8, 0x84, 0x90, 0xbe, 0xa7, 0x65,
+            0xe8, 0x49, 0xf0, 0x96,
         ]
     );
 }
@@ -625,7 +649,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e07a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e08a7676c6f62616c7390");
 }
 
 #[test]
@@ -1659,10 +1683,11 @@ fn a_host_write_the_view_cannot_carry_leaves_the_view_a_projection() {
 /// snapshot decodes plain and a heap-backed snapshot decodes heap-backed.
 #[test]
 fn the_state_mode_survives_a_snapshot_round_trip_in_both_directions() {
-    let mut plain = State::new();
-    plain
-        .insert_global("x", Value::Number(1.0))
-        .expect("seeding a global stays within the heap bound");
+    let plain = State::from_snapshot(Snapshot::new(
+        [("x".to_string(), Value::Number(1.0))]
+            .into_iter()
+            .collect(),
+    ));
     assert!(matches!(plain.mode, StateMode::Plain(_)));
     let plain_snapshot = plain.snapshot();
     let plain_bytes = plain_snapshot
@@ -1695,6 +1720,30 @@ fn the_state_mode_survives_a_snapshot_round_trip_in_both_directions() {
     );
     assert_eq!(decoded, heap_snapshot);
     assert_eq!(State::from_snapshot(decoded), heap_backed);
+}
+
+/// A host write makes the heap the owner at once, exactly as a cell's binding
+/// does, so the first execution does not re-home seeded values under new ids.
+/// A removal alone leaves a plain state plain.
+#[test]
+fn a_host_write_promotes_a_plain_state_to_the_heap() {
+    let mut state = State::new();
+    assert!(!state.remove_global("absent"));
+    assert!(matches!(state.mode, StateMode::Plain(_)));
+    state
+        .insert_global(
+            "seeded",
+            Value::List(vec![Value::String("kept".into())].into()),
+        )
+        .expect("seed a compound");
+    let StateMode::HeapBacked(backed) = &state.mode else {
+        panic!("a host write promotes the state")
+    };
+    assert!(matches!(backed.runtime_globals["seeded"], Value::Ref(_)));
+    assert_eq!(
+        state.globals()["seeded"],
+        Value::List(vec![Value::String("kept".into())].into())
+    );
 }
 
 /// Taking a heap-backed state's runtime leaves a plain state holding the

@@ -11,25 +11,23 @@ impl CanonicalHeapObject {
             HeapObject::List(values) => Self::List {
                 items: canonical_items(values, &location, 0)?,
             },
-            HeapObject::Record(record) => {
-                let mut fields = record.iter().collect::<Vec<_>>();
-                fields.sort_unstable_by_key(|(name, _)| *name);
-                Self::Record {
-                    fields: fields
-                        .into_iter()
-                        .map(|(name, value)| {
-                            Ok(CanonicalBinding {
-                                name: name.to_string(),
-                                value: CanonicalValue::from_runtime(
-                                    value,
-                                    &child_location(&location, name),
-                                    0,
-                                )?,
-                            })
+            // Property order is observable, so a record's fields are written
+            // in the order the object holds them, never sorted (FIG-3606).
+            HeapObject::Record(record) => Self::Record {
+                fields: record
+                    .iter()
+                    .map(|(name, value)| {
+                        Ok(CanonicalBinding {
+                            name: name.to_string(),
+                            value: CanonicalValue::from_runtime(
+                                value,
+                                &child_location(&location, name),
+                                0,
+                            )?,
                         })
-                        .collect::<Result<_, ContinuationError>>()?,
-                }
-            }
+                    })
+                    .collect::<Result<_, ContinuationError>>()?,
+            },
             HeapObject::Closure { function, captures } => Self::Closure {
                 function: *function,
                 captures: canonical_items(captures, &location, 0)?,
@@ -333,27 +331,24 @@ impl CanonicalValue {
                     references_allowed,
                 )?,
             },
-            Value::Record(record) => {
-                let mut fields = record.iter().collect::<Vec<_>>();
-                fields.sort_unstable_by_key(|(name, _)| *name);
-                Self::Record {
-                    fields: fields
-                        .into_iter()
-                        .map(|(name, value)| {
-                            let location = child_location(location, name);
-                            Ok(CanonicalBinding {
-                                name: name.to_string(),
-                                value: Self::from_runtime_with_references(
-                                    value,
-                                    &location,
-                                    depth + 1,
-                                    references_allowed,
-                                )?,
-                            })
+            // In property order, like a heap record (FIG-3606).
+            Value::Record(record) => Self::Record {
+                fields: record
+                    .iter()
+                    .map(|(name, value)| {
+                        let location = child_location(location, name);
+                        Ok(CanonicalBinding {
+                            name: name.to_string(),
+                            value: Self::from_runtime_with_references(
+                                value,
+                                &location,
+                                depth + 1,
+                                references_allowed,
+                            )?,
                         })
-                        .collect::<Result<_, ContinuationError>>()?,
-                }
-            }
+                    })
+                    .collect::<Result<_, ContinuationError>>()?,
+            },
             Value::Projected(projected) => Self::Projected {
                 value: CanonicalProjectedValue::from_projected(projected, location, depth)?,
             },

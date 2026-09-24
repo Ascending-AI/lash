@@ -23,7 +23,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         if let Some(target) = heap_target {
             let value = self.heap.push_list(&target, item)?;
-            self.record_assignment(slot);
             self.last_value = Some(value);
             return Ok(());
         }
@@ -45,7 +44,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         } else {
             add_values(current.clone(), Value::List(vec![item].into()))?
         };
-        self.record_assignment(slot);
         self.last_value = Some(value);
         Ok(())
     }
@@ -76,7 +74,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         if let Some(target) = extend_target {
             let value = self.heap.extend_list(&target, &right)?;
-            self.record_assignment(slot);
             self.last_value = Some(value);
             return Ok(());
         }
@@ -114,7 +111,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         } else {
             value
         };
-        self.record_assignment(slot);
         self.last_value = Some(value);
         Ok(())
     }
@@ -150,7 +146,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
         };
-        self.record_assignment(slot);
         self.last_value = Some(value);
         Ok(())
     }
@@ -194,7 +189,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 name: slot_name.text.to_string(),
             })?;
         let value = add_assign_index_number(root, index, right)?;
-        self.record_assignment(slot);
         self.last_value = Some(value);
         Ok(())
     }

@@ -251,7 +251,6 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 "checkpoint_curve.capture",
                 async {
                     fixture.fixture.assign_one(sample, sample).await?;
-                    fixture.fixture.absorb_dirty_assignments();
                     fixture.fixture.capture().map_err(anyhow::Error::from)
                 },
             ))
