@@ -545,4 +545,10 @@ pub struct LashRuntime {
     /// any generation: if its rows were reclaimed while the turn was down,
     /// another driver answered them, so committing would answer them twice.
     pub(crate) journaled_drive_claims: std::collections::BTreeSet<String>,
+    /// The turn index the running direct turn's admission recorded
+    /// (FIG-3682). The accept phase sets it after it adopted the head the
+    /// turn was admitted on; the prepare phase takes it, so the admitted
+    /// physical turn is addressed under the recorded index and never re-reads
+    /// the head a replay's live store may have moved past.
+    pub(crate) admitted_turn_index: Option<usize>,
 }

@@ -146,6 +146,21 @@ impl RuntimeAttribution {
         }
     }
 
+    /// A turn's attribution before its admission fixed a turn index: the
+    /// acceptance of its input and the drive that admits it (FIG-3682). A
+    /// turn index read here would come from the live head, which a replay
+    /// after the turn's own commit no longer shares.
+    pub fn for_turn_admission(
+        session_id: impl Into<SessionId>,
+        turn_id: impl Into<TurnId>,
+    ) -> Self {
+        Self {
+            session_id: Some(session_id.into()),
+            turn_id: Some(turn_id.into()),
+            ..Self::none()
+        }
+    }
+
     pub fn validate(&self) -> Result<(), RuntimeEffectControllerError> {
         if self
             .session_id

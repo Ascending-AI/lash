@@ -281,9 +281,6 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
 /// Crash points where lash itself does not recover yet (FIG-3678), pinned so
 /// a fix flips this test:
 ///
-/// * after the final commit (commands 33 and 34), the replayed turn branches
-///   on the committed store state and returns early — a journal mismatch the
-///   engine retries until it pauses;
 /// * right after the group dispatcher send (command 13), the running
 ///   dispatcher asks for the child's executor while no attempt's opener is
 ///   registered, and routing refuses with `NoExecutor` — a race, so it
@@ -295,14 +292,6 @@ const KNOWN_DIVERGENCES: &[(&str, Divergence)] = &[
     (
         "LashTestHandlerHost BeforeCommand { index: 13 }",
         Divergence::Sometimes,
-    ),
-    (
-        "LashTestHandlerHost BeforeCommand { index: 33 }",
-        Divergence::Always,
-    ),
-    (
-        "LashTestHandlerHost BeforeCommand { index: 34 }",
-        Divergence::Always,
     ),
     (
         "LashTestHandlerHost BeforeCommand { index: 2 }",

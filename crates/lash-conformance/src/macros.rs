@@ -246,6 +246,7 @@ macro_rules! runtime_persistence_reopenable_tests {
             [
                 (reopen_mint_identity, "pending-turn-input-multi-store-mint"),
                 (gc_blobs, "gc-blobs"),
+                (an_admission_base_survives_collection_until_the_next_admission, "admission-base-retention"),
                 (append_receipt_reopen, "root"),
                 (runtime_reopen, "root"),
             ]

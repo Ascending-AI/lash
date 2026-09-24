@@ -222,11 +222,14 @@ lash_store_sql::statements! {
         select_reclaim = "SELECT leaf_node_id, checkpoint_ref FROM sessions
          WHERE session_id = ?1";
 
-        /// Every live checkpoint root: heads that have published one, plus
-        /// every explicit anchor.
+        /// Every live checkpoint root: heads that have published one, every
+        /// explicit anchor, and every retained admission base (FIG-3682).
         select_checkpoint_roots = "SELECT checkpoint_ref FROM sessions WHERE checkpoint_ref IS NOT NULL
              UNION
-             SELECT checkpoint_ref FROM node_anchors";
+             SELECT checkpoint_ref FROM node_anchors
+             UNION
+             SELECT admission_base_checkpoint_ref FROM session_meta
+             WHERE admission_base_checkpoint_ref IS NOT NULL";
 
         /// Every distinct checkpoint root the sessions in `?1` have published.
         select_checkpoints_for_sessions = "SELECT DISTINCT checkpoint_ref
@@ -716,6 +719,10 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                        SELECT 1 FROM node_anchors AS anchor
                        WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                   )
+               AND NOT EXISTS (
+                       SELECT 1 FROM session_meta AS meta
+                       WHERE meta.admission_base_checkpoint_ref = edge.checkpoint_ref
                    )";
 
         /// Sever the outgoing edges of every checkpoint in `?1` that stopped

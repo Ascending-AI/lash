@@ -64,73 +64,39 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
-        let session_id = &self.session_id;
+        self.load_session_read(None).await
+    }
+
+    async fn load_session_at(
+        &self,
+        base: &lash_core_execution::store::SessionHeadRef,
+    ) -> Result<PersistedSessionRead, StoreError> {
+        self.load_session_read(Some(base))
+            .await?
+            .ok_or(StoreError::TurnBaseNotRetained {
+                revision: base.revision,
+            })
+    }
+
+    async fn retain_admission_base(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+        base: &lash_core_execution::store::SessionHeadRef,
+    ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query(
-            crate::connection_sql::connection_sql()
-                .begin_repeatable_read_read_only
-                .sql(),
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        read_session_state_version_tx(&mut tx, session_id, false).await?;
-        let Some(meta) = load_session_head_meta_tx(&mut tx, session_id, false).await? else {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        };
-        let leaf_node_id = meta.leaf_node_id.clone();
-        let graph = load_graph_tx(
-            &mut tx,
-            session_id,
-            leaf_node_id
-                .clone()
-                .map(lash_core_execution::NodeId::into_inner),
-        )
-        .await?;
-        let checkpoint = match meta.checkpoint_ref.as_ref() {
-            Some(blob_ref) => get_checkpoint_tx(&mut tx, blob_ref).await?,
-            None => None,
-        };
-        let token_ledger = lash_core_execution::store::merge_token_ledger_entries_checked(
-            load_usage_deltas_tx(&mut tx, session_id).await?,
-        )?;
-        let turn_failure_rows =
-            sqlx::query(session_sql().turn_commits.select_failure_settlements.sql())
-                .bind(session_id.as_str())
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        let mut turn_failure_settlements = Vec::new();
-        for row in turn_failure_rows {
-            let turn_id = row.get::<String, _>("turn_id");
-            let result_json = row.get::<String, _>("result_json");
-            let receipt = lash_core_execution::store::decode_runtime_commit_receipt(
-                session_id,
-                &turn_id,
-                &result_json,
-            )?;
-            if !receipt.failure_evidence.is_empty() {
-                turn_failure_settlements.push(lash_core_execution::TurnFailureSettlement {
-                    turn_id,
-                    evidence: receipt.failure_evidence,
-                });
-            }
-        }
-        let read = PersistedSessionRead {
-            session_id: meta.session_id,
-            head_revision: meta.head_revision,
-            config: meta.config,
-            current_frame_node_id: meta.current_frame_node_id,
-            graph,
-            checkpoint_ref: meta.checkpoint_ref,
-            checkpoint,
-            token_ledger,
-            turn_failure_settlements,
-        };
+        #[cfg(any(test, feature = "testing"))]
+        self.set_transaction_lease_clock_for_testing(&mut tx)
+            .await?;
+        ensure_session_execution_lease_tx(&mut tx, &lease.session_id, lease).await?;
+        sqlx::query(session_sql().meta.retain_admission_base.sql())
+            .bind(lease.session_id.as_str())
+            .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Some(read))
+        Ok(())
     }
 
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
@@ -1312,4 +1278,115 @@ async fn release_undelivered_turn_input_claims_tx(
             .map_err(store_sqlx_error)?;
     }
     Ok(())
+}
+
+impl PostgresSessionStore {
+    /// The live session (`base: None`), or the session as it stood at the head
+    /// one of its turns was admitted on (FIG-3682).
+    ///
+    /// A base read takes the graph along the base leaf and the base
+    /// checkpoint, and the frame nearest the base leaf with that frame's
+    /// configuration when the live head has since moved to another frame. A
+    /// base checkpoint the store no longer holds is
+    /// [`StoreError::TurnBaseNotRetained`], never another head.
+    async fn load_session_read(
+        &self,
+        base: Option<&lash_core_execution::store::SessionHeadRef>,
+    ) -> Result<Option<PersistedSessionRead>, StoreError> {
+        let session_id = &self.session_id;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read_read_only
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        read_session_state_version_tx(&mut tx, session_id, false).await?;
+        let Some(meta) = load_session_head_meta_tx(&mut tx, session_id, false).await? else {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(None);
+        };
+        let (head_revision, leaf_node_id, checkpoint_ref) = match base {
+            None => (
+                meta.head_revision,
+                meta.leaf_node_id.clone(),
+                meta.checkpoint_ref.clone(),
+            ),
+            Some(base) => (base.revision, base.leaf.clone(), base.checkpoint.clone()),
+        };
+        let graph = load_graph_tx(
+            &mut tx,
+            session_id,
+            leaf_node_id
+                .clone()
+                .map(lash_core_execution::NodeId::into_inner),
+        )
+        .await?;
+        let checkpoint = match checkpoint_ref.as_ref() {
+            Some(blob_ref) => match get_checkpoint_tx(&mut tx, blob_ref).await? {
+                None if base.is_some() => {
+                    return Err(StoreError::TurnBaseNotRetained {
+                        revision: head_revision,
+                    });
+                }
+                checkpoint => checkpoint,
+            },
+            None => None,
+        };
+        let (current_frame_node_id, config) = match leaf_node_id.as_ref() {
+            Some(leaf) if base.is_some() && meta.leaf_node_id.as_ref() != Some(leaf) => {
+                let frame = super::nearest_frame_node_id_tx(&mut tx, leaf.as_str())
+                    .await?
+                    .and_then(|frame| lash_core_execution::FrameNodeId::new(frame).ok());
+                let frame_config = frame
+                    .as_ref()
+                    .filter(|frame| meta.current_frame_node_id.as_ref() != Some(*frame))
+                    .and_then(|frame| graph.find_node(frame.as_str()))
+                    .and_then(lash_core_execution::SessionNodeRecord::frame_config);
+                (frame, frame_config.unwrap_or(meta.config))
+            }
+            _ => (meta.current_frame_node_id, meta.config),
+        };
+        let token_ledger = lash_core_execution::store::merge_token_ledger_entries_checked(
+            load_usage_deltas_tx(&mut tx, session_id).await?,
+        )?;
+        let turn_failure_rows =
+            sqlx::query(session_sql().turn_commits.select_failure_settlements.sql())
+                .bind(session_id.as_str())
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        let mut turn_failure_settlements = Vec::new();
+        for row in turn_failure_rows {
+            let turn_id = row.get::<String, _>("turn_id");
+            let result_json = row.get::<String, _>("result_json");
+            let receipt = lash_core_execution::store::decode_runtime_commit_receipt(
+                session_id,
+                &turn_id,
+                &result_json,
+            )?;
+            if !receipt.failure_evidence.is_empty() {
+                turn_failure_settlements.push(lash_core_execution::TurnFailureSettlement {
+                    turn_id,
+                    evidence: receipt.failure_evidence,
+                });
+            }
+        }
+        let read = PersistedSessionRead {
+            session_id: meta.session_id,
+            head_revision,
+            config,
+            current_frame_node_id,
+            graph,
+            checkpoint_ref,
+            checkpoint,
+            token_ledger,
+            turn_failure_settlements,
+        };
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(Some(read))
+    }
 }

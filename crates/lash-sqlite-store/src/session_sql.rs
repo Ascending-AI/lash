@@ -203,11 +203,14 @@ lash_store_sql::statements! {
 
         delete_by_session = "DELETE FROM session_head WHERE session_id = ?1";
 
-        /// Every live checkpoint root: heads that have published one, plus
-        /// every explicit anchor.
+        /// Every live checkpoint root: heads that have published one, every
+        /// explicit anchor, and every retained admission base (FIG-3682).
         select_checkpoint_roots = "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
                  UNION
-                 SELECT checkpoint_ref FROM node_anchors";
+                 SELECT checkpoint_ref FROM node_anchors
+                 UNION
+                 SELECT admission_base_checkpoint_ref FROM session_meta
+                 WHERE admission_base_checkpoint_ref IS NOT NULL";
 
         /// The retained checkpoint for node `?1`: an explicit anchor if there
         /// is one, otherwise the lowest-numbered session head that points at
@@ -574,6 +577,10 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                        SELECT 1 FROM node_anchors AS anchor
                        WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                   )
+               AND NOT EXISTS (
+                       SELECT 1 FROM session_meta AS meta
+                       WHERE meta.admission_base_checkpoint_ref = edge.checkpoint_ref
                    )";
 
         /// Sever checkpoint `?1`'s outgoing edges when the owner transaction

@@ -503,10 +503,10 @@ async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id() -> Result<()> 
 
 /// FIG-3589: the aborted turn's input is bound to that turn. A later direct
 /// turn under a new lease generation drives only its own input and never
-/// folds the aborted one in. The aborted turn's journal was recorded against
-/// the session head it ran on, so once a later turn commits its redrive can no
-/// longer replay; the input stays bound until the host cancels it by the
-/// receipt.
+/// folds the aborted one in. The aborted turn was admitted on the session head
+/// it ran on, so once a later turn commits its redrive parks instead of
+/// replaying on another head; the input stays bound until the host cancels it
+/// by the receipt.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input() -> Result<()> {
     const SESSION: &str = "direct-live-fault-next-turn";
@@ -569,9 +569,12 @@ async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input() -> Result<()>
     let EmbedError::Runtime(late_redrive) = late_redrive else {
         panic!("the refused redrive is a runtime error: {late_redrive:?}");
     };
+    // The later turn moved the head under the uncommitted aborted turn, so
+    // its admission no longer names the live head: it parks before any
+    // effect replays (FIG-3682).
     assert_eq!(
         late_redrive.code,
-        lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+        lash_core::RuntimeErrorCode::EffectReplayDivergence,
         "{late_redrive:?}"
     );
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);

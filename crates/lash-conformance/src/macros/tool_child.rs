@@ -61,6 +61,29 @@ macro_rules! migrated_tools_redrive_tests {
     };
 }
 
+/// Register the admitted-head redrive law (FIG-3682): a direct turn crashed
+/// after its own commit and redriven replays at the head it was admitted on,
+/// under the turn index its admission recorded. The fixture hands back a
+/// guard, a prefix, the tier's effect host, the store set under test and its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner). The turn calls no
+/// tool, so it runs wherever a direct turn runs.
+#[macro_export]
+macro_rules! admitted_head_redrive_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::admitted_head_redrive_tests!(@law [$(#[$attr])*] $fixture;
+            (a_turn_redriven_after_its_commit_replays_at_its_admitted_head, "admitted-head-redrive"));
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
 /// Register the model-call drift park law (FIG-3587): a model call replays
 /// from the journaled prompt, a recorded model call whose envelope drifted
 /// parks its turn, and restoring the surface finishes it. The fixture hands

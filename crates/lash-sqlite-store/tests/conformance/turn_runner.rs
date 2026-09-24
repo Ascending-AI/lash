@@ -37,3 +37,9 @@ async fn sqlite_turn_runner_fixture() -> SqliteTurnRunnerFixture {
 lash_conformance::turn_runner_tests!({ sqlite_turn_runner_fixture().await });
 
 lash_conformance::tool_child_turn_cancel_tests!({ sqlite_turn_runner_fixture().await });
+
+lash_conformance::admitted_head_redrive_tests!({
+    let (backend, prefix, effect_host, stores, _process_work, turn_runner, _after_law) =
+        sqlite_turn_runner_fixture().await;
+    (backend, prefix, effect_host, stores, turn_runner)
+});

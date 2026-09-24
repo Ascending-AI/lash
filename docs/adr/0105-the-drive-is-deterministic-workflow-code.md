@@ -116,6 +116,17 @@ pub trait DriveAdmission: EngineContext {
   child or child execution **never mints an epoch**; it answers `Valid`,
   `Stale` or `GenerationRefused`.
 
+- **Implemented ahead of S5 (FIG-3682): the admission records its base.**
+  `Admitted` carries `base: SessionHeadRef` (generation, revision, leaf and
+  checkpoint) and `turn_index`. Until `AdmitDrive` exists, a direct turn's
+  journaled `ClaimAcceptedTurnInput` outcome (`AcceptedTurnInputDrive::Claimed`)
+  carries the same pair. A replay rebuilds the turn from
+  `SessionCommitStore::load_session_at(base)` and addresses it under the recorded
+  index, never re-reading the live head, which the turn's own commit may have
+  advanced. The store keeps the base checkpoint as a GC root until the
+  session's next admission; a base it no longer holds refuses
+  `TurnBaseNotRetained`, which parks.
+
 Every other durable operation is reachable only through `Fenced`, which is
 built only from a recorded `SealVerdict::Sealed` or `InheritVerdict::Valid`:
 
