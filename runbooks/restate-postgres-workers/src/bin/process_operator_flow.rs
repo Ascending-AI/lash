@@ -510,6 +510,21 @@ fn core(
         )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        // The session-open drive spawns this core's process dispatcher, which
+        // otherwise rescans the whole non-terminal worklist every 250ms. A
+        // rescan claims each seeded row's lease before checking its
+        // disposition, so a drain that lands inside that claim window reads a
+        // live lease it never created and defers the row as Busy (FIG-3711).
+        // These scenarios seed the registry directly and drive every worker
+        // step by hand; an hour-long rescan interval keeps the idle
+        // dispatcher from ever touching them.
+        .native_substrate_config(lash::runtime::NativeSubstrateConfig {
+            worker_sweep: lash::runtime::WorkerSweepPolicy {
+                rescan_interval: Duration::from_secs(3600),
+                ..lash::runtime::WorkerSweepPolicy::default()
+            },
+            ..lash::runtime::NativeSubstrateConfig::default()
+        })
         .trace_jsonl_path(trace_path)
         .trace_level(lash::tracing::TraceLevel::Extended)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
