@@ -1,5 +1,14 @@
 # Durable waits lean on effect-host engines; substrates own their journals
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: the SQLite and PostgreSQL substrates' effect
+journals (`runtime_effect_replay`) and their await-event promise rows; the
+keyed-promise contract stays, as an engine obligation. Those passages stay as
+written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
+the session lease) rewrites them.
+
 Long-lived processes need to suspend durably (waiting on a signal, a long timer, or a
 child process) without holding a worker. We close this by growing the effect-host
 contract by exactly one primitive — a durable, one-shot, keyed promise

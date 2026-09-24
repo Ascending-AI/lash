@@ -10,6 +10,15 @@ item, deferred or dropped, is recorded with a closed reason. Only an explicit
 host withdrawal may drop a wake. Arbitration on the keyed-promise seam is
 unchanged.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: the session-execution-lease generation that
+authorizes a cancel closure, and lease renewal, release and takeover around it;
+the keyed-promise cancellation contract stays. Those passages stay as written
+until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the
+session lease) rewrites them.
+
 Foreground turns need a durable, externally addressable stop request without becoming Runtime
 Processes and without adding coordination state to the session store. We therefore define exact
 turn cancellation as `TurnAddress { session_id, turn_id }` on `TurnWorkDriver`, alongside (but

@@ -9,6 +9,13 @@ fencing model of
 leaves the failover-latency lever of
 [ADR 0014](0014-operational-policy-stays-with-the-host.md) where it is.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: failover that waits out the session-execution
+lease TTL. Those passages stay as written until the PR that deletes the code
+(FIG-3667, FIG-3668, or FIG-3600 for the session lease) rewrites them.
+
 ## Context
 
 Under durable acceptance ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md))

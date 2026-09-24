@@ -30,6 +30,15 @@ therefore taken by another driver, and the redrive cedes with
 claims alike. The recovered-settlement drop rule and its retry budget are
 deleted.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: generation-fenced claims under the SQL
+session-execution lease, which FIG-3600 replaces with per-session serialized
+execution owned by the engine. Those passages stay as written until the PR that
+deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the session lease)
+rewrites them.
+
 ## Context
 
 Queued-work claims and turn-input claims carried a per-claim TTL (30s by default,

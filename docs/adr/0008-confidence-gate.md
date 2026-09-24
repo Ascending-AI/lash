@@ -4,6 +4,14 @@
 
 accepted
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: the SQLite and PostgreSQL backend conformance
+and the lease, fencing and reopen contention evidence in the `default` and
+`broad` lanes. Those passages stay as written until the PR that deletes the code
+(FIG-3667, FIG-3668, or FIG-3600 for the session lease) rewrites them.
+
 ## Decision
 
 Lash has one executable confidence contract: `scripts/confidence-gate.sh`.
