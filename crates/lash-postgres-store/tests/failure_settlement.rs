@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use lash_core::llm::types::{LlmRequest, LlmResponse};
 use lash_core::runtime::effect::effect_replay_driver::EffectJournalFaultPoint;
 use lash_core::{LlmOutputPart, TurnInput};
-use lash_postgres_store::{PostgresEffectHost, PostgresStorage};
+use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 use lash_sansio::sync::MutexExt;
 
 use crate::support::{SharedDatabaseLock, database_url, reset};
@@ -101,21 +101,36 @@ fn counting_text_provider(
 struct PostgresBackend {
     storage: PostgresStorage,
     effect_host: Arc<PostgresEffectHost>,
+    /// When set, every host timestamp and the store's lease timeline read this
+    /// clock instead of the wall clock and the database transaction clock.
+    clock: Option<Arc<dyn lash_core::Clock>>,
     _lock: SharedDatabaseLock,
 }
 
 impl PostgresBackend {
     async fn open() -> Option<Self> {
+        Self::open_on(None).await
+    }
+
+    async fn open_on(clock: Option<Arc<dyn lash_core::Clock>>) -> Option<Self> {
         let database_url = database_url()?;
         let lock = SharedDatabaseLock::acquire(&database_url).await;
         let storage = PostgresStorage::connect(&database_url)
             .await
             .expect("connect Postgres");
         reset(storage.pool()).await;
-        let effect_host = Arc::new(storage.effect_host());
+        let effect_host = Arc::new(match &clock {
+            Some(clock) => PostgresEffectHost::with_options_and_clock(
+                &storage,
+                PostgresEffectReplayOptions::default(),
+                Arc::clone(clock),
+            ),
+            None => storage.effect_host(),
+        });
         Some(Self {
             storage,
             effect_host,
+            clock,
             _lock: lock,
         })
     }
@@ -134,6 +149,20 @@ impl PostgresBackend {
             ),
             None => builder,
         };
+        let store_factory = self
+            .storage
+            .session_store_factory_with_shared_process_registry();
+        let process_registry = self.storage.process_registry();
+        let (builder, store_factory, process_registry) = match &self.clock {
+            Some(clock) => (
+                builder.clock(Arc::clone(clock)),
+                store_factory
+                    .with_clock(Arc::clone(clock))
+                    .with_lease_clock_for_testing(Arc::clone(clock)),
+                process_registry.with_clock(Arc::clone(clock)),
+            ),
+            None => (builder, store_factory, process_registry),
+        };
         builder
             .provider(provider)
             .model(
@@ -145,11 +174,8 @@ impl PostgresBackend {
             .effect_host(Arc::clone(&self.effect_host) as Arc<dyn lash::durability::EffectHost>)
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .process_env_store(Arc::new(self.storage.process_env_store()))
-            .store_factory(Arc::new(
-                self.storage
-                    .session_store_factory_with_shared_process_registry(),
-            ))
-            .process_registry(Arc::new(self.storage.process_registry()))
+            .store_factory(Arc::new(store_factory))
+            .process_registry(Arc::new(process_registry))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .without_queued_work()
@@ -559,13 +585,18 @@ async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id()
 }
 
 /// FIG-3589 keeps crash recovery on PostgreSQL: a direct turn whose worker
-/// dies mid-turn never binds its claim, so the next lease generation reclaims
-/// the input and answers it.
+/// dies mid-turn never binds its claim. Once its lease generation lapses, the
+/// next generation reclaims the input and answers it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-crash-reclaim";
-    let Some(backend) = PostgresBackend::open().await else {
+    let clock = Arc::new(lash_core::testing::TestClock::new(
+        lash_core::ClockWallTime::timestamp_ms(&lash_core::facade_support::SystemClock),
+    ));
+    let Some(backend) =
+        PostgresBackend::open_on(Some(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)).await
+    else {
         return Ok(());
     };
     let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
@@ -613,24 +644,17 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation()
     crashed.abort();
     assert!(crashed.await.is_err_and(|error| error.is_cancelled()));
 
-    let mut attempts = 0;
-    let next = loop {
-        match session
-            .turn(TurnInput::text("the next turn"))
-            .turn_id("next-generation-turn")
-            .run()
-            .await
-        {
-            Err(lash::EmbedError::Runtime(error))
-                if error.code == lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
-                    && attempts < 200 =>
-            {
-                attempts += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            other => break other?,
-        }
-    };
+    // The crashed worker never renews its lease, so its generation lapses at
+    // the TTL. The lapse, not the dropped guard's best-effort background
+    // release, is what makes the next turn a new generation: until that
+    // release lands, this runtime's executor would re-enter its own live
+    // lease, which keeps the generation and with it the crashed claim.
+    clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms());
+    let next = session
+        .turn(TurnInput::text("the next turn"))
+        .turn_id("next-generation-turn")
+        .run()
+        .await?;
     assert!(next.is_success(), "{:?}", next.result.outcome);
     let seen = requests.lock_recover().clone();
     assert_eq!(seen.len(), 1);

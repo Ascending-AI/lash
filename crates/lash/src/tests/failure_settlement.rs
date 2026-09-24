@@ -48,19 +48,29 @@ impl lash_core::plugin::ProtocolSessionPlugin for RefusingBeforeLlmCall {
 struct SqliteBackend {
     directory: tempfile::TempDir,
     effect_host: Arc<lash_sqlite_store::SqliteEffectHost>,
+    clock: Arc<dyn lash_core::Clock>,
 }
 
 impl SqliteBackend {
     async fn open() -> Self {
+        Self::open_on(Arc::new(lash_core::facade_support::SystemClock)).await
+    }
+
+    /// The backend with every lease and record timestamp read from `clock`.
+    async fn open_on(clock: Arc<dyn lash_core::Clock>) -> Self {
         let directory = tempfile::tempdir().expect("temporary durable backend");
         let effect_host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(&directory.path().join("effects.sqlite"))
-                .await
-                .expect("file-backed SQLite effect journal"),
+            lash_sqlite_store::SqliteEffectHost::open_with_clock(
+                &directory.path().join("effects.sqlite"),
+                Arc::clone(&clock),
+            )
+            .await
+            .expect("file-backed SQLite effect journal"),
         );
         Self {
             directory,
             effect_host,
+            clock,
         }
     }
 
@@ -93,10 +103,14 @@ impl SqliteBackend {
         explicit_ephemeral_facets(builder)
             .provider(provider)
             .model(mock_model_spec())
+            .clock(Arc::clone(&self.clock))
             .effect_host(Arc::clone(&self.effect_host) as Arc<dyn EffectHost>)
-            .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-                self.directory.path().join("sessions"),
-            )))
+            .store_factory(Arc::new(
+                lash_sqlite_store::SqliteSessionStoreFactory::new(
+                    self.directory.path().join("sessions"),
+                )
+                .with_clock(Arc::clone(&self.clock)),
+            ))
             .build(crate::testing::runtime_lease_owner())
             .expect("file-backed SQLite backend")
     }
@@ -806,12 +820,14 @@ async fn a_drain_never_answers_an_aborted_turns_input() -> Result<()> {
 }
 
 /// FIG-3589 keeps crash recovery: a direct turn whose worker dies mid-turn
-/// never reaches its abort path, so its claim is not bound, and the next lease
-/// generation reclaims the input under the ADR 0029 fence and answers it.
+/// never reaches its abort path, so its claim is not bound. Once its lease
+/// generation lapses, the next generation reclaims the input under the ADR
+/// 0029 fence and answers it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> Result<()> {
     const SESSION: &str = "direct-crash-reclaim";
-    let backend = SqliteBackend::open().await;
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
+    let backend = SqliteBackend::open_on(Arc::clone(&clock) as Arc<dyn lash_core::Clock>).await;
     let (entered_tx, entered_rx) = oneshot::channel::<()>();
     let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
     let requests = Arc::new(StdMutex::new(Vec::new()));
@@ -855,27 +871,17 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> R
     crashed.abort();
     assert!(crashed.await.is_err_and(|error| error.is_cancelled()));
 
-    // The dropped lease guard releases its lease in the background; the next
-    // turn waits for the lane to turn over and then claims under a new
-    // generation.
-    let mut attempts = 0;
-    let next = loop {
-        match session
-            .turn(TurnInput::text("the next turn"))
-            .turn_id("next-generation-turn")
-            .run()
-            .await
-        {
-            Err(EmbedError::Runtime(error))
-                if error.code == lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
-                    && attempts < 200 =>
-            {
-                attempts += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            other => break other?,
-        }
-    };
+    // The crashed worker never renews its lease, so its generation lapses at
+    // the TTL. The lapse, not the dropped guard's best-effort background
+    // release, is what makes the next turn a new generation: until that
+    // release lands, this runtime's executor would re-enter its own live
+    // lease, which keeps the generation and with it the crashed claim.
+    clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms());
+    let next = session
+        .turn(TurnInput::text("the next turn"))
+        .turn_id("next-generation-turn")
+        .run()
+        .await?;
     assert!(next.is_success(), "{:?}", next.result.outcome);
     let seen = requests.lock_recover().clone();
     assert_eq!(seen.len(), 1);
