@@ -294,6 +294,11 @@ const PROBES: &[Probe] = &[
         "TS_DELETE_ARRAY_INDEX_UNSUPPORTED",
         "const a = [1, 2]; delete a[0]; finish(a.length);",
     ),
+    readme_probe("TS_DELETE_NON_REFERENCE_UNSUPPORTED", "finish(delete 1);"),
+    readme_probe(
+        "TS_FUNCTION_REDECLARATION_UNSUPPORTED",
+        "function f() { return 1; } function f() { return 2; } finish(f());",
+    ),
     readme_probe(
         "TS_DATE_PARSE_NON_ISO",
         "finish(Date.parse('March 7, 2024'));",

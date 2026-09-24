@@ -707,3 +707,19 @@ findings	418	accept	"({[1e55]:1})['1e+55']"	"1"	-
 findings	419	accept	"({[1e55]:'a',[1e55]:'b'})['1e+55']"	"b"	-
 findings	420	accept	"[...(new Set([3,2,1,0])).intersection(new Set([1,3,5]))].join(',')"	"1,3"	-
 findings	421	accept	"[...(new Set([3,1,5,2])).intersection(new Set([5,3,1]))].join(',')"	"5,3,1"	-
+findings	422	accept	"(() => { const o = { bre\\u0061k: 1 }; return o.bre\\u0061k + o['break']; })()"	"2"	-
+findings	423	accept	"(() => { const o = { \\u0069f: 3 }; return o.i\\u0066; })()"	"3"	-
+findings	424	accept	"(() => { var await = 2; return await * 3; })()"	"6"	-
+findings	425	accept	"(() => { { let f = 1; } var f = 2; return f; })()"	"2"	-
+findings	426	accept	"/\\p{Script=Unknown}/u.test(String.fromCodePoint(0x378))"	"true"	-
+findings	427	accept	"/\\p{scx=Zzzz}/u.test('A')"	"false"	-
+findings	428	reject	"(() => { { let f; var f; } })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+findings	429	reject	"(() => { switch (0) { case 1: let f; default: var f; } })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+findings	430	reject	"(() => { try {} catch (e) { let e; } })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+findings	431	reject	"(() => { for (let x of []) { var x; } })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+findings	432	reject	"(() => { var \\u0062reak = 1; })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+findings	433	reject	"(() => { 'use strict'; return '\\8'; })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+findings	434	reject	"(() => `\\8`)()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+findings	435	reject	"(async () => { var \\u0061wait; })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+findings	436	reject	"(() => { function f() { return 1; } function f() { return 2; } return f(); })()"	"2"	TS_FUNCTION_REDECLARATION_UNSUPPORTED
+findings	437	reject	"(() => delete 1)()"	"true"	TS_DELETE_NON_REFERENCE_UNSUPPORTED

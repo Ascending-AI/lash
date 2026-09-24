@@ -1002,10 +1002,9 @@ where
                         self.consume(ec);
                         let negate = ec == 'P' as u32;
                         match self.try_consume_unicode_property_escape()? {
-                            PropertyEscapeKind::CharacterClass(s) => Ok(Some(ClassAtom::Range {
-                                iv: CodePointSet::from_sorted_disjoint_intervals(s.to_vec()),
-                                negate,
-                            })),
+                            PropertyEscapeKind::CharacterClass(iv) => {
+                                Ok(Some(ClassAtom::Range { iv, negate }))
+                            }
                             PropertyEscapeKind::StringSet(_) => error("Invalid property escape"),
                         }
                     }
@@ -1267,11 +1266,9 @@ where
                     0x70 => {
                         self.consume('p');
                         match self.try_consume_unicode_property_escape()? {
-                            PropertyEscapeKind::CharacterClass(intervals) => Ok(
-                                CharacterClassEscape(CodePointSet::from_sorted_disjoint_intervals(
-                                    intervals.to_vec(),
-                                )),
-                            ),
+                            PropertyEscapeKind::CharacterClass(code_points) => {
+                                Ok(CharacterClassEscape(code_points))
+                            }
                             PropertyEscapeKind::StringSet(_) if negate_set => {
                                 error("Invalid character escape")
                             }
@@ -1286,9 +1283,9 @@ where
                     0x50 => {
                         self.consume('P');
                         match self.try_consume_unicode_property_escape()? {
-                            PropertyEscapeKind::CharacterClass(s) => Ok(CharacterClassEscape(
-                                CodePointSet::from_sorted_disjoint_intervals(s.to_vec()).inverted(),
-                            )),
+                            PropertyEscapeKind::CharacterClass(code_points) => {
+                                Ok(CharacterClassEscape(code_points.inverted()))
+                            }
                             PropertyEscapeKind::StringSet(_) => error("Invalid character escape"),
                         }
                     }
@@ -1624,12 +1621,11 @@ where
                 let negate = c == 'P' as u32;
                 let property_escape = self.try_consume_unicode_property_escape()?;
                 match property_escape {
-                    PropertyEscapeKind::CharacterClass(s) => {
+                    PropertyEscapeKind::CharacterClass(mut cps) => {
                         // Unlike \w and friends, \P negates the raw property
                         // set before case folding applies: under ignoreCase a
                         // character matches iff its fold is reachable from the
                         // (already complemented) set.
-                        let mut cps = CodePointSet::from_sorted_disjoint_intervals(s.to_vec());
                         if negate {
                             cps = cps.inverted();
                         }

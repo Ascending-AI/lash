@@ -306,6 +306,17 @@ rejection_test!(
     Code::InstanceOfUnsupported
 );
 rejection_test!(rejects_debugger, "debugger;", Code::DebuggerUnsupported);
+// Stricter than ECMA-262 where `tsc --strict` rejects the program (ADR 0064).
+rejection_test!(
+    rejects_delete_of_a_non_reference,
+    "const b = delete 1;",
+    Code::DeleteNonReferenceUnsupported
+);
+rejection_test!(
+    rejects_a_function_redeclared_in_its_var_scope,
+    "function f() {} function f() {}",
+    Code::FunctionRedeclarationUnsupported
+);
 rejection_test!(
     rejects_reserved_generated_identifier,
     "const __typescript_0_a = 1;",

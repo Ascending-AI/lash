@@ -2,13 +2,15 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::node_label::{NodeLabel, is_label_comment, parse_label_comment};
-use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 use swc_common::comments::{CommentKind, Comments, SingleThreadedComments};
 use swc_common::{BytePos, Spanned};
 use swc_ecma_ast as swc;
-use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 
+mod declarations;
+mod early_errors;
 mod enums;
+mod goal;
 mod nesting;
 mod optional_chain;
 mod prototype_chain;
@@ -18,6 +20,7 @@ mod tests;
 mod traversal;
 mod types;
 use enums::{ConstEnumValue, enum_member_property_name};
+use goal::Goal;
 use nesting::{guard_source_nesting, source_nesting_diagnostic};
 pub(crate) use prototype_chain::is_prototype_chain_property as names_the_prototype_chain;
 use prototype_chain::{
@@ -520,38 +523,57 @@ fn parse_on_proportional_stack(source: &str) -> Result<Program, Diagnostic> {
 }
 
 fn parse_source(source: &str) -> Result<Program, Diagnostic> {
-    let end = u32::try_from(source.len()).unwrap_or(u32::MAX);
-    // Comments are trivia to the language and carry no semantics, but one
-    // shape of doc comment names a graph node (see `crate::node_label`), so
-    // the lexer has to keep them for the adapter to read back.
-    let comments = SingleThreadedComments::default();
-    let lexer = Lexer::new(
-        Syntax::Typescript(TsSyntax {
-            tsx: true,
-            decorators: true,
-            ..TsSyntax::default()
-        }),
-        Default::default(),
-        StringInput::new(source, BytePos(0), BytePos(end)),
-        Some(&comments),
-    );
-    let mut parser = Parser::new_from(lexer);
-    let module = parser
-        .parse_module()
-        .map_err(|error| parser_diagnostic(error, source))?;
-    if let Some(error) = parser.take_errors().into_iter().next() {
-        return Err(parser_diagnostic(error, source));
-    }
-    Adapter {
-        comments: comments.clone(),
+    parse_from_goal(source, Goal::Module)
+}
+
+/// Reads `source` under the first goal, from `first` on, that admits it (see
+/// [`Goal`]), converts it, and checks the early errors of its declarations.
+fn parse_from_goal(source: &str, first: Goal) -> Result<Program, Diagnostic> {
+    let parsed = goal::parse(source, first).map_err(|error| parser_diagnostic(error, source))?;
+    let adapter = Adapter {
+        source: &parsed.text,
+        goal: parsed.goal,
+        respelled_awaits: parsed.respelled_awaits,
+        respellings: parsed.respellings,
+        comments: parsed.comments.clone(),
         ..Adapter::default()
+    };
+    let converted = adapter.convert_module_items(&parsed.items);
+    if converted.is_err() && adapter.module_goal_await.get() {
+        // `await` written as an identifier: the cell is a Script.
+        return parse_from_goal(source, Goal::Script);
     }
-    .convert_module_items(&module.body)
-    .map(|statements| Program { statements })
+    let early_error =
+        matches!(&converted, Err(diagnostic) if diagnostic.kind == DiagnosticKind::ProgramDefect);
+    if !early_error && let Some(error) = adapter.unvalidated_respelling() {
+        return Err(parser_diagnostic(error.clone(), source));
+    }
+    let program = Program {
+        statements: converted?,
+    };
+    declarations::check(&program)?;
+    Ok(program)
 }
 
 #[derive(Default)]
-struct Adapter {
+struct Adapter<'a> {
+    /// The text SWC read, whose byte offsets every span indexes.
+    source: &'a str,
+    goal: Goal,
+    /// Where the Script-goal parse read a placeholder for `await`.
+    respelled_awaits: BTreeSet<u32>,
+    /// Every respelled word's position, with the error SWC reported there.
+    respellings: BTreeMap<u32, swc_ecma_parser::error::Error>,
+    /// The respelled words the adapter has read as identifiers or names.
+    validated_respellings: RefCell<BTreeSet<u32>>,
+    /// Whether the adapter stands in an async function's body or parameters.
+    in_async_function: Cell<bool>,
+    /// Set when `await` was refused as an identifier only because the Module
+    /// goal reserves it: the cell is then read again as a Script.
+    module_goal_await: Cell<bool>,
+    /// Whether the adapter stands in an arrow function's parameters, where an
+    /// `await` expression is an early error.
+    in_arrow_parameters: Cell<bool>,
     comments: SingleThreadedComments,
     nesting_depth: Cell<usize>,
     enum_constants: RefCell<Vec<BTreeMap<String, BTreeMap<String, ConstEnumValue>>>>,
@@ -559,7 +581,7 @@ struct Adapter {
     enum_context: RefCell<Option<(String, BTreeSet<String>)>>,
 }
 
-impl Adapter {
+impl Adapter<'_> {
     fn with_statement_depth<T>(
         &self,
         span: Option<SourceSpan>,
@@ -753,7 +775,8 @@ impl Adapter {
                     span,
                 ));
             }
-            swc::Stmt::Labeled(_) => {
+            swc::Stmt::Labeled(labeled) => {
+                self.identifier(&labeled.label)?;
                 return Err(Diagnostic::new(
                     DiagnosticCode::LabelUnsupported,
                     "Unsupported: labeled break/continue. Extract the labeled region into a helper function and return.",
@@ -782,31 +805,34 @@ impl Adapter {
                 test: self.convert_expr(&stmt.test)?,
                 test_span: source_span(stmt.test.span()),
             },
-            swc::Stmt::For(stmt) => Stmt::For {
-                init: stmt
-                    .init
-                    .as_ref()
-                    .map(|init| match init {
-                        swc::VarDeclOrExpr::VarDecl(decl) => self
-                            .convert_decl(&swc::Decl::Var(decl.clone()))
-                            .map(Box::new),
-                        swc::VarDeclOrExpr::Expr(expr) => self
-                            .convert_expr(expr)
-                            .map(|expr| Box::new(Stmt::Expr(expr))),
-                    })
-                    .transpose()?,
-                test: stmt
-                    .test
-                    .as_deref()
-                    .map(|expr| self.convert_expr(expr))
-                    .transpose()?,
-                update: stmt
-                    .update
-                    .as_deref()
-                    .map(|expr| self.convert_expr(expr))
-                    .transpose()?,
-                body: Box::new(self.convert_body_stmt(&stmt.body)?),
-            },
+            swc::Stmt::For(stmt) => {
+                self.check_for_head(stmt)?;
+                Stmt::For {
+                    init: stmt
+                        .init
+                        .as_ref()
+                        .map(|init| match init {
+                            swc::VarDeclOrExpr::VarDecl(decl) => self
+                                .convert_decl(&swc::Decl::Var(decl.clone()))
+                                .map(Box::new),
+                            swc::VarDeclOrExpr::Expr(expr) => self
+                                .convert_expr(expr)
+                                .map(|expr| Box::new(Stmt::Expr(expr))),
+                        })
+                        .transpose()?,
+                    test: stmt
+                        .test
+                        .as_deref()
+                        .map(|expr| self.convert_expr(expr))
+                        .transpose()?,
+                    update: stmt
+                        .update
+                        .as_deref()
+                        .map(|expr| self.convert_expr(expr))
+                        .transpose()?,
+                    body: Box::new(self.convert_body_stmt(&stmt.body)?),
+                }
+            }
             swc::Stmt::ForIn(stmt) => {
                 let (pattern, kind) = self.convert_for_head(&stmt.left, span)?;
                 Stmt::ForIn {
@@ -817,6 +843,7 @@ impl Adapter {
                 }
             }
             swc::Stmt::ForOf(stmt) => {
+                self.check_for_of_keyword(stmt.left.span(), stmt.right.span())?;
                 if stmt.is_await {
                     return Err(reject(
                         DiagnosticCode::ForOfUnsupported,
@@ -850,11 +877,14 @@ impl Adapter {
                 "decorators",
                 span,
             )),
-            swc::Decl::Class(_) => Err(Diagnostic::new(
-                DiagnosticCode::ClassUnsupported,
-                "Unsupported: classes. Use functions and plain objects; for coded errors use Object.assign(new Error(message), {code}).",
-                span,
-            )),
+            swc::Decl::Class(class) => {
+                self.identifier(&class.ident)?;
+                Err(Diagnostic::new(
+                    DiagnosticCode::ClassUnsupported,
+                    "Unsupported: classes. Use functions and plain objects; for coded errors use Object.assign(new Error(message), {code}).",
+                    span,
+                ))
+            }
             swc::Decl::TsEnum(declaration) => self.convert_enum(declaration),
             swc::Decl::TsModule(_) => Err(reject(
                 DiagnosticCode::NamespaceUnsupported,
@@ -907,12 +937,9 @@ impl Adapter {
                         span,
                     ));
                 }
-                let function =
-                    self.convert_function(Some(decl.ident.sym.to_string()), &decl.function)?;
-                Ok(Stmt::Function {
-                    name: decl.ident.sym.to_string(),
-                    function,
-                })
+                let name = self.identifier(&decl.ident)?;
+                let function = self.convert_function(Some(name.clone()), &decl.function)?;
+                Ok(Stmt::Function { name, function })
             }
         }
     }
@@ -962,7 +989,7 @@ impl Adapter {
         let span = Some(source_span(pattern.span()));
         Ok(match pattern {
             swc::Pat::Ident(name) => Pattern::Ident(
-                name.id.sym.to_string(),
+                self.identifier(&name.id)?,
                 name.type_ann
                     .as_ref()
                     .map(|annotation| types::convert_type(&annotation.type_ann)),
@@ -1018,7 +1045,8 @@ impl Adapter {
                             });
                         }
                         swc::ObjectPatProp::Assign(property) => {
-                            let target = Pattern::Ident(property.key.id.sym.to_string(), None);
+                            let name = self.identifier(&property.key.id)?;
+                            let target = Pattern::Ident(name.clone(), None);
                             let value = match property.value.as_deref() {
                                 Some(default) => Pattern::Assign {
                                     target: Box::new(target),
@@ -1027,7 +1055,7 @@ impl Adapter {
                                 None => target,
                             };
                             properties.push(ObjectPatternProperty {
-                                key: PropertyKey::Static(property.key.id.sym.to_string()),
+                                key: PropertyKey::Static(name),
                                 value,
                             });
                         }
@@ -1051,8 +1079,9 @@ impl Adapter {
     fn convert_property_key(&self, name: &swc::PropName) -> Result<PropertyKey, Diagnostic> {
         check_property_key(name)?;
         Ok(match name {
-            swc::PropName::Ident(name) => PropertyKey::Static(name.sym.to_string()),
+            swc::PropName::Ident(name) => PropertyKey::Static(self.identifier_name(name)?),
             swc::PropName::Str(name) => {
+                self.check_string_literal(name.span)?;
                 PropertyKey::Static(name.value.to_string_lossy().into_owned())
             }
             swc::PropName::Num(name) => PropertyKey::Static(name.value.to_string()),
@@ -1089,14 +1118,6 @@ impl Adapter {
                 span,
             ));
         }
-        let params = function
-            .params
-            .iter()
-            .map(|param| self.convert_pattern(&param.pat))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter(|param| !matches!(param, Pattern::Ident(name, _) if name == "this"))
-            .collect();
         let body = function.body.as_ref().ok_or_else(|| {
             reject_refusal(
                 DiagnosticCode::UnsupportedStatement,
@@ -1104,10 +1125,20 @@ impl Adapter {
                 span,
             )
         })?;
+        let (params, body) = self.in_function(function.is_async, || {
+            let params = function
+                .params
+                .iter()
+                .enumerate()
+                .filter(|(index, param)| !self.is_this_parameter(*index, &param.pat))
+                .map(|(_, param)| self.convert_pattern(&param.pat))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((params, self.convert_statements(&body.stmts)?))
+        })?;
         Ok(Function {
             name,
             params,
-            body: FunctionBody::Block(self.convert_statements(&body.stmts)?),
+            body: FunctionBody::Block(body),
             is_async: function.is_async,
         })
     }
@@ -1122,7 +1153,7 @@ impl Adapter {
         let span = Some(source_span(expr.span()));
         Ok(match expr {
             swc::Expr::Ident(ident) => {
-                let name = ident.sym.to_string();
+                let name = self.identifier(ident)?;
                 if let Some((enum_name, members)) = self.enum_context.borrow().as_ref()
                     && members.contains(&name)
                 {
@@ -1139,15 +1170,19 @@ impl Adapter {
                 swc::Lit::Null(_) => Expr::Null,
                 swc::Lit::Bool(value) => Expr::Bool(value.value),
                 swc::Lit::Num(value) => Expr::Number(value.value),
-                swc::Lit::Str(value) => value
-                    .value
-                    .as_str()
-                    .map_or(Expr::LoneSurrogateString, |value| {
-                        Expr::String(value.to_string())
-                    }),
+                swc::Lit::Str(value) => {
+                    self.check_string_literal(value.span)?;
+                    value
+                        .value
+                        .as_str()
+                        .map_or(Expr::LoneSurrogateString, |value| {
+                            Expr::String(value.to_string())
+                        })
+                }
                 swc::Lit::Regex(value) => {
                     let pattern = value.exp.to_string();
                     let flags = value.flags.to_string();
+                    early_errors::check_regex_body(&pattern, span)?;
                     crate::regex::validate_literal(&pattern, &flags, span)?;
                     Expr::RegExp { pattern, flags }
                 }
@@ -1186,10 +1221,18 @@ impl Adapter {
                     .map(|property| self.convert_property(property))
                     .collect::<Result<_, _>>()?,
             ),
-            swc::Expr::Fn(function) => Expr::Function(self.convert_function(
-                function.ident.as_ref().map(|name| name.sym.to_string()),
-                &function.function,
-            )?),
+            swc::Expr::Fn(function) => {
+                // A function expression's own name is read under the rule of
+                // its body (§15.2, §15.8).
+                let name = self.in_function(function.function.is_async, || {
+                    function
+                        .ident
+                        .as_ref()
+                        .map(|name| self.identifier(name))
+                        .transpose()
+                })?;
+                Expr::Function(self.convert_function(name, &function.function)?)
+            }
             swc::Expr::Arrow(function) => {
                 if function.is_generator {
                     return Err(reject(
@@ -1198,22 +1241,30 @@ impl Adapter {
                         span,
                     ));
                 }
-                let params = function
-                    .params
-                    .iter()
-                    .map(|param| self.convert_pattern(param))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .filter(|param| !matches!(param, Pattern::Ident(name, _) if name == "this"))
-                    .collect();
-                let body = match function.body.as_ref() {
-                    swc::BlockStmtOrExpr::BlockStmt(block) => {
-                        FunctionBody::Block(self.convert_statements(&block.stmts)?)
-                    }
-                    swc::BlockStmtOrExpr::Expr(expr) => {
-                        FunctionBody::Expression(Box::new(self.convert_expr(expr)?))
-                    }
-                };
+                // An async arrow's parameters reserve `await`; a plain
+                // arrow's inherit the enclosing rule (§15.3, §15.9).
+                let parameter_rule = self.in_async_function.get() || function.is_async;
+                let params = self.in_function(parameter_rule, || {
+                    self.in_arrow_parameters(|| {
+                        function
+                            .params
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, param)| !self.is_this_parameter(*index, param))
+                            .map(|(_, param)| self.convert_pattern(param))
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                })?;
+                let body = self.in_function(function.is_async, || {
+                    Ok(match function.body.as_ref() {
+                        swc::BlockStmtOrExpr::BlockStmt(block) => {
+                            FunctionBody::Block(self.convert_statements(&block.stmts)?)
+                        }
+                        swc::BlockStmtOrExpr::Expr(expr) => {
+                            FunctionBody::Expression(Box::new(self.convert_expr(expr)?))
+                        }
+                    })
+                })?;
                 Expr::Function(Function {
                     name: None,
                     params,
@@ -1228,19 +1279,7 @@ impl Adapter {
                     swc::UnaryOp::Bang => UnaryOp::Not,
                     swc::UnaryOp::TypeOf => UnaryOp::TypeOf,
                     swc::UnaryOp::Void => UnaryOp::Void,
-                    swc::UnaryOp::Delete => {
-                        let Expr::Member {
-                            object, property, ..
-                        } = self.convert_expr(&expr.arg)?
-                        else {
-                            return Err(reject(
-                                DiagnosticCode::SyntaxError,
-                                "Unsupported: delete on a non-member expression. Use delete object.member.",
-                                span,
-                            ));
-                        };
-                        return Ok(Expr::Delete { object, property });
-                    }
+                    swc::UnaryOp::Delete => return self.convert_delete(&expr.arg, span),
                     swc::UnaryOp::Tilde => UnaryOp::BitNot,
                 };
                 Expr::Unary {
@@ -1302,8 +1341,11 @@ impl Adapter {
                 quasis: template
                     .quasis
                     .iter()
-                    .map(|quasi| quasi.raw.to_string())
-                    .collect(),
+                    .map(|quasi| {
+                        self.check_template_text(quasi.span)?;
+                        Ok(quasi.raw.to_string())
+                    })
+                    .collect::<Result<_, Diagnostic>>()?,
                 expressions: template
                     .exprs
                     .iter()
@@ -1336,7 +1378,7 @@ impl Adapter {
                     ));
                 };
                 Expr::New {
-                    constructor: constructor.sym.to_string(),
+                    constructor: self.identifier(constructor)?,
                     args: self.convert_call_args(new.args.as_deref().unwrap_or_default())?,
                 }
             }
@@ -1354,7 +1396,10 @@ impl Adapter {
                     span,
                 ));
             }
-            swc::Expr::Class(_) => {
+            swc::Expr::Class(class) => {
+                if let Some(name) = &class.ident {
+                    self.identifier(name)?;
+                }
                 return Err(Diagnostic::new(
                     DiagnosticCode::ClassUnsupported,
                     "Unsupported: classes. Use functions and plain objects; for coded errors use Object.assign(new Error(message), {code}).",
@@ -1371,10 +1416,13 @@ impl Adapter {
                     span,
                 ));
             }
-            swc::Expr::Await(await_expr) => Expr::Await {
-                value: Box::new(self.convert_expr(&await_expr.arg)?),
-                span: source_span(await_expr.span),
-            },
+            swc::Expr::Await(await_expr) => {
+                self.check_await_expression(await_expr.span)?;
+                Expr::Await {
+                    value: Box::new(self.convert_expr(&await_expr.arg)?),
+                    span: source_span(await_expr.span),
+                }
+            }
             swc::Expr::SuperProp(_) => {
                 return Err(reject(
                     DiagnosticCode::SuperUnsupported,
@@ -1415,10 +1463,13 @@ impl Adapter {
             return Ok(ObjectProperty::Spread(self.convert_expr(&spread.expr)?));
         };
         match property.as_ref() {
-            swc::Prop::Shorthand(name) => Ok(ObjectProperty::KeyValue(
-                PropertyKey::Static(name.sym.to_string()),
-                Expr::Ident(name.sym.to_string(), Some(source_span(name.span))),
-            )),
+            swc::Prop::Shorthand(name) => {
+                let name_text = self.identifier(name)?;
+                Ok(ObjectProperty::KeyValue(
+                    PropertyKey::Static(name_text.clone()),
+                    Expr::Ident(name_text, Some(source_span(name.span))),
+                ))
+            }
             swc::Prop::KeyValue(property) => Ok(ObjectProperty::KeyValue(
                 self.convert_property_key(&property.key)?,
                 self.convert_expr(&property.value)?,
@@ -1428,10 +1479,13 @@ impl Adapter {
                 "getters/setters",
                 Some(source_span(property.span())),
             )),
-            swc::Prop::Method(method) => Ok(ObjectProperty::KeyValue(
-                self.convert_property_key(&method.key)?,
-                Expr::Function(self.convert_function(None, &method.function)?),
-            )),
+            swc::Prop::Method(method) => {
+                self.check_async_method_head(method)?;
+                Ok(ObjectProperty::KeyValue(
+                    self.convert_property_key(&method.key)?,
+                    Expr::Function(self.convert_function(None, &method.function)?),
+                ))
+            }
             swc::Prop::Assign(_) => Err(reject_refusal(
                 DiagnosticCode::UnsupportedExpression,
                 "assignment properties",
@@ -1514,7 +1568,7 @@ impl Adapter {
                 if is_prototype_chain_property(name.sym.as_ref()) {
                     return Err(prototype_access_rejection(member.span));
                 }
-                MemberProperty::Field(name.sym.to_string())
+                MemberProperty::Field(self.identifier_name(name)?)
             }
             swc::MemberProp::Computed(property) => {
                 if let swc::Expr::Lit(swc::Lit::Str(name)) = property.expr.as_ref()
@@ -1575,7 +1629,7 @@ impl Adapter {
     ) -> Result<AssignTarget, Diagnostic> {
         match target {
             swc::AssignTarget::Simple(swc::SimpleAssignTarget::Ident(name)) => {
-                Ok(AssignTarget::Ident(name.id.sym.to_string()))
+                Ok(AssignTarget::Ident(self.identifier(&name.id)?))
             }
             swc::AssignTarget::Simple(swc::SimpleAssignTarget::Member(member)) => {
                 match self.convert_member(member)? {

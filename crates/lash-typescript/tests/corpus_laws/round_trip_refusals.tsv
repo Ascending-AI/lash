@@ -297,6 +297,12 @@ differential:findings:418	cannot render a block in expression position as TypeSc
 differential:findings:419	cannot render a block in expression position as TypeScript	an object literal with a spread or a computed key lowers to a statement sequence (its copies), which has no expression spelling
 differential:findings:420	cannot render a block in expression position as TypeScript	an array literal with a spread element lowers to a statement sequence (its element copies), which has no expression spelling
 differential:findings:421	cannot render a block in expression position as TypeScript	an array literal with a spread element lowers to a statement sequence (its element copies), which has no expression spelling
+differential:findings:422	invalid field identifier `break`	a reserved word as a field name is a valid IdentifierName, which the lens printer does not spell
+differential:findings:423	invalid field identifier `if`	a reserved word as a field name is a valid IdentifierName, which the lens printer does not spell
+differential:findings:424	invalid var binding identifier `await`	`await` as a Script identifier is valid outside async functions, which the lens printer does not spell
+differential:findings:425	generated binding `__typescript_0_f` has no authored TypeScript spelling	a binding that shadows one in scope lowers to a generated slot, which has no authored spelling
+differential:findings:426	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:findings:427	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:findings:32	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:33	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:34	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
