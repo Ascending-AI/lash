@@ -192,7 +192,6 @@ fn wake_delivery_statements_keep_their_previous_bytes() {
 /// rendered predicates are character for character what the schema's partial
 /// indexes declare. No production statement moves here — FIG-3384 owns that.
 mod vocabulary_tokens {
-    use super::process_sql;
     use lash_core_execution::store_backend_support as vocabulary;
     use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm, render};
 
