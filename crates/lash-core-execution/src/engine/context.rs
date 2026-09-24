@@ -7,7 +7,7 @@ use futures_util::future::FusedFuture;
 use serde::{Deserialize, Serialize};
 
 use super::contracts::{ChangeId, VersionRange};
-use crate::TurnEvent;
+use crate::{SessionStreamEvent, TurnActivityId, TurnEvent};
 
 /// What an engine supplies to drive code, implemented once per engine.
 ///
@@ -137,11 +137,29 @@ pub struct EngineTerminal {
 /// One observation a drive or step publishes, keyed by the replay key it
 /// belongs to and its ordinal under that key, so a replay can suppress or
 /// deduplicate it. Observation is never a decision input (ADR 0105 §1).
+///
+/// `(key, ordinal)` is also the observation's identity on the host stream: an
+/// activity's id is derived from it, never minted.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DriveObservation {
     pub key: ReplayKey,
     pub ordinal: u32,
-    pub event: TurnEvent,
+    pub event: ObservedEvent,
+}
+
+/// What one [`DriveObservation`] carries: an event on either of the two host
+/// streams a turn publishes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ObservedEvent {
+    /// A low-level session stream event.
+    Session(SessionStreamEvent),
+    /// An application-facing turn activity. `correlation_id` groups it with
+    /// related activities (a stream block, a tool call, a code cell); `None`
+    /// correlates it with itself.
+    Activity {
+        correlation_id: Option<TurnActivityId>,
+        event: TurnEvent,
+    },
 }
 
 /// Epoch milliseconds read from [`EngineContext::now_ms`]. Every deadline in a

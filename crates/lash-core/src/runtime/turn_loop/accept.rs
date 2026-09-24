@@ -47,10 +47,7 @@ impl LashRuntime {
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let TurnPrepareContext {
             mut input,
-            sinks: TurnSinks {
-                events,
-                turn_events,
-            },
+            sinks: TurnSinks { observer },
             scoped_effect_controller,
             cancel,
             queued_claims,
@@ -97,10 +94,7 @@ impl LashRuntime {
             .bind_turn_scoped(turn_id);
         Box::pin(self.stream_turn_inner(TurnPrepareContext {
             input: input.clone(),
-            sinks: TurnSinks {
-                events,
-                turn_events,
-            },
+            sinks: TurnSinks { observer },
             scoped_effect_controller,
             cancel: cancel.clone(),
             queued_claims,

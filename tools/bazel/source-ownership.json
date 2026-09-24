@@ -72,6 +72,7 @@
         "tests/runtime_support/**/*.rs",
         "tests/runtime/tests/attachment_continuation.rs",
         "tests/runtime/tests/child_sessions.rs",
+        "tests/runtime/tests/commit_bytes.rs",
         "tests/runtime/tests/persistence.rs",
         "tests/runtime/tests/plugin_lifecycle.rs",
         "tests/runtime/tests/tool_restore_report.rs",

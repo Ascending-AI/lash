@@ -18,10 +18,7 @@ mod trace;
 pub(in crate::runtime) use crate::runtime::turn_loop::{
     queued_work_trace_payload, send_queued_work_started_event,
 };
-pub(super) use events::{
-    emit_semantic_response_parts, send_session_event, send_turn_activity,
-    send_turn_input_applications,
-};
+pub(super) use events::{emit_semantic_response_parts, send_turn_input_applications};
 use handlers::foreground_exec_graph_key;
 pub(super) use local_effects::TurnEffectStateUpdate;
 pub(super) use trace::protocol_step_trace_event;
@@ -29,6 +26,9 @@ pub(super) use trace::protocol_step_trace_event;
 pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) session: Session,
     pub(super) policy: RuntimeSessionPolicy,
+    /// The turn's committed content, recorded in program order from the
+    /// machine's emissions and the driver's own terminal events.
+    pub(super) recorded_assembly: RecordedTurnAssembly,
     pub(super) host: RuntimeHost,
     pub(super) scoped_effect_controller: ScopedEffectController<'a>,
     pub(super) session_id: SessionId,

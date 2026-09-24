@@ -22,7 +22,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     pub(super) async fn execute_typed_turn_effect<T>(
         &mut self,
         machine: &mut TurnMachine,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
         envelope: RuntimeEffectEnvelope,
         decode: impl FnOnce(RuntimeEffectOutcome) -> Result<T, RuntimeEffectControllerError>,

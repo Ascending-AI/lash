@@ -32,7 +32,6 @@ crates/lash-core/src/runtime/turn_driver/effects.rs  |  fn retain_rows(&mut self
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>);  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  let mut already_delivered = std::collections::HashSet::new();  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  tokio::select! {  |  1  # AC34
-crates/lash-core/src/runtime/turn_driver/events.rs  |  TurnActivityId::new(uuid::Uuid::new_v4().to_string()),  |  1  # OBS
 crates/lash-core/src/runtime/turn_driver/local_effects.rs  |  std::collections::HashMap<usize, crate::runtime::LlmStreamSummary>,  |  1  # LZ1
 crates/lash-core/src/runtime/turn_driver/machine.rs  |  assistant_ids_at_last_model_call: Option<HashSet<String>>,  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/machine.rs  |  fn assistant_ids<'a>(messages: impl Iterator<Item = &'a Message>) -> HashSet<String> {  |  1  # UNMAPPED

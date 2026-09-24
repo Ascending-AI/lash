@@ -67,7 +67,7 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         request: Arc<LlmRequest>,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         match self.before_llm_call(machine, &request).await {
@@ -141,14 +141,12 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         if let Some(call_record) = call_record {
-            send_turn_activity(
-                event_tx,
+            event_tx.activity(
                 TurnActivityId::new(call_record.call_id.0.clone()),
                 TurnEvent::ModelCallRecorded {
                     record: call_record.clone(),
                 },
-            )
-            .await;
+            );
             self.llm_calls.push(call_record);
         }
         // Phase 2 of the staged boundary runs only once the paid attempt is
@@ -196,7 +194,7 @@ impl RuntimeTurnDriver<'_> {
                 .await?;
             if let Some(evidence) = pending_cancel {
                 cancel.cancel();
-                send_session_event(event_tx, SessionStreamEvent::Done).await;
+                self.emit_recorded(event_tx, SessionStreamEvent::Done);
                 machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
                     evidence,
                 }));
@@ -213,8 +211,7 @@ impl RuntimeTurnDriver<'_> {
                     response,
                     prose_projector.as_deref(),
                     &self.reasoning_publication,
-                )
-                .await;
+                );
             }
         }
         // Name the request that stopped the call before the machine decides a
@@ -241,7 +238,7 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         checkpoint: CheckpointKind,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
@@ -266,16 +263,12 @@ impl RuntimeTurnDriver<'_> {
                     let applications = claim.applications.clone();
                     let accepted_turn_inputs = claim.accepted_turn_inputs();
                     self.pending_turn_input_claims.push(claim);
-                    send_turn_input_applications(event_tx, applications).await;
+                    send_turn_input_applications(event_tx, applications);
                     if !accepted_turn_inputs.is_empty() {
-                        send_session_event(
-                            event_tx,
-                            SessionStreamEvent::InjectedTurnInputAccepted {
-                                inputs: accepted_turn_inputs,
-                                checkpoint,
-                            },
-                        )
-                        .await;
+                        event_tx.session(SessionStreamEvent::InjectedTurnInputAccepted {
+                            inputs: accepted_turn_inputs,
+                            checkpoint,
+                        });
                     }
                 }
                 // FIG-635: the step boundary. The checkpoint commit above is
@@ -341,7 +334,7 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         closed_iteration: usize,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         let effect_host = Arc::clone(&self.host.core.control.effect_host);
@@ -374,7 +367,10 @@ impl RuntimeTurnDriver<'_> {
             cancel.cancel();
             return Ok(());
         }
-        send_session_event(event_tx, SessionStreamEvent::Done).await;
+        // `binding` still borrows the controller, so this records the
+        // terminal `Done` field by field rather than through `emit_recorded`.
+        self.recorded_assembly.record(&SessionStreamEvent::Done);
+        event_tx.session(SessionStreamEvent::Done);
         machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
             evidence,
         }));
@@ -385,7 +381,7 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         let (result, cell_replay_grammar) = match self
@@ -414,7 +410,7 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         calls: Vec<crate::sansio::PendingToolCall>,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         // Per-tool trace events (ToolCallStarted / ToolCallCompleted) are
@@ -464,7 +460,7 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         language: String,
         code: String,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
@@ -483,18 +479,15 @@ impl RuntimeTurnDriver<'_> {
             Ok(invocation) => invocation,
             Err(err) => {
                 let message = err.to_string();
-                send_turn_activity(
-                    event_tx,
+                event_tx.activity(
                     code_correlation_id.clone(),
                     TurnEvent::CodeBlockStarted {
                         language: language.clone(),
                         code: code.clone(),
                         graph_key: None,
                     },
-                )
-                .await;
-                send_turn_activity(
-                    event_tx,
+                );
+                event_tx.activity(
                     code_correlation_id.clone(),
                     TurnEvent::CodeBlockCompleted {
                         language: language.clone(),
@@ -508,23 +501,20 @@ impl RuntimeTurnDriver<'_> {
                         tool_call_ids: Vec::new(),
                         graph_key: None,
                     },
-                )
-                .await;
+                );
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
             }
         };
         let graph_key = Some(foreground_effect_graph_key(&invocation));
-        send_turn_activity(
-            event_tx,
+        event_tx.activity(
             code_correlation_id.clone(),
             TurnEvent::CodeBlockStarted {
                 language: language.clone(),
                 code: code.clone(),
                 graph_key: graph_key.clone(),
             },
-        )
-        .await;
+        );
         let exec_created_at = self.host.core.clock.now();
         let result = match self
             .invoke_turn_exec_effect(
@@ -540,8 +530,7 @@ impl RuntimeTurnDriver<'_> {
             Ok(result) => result,
             Err(err) => {
                 let message = err.to_string();
-                send_turn_activity(
-                    event_tx,
+                event_tx.activity(
                     code_correlation_id.clone(),
                     TurnEvent::CodeBlockCompleted {
                         language: language.clone(),
@@ -561,8 +550,7 @@ impl RuntimeTurnDriver<'_> {
                         tool_call_ids: Vec::new(),
                         graph_key: graph_key.clone(),
                     },
-                )
-                .await;
+                );
                 let cancellation_evidence = self.turn_control.evidence();
                 if let Some(code_executor) = self.session.plugins().code_executor() {
                     code_executor
@@ -598,8 +586,7 @@ impl RuntimeTurnDriver<'_> {
         };
         match &result {
             Ok(output) => {
-                send_turn_activity(
-                    event_tx,
+                event_tx.activity(
                     code_correlation_id.clone(),
                     TurnEvent::CodeBlockCompleted {
                         language: language.clone(),
@@ -615,12 +602,10 @@ impl RuntimeTurnDriver<'_> {
                             .collect(),
                         graph_key: graph_key.clone(),
                     },
-                )
-                .await;
+                );
             }
             Err(error) => {
-                send_turn_activity(
-                    event_tx,
+                event_tx.activity(
                     code_correlation_id.clone(),
                     TurnEvent::CodeBlockCompleted {
                         language: language.clone(),
@@ -640,8 +625,7 @@ impl RuntimeTurnDriver<'_> {
                         tool_call_ids: Vec::new(),
                         graph_key: graph_key.clone(),
                     },
-                )
-                .await;
+                );
             }
         }
         if let Ok(output) = &result {

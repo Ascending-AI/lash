@@ -30,6 +30,9 @@ pub struct RecordingStore {
     /// Runtime commits the wrapped store applied; an attempt it answered from
     /// an earlier commit's durable receipt is not one.
     pub runtime_commit_count: Mutex<usize>,
+    /// Every runtime commit the wrapped store applied, in order: the committed
+    /// bytes a test pins.
+    runtime_commits: Mutex<Vec<RuntimeCommit>>,
     commit_attempt_count: AtomicUsize,
     load_session_count: AtomicUsize,
     load_session_head_meta_count: AtomicUsize,
@@ -102,6 +105,7 @@ impl RecordingStore {
         Self {
             inner,
             runtime_commit_count: Mutex::new(0),
+            runtime_commits: Mutex::new(Vec::new()),
             commit_attempt_count: AtomicUsize::new(0),
             load_session_count: AtomicUsize::new(0),
             load_session_head_meta_count: AtomicUsize::new(0),
@@ -123,6 +127,11 @@ impl RecordingStore {
             forged_head: Mutex::new(None),
             attachment_intents: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Every runtime commit the wrapped store applied, in commit order.
+    pub fn runtime_commits(&self) -> Vec<RuntimeCommit> {
+        self.runtime_commits.lock_recover().clone()
     }
 
     /// Every attachment write intent this store began, in order: the owner
@@ -364,10 +373,12 @@ impl RuntimePersistenceDecorator for RecordingStore {
         if let Some(request) = injected_cancel {
             self.inner.record_turn_cancel_request(request).await?;
         }
+        let applied = commit.clone();
         let receipt = self.inner.commit_runtime_state(commit).await?;
         self.forged_head.lock_recover().take();
         if !receipt.receipt_replayed {
             *self.runtime_commit_count.lock_recover() += 1;
+            self.runtime_commits.lock_recover().push(applied);
         }
         Ok(receipt)
     }

@@ -68,7 +68,7 @@ pub(super) fn recovered_turn_cancel_closure(
 
 pub(super) struct TurnFinishInput {
     pub(super) turn_pipeline: TurnBoundary,
-    pub(super) assembler: TurnAssembler,
+    pub(super) recorded_assembly: RecordedTurnAssembly,
     pub(super) new_messages: crate::MessageSequence,
     pub(super) policy: SessionPolicy,
     pub(super) turn_index: usize,
@@ -309,26 +309,28 @@ impl CommittedTurn {
 pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
     pub(in crate::runtime) finish: TurnFinishInput,
     pub(in crate::runtime) claims: &'commit LogicalTurnClaims,
-    pub(in crate::runtime) events: &'commit dyn EventSink,
     pub(in crate::runtime) scoped_effect_controller: &'commit ScopedEffectController<'run>,
     pub(in crate::runtime) cancel_state: &'commit CancellationToken,
     pub(in crate::runtime) lease: TurnLeaseScope<'commit>,
     pub(in crate::runtime) turn_control: &'commit ActiveTurnControl,
+    /// What the turn publishes through. The terminal publication waits
+    /// until the host has received every event the turn queued (see
+    /// `turn_observer`'s host contract).
+    pub(in crate::runtime) observer: &'commit TurnObserver,
 }
 
 /// The cancellation tail of the execute phase: the driver remainder a cancelled
 /// effect loop left behind, handed to the commit phase to settle.
 pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
     pub(super) driver: TurnDriverRemainder,
-    pub(super) assembler: TurnAssembler,
     pub(super) cancellation_messages: crate::MessageSequence,
-    pub(super) events: &'cancel dyn EventSink,
     pub(super) finish_scoped_effect_controller: &'cancel ScopedEffectController<'run>,
     pub(super) cancel: &'cancel CancellationToken,
     pub(super) lease: TurnLeaseScope<'cancel>,
     pub(super) turn_control: &'cancel ActiveTurnControl,
     pub(super) turn_index: usize,
     pub(super) trace_turn_id: TurnId,
+    pub(super) observer: &'cancel TurnObserver,
 }
 
 /// The terminal turn a logical run commits when it refuses to switch agent
@@ -351,7 +353,6 @@ impl LashRuntime {
         let TurnCommitContext {
             finish,
             claims,
-            events,
             scoped_effect_controller,
             cancel_state,
             lease:
@@ -360,6 +361,7 @@ impl LashRuntime {
                     release_policy: session_execution_lease_release_policy,
                 },
             turn_control,
+            observer,
         } = context;
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_binding =
@@ -368,7 +370,7 @@ impl LashRuntime {
         let turn_control_binding_id = turn_control_binding.binding_id().to_string();
         let TurnFinishInput {
             mut turn_pipeline,
-            assembler,
+            recorded_assembly: assembly,
             new_messages,
             policy,
             turn_index,
@@ -377,12 +379,12 @@ impl LashRuntime {
         turn_pipeline.state_mut().policy = self.state.effective_policy().clone();
         turn_pipeline.state_mut().turn_index = turn_index;
 
-        if !assembler.token_usage.is_zero() {
+        if !assembly.token_usage.is_zero() {
             session_manager::record_token_usage_shared(
                 &self.shared_token_ledger,
                 "turn",
                 &policy.model.id,
-                &assembler.token_usage,
+                &assembly.token_usage,
             );
         }
         // The cumulative row above covers only counted responses. Every other
@@ -392,15 +394,15 @@ impl LashRuntime {
             &self.shared_token_ledger,
             "turn",
             &policy.model.id,
-            &assembler.llm_calls,
-            assembler.usage_counted_calls,
+            &assembly.llm_calls,
+            assembly.usage_counted_calls,
         );
         // ADR 0031: an attempt the host aborted or that failed before the
         // provider's usage arrived was still billed. Write the hole as a typed
         // unreported row (even at zero usage) and remember the attempt so a
         // host can reconcile it later; a turn with no interruption and no
         // usage still writes nothing.
-        let unreported = unreported_usage_attempts(&assembler.llm_calls, &policy.model.id);
+        let unreported = unreported_usage_attempts(&assembly.llm_calls, &policy.model.id);
         if !unreported.is_empty() {
             let descriptors = unreported
                 .iter()
@@ -423,7 +425,7 @@ impl LashRuntime {
         // so the request id a host saw on the streamed outcome is the one the
         // committed report carries. Only a cancellation with no assembled
         // evidence at all falls back to lash's internal mint.
-        let assembled_cancellation = match &assembler.outcome {
+        let assembled_cancellation = match &assembly.outcome {
             Some(TurnOutcome::Stopped(TurnStop::Cancelled { evidence })) => Some(evidence.clone()),
             _ => None,
         };
@@ -556,17 +558,17 @@ impl LashRuntime {
                 self.host.core.clock.as_ref(),
             );
         }
-        if !assembler.token_usage.is_zero() {
-            turn_pipeline.state_mut().token_usage = assembler.token_usage.clone();
+        if !assembly.token_usage.is_zero() {
+            turn_pipeline.state_mut().token_usage = assembly.token_usage.clone();
         }
 
-        let last_prompt_usage = assembler
+        let last_prompt_usage = assembly
             .last_llm_usage()
             .filter(|usage| !usage.is_zero())
             .cloned();
         turn_pipeline.state_mut().last_prompt_usage = last_prompt_usage;
         let assembled_state = turn_pipeline.export_state_for_assembly();
-        let assembled = assembler.finish(
+        let assembled = assembly.finish(
             assembled_state,
             cancellation.clone(),
             None,
@@ -581,6 +583,7 @@ impl LashRuntime {
                 .record_committed_observation_turn(observation_revision.as_u64(), &trace_turn_id);
             self.emit_completed_turn_trace(&assembled.state, &assembled.outcome, &trace_turn_id);
             self.record_turn_parent_end(&trace_turn_id).await?;
+            observer.published().await;
             publish_terminal_after_commit(
                 turn_control,
                 turn_control_resolver,
@@ -799,7 +802,8 @@ impl LashRuntime {
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
 
-        emit_session_events_to_sink(events, delivery.events).await;
+        emit_session_events_to_sink(observer, delivery.events).await;
+        observer.published().await;
         publish_terminal_after_commit(
             turn_control,
             turn_control_resolver,
@@ -921,9 +925,7 @@ impl LashRuntime {
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let CancelledTurnFinishContext {
             driver,
-            mut assembler,
             cancellation_messages,
-            events,
             finish_scoped_effect_controller,
             cancel,
             lease:
@@ -934,9 +936,11 @@ impl LashRuntime {
             turn_control,
             turn_index,
             trace_turn_id,
+            observer,
         } = context;
         let TurnDriverRemainder {
             policy,
+            mut recorded_assembly,
             turn_pipeline,
             mut pending_queue_claims,
             pending_turn_input_claims,
@@ -944,8 +948,8 @@ impl LashRuntime {
             ..
         } = driver;
         emit_terminal_sequence(
-            &mut assembler,
-            events,
+            &mut recorded_assembly,
+            observer,
             None,
             TurnStop::Cancelled {
                 evidence: turn_control.evidence_or_internal(),
@@ -967,14 +971,13 @@ impl LashRuntime {
         Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
                 turn_pipeline,
-                assembler,
+                recorded_assembly,
                 new_messages: cancellation_messages,
                 policy: policy.policy,
                 turn_index,
                 trace_turn_id,
             },
             claims: &claims,
-            events,
             scoped_effect_controller: finish_scoped_effect_controller,
             cancel_state: cancel,
             lease: TurnLeaseScope {
@@ -982,6 +985,7 @@ impl LashRuntime {
                 release_policy: session_execution_lease_release_policy,
             },
             turn_control,
+            observer,
         }))
         .await
     }
@@ -1048,10 +1052,7 @@ impl LashRuntime {
         let LogicalTurnErrorContext {
             message,
             trace_turn_id,
-            sinks: TurnSinks {
-                events,
-                turn_events,
-            },
+            sinks: TurnSinks { observer },
             scoped_effect_controller,
             cancel,
             claims,
@@ -1071,17 +1072,17 @@ impl LashRuntime {
             )
             .await?,
         );
-        let mut assembler = TurnAssembler::default();
+        let mut recorded_assembly = RecordedTurnAssembly::default();
         emit_terminal_sequence(
-            &mut assembler,
-            events,
+            &mut recorded_assembly,
+            observer,
             Some(TerminalDiagnostic {
                 kind: TerminalDiagnosticKind::Runtime,
                 code: Some(crate::TurnFailureCode::AgentFrameSwitchLimit.into()),
                 message,
                 retryable: Some(false),
                 activity: TerminalActivityTarget::UnscopedSink {
-                    sink: turn_events,
+                    sink: observer,
                     turn_id: &trace_turn_id,
                 },
             }),
@@ -1110,7 +1111,7 @@ impl LashRuntime {
         let finish_result = Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
                 turn_pipeline,
-                assembler,
+                recorded_assembly,
                 new_messages: messages,
                 policy: self.state.effective_policy().clone(),
                 // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
@@ -1118,7 +1119,6 @@ impl LashRuntime {
                 trace_turn_id,
             },
             claims: &claims,
-            events,
             scoped_effect_controller: &scoped_effect_controller,
             cancel_state: &cancel,
             lease: TurnLeaseScope {
@@ -1126,6 +1126,7 @@ impl LashRuntime {
                 release_policy: SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
             },
             turn_control: &turn_control,
+            observer,
         }))
         .await;
         if let Err(err) = &finish_result

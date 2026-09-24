@@ -50,7 +50,7 @@ pub use commit::{
 };
 pub use context::{
     Disposed, Disposition, DriveObservation, DurableOp, EngineContext, EngineFault, EngineRetry,
-    EngineTerminal, EpochMs, ReplayKey, Winner,
+    EngineTerminal, EpochMs, ObservedEvent, ReplayKey, Winner,
 };
 pub use contracts::{
     BuildGeneration, ChangeId, DriveHandover, DriveRequest, Never, PendingResolution,

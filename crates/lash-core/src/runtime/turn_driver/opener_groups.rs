@@ -24,7 +24,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     /// as a live opener first, which is what lets a recovered child resolve
     /// its runner. Best-effort: a failure is traced, and the turn's end still
     /// closes every live group under its scope.
-    pub(super) async fn recover_opener_groups(&self, event_tx: &mpsc::Sender<RuntimeStreamEvent>) {
+    pub(super) async fn recover_opener_groups(&self, event_tx: &TurnObserver) {
         // Without a closing seam there is no journal of live groups to read:
         // the tier answers recovery itself (Restate) or holds nothing that
         // outlives its process.
@@ -74,7 +74,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     /// reopen the turn exactly as any checkpoint message at completion does.
     pub(super) async fn finish_opener_groups_before_completion(
         &self,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
         self.close_turn_groups(event_tx).await.map(drop)
     }
@@ -99,7 +99,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     pub(super) async fn end_opener_groups(
         &self,
         result: Result<(crate::MessageSequence, usize), RuntimeError>,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
         if let Err(error) = &result
             && error.turn_failure_cause().aborts_invocation()
@@ -123,10 +123,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         }
     }
 
-    async fn close_turn_groups(
-        &self,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
-    ) -> Result<(), RuntimeError> {
+    async fn close_turn_groups(&self, event_tx: &TurnObserver) -> Result<(), RuntimeError> {
         // Nothing to close: no cursor held, and no closing seam whose journal
         // could name a group this turn no longer holds.
         if !self.opener_state.holds_groups()

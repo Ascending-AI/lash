@@ -28,7 +28,7 @@ struct LocalTurnEffectRunner {
     /// (FIG-3586), which a code cell must run under.
     cell_replay_grammar: Option<u32>,
     messages: crate::MessageSequence,
-    event_tx: mpsc::Sender<RuntimeStreamEvent>,
+    event_tx: TurnObserver,
     cancellation: CancellationToken,
     update: Arc<std::sync::Mutex<Option<TurnEffectStateUpdate>>>,
 }
@@ -168,7 +168,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
 pub(super) fn turn_effect_executor(
     driver: &mut RuntimeTurnDriver<'_>,
     machine: &crate::TurnMachine,
-    event_tx: mpsc::Sender<RuntimeStreamEvent>,
+    event_tx: TurnObserver,
     cancellation: CancellationToken,
     scoped_effect_controller: ScopedEffectController<'static>,
 ) -> (
@@ -185,6 +185,9 @@ pub(super) fn turn_effect_executor(
     let owned_driver = RuntimeTurnDriver {
         session: driver.session.clone_for_effect(),
         policy: driver.policy.clone(),
+        // A step body commits nothing: whatever it would record is dropped
+        // with this copy, and the turn's content rides its recorded outcome.
+        recorded_assembly: RecordedTurnAssembly::new(),
         host: driver.host.clone(),
         scoped_effect_controller,
         session_id: driver.session_id.clone(),

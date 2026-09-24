@@ -5,7 +5,7 @@ impl RuntimeTurnDriver<'_> {
         &self,
         completed: Vec<crate::sansio::CompletedToolCall>,
         protocol_iteration: usize,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
         let (tool_event_tx, mut tool_event_rx) =
             tokio::sync::mpsc::channel::<SessionStreamEvent>(64);
@@ -13,13 +13,13 @@ impl RuntimeTurnDriver<'_> {
         let runtime_event_tx = event_tx.clone();
         let tool_event_forwarder = crate::task::spawn(async move {
             while let Some(event) = tool_event_rx.recv().await {
-                send_session_event(&runtime_event_tx, event).await;
+                runtime_event_tx.session(event);
             }
         });
         let runtime_event_tx = event_tx.clone();
         let turn_event_forwarder = crate::task::spawn(async move {
             while let Some(event) = turn_event_rx.recv().await {
-                let _ = runtime_event_tx.send(RuntimeStreamEvent::Turn(event)).await;
+                runtime_event_tx.publish(RuntimeStreamEvent::Turn(event));
             }
         });
         let context = match self.execution_context(
@@ -57,7 +57,7 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         calls: Vec<crate::sansio::PendingToolCall>,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<Vec<crate::sansio::CompletedToolCall>, RuntimeEffectControllerError> {
         let (tool_event_tx, mut tool_event_rx) =
@@ -66,13 +66,13 @@ impl RuntimeTurnDriver<'_> {
         let runtime_event_tx = event_tx.clone();
         let tool_event_forwarder = crate::task::spawn(async move {
             while let Some(event) = tool_event_rx.recv().await {
-                send_session_event(&runtime_event_tx, event).await;
+                runtime_event_tx.session(event);
             }
         });
         let runtime_event_tx = event_tx.clone();
         let turn_event_forwarder = crate::task::spawn(async move {
             while let Some(event) = turn_event_rx.recv().await {
-                let _ = runtime_event_tx.send(RuntimeStreamEvent::Turn(event)).await;
+                runtime_event_tx.publish(RuntimeStreamEvent::Turn(event));
             }
         });
         let prepare_context = self

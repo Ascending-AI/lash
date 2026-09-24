@@ -9,7 +9,6 @@ use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::{ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFacadeOps};
 use lash_sansio::core_support::*;
-use std::pin::Pin;
 
 mod accept;
 mod commit;
@@ -47,13 +46,11 @@ pub use queued_work::{
 pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
 pub use resident_session::ResidentSessionState;
 
-/// The pair of sinks every turn phase writes to.
-///
-/// Bundled so the phase context structs carry one field instead of two
-/// adjacent trait-object references that transpose silently.
+/// What every turn phase publishes through: the logical turn's observer,
+/// whose host end [`drive_logical_turn`](LashRuntime::drive_logical_turn)
+/// publishes to the host sinks outside the drive.
 pub(in crate::runtime) struct TurnSinks<'sinks> {
-    pub(in crate::runtime) events: &'sinks dyn EventSink,
-    pub(in crate::runtime) turn_events: &'sinks dyn TurnActivitySink,
+    pub(in crate::runtime) observer: &'sinks TurnObserver,
 }
 
 /// The session-execution lease a turn phase runs under, together with the
@@ -318,14 +315,13 @@ pub(in crate::runtime) async fn emit_queued_work_started_to_sink(
     .await;
 }
 
-pub(in crate::runtime) async fn send_queued_work_started_event(
-    event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+pub(in crate::runtime) fn send_queued_work_started_event(
+    event_tx: &TurnObserver,
     boundary: crate::QueuedWorkClaimBoundary,
     claim: &crate::QueuedWorkClaim,
     causes: Vec<crate::TurnCause>,
 ) {
-    send_turn_activity(
-        event_tx,
+    event_tx.activity(
         TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
         TurnEvent::QueuedWorkStarted {
             boundary,
@@ -335,8 +331,7 @@ pub(in crate::runtime) async fn send_queued_work_started_event(
                 .collect(),
             causes,
         },
-    )
-    .await;
+    );
 }
 
 trait TypedTurnPhase {
@@ -453,10 +448,10 @@ struct TerminalDiagnostic<'a> {
 /// The order is fixed and load-bearing for host transcripts: the optional
 /// diagnostic's session `Error` event (with its turn activity emitted in
 /// between), then `TurnOutcome::Stopped(stop)`, then `Done`. Every session
-/// event is recorded on `assembler` in emission order so the assembled turn
-/// matches what the host streamed.
+/// event is recorded on `recorded_assembly` as it is written, so the committed
+/// turn carries the same terminal facts the host streamed.
 async fn emit_terminal_sequence(
-    assembler: &mut TurnAssembler,
+    recorded_assembly: &mut RecordedTurnAssembly,
     events: &dyn EventSink,
     diagnostic: Option<TerminalDiagnostic<'_>>,
     stop: TurnStop,
@@ -474,7 +469,7 @@ async fn emit_terminal_sequence(
                 provider_failure_kind: None,
             }),
         };
-        assembler.push(&error_event);
+        recorded_assembly.record(&error_event);
         let activity = TurnActivity::independent(TurnEvent::Error {
             message: diagnostic.message,
         });
@@ -491,25 +486,27 @@ async fn emit_terminal_sequence(
     let outcome_event = SessionStreamEvent::TurnOutcome {
         outcome: TurnOutcome::Stopped(stop),
     };
-    assembler.push(&outcome_event);
+    recorded_assembly.record(&outcome_event);
     emit_session_event_to_sink(events, outcome_event).await;
-    assembler.push(&SessionStreamEvent::Done);
+    recorded_assembly.record(&SessionStreamEvent::Done);
     emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
 }
 
-struct TurnScopedActivitySink<'a> {
-    turn_id: TurnId,
-    inner: &'a dyn TurnActivitySink,
-}
-
-#[async_trait::async_trait]
-impl TurnActivitySink for TurnScopedActivitySink<'_> {
-    fn is_noop(&self) -> bool {
-        self.inner.is_noop()
-    }
-
-    async fn emit(&self, activity: TurnActivity) {
-        self.inner.emit_for_turn(&self.turn_id, activity).await;
+/// Publish one observation to its host sink, addressing an activity to its
+/// physical turn when it has one.
+pub(in crate::runtime) async fn publish_observation(
+    events: &dyn EventSink,
+    turn_events: &dyn TurnActivitySink,
+    observation: Observation,
+) {
+    match observation.event {
+        RuntimeStreamEvent::Session(event) => emit_session_event_to_sink(events, event).await,
+        RuntimeStreamEvent::Turn(activity) => match observation.turn {
+            Some(turn_id) => {
+                emit_turn_activity_to_sink_for_turn(turn_events, &turn_id, activity).await;
+            }
+            None => emit_turn_activity_to_sink(turn_events, activity).await,
+        },
     }
 }
 
@@ -527,39 +524,6 @@ async fn publish_terminal_after_commit(
             turn_id = turn_id.as_str(),
             "turn committed but terminal publication failed"
         );
-    }
-}
-
-struct RuntimeStreamEventPump<'pump> {
-    assembler: &'pump mut TurnAssembler,
-    events: &'pump dyn EventSink,
-    turn_events: &'pump dyn TurnActivitySink,
-}
-
-impl RuntimeStreamEventPump<'_> {
-    async fn emit(&mut self, event: RuntimeStreamEvent) {
-        emit_runtime_stream_event_to_sinks(self.events, self.turn_events, event, self.assembler)
-            .await;
-    }
-}
-
-async fn emit_runtime_stream_event_to_sinks(
-    events: &dyn EventSink,
-    turn_events: &dyn TurnActivitySink,
-    event: RuntimeStreamEvent,
-    assembler: &mut TurnAssembler,
-) {
-    match event {
-        RuntimeStreamEvent::Session(event) => {
-            assembler.push(&event);
-            emit_session_event_to_sink(events, event).await;
-        }
-        RuntimeStreamEvent::Turn(activity) => {
-            if matches!(activity.event, TurnEvent::CodeBlockCompleted { .. }) {
-                assembler.note_code_execution();
-            }
-            emit_turn_activity_to_sink(turn_events, activity).await;
-        }
     }
 }
 

@@ -31,10 +31,7 @@ impl LashRuntime {
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let TurnPrepareContext {
             mut input,
-            sinks: TurnSinks {
-                events,
-                turn_events,
-            },
+            sinks: TurnSinks { observer },
             scoped_effect_controller,
             cancel,
             queued_claims,
@@ -117,21 +114,21 @@ impl LashRuntime {
             Ok(items) => items,
             Err(e) => {
                 self.state.last_prompt_usage = None;
-                let mut assembler = TurnAssembler::default();
+                let mut recorded_assembly = RecordedTurnAssembly::default();
                 let trace_turn_id = input
                     .trace_turn_id
                     .clone()
                     .expect("turn id is bound from the execution scope before validation");
                 emit_terminal_sequence(
-                    &mut assembler,
-                    events,
+                    &mut recorded_assembly,
+                    observer,
                     Some(TerminalDiagnostic {
                         kind: TerminalDiagnosticKind::InputValidation,
                         code: Some(crate::TurnFailureCode::InvalidTurnInput.into()),
                         message: e,
                         retryable: Some(false),
                         activity: TerminalActivityTarget::UnscopedSink {
-                            sink: turn_events,
+                            sink: observer,
                             turn_id: &trace_turn_id,
                         },
                     }),
@@ -181,14 +178,13 @@ impl LashRuntime {
                 return Box::pin(self.finish_turn(TurnCommitContext {
                     finish: TurnFinishInput {
                         turn_pipeline,
-                        assembler,
+                        recorded_assembly,
                         new_messages: messages,
                         policy: self.state.effective_policy().clone(),
                         turn_index,
                         trace_turn_id,
                     },
                     claims: &claims,
-                    events,
                     scoped_effect_controller: &scoped_effect_controller,
                     cancel_state: &cancel,
                     lease: TurnLeaseScope {
@@ -196,6 +192,7 @@ impl LashRuntime {
                         release_policy: session_execution_lease_release_policy,
                     },
                     turn_control: &turn_control,
+                    observer,
                 }))
                 .await;
             }
@@ -303,7 +300,7 @@ impl LashRuntime {
         }
         if !initial_turn_input_applications.is_empty() {
             emit_turn_activity_to_sink_for_turn(
-                turn_events,
+                observer,
                 &trace_turn_id,
                 TurnActivity::independent(TurnEvent::QueuedInputAccepted {
                     applications: initial_turn_input_applications,
@@ -435,10 +432,7 @@ impl LashRuntime {
                     trace_turn_id,
                     turn_index,
                 },
-                sinks: TurnSinks {
-                    events,
-                    turn_events,
-                },
+                sinks: TurnSinks { observer },
                 scoped_effect_controller,
                 cancel,
                 initial_queue_claims: queued_claims,

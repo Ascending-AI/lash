@@ -1,12 +1,12 @@
 use super::*;
 
-pub(super) async fn emit_plugin_runtime_events_runtime(
+pub(super) fn emit_plugin_runtime_events_runtime(
     forwarder: &mut ProviderHostForwarder<'_>,
     plugin_id: &str,
     events: Vec<crate::PluginRuntimeEvent>,
 ) {
     for event in crate::plugin::plugin_runtime_session_events(plugin_id, events) {
-        forwarder.send_semantic_session_event(event).await;
+        forwarder.send_semantic_session_event(event);
     }
 }
 
