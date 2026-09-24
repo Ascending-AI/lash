@@ -643,7 +643,7 @@ The shipped static families are:
   program at all.
 - URL: `canParse(input[, base])`.
 
-The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
+The shipped instance names are `at`, `concat`, `copyWithin`, `charAt`, `charCodeAt`,
 `codePointAt`, `append`, `add`, `clear`, `delete`, `entries`, `exec`, `endsWith`, `filter`, `fill`,
 `find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `forEach`,
 `get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `match`, `matchAll`,
@@ -657,10 +657,11 @@ The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
 `symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`,
 `toJSON`, `getTime`, `getUTCFullYear`, `getUTCMonth`, `getUTCDate`,
 `getUTCDay`, `getUTCHours`, `getUTCMinutes`, `getUTCSeconds`,
-`getUTCMilliseconds`, and `toISOString`. The signature table in
+`getUTCMilliseconds`, `toISOString`, and `toUTCString`. The signature table in
 `src/signatures.rs` gives every optional form.
 
-`Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, `MAX_VALUE`, and
+`Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, `MAX_VALUE`,
+`MIN_VALUE`, `POSITIVE_INFINITY`, `NEGATIVE_INFINITY`, and
 `NaN` are accepted constants. Array callbacks run synchronously and sequentially inside
 the durable VM callback driver. `sort` is stable, mutates and returns its
 receiver; `toSorted`, `toReversed`, `toSpliced`, and `with` return fresh arrays.

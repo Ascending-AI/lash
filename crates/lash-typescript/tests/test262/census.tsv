@@ -228,6 +228,7 @@ typescript	closed-shape-field-guard	rejected	TS_LINK_ERROR	const o = { a: 1 }; c
 typescript	comma-operator	rejected	TS_SEQUENCE_UNSUPPORTED	const x = (1, 2);
 typescript	cyclic-heap-value	rejected	TS_CYCLIC_VALUE_UNSUPPORTED	const a = []; a.push(a);
 typescript	date-mutation	rejected	TS_DATE_IMMUTABLE	const d = new Date(0); d.setUTCHours(1);
+typescript	date-parse-non-iso	rejected	TS_DATE_PARSE_NON_ISO	finish(Date.parse('March 7, 2024'));
 typescript	date-string-coercion	accepted	-	-
 typescript	debugger	rejected	TS_DEBUGGER_UNSUPPORTED	debugger;
 typescript	decorators	rejected	TS_DECORATOR_UNSUPPORTED	@dec class A { }

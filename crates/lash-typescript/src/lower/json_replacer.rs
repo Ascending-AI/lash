@@ -458,6 +458,7 @@ impl Lowerer {
         ]);
         let internalize_fn = LashExpr::Function(Box::new(FunctionExpr {
             name: Some(internalize.as_str().into()),
+            js_name: None,
             params: vec![holder.as_str().into(), key.as_str().into()],
             captures: vec![reviver_name.as_str().into()],
             body: Box::new(internalize_body),
@@ -482,6 +483,7 @@ impl Lowerer {
                 &worker,
                 LashExpr::Function(Box::new(FunctionExpr {
                     name: None,
+                    js_name: None,
                     params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                     captures: vec![parsed.as_str().into(), internalize.as_str().into()],
                     body: Box::new(worker_body),
