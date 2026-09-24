@@ -43,7 +43,7 @@ impl AssignTarget {
     fn child_expressions(&self) -> Box<dyn Iterator<Item = &Expr> + '_> {
         let mut children = Vec::new();
         match self {
-            AssignTarget::Ident(_) => {}
+            AssignTarget::Ident(_) | AssignTarget::ParenIdent(_) => {}
             AssignTarget::Member { object, property } => {
                 children.push(object.as_ref());
                 if let MemberProperty::Index(index) = property {
@@ -53,6 +53,24 @@ impl AssignTarget {
             AssignTarget::Pattern(pattern) => children.extend(pattern.child_expressions()),
         }
         Box::new(children.into_iter())
+    }
+
+    /// The binding an identifier target writes, for `x` and `(x)` alike.
+    pub(crate) fn ident(&self) -> Option<&str> {
+        match self {
+            AssignTarget::Ident(name) | AssignTarget::ParenIdent(name) => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The name a NamedEvaluation confers through this target: a bare `x`
+    /// names the anonymous function it is assigned; a covered `(x)` is no
+    /// IdentifierReference and names nothing.
+    pub(crate) fn named_evaluation(&self) -> Option<&str> {
+        match self {
+            AssignTarget::Ident(name) => Some(name.as_str()),
+            _ => None,
+        }
     }
 }
 

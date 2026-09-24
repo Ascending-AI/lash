@@ -1,0 +1,11 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3703	1	accept	"(() => { var v = 1; v += 2; v++; return v; })()"	"4"	-
+FIG-3703	2	accept	"((p) => { p += 3; return p; })(1)"	"4"	-
+FIG-3703	3	accept	"(() => { try { null.x; } catch (e) { e = 5; return e; } })()"	"5"	-
+FIG-3703	4	accept	"(() => { var x = 1; (x) = 9; return x; })()"	"9"	-
+FIG-3703	5	accept	"(() => { var v = 1; (v)++; return v; })()"	"2"	-
+FIG-3703	6	accept	"(() => { var f; f = function () {}; var g; (g) = function () {}; return `${f.name}|${g.name}`; })()"	"f|"	-
+FIG-3703	7	accept	"(() => { const seen = i; for (var i = 0; i < 3; i++) {} return `${seen}|${i}`; })()"	"undefined|3"	-
+FIG-3703	8	accept	"(() => { var undefined = 4; return undefined; })()"	"4"	-
+FIG-3703	9	accept	"(() => { var NaN = 6; return NaN; })()"	"6"	-
+FIG-3703	10	accept	"(() => { if (true) { var x = 7; } x = 8; return x; })()"	"8"	-

@@ -109,6 +109,14 @@ fn a_closure_reading_a_binding_assigned_after_it_was_created_rejects() {
             "const fs: any[] = []; for (let i = 0; i < 3; i++) { fs.push(() => i); i = i + 1; } finish(JSON.stringify(fs.map((f) => f())));",
             "i",
         ),
+        // A `for (var i ...)` head is one shared slot, not a per-iteration
+        // binding, so a body closure reads the value the loop leaves, not its
+        // own iteration's. Would answer [0,1,2]; Node [3,3,3]. (FIG-3703 made
+        // the `var` head compile at all.)
+        (
+            "const fs: any[] = []; for (var i = 0; i < 3; i++) { fs.push(() => i); } finish(JSON.stringify(fs.map((f) => f())));",
+            "i",
+        ),
         // Answered [1,2]; Node [9,9].
         (
             "const fs: any[] = []; for (let v of [1, 2]) { fs.push(() => v); v = 9; } finish(JSON.stringify(fs.map((f) => f())));",
@@ -157,6 +165,10 @@ fn a_closure_assigning_a_captured_binding_rejects() {
     let cases = [
         "let n = 0; const f = () => { n = 5; }; f(); finish(n);",
         "let seen = 0; function f(): number { try { return 1; } finally { seen = 1; } } f(); finish(seen);",
+        // FIG-3703: a `var` and a parameter are mutable slots too — assigning
+        // either from an inner function is the same refusal.
+        "var n = 0; const f = () => { n = 5; }; f(); finish(n);",
+        "const f = (p: number) => () => { p = 5; }; finish(f(0)());",
     ];
     for source in cases {
         refused(source);

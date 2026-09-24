@@ -369,6 +369,7 @@ impl<'p> Printer<'p> {
             } => {
                 if let Some((target, init)) = var_initialization(expression)
                     && vars.contains(target.root.as_str())
+                    && !suppresses_named_evaluation(target, init)
                 {
                     return Ok(format!(
                         "{prefix}var {} = {};\n",
@@ -417,10 +418,20 @@ impl<'p> Printer<'p> {
                 ))
             }
             expression if let Some(classic) = classic_for(expression) => {
+                // A `var` head keeps its `var` (the binding is not one a bare
+                // `for (i = ..)` may have introduced), an already-bound name
+                // is assigned, and anything else is the loop's own `let`.
+                let declaration = if vars.contains(classic.binding) {
+                    "var "
+                } else if bound.iter().any(|name| name == classic.binding) {
+                    ""
+                } else {
+                    "let "
+                };
                 let mut inner = bound.clone();
                 inner.push(classic.binding.to_string());
                 Ok(format!(
-                    "{prefix}for (let {binding} = {start}; {binding} < {end}; {binding}++) {}\n",
+                    "{prefix}for ({declaration}{binding} = {start}; {binding} < {end}; {binding}++) {}\n",
                     self.block(classic.body, level, &mut inner, vars)?,
                     binding = self.identifier("loop binding", classic.binding)?,
                     start = self.expression(classic.start)?,
@@ -451,19 +462,36 @@ impl<'p> Printer<'p> {
                 // declaration, and a graph carries it as the bare assign the
                 // completion unwraps to. Only `var` spells it back: the
                 // binding is not one `name = ..` may assign.
-                if target.is_simple() && vars.contains(target.root.as_str()) {
+                if target.is_simple()
+                    && vars.contains(target.root.as_str())
+                    && !suppresses_named_evaluation(target, expr)
+                {
                     return Ok(format!(
                         "{prefix}var {} = {};\n",
                         self.identifier("var binding", target.root.as_str())?,
                         self.expression(expr)?
                     ));
                 }
-                let rendered = format!(
-                    "{} = {};\n",
-                    self.assign_target(target)?,
-                    self.expression(expr)?
-                );
-                if target.is_simple() && !bound.contains(&target.root.to_string()) {
+                // NamedEvaluation names an anonymous function for a bare
+                // `name = ..` target; a function whose `js_name` is not the
+                // target's was authored `(name) = ..` and only prints so.
+                let rendered = if suppresses_named_evaluation(target, expr) {
+                    format!(
+                        "({}) = {};\n",
+                        self.assign_target(target)?,
+                        self.expression(expr)?
+                    )
+                } else {
+                    format!(
+                        "{} = {};\n",
+                        self.assign_target(target)?,
+                        self.expression(expr)?
+                    )
+                };
+                if !suppresses_named_evaluation(target, expr)
+                    && target.is_simple()
+                    && !bound.contains(&target.root.to_string())
+                {
                     bound.push(target.root.to_string());
                     // A process literal only lifts from a `const` binding, so
                     // the one binding form the lens cannot spell as `let` is
@@ -598,7 +626,11 @@ impl<'p> Printer<'p> {
         match expression {
             Expr::Assign { target, expr } => Ok(format!(
                 "{} = {}",
-                self.assign_target(target)?,
+                if suppresses_named_evaluation(target, expr) {
+                    format!("({})", self.assign_target(target)?)
+                } else {
+                    self.assign_target(target)?
+                },
                 self.expression(expr)?
             )),
             Expr::Break => Ok("break".to_string()),
@@ -1139,6 +1171,17 @@ pub(super) fn statement_block_contents(expression: &Expr) -> Vec<&Expr> {
             .filter(|statement| !matches!(statement, Expr::Undefined))
             .collect(),
     }
+}
+
+/// Whether `name = value` would not re-lower to this assignment: a bare
+/// identifier target is a NamedEvaluation position, so it names an anonymous
+/// function after the target — an assigned anonymous function whose `js_name`
+/// is not the target's was authored `(name) = ..` and keeps its parentheses.
+fn suppresses_named_evaluation(target: &AssignTarget, expr: &Expr) -> bool {
+    target.is_simple()
+        && matches!(expr, Expr::Function(function)
+            if function.name.is_none()
+                && function.js_name.as_deref() != Some(target.root.as_str()))
 }
 
 /// The `var name = init` shape: a completion list whose one visible statement

@@ -321,6 +321,11 @@ pub(crate) enum OptionalOperation {
 #[derive(Clone, Debug)]
 pub(crate) enum AssignTarget {
     Ident(String),
+    /// A parenthesized identifier target — `(x) = 1`. ECMA-262 covers the
+    /// parentheses away, so it assigns `x`; but a covered name is not an
+    /// IdentifierReference, so an anonymous function assigned to it gets no
+    /// NamedEvaluation name.
+    ParenIdent(String),
     Member {
         object: Box<Expr>,
         property: MemberProperty,
@@ -1632,11 +1637,25 @@ impl Adapter<'_> {
                 Ok(AssignTarget::Ident(self.identifier(&name.id)?))
             }
             swc::AssignTarget::Simple(swc::SimpleAssignTarget::Member(member)) => {
-                match self.convert_member(member)? {
+                let Expr::Member {
+                    object, property, ..
+                } = self.convert_member(member)?
+                else {
+                    unreachable!()
+                };
+                Ok(AssignTarget::Member { object, property })
+            }
+            swc::AssignTarget::Simple(swc::SimpleAssignTarget::Paren(paren)) => {
+                match self.convert_expr(&paren.expr)? {
+                    Expr::Ident(name, _) => Ok(AssignTarget::ParenIdent(name)),
                     Expr::Member {
                         object, property, ..
                     } => Ok(AssignTarget::Member { object, property }),
-                    _ => unreachable!(),
+                    _ => Err(Diagnostic::refusal(
+                        DiagnosticCode::UnsupportedExpression,
+                        "Unsupported: this assignment target. Assign to an identifier, member, index, or destructuring pattern.",
+                        Some(source_span(paren.expr.span())),
+                    )),
                 }
             }
             swc::AssignTarget::Pat(pattern) => {

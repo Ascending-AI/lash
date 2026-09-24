@@ -231,7 +231,7 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
                 continue;
             }
         };
-        let compiled_sites = compiled_sites(&compiled);
+        let compiled_sites = compiled_sites(&compiled, subgraph);
         let mapped = mapped_sites(subgraph);
         for site in compiled_sites.difference(&mapped) {
             failures.push(format!(
@@ -266,11 +266,21 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
 
 /// The compiled sites of one entry, each with the branch arms that enclose
 /// it in the IR: a site under a compiled branch's `then` or `else` child.
-fn compiled_sites(compiled: &lashlang::CompiledProgram) -> BTreeSet<Site> {
+/// Only an `if` container's children are arms; a loop or comprehension node
+/// can carry a `Branch` site of its own when an `if` lowers inside its
+/// condition or bind (the site then projects onto the container's path), so
+/// a `Branch` kind alone does not make a node an arm parent.
+fn compiled_sites(
+    compiled: &lashlang::CompiledProgram,
+    graph: &WorkflowSubgraph,
+) -> BTreeSet<Site> {
+    let mut arm_parents = BTreeSet::new();
+    if_container_ids(graph, &mut arm_parents);
     let sites = lashlang::testing::harness::compiled_execution_sites(compiled);
     let branches = sites
         .iter()
         .filter(|site| site.node_kind == lash_sansio::ExecutionNodeKind::Branch)
+        .filter(|site| arm_parents.contains(&site.node_id))
         .map(|site| {
             (
                 site.workflow_site.owner.clone(),
@@ -303,6 +313,21 @@ fn compiled_sites(compiled: &lashlang::CompiledProgram) -> BTreeSet<Site> {
             )
         })
         .collect()
+}
+
+/// The ids of a subgraph's `if` containers: the only nodes whose children
+/// sit in branch arms.
+fn if_container_ids(graph: &WorkflowSubgraph, out: &mut BTreeSet<String>) {
+    for node in &graph.nodes {
+        if let WorkflowNodeKind::Container(container) = &node.kind {
+            if matches!(container, WorkflowContainer::If { .. }) {
+                out.insert(node.id.to_string());
+            }
+            for (_, child) in container.child_subgraphs() {
+                if_container_ids(child, out);
+            }
+        }
+    }
 }
 
 /// The trace map of one subgraph, as the trace skeleton flattens it: every
