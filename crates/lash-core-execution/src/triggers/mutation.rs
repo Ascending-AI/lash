@@ -13,13 +13,11 @@ pub fn evaluate_trigger_mutation(
             "trigger mutation evaluator received a list command".to_string(),
         ));
     }
-    let mut state = InMemoryTriggerEventState::default();
+    let mut subscriptions = BTreeMap::new();
     if let Some(record) = current {
-        state
-            .subscriptions
-            .insert(record.subscription_id.clone(), record);
+        subscriptions.insert(record.subscription_id.clone(), record);
     }
-    Ok(apply_in_memory_trigger_command(&mut state, command, now))
+    Ok(apply_trigger_command(&mut subscriptions, command, now))
 }
 
 /// Testing seam for fixture generators that must pin otherwise-random trigger identity.
@@ -34,22 +32,271 @@ pub fn evaluate_trigger_mutation_with_incarnation(
             "trigger mutation evaluator received a list command".to_string(),
         ));
     }
-    let mut state = InMemoryTriggerEventState::default();
+    let mut subscriptions = BTreeMap::new();
     if let Some(record) = current {
-        state
-            .subscriptions
-            .insert(record.subscription_id.clone(), record);
+        subscriptions.insert(record.subscription_id.clone(), record);
     }
-    Ok(apply_in_memory_trigger_command_with_incarnation(
-        &mut state,
+    Ok(apply_trigger_command_with_incarnation(
+        &mut subscriptions,
         command,
         now,
         &mut || incarnation.clone(),
     ))
 }
 
-pub(super) fn mutate_enabled(
-    state: &mut InMemoryTriggerEventState,
+/// Apply one trigger command to a subscription map keyed by subscription id.
+/// This is the shared command semantics: durable stores reach it through
+/// [`evaluate_trigger_mutation`] with the one current row as the map.
+pub(super) fn apply_trigger_command(
+    subscriptions: &mut BTreeMap<String, TriggerSubscriptionRecord>,
+    command: TriggerCommand,
+    now: u64,
+) -> TriggerEffectResult {
+    apply_trigger_command_with_incarnation(subscriptions, command, now, &mut || {
+        uuid::Uuid::new_v4().to_string()
+    })
+}
+
+fn apply_trigger_command_with_incarnation(
+    subscriptions: &mut BTreeMap<String, TriggerSubscriptionRecord>,
+    command: TriggerCommand,
+    now: u64,
+    new_incarnation: &mut dyn FnMut() -> String,
+) -> TriggerEffectResult {
+    match command {
+        TriggerCommand::List {
+            owner_scope,
+            mut filter,
+        } => {
+            filter.registrant_scope_id = Some(owner_scope.namespace());
+            let mut records = subscriptions
+                .values()
+                .filter(|record| filter.matches(record))
+                .cloned()
+                .collect::<Vec<_>>();
+            records.sort_by(|left, right| left.subscription_key.cmp(&right.subscription_key));
+            Ok(TriggerCommandOutcome::List { records })
+        }
+        TriggerCommand::Prune {
+            owner_scope,
+            actor,
+            subscription_keys,
+        } => {
+            let records = subscriptions.values().cloned().collect::<Vec<_>>();
+            let result =
+                evaluate_trigger_prune(records, owner_scope, actor, subscription_keys, now)?;
+            if let TriggerCommandOutcome::Prune { receipts } = &result {
+                for receipt in receipts {
+                    subscriptions.insert(
+                        receipt.subscription_id.clone(),
+                        receipt.record_snapshot.clone(),
+                    );
+                }
+            }
+            Ok(result)
+        }
+        TriggerCommand::Register {
+            owner_scope,
+            actor,
+            draft,
+        } => {
+            draft.validate().map_err(TriggerOperationError::from)?;
+            let subscription_id =
+                deterministic_subscription_id(&owner_scope, &draft.subscription_key);
+            let definition_fingerprint =
+                trigger_subscription_definition_fingerprint(&owner_scope, &draft);
+            if let Some(existing) = subscriptions.get(&subscription_id).cloned() {
+                if !existing.is_tombstoned()
+                    && existing.definition_fingerprint == definition_fingerprint
+                {
+                    return Ok(TriggerCommandOutcome::Mutation {
+                        receipt: Box::new(TriggerMutationReceipt::from_record(
+                            existing,
+                            TriggerMutationOutcome::Unchanged,
+                        )),
+                    });
+                }
+                return Err(subscription_conflict(
+                    &draft.subscription_key,
+                    Some(&existing),
+                    Some(definition_fingerprint),
+                    if existing.is_tombstoned() {
+                        "subscription is tombstoned; use revive"
+                    } else {
+                        "register does not replace a different definition; use update"
+                    },
+                ));
+            }
+            let record = subscription_record_from_draft(
+                owner_scope,
+                actor,
+                draft,
+                subscription_id.clone(),
+                new_incarnation(),
+                1,
+                definition_fingerprint,
+                true,
+                now,
+                now,
+            );
+            subscriptions.insert(subscription_id, record.clone());
+            Ok(TriggerCommandOutcome::Mutation {
+                receipt: Box::new(TriggerMutationReceipt::from_record(
+                    record,
+                    TriggerMutationOutcome::Created,
+                )),
+            })
+        }
+        TriggerCommand::Update {
+            owner_scope,
+            actor,
+            subscription_key,
+            mut draft,
+            expected_revision,
+        } => {
+            draft.subscription_key.clone_from(&subscription_key);
+            draft.validate().map_err(TriggerOperationError::from)?;
+            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
+            let requested_hash = trigger_subscription_definition_fingerprint(&owner_scope, &draft);
+            let Some(existing) = subscriptions.get(&subscription_id).cloned() else {
+                return Err(subscription_conflict(
+                    &subscription_key,
+                    None,
+                    Some(requested_hash),
+                    "subscription does not exist",
+                ));
+            };
+            ensure_live_revision(&existing, expected_revision, Some(requested_hash.clone()))?;
+            let next_revision = next_trigger_revision(&existing)?;
+            let record = subscription_record_from_draft(
+                owner_scope,
+                actor,
+                draft,
+                subscription_id.clone(),
+                existing.incarnation,
+                next_revision,
+                requested_hash,
+                existing.lifecycle.enabled(),
+                existing.created_at_ms,
+                now,
+            );
+            subscriptions.insert(subscription_id, record.clone());
+            Ok(TriggerCommandOutcome::Mutation {
+                receipt: Box::new(TriggerMutationReceipt::from_record(
+                    record,
+                    TriggerMutationOutcome::Updated,
+                )),
+            })
+        }
+        TriggerCommand::Enable {
+            owner_scope,
+            actor,
+            subscription_key,
+            expected_revision,
+        } => mutate_enabled(
+            subscriptions,
+            owner_scope,
+            actor,
+            subscription_key,
+            expected_revision,
+            true,
+            now,
+        ),
+        TriggerCommand::Disable {
+            owner_scope,
+            actor,
+            subscription_key,
+            expected_revision,
+        } => mutate_enabled(
+            subscriptions,
+            owner_scope,
+            actor,
+            subscription_key,
+            expected_revision,
+            false,
+            now,
+        ),
+        TriggerCommand::Delete {
+            owner_scope,
+            actor,
+            subscription_key,
+            expected_revision,
+        } => {
+            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
+            let Some(existing) = subscriptions.get_mut(&subscription_id) else {
+                return Err(subscription_conflict(
+                    &subscription_key,
+                    None,
+                    None,
+                    "subscription does not exist",
+                ));
+            };
+            ensure_live_revision(existing, expected_revision, None)?;
+            let next_revision = next_trigger_revision(existing)?;
+            existing.registrant = actor;
+            existing.tombstone(now);
+            existing.revision = next_revision;
+            existing.updated_at_ms = now;
+            Ok(TriggerCommandOutcome::Mutation {
+                receipt: Box::new(TriggerMutationReceipt::from_record(
+                    existing.clone(),
+                    TriggerMutationOutcome::Deleted,
+                )),
+            })
+        }
+        TriggerCommand::Revive {
+            owner_scope,
+            actor,
+            subscription_key,
+            mut draft,
+            expected_revision,
+        } => {
+            draft.subscription_key.clone_from(&subscription_key);
+            draft.validate().map_err(TriggerOperationError::from)?;
+            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
+            let requested_hash = trigger_subscription_definition_fingerprint(&owner_scope, &draft);
+            let Some(existing) = subscriptions.get(&subscription_id).cloned() else {
+                return Err(subscription_conflict(
+                    &subscription_key,
+                    None,
+                    Some(requested_hash),
+                    "subscription does not exist; use register",
+                ));
+            };
+            if !existing.is_tombstoned() || existing.revision != expected_revision {
+                return Err(subscription_conflict(
+                    &subscription_key,
+                    Some(&existing),
+                    Some(requested_hash),
+                    "revive requires the current tombstone revision",
+                ));
+            }
+            let next_revision = next_trigger_revision(&existing)?;
+            let record = subscription_record_from_draft(
+                owner_scope,
+                actor,
+                draft,
+                subscription_id.clone(),
+                new_incarnation(),
+                next_revision,
+                requested_hash,
+                true,
+                existing.created_at_ms,
+                now,
+            );
+            subscriptions.insert(subscription_id, record.clone());
+            Ok(TriggerCommandOutcome::Mutation {
+                receipt: Box::new(TriggerMutationReceipt::from_record(
+                    record,
+                    TriggerMutationOutcome::Revived,
+                )),
+            })
+        }
+    }
+}
+
+fn mutate_enabled(
+    subscriptions: &mut BTreeMap<String, TriggerSubscriptionRecord>,
     owner_scope: TriggerOwnerScope,
     actor: crate::ProcessOriginator,
     subscription_key: String,
@@ -58,7 +305,7 @@ pub(super) fn mutate_enabled(
     now: u64,
 ) -> TriggerEffectResult {
     let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
-    let Some(existing) = state.subscriptions.get_mut(&subscription_id) else {
+    let Some(existing) = subscriptions.get_mut(&subscription_id) else {
         return Err(subscription_conflict(
             &subscription_key,
             None,
@@ -92,7 +339,7 @@ pub(super) fn mutate_enabled(
     })
 }
 
-pub(super) fn ensure_live_revision(
+fn ensure_live_revision(
     existing: &TriggerSubscriptionRecord,
     expected_revision: u64,
     requested_hash: Option<String>,
@@ -112,7 +359,7 @@ pub(super) fn ensure_live_revision(
     Ok(())
 }
 
-pub(super) fn subscription_conflict(
+fn subscription_conflict(
     subscription_key: &str,
     existing: Option<&TriggerSubscriptionRecord>,
     requested_definition_fingerprint: Option<String>,
@@ -129,7 +376,7 @@ pub(super) fn subscription_conflict(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn subscription_record_from_draft(
+fn subscription_record_from_draft(
     owner_scope: TriggerOwnerScope,
     actor: crate::ProcessOriginator,
     draft: TriggerSubscriptionDraft,
