@@ -765,7 +765,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         "a rejected checkpoint must not emit live application evidence"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_turn_input_applications(
+        lash_core::store::SessionCommitStore::list_turn_input_applications(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -932,7 +932,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
         "a failed checkpoint attachment must not emit live application evidence"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_turn_input_applications(
+        lash_core::store::SessionCommitStore::list_turn_input_applications(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -1252,7 +1252,7 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         turn_id,
     )
     .await;
-    let first_applications = lash_core::store::TurnInputStore::list_turn_input_applications(
+    let first_applications = lash_core::store::SessionCommitStore::list_turn_input_applications(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -1290,7 +1290,7 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         "redrive must retain the journaled acceptance identity"
     );
     assert_eq!(
-        lash_core::store::TurnInputStore::list_turn_input_applications(
+        lash_core::store::SessionCommitStore::list_turn_input_applications(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -1350,7 +1350,7 @@ pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driv
         "the accepted row stays with its holder, neither withdrawn nor re-admitted: {pending:?}"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_turn_input_applications(
+        lash_core::store::SessionCommitStore::list_turn_input_applications(
             store.as_ref(),
             &SessionId::from("root"),
         )

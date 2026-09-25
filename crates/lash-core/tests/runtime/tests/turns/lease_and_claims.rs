@@ -2273,7 +2273,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         .expect("the replayed direct turn exposes its journaled acceptance");
     assert_ne!(acceptance.input_id, late_input_id);
 
-    let after_replacement = lash_core::store::TurnInputStore::list_turn_input_applications(
+    let after_replacement = lash_core::store::SessionCommitStore::list_turn_input_applications(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -2313,7 +2313,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         "the late input must be claimable by the next turn, not stranded"
     );
 
-    let settled = lash_core::store::TurnInputStore::list_turn_input_applications(
+    let settled = lash_core::store::SessionCommitStore::list_turn_input_applications(
         store.as_ref(),
         &SessionId::from("root"),
     )

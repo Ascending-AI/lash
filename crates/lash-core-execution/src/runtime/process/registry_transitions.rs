@@ -24,7 +24,7 @@
 
 use crate::ProcessId;
 use crate::plugin::PluginError;
-use crate::store::session_execution_lease::LeaseOwnerIdentity;
+use crate::store::LeaseOwnerIdentity;
 
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWakeDelivery};
 use super::model::{PROCESS_LEASE_SCHEMA_VERSION, ProcessLease, ProcessRef};

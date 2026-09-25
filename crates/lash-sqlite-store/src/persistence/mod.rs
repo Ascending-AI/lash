@@ -1,6 +1,9 @@
 //! The [`RuntimePersistence`] capability-segment implementations for
-//! [`Store`]: [`SessionCommitStore`], [`SessionExecutionLeaseStore`],
-//! [`QueuedWorkStore`], [`TurnInputStore`], and [`StoreMaintenance`].
+//! [`Store`]: [`SessionCommitStore`],
+//! [`SessionIngressStore`](lash_core_execution::store::SessionIngressStore),
+//! [`DriveEpochStore`](lash_core_execution::store::DriveEpochStore), [`QueuedRunStore`], [`TurnCancelStore`],
+//! [`StoreMaintenance`], and the retiring [`SessionExecutionLeaseStore`],
+//! [`QueuedWorkStore`] and [`TurnInputStore`].
 //!
 //! This is the tokio-rusqlite port of the prior store's `persistence.rs`. The
 //! public surface is byte-for-byte the prior store async trait: identical method
@@ -176,6 +179,8 @@ use queued_run_selection::*;
 mod session_commit;
 mod session_execution_lease;
 mod session_ingress;
+mod turn_cancel;
+mod turn_commit_reads;
 mod turn_input;
 pub(crate) mod turn_park_feed;
 

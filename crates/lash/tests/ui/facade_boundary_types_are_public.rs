@@ -12,20 +12,23 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    AdmissionId, CheckpointKind, DriveEpochSeal, DriveEpochStore, GcReport, GraphAppend,
-    LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceResult,
-    OperationId, OrphanedTurnInputScope, PendingTurnInputDraft, PersistedSessionConfig,
-    PersistedSessionRead, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
-    QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
-    RuntimeCommitReceipt, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
-    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SelectedQueuedWorkClaimOutcome,
-    SessionCheckpoint, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
-    SessionHeadMeta, SessionHeadPayload, SessionMeta, SessionNodeRecord, StoreError,
-    StoreMaintenance, StoredDriveEpoch, TurnInputCheckpointBoundary, TurnInputClaim,
-    TurnInputIngress, TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
-    load_persisted_session_state,
+    AdmissionId, CheckpointKind, ClaimMode, DriveEpochSeal, DriveEpochStore, DriveFence, GcReport,
+    GraphAppend, IngressClaim, IngressClaimPolicy, IngressEnqueueOutcome, IngressItemDraft,
+    IngressItemRead, IngressReclaimOutcome, IngressSuffixWithdrawOutcome, IngressWithdrawReceipt,
+    IngressWithdrawTarget, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure,
+    MaintenanceRefusal, MaintenanceResult, OperationId, OrphanedTurnInputScope,
+    PendingTurnInputDraft, PersistedSessionConfig, PersistedSessionRead, QueuedRunStore,
+    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
+    QueuedWorkClaimOutcome, QueuedWorkClaimPolicy, QueuedWorkEnqueueOutcome, QueuedWorkStore,
+    RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence,
+    RuntimeSessionState, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+    SelectedQueuedWorkClaimOutcome, SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta,
+    SessionHeadPayload, SessionIngressStore, SessionMeta, SessionNodeRecord, StoreError,
+    StoreMaintenance, StoredDriveEpoch, TurnCancelStore, TurnInputCheckpointBoundary,
+    TurnInputClaim, TurnInputIngress, TurnInputState, TurnInputStore, VacuumReport,
+    commit_runtime_state_verified, load_persisted_session_state,
 };
 use lash::plugins::{
     AfterToolCallHook, AfterToolCallPluginDirective, BeforeToolCallHook,
@@ -105,6 +108,10 @@ impl SessionCommitStore for FacadeStore {
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
         Ok(None)
     }
+
+    async fn turn_is_committed(&self, _address: &lash::TurnAddress) -> Result<bool, StoreError> {
+        Ok(false)
+    }
 }
 
 #[async_trait]
@@ -170,38 +177,6 @@ impl SessionExecutionLeaseStore for FacadeStore {
 // (and its signature vocabulary) is nameable through the facade.
 #[async_trait]
 impl TurnInputStore for FacadeStore {
-    async fn validate_turn_cancellation_binding(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
-        _binding_id: &str,
-        _admitted_scope: &lash::runtime::ExecutionScope,
-    ) -> Result<(), StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn authorize_turn_cancel_closure(
-        &self,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
-        _authorization: &lash::TurnCancelClosureAuthorization,
-    ) -> Result<lash::TurnCancelClosureAuthorizationOutcome, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn pending_turn_cancel_closures(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &SessionExecutionLeaseAuthority,
-        _binding_id: &str,
-        _admitted_scope: &lash::runtime::ExecutionScope,
-    ) -> Result<Vec<lash::TurnCancelClosureAuthorization>, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn turn_is_committed(&self, _address: &lash::TurnAddress) -> Result<bool, StoreError> {
-        Ok(false)
-    }
-
     async fn enqueue_pending_turn_input(
         &self,
         _input: PendingTurnInputDraft,
@@ -280,6 +255,37 @@ impl TurnInputStore for FacadeStore {
 }
 
 #[async_trait]
+impl TurnCancelStore for FacadeStore {
+    async fn validate_turn_cancellation_binding(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+        _admitted_scope: &lash::runtime::ExecutionScope,
+    ) -> Result<(), StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _authorization: &lash::TurnCancelClosureAuthorization,
+    ) -> Result<lash::TurnCancelClosureAuthorizationOutcome, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+        _admitted_scope: &lash::runtime::ExecutionScope,
+    ) -> Result<Vec<lash::TurnCancelClosureAuthorization>, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+}
+
+#[async_trait]
 impl DriveEpochStore for FacadeStore {
     async fn seal_drive_epoch(
         &self,
@@ -291,6 +297,75 @@ impl DriveEpochStore for FacadeStore {
     }
 
     async fn drive_epoch(&self, _session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+}
+
+#[async_trait]
+impl SessionIngressStore for FacadeStore {
+    async fn enqueue_ingress_item(
+        &self,
+        _draft: IngressItemDraft,
+    ) -> Result<IngressEnqueueOutcome, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn claim_session_commands(
+        &self,
+        _fence: &DriveFence,
+    ) -> Result<Option<IngressClaim>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn claim_turn_items(
+        &self,
+        _fence: &DriveFence,
+        _mode: ClaimMode,
+        _policy: &IngressClaimPolicy,
+    ) -> Result<Option<IngressClaim>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn reclaim_ingress_claim(
+        &self,
+        _fence: &DriveFence,
+        _claim: &IngressClaim,
+    ) -> Result<IngressReclaimOutcome, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn abandon_ingress_claim(
+        &self,
+        _fence: &DriveFence,
+        _claim: &IngressClaim,
+    ) -> Result<(), StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn withdraw_ingress_items(
+        &self,
+        _session_id: &SessionId,
+        _targets: &[IngressWithdrawTarget],
+    ) -> Result<Vec<IngressWithdrawReceipt>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn withdraw_ingress_suffix(
+        &self,
+        _session_id: &SessionId,
+        _anchor: &IngressWithdrawTarget,
+    ) -> Result<IngressSuffixWithdrawOutcome, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn list_ingress_items(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<IngressItemRead>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn vacuum_session_ingress(&self, _session_id: &SessionId) -> Result<u64, StoreError> {
         unreachable!("fixture runs no session drive")
     }
 }
@@ -308,35 +383,6 @@ impl QueuedWorkStore for FacadeStore {
     ) -> std::result::Result<lash_core::store::SelectedQueuedRun, lash_core::StoreError> {
         unreachable!("fixture does not serve queued runs")
     }
-    async fn pending_queued_run(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
-    {
-        unreachable!("fixture does not serve queued runs")
-    }
-    async fn queued_run(
-        &self,
-        _scope: &lash_core::ExecutionScope,
-    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
-    {
-        unreachable!("fixture does not serve queued runs")
-    }
-    async fn settle_queued_run(
-        &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
-        _settlement: lash_core::store::QueuedRunCommit,
-    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
-        unreachable!("fixture does not serve queued runs")
-    }
-    async fn begin_or_resume_queued_run(
-        &self,
-        _fence: &lash_core::SessionExecutionLeaseAuthority,
-        _request: lash_core::store::BeginQueuedRun,
-    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
-        unreachable!("FacadeStore does not serve queued runs")
-    }
-
     async fn enqueue_queued_work_with_outcome(
         &self,
         _batch: QueuedWorkBatchDraft,
@@ -437,6 +483,41 @@ impl QueuedWorkStore for FacadeStore {
 }
 
 #[async_trait]
+impl QueuedRunStore for FacadeStore {
+    async fn begin_or_resume_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _request: lash_core::store::BeginQueuedRun,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        unreachable!("FacadeStore does not serve queued runs")
+    }
+
+    async fn pending_queued_run(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        unreachable!("fixture does not serve queued runs")
+    }
+
+    async fn queued_run(
+        &self,
+        _scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        unreachable!("fixture does not serve queued runs")
+    }
+
+    async fn settle_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _settlement: lash_core::store::QueuedRunCommit,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        unreachable!("fixture does not serve queued runs")
+    }
+}
+
+#[async_trait]
 impl StoreMaintenance for FacadeStore {
     async fn vacuum(&self) -> MaintenanceResult<VacuumReport> {
         Ok(VacuumReport::default())
@@ -464,6 +545,8 @@ fn persistence_types_are_nameable(
         expected_head_revision: 0,
         session_execution_lease_fence: None,
         release_session_execution_lease: None,
+        drive_fence: None,
+        ingress_settlement: None,
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         current_frame_node_id: None,
         graph,

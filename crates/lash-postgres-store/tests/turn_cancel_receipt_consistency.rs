@@ -3,7 +3,7 @@
 //! rows cannot split request metadata from the payloads it reports.
 
 use lash_core_execution::{
-    PendingTurnInputDraft, StoreMaintenance, TurnCancelDisposition, TurnInput,
+    PendingTurnInputDraft, StoreMaintenance, TurnCancelDisposition, TurnCancelStore, TurnInput,
     TurnInputCheckpointBoundary, TurnInputIngress, TurnInputStore,
     facade_support::{TurnAddress, TurnCancelRequest},
 };

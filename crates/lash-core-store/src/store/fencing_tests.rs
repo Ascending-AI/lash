@@ -5,11 +5,12 @@
 //! millisecond, head moved, first commit — because these functions are the
 //! only place those answers are now decided.
 
+use super::LeaseOwnerIdentity;
 use super::StoreError;
 use super::fencing::*;
 use super::session_execution_lease::{
-    LeaseOwnerIdentity, SessionExecutionLeaseAuthority, SessionExecutionLeaseFenceFacts,
-    SessionExecutionLeaseRow, require_current_session_execution_lease,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseFenceFacts, SessionExecutionLeaseRow,
+    require_current_session_execution_lease,
 };
 use crate::SessionId;
 

@@ -1,5 +1,7 @@
 //! Named backend test registration. Every generated test owns a fresh fixture.
 
+mod cancel_by_author;
+mod ingress_runtime;
 mod session_ingress;
 mod tool_child;
 mod turn_crash;

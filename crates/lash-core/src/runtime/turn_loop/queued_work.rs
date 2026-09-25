@@ -762,7 +762,7 @@ impl LashRuntime {
     ///
     /// This is the host's disposition for a run it no longer wants recovered
     /// (ADR 0099): `scope` and `expected_revision` name the run exactly as
-    /// [`pending_queued_run`](crate::store::QueuedWorkStore::pending_queued_run)
+    /// [`pending_queued_run`](crate::store::QueuedRunStore::pending_queued_run)
     /// reported it, and a stale revision is refused. The run's assigned work
     /// is cancelled and its failed-terminal evidence retained. Abandonment is
     /// a terminal settlement like any other, so it ends the drain through the

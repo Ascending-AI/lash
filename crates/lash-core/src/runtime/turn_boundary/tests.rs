@@ -3,7 +3,7 @@ use crate::SessionId;
 use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
 use crate::session_model::{ConversationRecord, MessageRole, Part};
 use crate::store::SessionExecutionLeaseStore;
-use crate::store::TurnInputStore;
+use crate::store::{TurnCancelStore, TurnInputStore};
 use crate::testing::conformance_support::TurnCancelPeekIdentity;
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, TokenUsage,

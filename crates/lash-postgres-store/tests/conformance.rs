@@ -82,6 +82,8 @@ use lash_postgres_store::{PostgresStorage, PostgresStoreConfig};
 
 mod support;
 
+#[path = "conformance/ingress_runtime.rs"]
+mod ingress_runtime;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "conformance/session_ingress.rs"]

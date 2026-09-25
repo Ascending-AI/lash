@@ -113,6 +113,19 @@ pub struct RuntimeCommit {
     pub session_execution_lease_fence: Option<SessionExecutionLeaseAuthority>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_session_execution_lease: Option<SessionExecutionLeaseAuthority>,
+    /// The drive fence this commit publishes under (ADR 0105 §2, FIG-3600).
+    ///
+    /// A transaction predicate, not semantic commit content: the backend
+    /// checks it with [`require_current_drive_fence`](super::require_current_drive_fence)
+    /// inside the write transaction, before receipt lookup, so a superseded
+    /// drive's commit is refused with [`StoreError::StaleDriveFence`] before
+    /// any write.
+    #[serde(skip)]
+    pub drive_fence: Option<super::DriveFence>,
+    /// The ingress claims this commit settles, in the same transaction as the
+    /// head compare-and-set (ADR 0101 §6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingress_settlement: Option<super::IngressClaimSettlement>,
     pub config: crate::PersistedSessionConfig,
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub graph: GraphAppend,

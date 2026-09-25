@@ -1159,7 +1159,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         committed.code,
         lash_core::RuntimeErrorCode::QueuedRunPending
     );
-    let pending = lash_core::store::QueuedWorkStore::pending_queued_run(
+    let pending = lash_core::store::QueuedRunStore::pending_queued_run(
         store.as_ref(),
         &SessionId::from("root"),
     )

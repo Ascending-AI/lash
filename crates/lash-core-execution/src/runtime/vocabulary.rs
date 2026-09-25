@@ -467,6 +467,21 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         })
     }
 
+    /// Page the live sessions that hold open ingress, in `session_id` order
+    /// strictly after `after`, at most `limit` of them, each with its oldest
+    /// open item (ADR 0104 O2). A read of the one ingress table across the
+    /// catalog: it opens no session and takes no fence. The reconcile sweep
+    /// asks a drive for each.
+    async fn sessions_with_open_ingress(
+        &self,
+        _after: Option<&SessionId>,
+        _limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::store::OpenIngressSession>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "sessions_with_open_ingress",
+        })
+    }
+
     /// Count the deployment's turns that are not settled yet: parked turns
     /// and every turn in flight (FIG-3586). `drain_status` reads it, so a
     /// deployment with a parked turn — or one whose claims a crashed driver

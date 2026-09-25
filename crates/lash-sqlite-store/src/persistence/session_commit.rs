@@ -1349,6 +1349,20 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
         Store::load_session_meta(self).await
     }
+
+    async fn turn_is_committed(
+        &self,
+        address: &lash_core_execution::facade_support::TurnAddress,
+    ) -> Result<bool, StoreError> {
+        self.read_turn_is_committed(address).await
+    }
+
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
+        self.read_turn_input_applications(session_id).await
+    }
 }
 
 /// Release the turn-input claims a cancelled turn withheld from its terminal

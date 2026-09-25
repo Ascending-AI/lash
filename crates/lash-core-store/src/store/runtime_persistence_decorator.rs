@@ -45,20 +45,39 @@ macro_rules! persistence_operations {
                 fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;
                 fn record_turn_park(&self, park: &crate::store::TurnParkWrite) -> Result<crate::store::TurnPark, StoreError>;
                 fn load_turn_park(&self, session_id: &SessionId) -> Result<Option<crate::store::TurnPark>, StoreError>;
-            }
-            TurnInputStore {
                 fn turn_is_committed(&self, address: &crate::TurnAddress) -> Result<bool, StoreError>;
-                fn reconcile_turn_cancel_winner(&self, address: &crate::TurnAddress, observed: &crate::TurnCancelIntentSnapshot, evidence: &crate::TurnCancellationEvidence) -> Result<bool, StoreError>;
-                fn record_turn_cancel_request(&self, request: crate::TurnCancelRequest) -> Result<crate::TurnCancelRequestRecord, StoreError>;
-                fn turn_cancel_request(&self, address: &crate::TurnAddress) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError>;
-                fn turn_cancel_request_intent(&self, address: &crate::TurnAddress) -> Result<crate::TurnCancelIntentSnapshot, StoreError>;
+                fn list_turn_input_applications(&self, session_id: &SessionId) -> Result<Vec<crate::TurnInputApplication>, StoreError>;
+            }
+            SessionIngressStore {
+                fn enqueue_ingress_item(&self, draft: IngressItemDraft) -> Result<IngressEnqueueOutcome, StoreError>;
+                fn claim_session_commands(&self, fence: &DriveFence) -> Result<Option<IngressClaim>, StoreError>;
+                fn claim_turn_items(&self, fence: &DriveFence, mode: ClaimMode, policy: &IngressClaimPolicy) -> Result<Option<IngressClaim>, StoreError>;
+                fn reclaim_ingress_claim(&self, fence: &DriveFence, claim: &IngressClaim) -> Result<IngressReclaimOutcome, StoreError>;
+                fn abandon_ingress_claim(&self, fence: &DriveFence, claim: &IngressClaim) -> Result<(), StoreError>;
+                fn withdraw_ingress_items(&self, session_id: &SessionId, targets: &[IngressWithdrawTarget]) -> Result<Vec<IngressWithdrawReceipt>, StoreError>;
+                fn withdraw_ingress_suffix(&self, session_id: &SessionId, anchor: &IngressWithdrawTarget) -> Result<IngressSuffixWithdrawOutcome, StoreError>;
+                fn list_ingress_items(&self, session_id: &SessionId) -> Result<Vec<IngressItemRead>, StoreError>;
+                fn vacuum_session_ingress(&self, session_id: &SessionId) -> Result<u64, StoreError>;
+            }
+            QueuedRunStore {
+                fn begin_or_resume_queued_run(&self, fence: &SessionExecutionLeaseAuthority, request: BeginQueuedRun) -> Result<QueuedRunAdmission, StoreError>;
+                fn pending_queued_run(&self, session_id: &SessionId) -> Result<Option<QueuedRunAdmission>, StoreError>;
+                fn queued_run(&self, scope: &crate::ExecutionScope) -> Result<Option<QueuedRunAdmission>, StoreError>;
+                fn settle_queued_run(&self, fence: &SessionExecutionLeaseAuthority, settlement: QueuedRunCommit) -> Result<QueuedRunAdmission, StoreError>;
+            }
+            TurnCancelStore {
                 fn validate_turn_cancellation_binding(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<(), StoreError>;
                 fn authorize_turn_cancel_closure(&self, session_execution_lease: &SessionExecutionLeaseAuthority, authorization: &crate::TurnCancelClosureAuthorization) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
                 fn pending_turn_cancel_closures(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
                 fn pending_turn_cancel_closure_pins(&self) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
+                fn record_turn_cancel_request(&self, request: crate::TurnCancelRequest) -> Result<crate::TurnCancelRequestRecord, StoreError>;
+                fn turn_cancel_request(&self, address: &crate::TurnAddress) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError>;
+                fn turn_cancel_request_intent(&self, address: &crate::TurnAddress) -> Result<crate::TurnCancelIntentSnapshot, StoreError>;
+                fn reconcile_turn_cancel_winner(&self, address: &crate::TurnAddress, observed: &crate::TurnCancelIntentSnapshot, evidence: &crate::TurnCancellationEvidence) -> Result<bool, StoreError>;
+            }
+            TurnInputStore {
                 fn enqueue_pending_turn_input(&self, input: crate::PendingTurnInputDraft) -> Result<crate::PendingTurnInput, StoreError>;
                 fn list_pending_turn_inputs(&self, session_id: &SessionId) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
-                fn list_turn_input_applications(&self, session_id: &SessionId) -> Result<Vec<crate::TurnInputApplication>, StoreError>;
                 fn cancel_pending_turn_input(&self, session_id: &SessionId, input_id: &str) -> Result<crate::PendingTurnInputCancelOutcome, StoreError>;
                 fn cancel_pending_turn_inputs(&self, session_id: &SessionId, targets: &[crate::PendingTurnInputCancelTarget]) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError>;
                 fn cancel_pending_turn_input_suffix(&self, session_id: &SessionId, anchor: &crate::PendingTurnInputCancelTarget) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError>;
@@ -81,10 +100,6 @@ macro_rules! persistence_operations {
             }
             QueuedWorkStore {
                 fn select_queued_run(&self, fence: &SessionExecutionLeaseAuthority, scope: &crate::ExecutionScope, owner: &LeaseOwnerIdentity, max_inputs: usize, configuration: &crate::PersistedSessionConfig, policy: crate::QueuedWorkClaimPolicy) -> Result<SelectedQueuedRun, StoreError>;
-                fn pending_queued_run(&self, session_id: &SessionId) -> Result<Option<QueuedRunAdmission>, StoreError>;
-                fn queued_run(&self, scope: &crate::ExecutionScope) -> Result<Option<QueuedRunAdmission>, StoreError>;
-                fn settle_queued_run(&self, fence: &SessionExecutionLeaseAuthority, settlement: QueuedRunCommit) -> Result<QueuedRunAdmission, StoreError>;
-                fn begin_or_resume_queued_run(&self, fence: &SessionExecutionLeaseAuthority, request: BeginQueuedRun) -> Result<QueuedRunAdmission, StoreError>;
                 fn enqueue_queued_work(&self, batch: crate::QueuedWorkBatchDraft) -> Result<crate::QueuedWorkBatch, StoreError>;
                 fn enqueue_queued_work_with_outcome(&self, batch: crate::QueuedWorkBatchDraft) -> Result<crate::QueuedWorkEnqueueOutcome, StoreError>;
                 fn claim_leading_ready_session_command(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, owner: &LeaseOwnerIdentity) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;

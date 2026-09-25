@@ -119,6 +119,33 @@ pub async fn commit_runtime_state_for_test(
         .await
 }
 
+/// Seal a fresh drive epoch for `session_id` and return its fence, standing
+/// in for the drive admission a test does not run. Each call supersedes every
+/// earlier fence of the session.
+pub async fn seal_drive_fence_for_test(
+    store: &Arc<dyn RuntimePersistence>,
+    session_id: &SessionId,
+    owner_id: &str,
+) -> crate::store::DriveFence {
+    let observed = store
+        .drive_epoch(session_id)
+        .await
+        .expect("read the session's drive epoch")
+        .epoch;
+    let admission =
+        crate::store::AdmissionId::new(format!("{owner_id}:seal-for-test:{}", observed + 1));
+    match store
+        .seal_drive_epoch(session_id, &admission, observed)
+        .await
+        .expect("seal the session's drive epoch")
+    {
+        crate::store::DriveEpochSeal::Sealed(fence) => fence,
+        crate::store::DriveEpochSeal::Superseded { epoch } => {
+            panic!("a concurrent seal raised the drive epoch to {epoch}")
+        }
+    }
+}
+
 pub async fn claim_session_execution_lease_for_test(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,

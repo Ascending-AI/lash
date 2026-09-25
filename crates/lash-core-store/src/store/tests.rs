@@ -938,6 +938,9 @@ fn decorator_surface_covers_every_component_trait_method() {
     let attachment_manifest = include_str!("attachment_manifest.rs");
     let decorator = include_str!("runtime_persistence_decorator.rs");
     let drive_fence = include_str!("drive_fence.rs");
+    let session_ingress = include_str!("session_ingress.rs");
+    let queued_run_store = include_str!("queued_run_store.rs");
+    let turn_cancel_store = include_str!("turn_cancel_store.rs");
 
     let mut declared = declared_methods(attachment_manifest, "AttachmentManifest");
     for trait_name in [
@@ -950,6 +953,9 @@ fn decorator_surface_covers_every_component_trait_method() {
         declared.extend(declared_methods(store_mod, trait_name));
     }
     declared.extend(declared_methods(drive_fence, "DriveEpochStore"));
+    declared.extend(declared_methods(session_ingress, "SessionIngressStore"));
+    declared.extend(declared_methods(queued_run_store, "QueuedRunStore"));
+    declared.extend(declared_methods(turn_cancel_store, "TurnCancelStore"));
     assert!(
         declared.contains("commit_runtime_state") && declared.contains("vacuum"),
         "the component-trait scan must cover every segment: {declared:?}"

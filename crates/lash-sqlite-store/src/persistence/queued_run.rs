@@ -819,3 +819,36 @@ pub(super) fn validate_run_members_conn(
     }
     Ok(())
 }
+
+#[async_trait::async_trait]
+impl QueuedRunStore for Store {
+    async fn begin_or_resume_queued_run(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        request: lash_core_execution::store::BeginQueuedRun,
+    ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
+        self.begin_run(fence, request).await
+    }
+
+    async fn pending_queued_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<lash_core_execution::store::QueuedRunAdmission>, StoreError> {
+        self.pending_run(session_id).await
+    }
+
+    async fn queued_run(
+        &self,
+        scope: &lash_core_execution::ExecutionScope,
+    ) -> Result<Option<lash_core_execution::store::QueuedRunAdmission>, StoreError> {
+        self.run_by_scope(scope).await
+    }
+
+    async fn settle_queued_run(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        settlement: lash_core_execution::store::QueuedRunCommit,
+    ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
+        self.settle_run(fence, settlement).await
+    }
+}

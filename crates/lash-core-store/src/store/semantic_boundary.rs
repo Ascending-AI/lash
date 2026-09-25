@@ -43,6 +43,7 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
     let carried: &[(&str, bool)] = &[
         ("failure_evidence", !commit.failure_evidence.is_empty()),
         ("queued_run", commit.queued_run.is_some()),
+        ("ingress_settlement", commit.ingress_settlement.is_some()),
         (
             "completed_queue_claims",
             !commit.completed_queue_claims.is_empty(),
@@ -109,6 +110,8 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         expected_head_revision: _, // CAS is excluded from replay identity
         session_execution_lease_fence: _, // transaction predicate, not content
         release_session_execution_lease: _, // transport authority
+        drive_fence: _,            // transaction predicate, not content
+        ingress_settlement: _,     // refused present by validation
         config,
         current_frame_node_id: _, // derived from the graph leaf
         graph,

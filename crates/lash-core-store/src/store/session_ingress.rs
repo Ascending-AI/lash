@@ -156,6 +156,15 @@ pub struct IngressSettlementReceipt {
     pub affected: Vec<IngressAffectedItem>,
 }
 
+/// One session with open ingress, as the cross-session read answers it: the
+/// session and its oldest open item, which names the drive a reconcile sweep
+/// asks for (ADR 0104 O2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenIngressSession {
+    pub session_id: SessionId,
+    pub oldest_open_item: IngressItemId,
+}
+
 /// The one session-ingress capability (ADR 0101 §1).
 ///
 /// Every producer takes the session lock before it takes the sequence

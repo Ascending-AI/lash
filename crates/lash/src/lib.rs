@@ -367,6 +367,14 @@ pub mod persistence {
         TurnParkWrite, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
         load_persisted_session_state,
     };
+    /// The one session ingress (ADR 0101), the queued-run record and durable
+    /// turn cancellation: segments of [`RuntimePersistence`].
+    pub use lash_core::store::{
+        ClaimMode, DriveFence, IngressClaim, IngressClaimPolicy, IngressEnqueueOutcome,
+        IngressItemDraft, IngressItemRead, IngressReclaimOutcome, IngressSuffixWithdrawOutcome,
+        IngressWithdrawReceipt, IngressWithdrawTarget, OpenIngressSession, QueuedRunStore,
+        SessionIngressStore, TurnCancelStore,
+    };
     /// Test-only store hooks and the conformance-suite handle types that
     /// carry them (`testing` feature only; no production trait requires them).
     #[cfg(any(test, feature = "testing"))]

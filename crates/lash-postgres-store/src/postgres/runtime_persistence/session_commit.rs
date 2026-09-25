@@ -1250,6 +1250,64 @@ impl SessionCommitStore for PostgresSessionStore {
         })
         .transpose()
     }
+
+    async fn turn_is_committed(
+        &self,
+        address: &lash_core_execution::facade_support::TurnAddress,
+    ) -> Result<bool, StoreError> {
+        let operation_key =
+            lash_core_execution::OperationId::turn(&address.session_id, &address.turn_id, "final")
+                .storage_key()?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        sqlx::query_scalar(
+            crate::session_sql::session_sql()
+                .turn_commits
+                .exists_for_turn
+                .sql(),
+        )
+        .bind(address.session_id.as_str())
+        .bind(operation_key)
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)
+    }
+
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let rows = sqlx::query(
+            crate::session_sql::session_sql()
+                .turn_commits
+                .select_all_for_session
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
+        let mut commits = Vec::with_capacity(rows.len());
+        for row in rows {
+            let turn_id = row.get::<String, _>(0);
+            let result_json: String = row.get(1);
+            let result = lash_core_execution::store::decode_runtime_commit_receipt(
+                session_id,
+                &turn_id,
+                &result_json,
+            )?;
+            commits.push((
+                result.head_revision,
+                turn_id,
+                result.turn_input_applications,
+            ));
+        }
+        commits.sort_by(|left, right| (left.0, left.1.as_str()).cmp(&(right.0, right.1.as_str())));
+        Ok(commits
+            .into_iter()
+            .flat_map(|(_, _, applications)| applications)
+            .collect())
+    }
 }
 
 /// Release the turn-input claims a cancelled turn withheld from its terminal

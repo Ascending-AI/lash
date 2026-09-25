@@ -362,6 +362,7 @@ mod refusal_probe_tests;
 mod session_commit;
 mod session_execution_lease;
 mod session_ingress;
+mod turn_cancel;
 mod turn_input;
 pub(crate) mod turn_park_feed;
 

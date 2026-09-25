@@ -792,6 +792,8 @@ async fn commit_cas_livelock(
             expected_head_revision: state.head_revision,
             session_execution_lease_fence: Some(holder.fence()),
             release_session_execution_lease: None,
+            drive_fence: None,
+            ingress_settlement: None,
             config: state.config,
             current_frame_node_id: state.current_frame_node_id,
             graph: lash_core::store::GraphAppend::PreserveHead,

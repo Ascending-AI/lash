@@ -35,7 +35,7 @@ impl RuntimePersistenceDecorator for FailCancelClosureAuthorizationStore {
                 "injected finish-time cancellation authorization failure".to_string(),
             ));
         }
-        lash_core::store::TurnInputStore::authorize_turn_cancel_closure(
+        lash_core::store::TurnCancelStore::authorize_turn_cancel_closure(
             self.inner.as_ref(),
             lease,
             authorization,
@@ -180,7 +180,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         "Drop evidence must keep the undelivered input out of every later claim"
     );
     let record =
-        lash_core::store::TurnInputStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
+        lash_core::store::TurnCancelStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
             .await
             .expect("read durable cancellation record")
             .expect("Drop request remains recorded");

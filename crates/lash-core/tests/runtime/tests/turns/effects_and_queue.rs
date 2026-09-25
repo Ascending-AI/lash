@@ -394,7 +394,7 @@ pub(super) async fn fig1123_committed_frame_handoff_survives_before_inline_claim
         .await
         .expect_err("the committed handoff remains pending after selection fails");
     assert_eq!(first.code, lash_core::RuntimeErrorCode::QueuedRunPending);
-    let pending = lash_core::store::QueuedWorkStore::pending_queued_run(
+    let pending = lash_core::store::QueuedRunStore::pending_queued_run(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -1944,7 +1944,7 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
         lash_core::RuntimeErrorCode::QueuedRunPending
     );
     assert_eq!(store.abandoned_claim_counts(), (0, 0));
-    let pending = lash_core::store::QueuedWorkStore::pending_queued_run(
+    let pending = lash_core::store::QueuedRunStore::pending_queued_run(
         store.as_ref(),
         &SessionId::from("root"),
     )

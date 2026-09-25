@@ -937,7 +937,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
             ));
         }
     }
-    let record = lash_core::store::TurnInputStore::turn_cancel_request(
+    let record = lash_core::store::TurnCancelStore::turn_cancel_request(
         store.as_ref(),
         &lash_core::facade_support::TurnAddress::new(session_id, turn_id),
     )

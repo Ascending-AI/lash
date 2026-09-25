@@ -1996,6 +1996,20 @@ impl lash_core::SessionCommitStore for CommitRetryStore {
     ) -> Result<Option<lash_core::SessionMeta>, lash_core::StoreError> {
         self.inner.load_session_meta().await
     }
+
+    async fn turn_is_committed(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+    ) -> Result<bool, lash_core::StoreError> {
+        self.inner.turn_is_committed(address).await
+    }
+
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core::TurnInputApplication>, lash_core::StoreError> {
+        self.inner.list_turn_input_applications(session_id).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -2081,35 +2095,6 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
             .select_queued_run(fence, scope, owner, max_inputs, configuration, policy)
             .await
     }
-    async fn pending_queued_run(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
-    {
-        self.inner.pending_queued_run(session_id).await
-    }
-    async fn queued_run(
-        &self,
-        scope: &lash_core::ExecutionScope,
-    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
-    {
-        self.inner.queued_run(scope).await
-    }
-    async fn settle_queued_run(
-        &self,
-        fence: &lash_core::SessionExecutionLeaseAuthority,
-        settlement: lash_core::store::QueuedRunCommit,
-    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
-        self.inner.settle_queued_run(fence, settlement).await
-    }
-    async fn begin_or_resume_queued_run(
-        &self,
-        fence: &lash_core::SessionExecutionLeaseAuthority,
-        request: lash_core::store::BeginQueuedRun,
-    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
-        self.inner.begin_or_resume_queued_run(fence, request).await
-    }
-
     async fn enqueue_queued_work_with_outcome(
         &self,
         batch: lash_core::runtime::QueuedWorkBatchDraft,
@@ -2241,96 +2226,42 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 }
 
 #[async_trait::async_trait]
+impl lash_core::store::QueuedRunStore for CommitRetryStore {
+    async fn begin_or_resume_queued_run(
+        &self,
+        fence: &lash_core::SessionExecutionLeaseAuthority,
+        request: lash_core::store::BeginQueuedRun,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        self.inner.begin_or_resume_queued_run(fence, request).await
+    }
+
+    async fn pending_queued_run(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        self.inner.pending_queued_run(session_id).await
+    }
+
+    async fn queued_run(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        self.inner.queued_run(scope).await
+    }
+
+    async fn settle_queued_run(
+        &self,
+        fence: &lash_core::SessionExecutionLeaseAuthority,
+        settlement: lash_core::store::QueuedRunCommit,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        self.inner.settle_queued_run(fence, settlement).await
+    }
+}
+
+#[async_trait::async_trait]
 impl lash_core::TurnInputStore for CommitRetryStore {
-    async fn validate_turn_cancellation_binding(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        binding_id: &str,
-        admitted_scope: &lash_core::ExecutionScope,
-    ) -> Result<(), lash_core::StoreError> {
-        self.inner
-            .validate_turn_cancellation_binding(
-                session_id,
-                session_execution_lease,
-                binding_id,
-                admitted_scope,
-            )
-            .await
-    }
-
-    async fn authorize_turn_cancel_closure(
-        &self,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        authorization: &lash_core::TurnCancelClosureAuthorization,
-    ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError> {
-        self.inner
-            .authorize_turn_cancel_closure(session_execution_lease, authorization)
-            .await
-    }
-
-    async fn pending_turn_cancel_closures(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        binding_id: &str,
-        admitted_scope: &lash_core::ExecutionScope,
-    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError> {
-        self.inner
-            .pending_turn_cancel_closures(
-                session_id,
-                session_execution_lease,
-                binding_id,
-                admitted_scope,
-            )
-            .await
-    }
-
-    async fn pending_turn_cancel_closure_pins(
-        &self,
-    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError> {
-        self.inner.pending_turn_cancel_closure_pins().await
-    }
-
-    async fn turn_is_committed(
-        &self,
-        address: &lash_core::runtime::TurnAddress,
-    ) -> Result<bool, lash_core::StoreError> {
-        self.inner.turn_is_committed(address).await
-    }
-
-    async fn record_turn_cancel_request(
-        &self,
-        request: lash_core::runtime::TurnCancelRequest,
-    ) -> Result<lash_core::TurnCancelRequestRecord, lash_core::StoreError> {
-        self.inner.record_turn_cancel_request(request).await
-    }
-
-    async fn turn_cancel_request(
-        &self,
-        address: &lash_core::runtime::TurnAddress,
-    ) -> Result<Option<lash_core::TurnCancelRequestRecord>, lash_core::StoreError> {
-        self.inner.turn_cancel_request(address).await
-    }
-
-    async fn turn_cancel_request_intent(
-        &self,
-        address: &lash_core::runtime::TurnAddress,
-    ) -> Result<lash_core::TurnCancelIntentSnapshot, lash_core::StoreError> {
-        self.inner.turn_cancel_request_intent(address).await
-    }
-
-    async fn reconcile_turn_cancel_winner(
-        &self,
-        address: &lash_core::runtime::TurnAddress,
-        observed: &lash_core::TurnCancelIntentSnapshot,
-        evidence: &lash_core::runtime::TurnCancellationEvidence,
-    ) -> Result<bool, lash_core::StoreError> {
-        self.inner
-            .reconcile_turn_cancel_winner(address, observed, evidence)
-            .await
-    }
-
     async fn enqueue_pending_turn_input(
         &self,
         input: lash_core::PendingTurnInputDraft,
@@ -2343,13 +2274,6 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         session_id: &SessionId,
     ) -> Result<Vec<lash_core::PendingTurnInputRead>, lash_core::StoreError> {
         self.inner.list_pending_turn_inputs(session_id).await
-    }
-
-    async fn list_turn_input_applications(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<lash_core::TurnInputApplication>, lash_core::StoreError> {
-        self.inner.list_turn_input_applications(session_id).await
     }
 
     async fn cancel_pending_turn_inputs(
@@ -2474,6 +2398,91 @@ impl lash_core::TurnInputStore for CommitRetryStore {
                 observed,
                 settlement,
             )
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::store::TurnCancelStore for CommitRetryStore {
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner
+            .validate_turn_cancellation_binding(
+                session_id,
+                session_execution_lease,
+                binding_id,
+                admitted_scope,
+            )
+            .await
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        authorization: &lash_core::TurnCancelClosureAuthorization,
+    ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError> {
+        self.inner
+            .authorize_turn_cancel_closure(session_execution_lease, authorization)
+            .await
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &lash_core::ExecutionScope,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError> {
+        self.inner
+            .pending_turn_cancel_closures(
+                session_id,
+                session_execution_lease,
+                binding_id,
+                admitted_scope,
+            )
+            .await
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError> {
+        self.inner.pending_turn_cancel_closure_pins().await
+    }
+
+    async fn record_turn_cancel_request(
+        &self,
+        request: lash_core::runtime::TurnCancelRequest,
+    ) -> Result<lash_core::TurnCancelRequestRecord, lash_core::StoreError> {
+        self.inner.record_turn_cancel_request(request).await
+    }
+
+    async fn turn_cancel_request(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+    ) -> Result<Option<lash_core::TurnCancelRequestRecord>, lash_core::StoreError> {
+        self.inner.turn_cancel_request(address).await
+    }
+
+    async fn turn_cancel_request_intent(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+    ) -> Result<lash_core::TurnCancelIntentSnapshot, lash_core::StoreError> {
+        self.inner.turn_cancel_request_intent(address).await
+    }
+
+    async fn reconcile_turn_cancel_winner(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+        observed: &lash_core::TurnCancelIntentSnapshot,
+        evidence: &lash_core::runtime::TurnCancellationEvidence,
+    ) -> Result<bool, lash_core::StoreError> {
+        self.inner
+            .reconcile_turn_cancel_winner(address, observed, evidence)
             .await
     }
 }

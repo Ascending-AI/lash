@@ -7,50 +7,6 @@ use super::*;
 /// this double records without inspecting.
 #[async_trait]
 impl lash_core::TurnInputStore for SnapshotStore {
-    async fn turn_cancel_request_intent(
-        &self,
-        _address: &lash_core::facade_support::TurnAddress,
-    ) -> std::result::Result<lash_core::TurnCancelIntentSnapshot, lash_core::StoreError> {
-        Ok(lash_core::TurnCancelIntentSnapshot::Absent)
-    }
-
-    async fn validate_turn_cancellation_binding(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        _binding_id: &str,
-        _admitted_scope: &lash_core::ExecutionScope,
-    ) -> std::result::Result<(), lash_core::StoreError> {
-        Ok(())
-    }
-
-    async fn authorize_turn_cancel_closure(
-        &self,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        _authorization: &lash_core::TurnCancelClosureAuthorization,
-    ) -> std::result::Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError>
-    {
-        Ok(lash_core::TurnCancelClosureAuthorizationOutcome::Authorized)
-    }
-
-    async fn pending_turn_cancel_closure_pins(
-        &self,
-    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
-    {
-        Ok(Vec::new())
-    }
-
-    async fn pending_turn_cancel_closures(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        _binding_id: &str,
-        _admitted_scope: &lash_core::ExecutionScope,
-    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
-    {
-        Ok(Vec::new())
-    }
-
     async fn enqueue_pending_turn_input(
         &self,
         input: lash_core::PendingTurnInputDraft,
@@ -237,7 +193,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
 }
 
 #[async_trait]
-impl lash_core::TurnInputStore for BoundSessionStore {
+impl lash_core::store::TurnCancelStore for SnapshotStore {
     async fn validate_turn_cancellation_binding(
         &self,
         _session_id: &SessionId,
@@ -254,14 +210,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         _authorization: &lash_core::TurnCancelClosureAuthorization,
     ) -> std::result::Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError>
     {
-        unreachable!("BoundSessionStore never authorizes turn cancellation")
-    }
-
-    async fn pending_turn_cancel_closure_pins(
-        &self,
-    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
-    {
-        Ok(Vec::new())
+        Ok(lash_core::TurnCancelClosureAuthorizationOutcome::Authorized)
     }
 
     async fn pending_turn_cancel_closures(
@@ -275,6 +224,23 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         Ok(Vec::new())
     }
 
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
+    async fn turn_cancel_request_intent(
+        &self,
+        _address: &lash_core::facade_support::TurnAddress,
+    ) -> std::result::Result<lash_core::TurnCancelIntentSnapshot, lash_core::StoreError> {
+        Ok(lash_core::TurnCancelIntentSnapshot::Absent)
+    }
+}
+
+#[async_trait]
+impl lash_core::TurnInputStore for BoundSessionStore {
     async fn enqueue_pending_turn_input(
         &self,
         _input: lash_core::PendingTurnInputDraft,
@@ -363,5 +329,45 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         Ok(lash_core::TurnCancelRepairResult::Applied(
             Default::default(),
         ))
+    }
+}
+
+#[async_trait]
+impl lash_core::store::TurnCancelStore for BoundSessionStore {
+    async fn validate_turn_cancellation_binding(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+        _admitted_scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _authorization: &lash_core::TurnCancelClosureAuthorization,
+    ) -> std::result::Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError>
+    {
+        unreachable!("BoundSessionStore never authorizes turn cancellation")
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+        _admitted_scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
     }
 }
