@@ -383,8 +383,8 @@ pub mod persistence {
     /// control intents a session's close and a parked root's verbs record.
     pub use lash_core::store::{
         CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind,
-        ControlIntentState, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
-        RootTerminalWrite, TurnCommitId,
+        ControlIntentState, ControlIntentStore, EnginePark, IntentApplication, RootStore,
+        RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWrite, TurnCommitId,
     };
     /// Test-only store hooks and the conformance-suite handle types that
     /// carry them (`testing` feature only; no production trait requires them).
