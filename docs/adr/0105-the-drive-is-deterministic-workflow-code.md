@@ -240,6 +240,18 @@ The engine tests in `lash-core-execution` run this shape on a `!Send` and a
   AC13) records them: an effect-group rank wait on the SQL tier and on the
   Restate ingress host races the gate live, so a replay that finds the rank
   already journaled can take a different settlement prefix than the live run.
+- **A lost process await's cancel is a recorded answer (FIG-3752).** The
+  journal already records which arm of a Restate race won: the select
+  resolves on the first completion in journal order, on every execution. What
+  follows the gate's win is `dispose(child, AwaitCancelled)`: the turn asks
+  the store to record the stop's cancellation, then calls the process
+  workflow's `cancel`. The store answers differently once that cancel has
+  ended the process (a terminal process refuses a new request), so the ask is
+  a recorded step (`process-await-turn-cancel-admission`). It records the
+  cancellation the store holds, or that the process had already ended, in
+  which case no cancel call is made. A replay reads that answer and makes the
+  same calls. A store fault inside the step is not recorded; the attempt
+  retries. Effect-journal generation 8.
 - **Process-scope waits keep the process's own stop until P16.** A wait that
   observes no turn — a process body's `waitSignal`, its group rank wait, its
   process await and its sleep — keeps the cancellation it had before P9: the

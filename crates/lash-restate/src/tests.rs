@@ -167,19 +167,20 @@ mod trigger_intent_cutover;
 mod turn_cancel_modes;
 mod turn_crash_on_the_double;
 use endpoint_protocol::{
-    admission_journal, admitted_invocation_body, durable_wait_index_call_response,
+    RecordedCommand, admission_journal, admitted_invocation_body, durable_wait_index_call_response,
     encode_call_replay, encode_captured_run_and_call_replay,
     encode_captured_run_and_interrupted_call_replay, encode_captured_run_command_replay,
     encode_completed_gate_sleep_replay, encode_completed_intent_drain_replay,
     encode_completed_sleep_replay, encode_journal_retry, encode_process_segment_send_replay,
     encode_process_terminal_delivery_replay, encode_recorded_commands_replay,
-    encode_recorded_commands_with_invocations_replay, encode_run_replay, invoke_endpoint,
-    invoke_endpoint_body, invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses,
-    invoke_endpoint_open, invoke_endpoint_with_named_call_responses,
-    invoke_endpoint_with_scripted_responses, invoke_process_workflow_body,
-    invoke_process_workflow_endpoint, restate_call_frames, restate_command_frame_types,
-    restate_completed_promise, restate_error_code, restate_error_message, restate_message_types,
-    restate_output_failure_message, restate_output_json, restate_recorded_commands, with_admission,
+    encode_recorded_commands_with_invocations_replay, encode_run_replay, encode_signal_value,
+    invoke_endpoint, invoke_endpoint_body, invoke_endpoint_body_open,
+    invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
+    invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
+    invoke_process_workflow_body, invoke_process_workflow_endpoint, restate_call_frames,
+    restate_command_frame_types, restate_completed_promise, restate_error_code,
+    restate_error_message, restate_message_types, restate_output_failure_message,
+    restate_output_json, restate_recorded_commands, with_admission,
 };
 
 fn registry_local_executor(
@@ -627,6 +628,7 @@ const RESTATE_PEEK_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x040A;
 const RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE: u16 = 0x0401;
 const RESTATE_END_MESSAGE_TYPE: u16 = 0x0003;
 const RESTATE_RUN_COMMAND_MESSAGE_TYPE: u16 = 0x0411;
+const RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE: u16 = 0x0005;
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct Fig779TimerGuardReproInput {

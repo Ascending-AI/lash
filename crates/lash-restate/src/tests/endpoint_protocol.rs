@@ -508,7 +508,7 @@ pub(super) fn encode_invocation_id_completion(completion_id: u32, invocation_id:
     encode_restate_message(0x800E, notification.to_vec())
 }
 
-fn encode_signal_value(signal_id: u32, value: &[u8]) -> Bytes {
+pub(super) fn encode_signal_value(signal_id: u32, value: &[u8]) -> Bytes {
     let mut nested_value = BytesMut::new();
     put_len_field(&mut nested_value, 1, value);
     let mut notification = BytesMut::new();
@@ -1976,6 +1976,21 @@ async fn invoke_endpoint_body_with_json_call_responses_unbounded(
                     }
                 } else {
                     drop(input_sender.take());
+                }
+            }
+            if message_type == 0x0005 {
+                // The runtime acknowledges a proposed run completion with the
+                // value the handler proposed.
+                if let Some((completion_id, value)) =
+                    proposed_run_completion(&output[decoded + 8..frame_end])
+                    && let Some(sender) = input_sender.as_mut()
+                {
+                    sender
+                        .send_data(encode_run_completion(completion_id, value))
+                        .await
+                        .map_err(|err| {
+                            TerminalError::new(format!("run completion input failed: {err}"))
+                        })?;
                 }
             }
             if message_type == 0x040A {

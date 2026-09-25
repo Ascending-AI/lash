@@ -51,7 +51,11 @@ use serde::{Deserialize, Serialize};
 /// journals a gate peek at each instruction checkpoint it reaches, and after
 /// a cell that stopped on the host; and the post-abort peek follows only an
 /// abort a recorded outcome typed as the turn's cancellation.
-pub const EFFECT_JOURNAL_VERSION: u32 = 7;
+/// 8: a process await that lost to the turn's cancellation gate records the
+/// cancel it owes the process as a step before it asks the process workflow
+/// to cancel, so a replay after the process ended issues the same cancel call
+/// instead of re-asking the store (FIG-3752).
+pub const EFFECT_JOURNAL_VERSION: u32 = 8;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";
