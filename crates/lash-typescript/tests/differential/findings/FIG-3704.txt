@@ -1,0 +1,39 @@
+Number.POSITIVE_INFINITY
+Number.NEGATIVE_INFINITY
+Number.MIN_VALUE
+Number.MIN_VALUE > 0
+RegExp('a+', 'gi').source
+RegExp('a+', 'gi').flags
+RegExp().source
+(() => { const r = /x+/y; return RegExp(r) === r; })()
+(() => { const r = /x+/y; return RegExp(r, 'g') === r; })()
+RegExp(/a+/).flags
+[1,2,3,4,5].copyWithin(0,3).join(',')
+[1,2,3,4,5].copyWithin(-2).join(',')
+[1,2,3,4,5].copyWithin(1,-2,-1).join(',')
+[1,2,3,4,5].copyWithin(2,0,4).join(',')
+(() => { const a = [1,2,3]; return a.copyWithin(0,1) === a; })()
+[1,2,3].copyWithin(0, NaN).join(',')
+String.raw({raw:['a','b','c']},1,2)
+String.raw({raw:['x']},1,2)
+String.raw({raw:{length:0}})
+String.raw({raw:['a',undefined,'b']})
+JSON.parse('{"a":1,"b":2}',(k,v)=>k==='b'?undefined:v).b
+JSON.parse('[1,2,3]',(k,v)=>k==='1'?undefined:v).length
+JSON.parse('{"n":5}',(k,v)=>typeof v==='number'?v*2:v).n
+JSON.parse('{"a":{"b":1}}',(k,v)=>typeof v==='object'&&v!==null?v:v+1).a.b
+(() => { const log=[]; JSON.parse('{"x":{"y":1}}',(k,v)=>{log.push(k);return v;}); return log.join(','); })()
+JSON.parse('4',7)
+new Date(0).toUTCString()
+new Date(0).toString()
+new Date(NaN).toUTCString()
+String(new Date(0))
+new Date(0) + ''
+[...new Set([1,2]).union(new Map([[2,'a'],[3,'b']]))].join(',')
+[...new Set([3,2,1,0]).intersection(new Set([1,3,5]))].join(',')
+new Set([2]).isSubsetOf(new Map([[2,'a']]))
+(() => { try { new Set([1]).union([3]); return 'no'; } catch(e) { return e.name; } })()
+(() => { const o={size:2,has:()=>true,keys:undefined}; try { new Set([1]).union(o); return 'no'; } catch(e) { return e.name; } })()
+(() => { const o={size:2,has:()=>true,keys:()=>[9]}; return new Set().isSubsetOf(o); })()
+(() => { const o={size:1,has:()=>true,keys:()=>[9]}; return [...new Set([1]).union(o)].join(','); })()
+[0,0].fill(1,0,undefined).join(',')

@@ -155,7 +155,7 @@ fn parse_javascript_json_value(source: &str) -> Result<Value, RuntimeError> {
             // turned host data containing a large number into a failed cell.
             // Underflow already agrees (`1e-400` parses as `0`), so only the
             // overflowing tokens are rewritten, and only outside strings.
-            let syntax_error = || js_stdlib_error(format!("JSON.parse: {error}"));
+            let syntax_error = || RuntimeError::syntax_error(format!("JSON.parse: {error}"));
             let Some(planted) = rewrite_overflowing_json_numbers(source) else {
                 return Err(syntax_error());
             };

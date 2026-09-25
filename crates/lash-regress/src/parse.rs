@@ -115,8 +115,18 @@ impl ClassSet {
         }
     }
 
-    fn intersect_operand(&mut self, operand: ClassSetOperand) {
+    fn intersect_operand(&mut self, operand: ClassSetOperand, icase: bool) {
+        if icase {
+            // Under ignoreCase each operand contributes its simple case
+            // folding image, so close codepoints accumulated as raw union
+            // items before intersecting.
+            self.codepoints = unicode::add_icase_code_points(core::mem::take(&mut self.codepoints));
+        }
         match operand {
+            ClassSetOperand::ClassSetCharacter(c) if icase => self.intersect_operand(
+                ClassSetOperand::CharacterClassEscape(icase_singleton(c)),
+                false,
+            ),
             ClassSetOperand::ClassSetCharacter(c) => {
                 if self.codepoints.contains(c) {
                     self.codepoints =
@@ -180,8 +190,17 @@ impl ClassSet {
         }
     }
 
-    fn subtract_operand(&mut self, operand: ClassSetOperand) {
+    fn subtract_operand(&mut self, operand: ClassSetOperand, icase: bool) {
+        if icase {
+            // As in intersect_operand, apply the case-fold image of the
+            // accumulated set before subtracting the folded operand.
+            self.codepoints = unicode::add_icase_code_points(core::mem::take(&mut self.codepoints));
+        }
         match operand {
+            ClassSetOperand::ClassSetCharacter(c) if icase => self.subtract_operand(
+                ClassSetOperand::CharacterClassEscape(icase_singleton(c)),
+                false,
+            ),
             ClassSetOperand::ClassSetCharacter(c) => {
                 self.codepoints.remove(&[Interval { first: c, last: c }]);
                 self.alternatives
@@ -237,6 +256,14 @@ enum ClassSetOperand {
     ClassStringDisjunction(ClassSetAlternativeStrings),
 }
 
+/// The simple case folding image of a single class set character, for use as
+/// an operand of a class intersection or subtraction under ignoreCase.
+fn icase_singleton(c: u32) -> CodePointSet {
+    unicode::add_icase_code_points(CodePointSet::from_sorted_disjoint_intervals(Vec::from([
+        Interval { first: c, last: c },
+    ])))
+}
+
 #[derive(Debug, Clone)]
 struct ClassSetAlternativeStrings(Vec<Vec<u32>>);
 
@@ -272,7 +299,12 @@ impl ClassSetAlternativeStrings {
             nodes.push(ir::Node::Cat(
                 string
                     .iter()
-                    .map(|cp| ir::Node::Char { c: *cp, icase })
+                    .map(|cp| ir::Node::Char {
+                        // Class set strings live under UnicodeSets, whose
+                        // Canonicalize is simple case folding.
+                        c: if icase { unicode::fold(*cp) } else { *cp },
+                        icase,
+                    })
                     .collect::<Vec<_>>(),
             ));
         }
@@ -332,17 +364,16 @@ fn codepoints_from_class_positive(ct: CharacterClassType) -> CodePointSet {
     cps
 }
 
-fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet {
-    let cps = codepoints_from_class_positive(ct);
-    if positive { cps } else { cps.inverted() }
-}
-
 /// \return a Bracket for a given character escape (positive or negative).
 /// For icase mode, we expand the positive set first, then invert if needed.
-fn make_bracket_class(ct: CharacterClassType, positive: bool, icase: bool) -> ir::Node {
+fn make_bracket_class(ct: CharacterClassType, positive: bool, flags: api::Flags) -> ir::Node {
     let mut cps = codepoints_from_class_positive(ct);
-    if icase {
-        cps = unicode::add_icase_code_points(cps);
+    if flags.icase {
+        cps = if flags.has_either_unicode_flag() {
+            unicode::add_icase_code_points(cps)
+        } else {
+            unicode::add_icase_code_points_nonunicode(cps)
+        };
     }
     if !positive {
         cps = cps.inverted();
@@ -350,14 +381,29 @@ fn make_bracket_class(ct: CharacterClassType, positive: bool, icase: bool) -> ir
     ir::Node::Bracket(BracketContents { invert: false, cps })
 }
 
-fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
+fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom, flags: api::Flags) {
     match atom {
         ClassAtom::CodePoint(c) => bc.cps.add_one(c),
         ClassAtom::CharacterClass {
             class_type,
             positive,
         } => {
-            bc.cps.add_set(codepoints_from_class(class_type, positive));
+            // A negated escape like \W complements its set before the
+            // icase closure is applied to the whole class; that would let
+            // folded word chars (e.g. ſ under 'iu') leak back in. Complement
+            // the folded set instead so the closure is idempotent.
+            let mut cps = codepoints_from_class_positive(class_type);
+            if flags.icase {
+                cps = if flags.has_either_unicode_flag() {
+                    unicode::add_icase_code_points(cps)
+                } else {
+                    unicode::add_icase_code_points_nonunicode(cps)
+                };
+            }
+            if !positive {
+                cps = cps.inverted();
+            }
+            bc.cps.add_set(cps);
         }
         ClassAtom::Range { iv, negate } => {
             if negate {
@@ -459,10 +505,36 @@ where
     /// Fold a character if icase.
     fn fold_if_icase(&self, c: u32) -> u32 {
         if self.flags.icase {
-            unicode::fold_code_point(c, self.flags.unicode)
+            unicode::fold_code_point(c, self.flags.has_either_unicode_flag())
         } else {
             c
         }
+    }
+
+    /// Apply the icase closure appropriate for the regex's Unicode mode:
+    /// simple case folding with either Unicode flag, ECMA-262 Canonicalize
+    /// (toUppercase without non-ASCII to ASCII mappings) otherwise.
+    fn icase_code_points(&self, cps: CodePointSet) -> CodePointSet {
+        if self.flags.has_either_unicode_flag() {
+            unicode::add_icase_code_points(cps)
+        } else {
+            unicode::add_icase_code_points_nonunicode(cps)
+        }
+    }
+
+    /// Code points of a character-class escape operand in a UnicodeSets
+    /// class: under icase the positive set takes its case-fold image and a
+    /// negated escape folds before complementing (MaybeSimpleCaseFolding
+    /// followed by CharacterComplement).
+    fn class_set_escape_codepoints(&self, ct: CharacterClassType, positive: bool) -> CodePointSet {
+        let mut cps = codepoints_from_class_positive(ct);
+        if self.flags.icase {
+            cps = unicode::add_icase_code_points(cps);
+        }
+        if !positive {
+            cps = cps.inverted();
+        }
+        cps
     }
 
     fn peek(&mut self) -> Option<u32> {
@@ -845,7 +917,7 @@ where
                 Some(']') => {
                     self.consume(']');
                     if self.flags.icase {
-                        result.cps = unicode::add_icase_code_points(result.cps);
+                        result.cps = self.icase_code_points(result.cps);
                     }
                     return Ok(ir::Node::Bracket(result));
                 }
@@ -857,14 +929,18 @@ where
             };
 
             if !self.try_consume('-') {
-                add_class_atom(&mut result, first);
+                add_class_atom(&mut result, first, self.flags);
                 continue;
             }
 
             let Some(second) = self.try_consume_bracket_class_atom()? else {
                 // No second atom. For example: [a-].
-                add_class_atom(&mut result, first);
-                add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
+                add_class_atom(&mut result, first, self.flags);
+                add_class_atom(
+                    &mut result,
+                    ClassAtom::CodePoint(u32::from('-')),
+                    self.flags,
+                );
                 continue;
             };
 
@@ -889,9 +965,13 @@ where
             }
 
             // If it does not match a range treat as any match single characters.
-            add_class_atom(&mut result, first);
-            add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
-            add_class_atom(&mut result, second);
+            add_class_atom(&mut result, first, self.flags);
+            add_class_atom(
+                &mut result,
+                ClassAtom::CodePoint(u32::from('-')),
+                self.flags,
+            );
+            add_class_atom(&mut result, second, self.flags);
         }
     }
 
@@ -1128,7 +1208,7 @@ where
             // ClassIntersection :: ClassSetOperand && [lookahead ≠ &]
             ClassSetOperator::Intersection => loop {
                 let operand = self.consume_class_set_operand(negate_set)?;
-                result.intersect_operand(operand);
+                result.intersect_operand(operand, self.flags.icase);
                 match self.next() {
                     Some(0x5D) => return Ok(result),
                     Some(0x26) => {}
@@ -1142,7 +1222,7 @@ where
             // ClassSubtraction :: ClassSubtraction -- ClassSetOperand
             ClassSetOperator::Subtraction => loop {
                 let operand = self.consume_class_set_operand(negate_set)?;
-                result.subtract_operand(operand);
+                result.subtract_operand(operand, self.flags.icase);
                 match self.next() {
                     Some(0x5D) => return Ok(result),
                     Some(0x2D) => {}
@@ -1167,9 +1247,12 @@ where
             0x5B => {
                 self.consume('[');
                 let negate_set = self.try_consume('^');
-                let result = self.consume_class_set_expression(negate_set)?;
+                let mut result = self.consume_class_set_expression(negate_set)?;
+                if self.flags.icase {
+                    result.codepoints = unicode::add_icase_code_points(result.codepoints);
+                }
                 if negate_set {
-                    result.codepoints.inverted();
+                    result.codepoints = result.codepoints.inverted();
                 }
                 Ok(Class(result))
             }
@@ -1222,42 +1305,42 @@ where
                     }
                     0x64 => {
                         self.consume('d');
-                        Ok(CharacterClassEscape(codepoints_from_class(
+                        Ok(CharacterClassEscape(self.class_set_escape_codepoints(
                             CharacterClassType::Digits,
                             true,
                         )))
                     }
                     0x44 => {
                         self.consume('D');
-                        Ok(CharacterClassEscape(codepoints_from_class(
+                        Ok(CharacterClassEscape(self.class_set_escape_codepoints(
                             CharacterClassType::Digits,
                             false,
                         )))
                     }
                     0x73 => {
                         self.consume('s');
-                        Ok(CharacterClassEscape(codepoints_from_class(
+                        Ok(CharacterClassEscape(self.class_set_escape_codepoints(
                             CharacterClassType::Spaces,
                             true,
                         )))
                     }
                     0x53 => {
                         self.consume('S');
-                        Ok(CharacterClassEscape(codepoints_from_class(
+                        Ok(CharacterClassEscape(self.class_set_escape_codepoints(
                             CharacterClassType::Spaces,
                             false,
                         )))
                     }
                     0x77 => {
                         self.consume('w');
-                        Ok(CharacterClassEscape(codepoints_from_class(
+                        Ok(CharacterClassEscape(self.class_set_escape_codepoints(
                             CharacterClassType::Words,
                             true,
                         )))
                     }
                     0x57 => {
                         self.consume('W');
-                        Ok(CharacterClassEscape(codepoints_from_class(
+                        Ok(CharacterClassEscape(self.class_set_escape_codepoints(
                             CharacterClassType::Words,
                             false,
                         )))
@@ -1266,7 +1349,10 @@ where
                     0x70 => {
                         self.consume('p');
                         match self.try_consume_unicode_property_escape()? {
-                            PropertyEscapeKind::CharacterClass(code_points) => {
+                            PropertyEscapeKind::CharacterClass(mut code_points) => {
+                                if self.flags.icase {
+                                    code_points = unicode::add_icase_code_points(code_points);
+                                }
                                 Ok(CharacterClassEscape(code_points))
                             }
                             PropertyEscapeKind::StringSet(_) if negate_set => {
@@ -1283,7 +1369,13 @@ where
                     0x50 => {
                         self.consume('P');
                         match self.try_consume_unicode_property_escape()? {
-                            PropertyEscapeKind::CharacterClass(code_points) => {
+                            PropertyEscapeKind::CharacterClass(mut code_points) => {
+                                if self.flags.icase {
+                                    // Under ignoreCase MaybeSimpleCaseFolding
+                                    // applies before CharacterComplement:
+                                    // fold the property set, then complement.
+                                    code_points = unicode::add_icase_code_points(code_points);
+                                }
                                 Ok(CharacterClassEscape(code_points.inverted()))
                             }
                             PropertyEscapeKind::StringSet(_) => error("Invalid character escape"),
@@ -1592,7 +1684,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Digits,
                     c == 'd' as u32,
-                    self.flags.icase,
+                    self.flags,
                 ))
             }
 
@@ -1601,7 +1693,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Spaces,
                     c == 's' as u32,
-                    self.flags.icase,
+                    self.flags,
                 ))
             }
 
@@ -1610,7 +1702,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Words,
                     c == 'w' as u32,
-                    self.flags.icase,
+                    self.flags,
                 ))
             }
 
@@ -1622,15 +1714,21 @@ where
                 let property_escape = self.try_consume_unicode_property_escape()?;
                 match property_escape {
                     PropertyEscapeKind::CharacterClass(mut cps) => {
-                        // Unlike \w and friends, \P negates the raw property
-                        // set before case folding applies: under ignoreCase a
-                        // character matches iff its fold is reachable from the
-                        // (already complemented) set.
-                        if negate {
-                            cps = cps.inverted();
-                        }
-                        if self.flags.icase {
-                            cps = unicode::add_icase_code_points(cps);
+                        // Unlike \w and friends, \P negates the property set.
+                        // Under 'u' the raw set is complemented and case
+                        // folding applies to the complemented set; under
+                        // UnicodeSets MaybeSimpleCaseFolding applies before
+                        // CharacterComplement, so the folded set is
+                        // complemented instead.
+                        if negate && self.flags.icase && self.flags.unicode_sets {
+                            cps = unicode::add_icase_code_points(cps).inverted();
+                        } else {
+                            if negate {
+                                cps = cps.inverted();
+                            }
+                            if self.flags.icase {
+                                cps = unicode::add_icase_code_points(cps);
+                            }
                         }
                         Ok(ir::Node::Bracket(BracketContents { invert: false, cps }))
                     }

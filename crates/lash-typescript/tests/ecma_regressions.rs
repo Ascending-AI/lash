@@ -197,17 +197,21 @@ fn agent_stdlib_regressions_match_ecmascript() {
         finished(r#"finish(JSON.stringify(JSON.parse('{"b":1,"a":2}')));"#),
         Value::String(r#"{"b":1,"a":2}"#.into())
     );
-    // A catchable runtime fault is delivered as an ordinary JavaScript error
-    // branded `RuntimeError`, with its typed payload on `cause`.
+    // Reading a member of `null` is ECMA's TypeError, delivered exactly as
+    // Node delivers it: the native class, Node's message, and no `cause`.
     assert_eq!(
         finished(
-            "try { null.toString(); } catch (error) { finish(error instanceof Error ? error.name : String(error)); }"
+            "try { null.toString(); } catch (error) { finish([error instanceof TypeError, error.name, error.message, error.cause === undefined]); }"
         ),
-        Value::String("RuntimeError".into())
-    );
-    assert_eq!(
-        finished("try { null.toString(); } catch (error) { finish(error.cause.code); }"),
-        Value::String("ValidationFailed".into())
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::String("TypeError".into()),
+                Value::String("Cannot read properties of null (reading 'toString')".into()),
+                Value::Bool(true),
+            ]
+            .into()
+        )
     );
 }
 
@@ -281,6 +285,54 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "const a=[1,2,3]; a.fill('x',-2); finish(a.join(','));",
             "1,x,x",
         ),
+        (
+            "const a=[0,0]; const b=[0,0]; finish(a.fill(1,0,undefined).join(',')+'|'+b.fill(1,0,null).join(','));",
+            "1,1|0,0",
+        ),
+        (
+            "const a=[1,2,3,4,5]; const r=a.copyWithin(-2); finish(a.join(',')+'|'+(a===r));",
+            "1,2,3,1,2|true",
+        ),
+        (
+            "const b=[1,2,3,4,5].copyWithin(0,3); const c=[1,2,3,4,5].copyWithin(0,3,4); const d=[1,2,3,4,5].copyWithin(-2,-3,-1); finish(b.join(',')+'|'+c.join(',')+'|'+d.join(','));",
+            "4,5,3,4,5|4,2,3,4,5|1,2,3,3,4",
+        ),
+        (
+            "const e=[1,2,3,4,5].copyWithin(1,0,3); const f=[1,2,3].copyWithin(0,1); finish(e.join(',')+'|'+f.join(','));",
+            "1,1,2,3,5|2,3,3",
+        ),
+        (
+            "const t={raw:['a','b','c']}; finish(String.raw(t,1,2)+'|'+String.raw(t)+'|'+String.raw({raw:{length:0}})+'|'+String.raw({raw:{length:undefined}}));",
+            "a1b2c|abc||",
+        ),
+        (
+            "const r={length:5,0:'e',1:'',2:null,3:undefined,4:123,5:'past'}; finish(String.raw({raw:r}));",
+            "enullundefined123",
+        ),
+        (
+            "try { String.raw(null); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "try { String.raw({raw:undefined}); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const calls=[]; JSON.parse('{\"p1\":0,\"p2\":0,\"p1\":0,\"2\":0,\"1\":0}',(k,v)=>{calls.push(k);return v;}); finish(calls.join(','));",
+            "1,2,p1,p2,",
+        ),
+        (
+            "const o=JSON.parse('{\"a\":1,\"b\":2}',(k,v)=>k==='b'?undefined:v); const l=JSON.parse('[1,2,3]',(k,v)=>k==='1'?undefined:v); finish(Object.keys(o).join(',')+'|'+l.length+'|'+l[1]+'|'+JSON.parse('{\"n\":5}',(k,v)=>typeof v==='number'?v*2:v).n+'|'+JSON.parse('4',7));",
+            "a|3|undefined|10|4",
+        ),
+        (
+            "const d=new Date('2014-03-27T00:00:00Z'); const e=new Date('0020-01-01T00:00:00Z'); const n=new Date(NaN); finish(d.toUTCString()+'|'+d.toString()+'|'+e.toUTCString()+'|'+n.toUTCString()+'|'+n.toString()+'|'+String(d));",
+            "Thu, 27 Mar 2014 00:00:00 GMT|Thu Mar 27 2014 00:00:00 GMT+0000 (Coordinated Universal Time)|Wed, 01 Jan 0020 00:00:00 GMT|Invalid Date|Invalid Date|Thu Mar 27 2014 00:00:00 GMT+0000 (Coordinated Universal Time)",
+        ),
+        (
+            "const g=new Date('-000123-07-01T00:00Z'); finish(g.toUTCString()+'|'+g.toString());",
+            "Sun, 01 Jul -0123 00:00:00 GMT|Sun Jul 01 -0123 00:00:00 GMT+0000 (Coordinated Universal Time)",
+        ),
         ("finish([1,[2,[3]]].flat(Infinity).join(','));", "1,2,3"),
         (
             "const a=[3,1,2]; const b=a.toReversed(); const c=a.toSpliced(1,1,9); const d=a.with(-1,8); finish(a.join(',')+'|'+b.join(',')+'|'+c.join(',')+'|'+d.join(','));",
@@ -307,6 +359,10 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "2.220446049250313e-16|-9007199254740991|3.141592653589793",
         ),
         (
+            "finish(String(Number.MIN_VALUE)+'|'+String(Number.POSITIVE_INFINITY)+'|'+String(Number.NEGATIVE_INFINITY));",
+            "5e-324|Infinity|-Infinity",
+        ),
+        (
             "finish([Math.atan2(1,1),Math.clz32(1),Math.imul(0xffffffff,5),Math.hypot(3,4)].join(','));",
             "0.7853981633974483,31,-5,5",
         ),
@@ -321,6 +377,38 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
         (
             "const a=new Set([1,2]); const b=new Set([2,3]); const u=a.union(b); const i=a.intersection(b); finish([...u].join(',')+'|'+[...i].join(',')+'|'+a.isDisjointFrom(new Set([9])));",
             "1,2,3|2|true",
+        ),
+        (
+            "const s=new Set([1,2]); const m=new Map([[2,'x'],[3,'y']]); finish([...s.union(m)].join(',')+'|'+[...s.intersection(m)].join(',')+'|'+[...s.difference(m)].join(',')+'|'+[...s.symmetricDifference(m)].join(','));",
+            "1,2,3|2|1|1,3",
+        ),
+        (
+            "const m=new Map([[2,'a']]); finish(new Set([2]).isSubsetOf(m)+'|'+new Set([2,5]).isSupersetOf(m)+'|'+new Set([1]).isDisjointFrom(m));",
+            "true|true|true",
+        ),
+        (
+            "finish([...new Set([3,2,1,0]).intersection(new Set([1,3,5]))].join(',')+'|'+[...new Set([1,2,3]).difference(new Set([7,6,3,2]))].join(','));",
+            "1,3|1",
+        ),
+        (
+            "try { new Set([1]).union([3]); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const o={size:2,has:()=>true,keys:undefined}; try { new Set([1]).union(o); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const o={size:2,has:undefined,keys:()=>[]}; try { new Set([1]).difference(o); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const o={size:'x',has:()=>true,keys:()=>[]}; try { new Set([1]).isSubsetOf(o); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "try { new Set([1]).isDisjointFrom(null); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
         ),
         (
             "finish(JSON.stringify(Object.groupBy([1,2,3,4],v=>v%2)));",
@@ -730,7 +818,7 @@ fn a_member_call_on_undefined_names_the_undefined_receiver() {
         let error = execute(source).expect_err("a member read on undefined must refuse");
         let rendered = error.to_string();
         assert!(
-            rendered.contains("Cannot read properties of undefined (reading `get`)"),
+            rendered.contains("Cannot read properties of undefined (reading 'get')"),
             "{source}: {rendered}"
         );
         assert!(
@@ -744,7 +832,7 @@ fn a_member_call_on_undefined_names_the_undefined_receiver() {
     assert!(
         error
             .to_string()
-            .contains("Cannot read properties of null (reading `get`)"),
+            .contains("Cannot read properties of null (reading 'get')"),
         "{error}"
     );
 
@@ -1850,5 +1938,219 @@ fn function_local_vars_may_name_the_reserved_value_identifiers() {
     assert_eq!(
         finished("finish((() => { var Infinity; return Infinity === undefined; })());"),
         Value::Bool(true)
+    );
+}
+/// The detached `{ name, message }` of an uncaught thrown error.
+fn uncaught(source: &str) -> (String, String) {
+    let error = execute(source).expect_err("the program throws");
+    let RuntimeError::UncaughtException {
+        value: Value::Record(record),
+    } = &error
+    else {
+        panic!("{source}: expected an uncaught error object, got {error:?}");
+    };
+    let text = |field: &str| match record.get(field) {
+        Some(Value::String(text)) => text.to_string(),
+        other => panic!("{source}: `{field}` is {other:?}"),
+    };
+    (text("name"), text("message"))
+}
+
+/// A fault in an operation ECMA-262 specifies to throw is that operation's
+/// own error (FIG-3653, FIG-3654): caught, it is an instance of its class with
+/// Node's message and no `cause`; uncaught, it ends the cell as an uncaught
+/// exception of that class. Before, each of these was a `RuntimeError` brand
+/// or threw nothing at all.
+#[test]
+fn ecma_specified_faults_throw_their_ecma_class() {
+    let caught = [
+        (
+            "const n: any = null; n.x;",
+            "TypeError",
+            "Cannot read properties of null (reading 'x')",
+        ),
+        (
+            "const n: any = undefined; n[0];",
+            "TypeError",
+            "Cannot read properties of undefined (reading '0')",
+        ),
+        (
+            "const n: any = null; n.x = 1;",
+            "TypeError",
+            "Cannot set properties of null (setting 'x')",
+        ),
+        (
+            "const {} = null as any;",
+            "TypeError",
+            "Cannot destructure 'null' as it is null.",
+        ),
+        (
+            "(({}: any) => 1)(undefined);",
+            "TypeError",
+            "Cannot destructure 'undefined' as it is undefined.",
+        ),
+        (
+            "[].find(null as any);",
+            "TypeError",
+            "object null is not a function",
+        ),
+        (
+            "Map.groupBy([], null as any);",
+            "TypeError",
+            "object null is not a function",
+        ),
+        (
+            "JSON.parse('{');",
+            "SyntaxError",
+            "JSON.parse: EOF while parsing an object at line 1 column 1",
+        ),
+        (
+            "(1).toFixed(101);",
+            "RangeError",
+            "toFixed() digits argument must be between 0 and 100",
+        ),
+        ("'a'.repeat(-1);", "RangeError", "Invalid count value: -1"),
+        (
+            "'a'.startsWith(/a/ as any);",
+            "TypeError",
+            "First argument to String.prototype.startsWith must not be a regular expression",
+        ),
+        (
+            "Object.keys(undefined as any);",
+            "TypeError",
+            "Cannot convert undefined or null to object",
+        ),
+        (
+            "Error({ toString: undefined, valueOf: undefined } as any);",
+            "TypeError",
+            "Cannot convert object to primitive value",
+        ),
+        (
+            "(function () {} as any).caller;",
+            "TypeError",
+            "'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them",
+        ),
+        (
+            "const m: any = new Map(); m.size = 1;",
+            "TypeError",
+            "Cannot set property size of #<Map> which has only a getter",
+        ),
+        (
+            "const n: any = 5; for (const x of n) {}",
+            "TypeError",
+            "5 is not iterable",
+        ),
+    ];
+    for (statement, name, message) in caught {
+        let source = format!(
+            "try {{ {statement} finish('no throw'); }} catch (e) {{ finish([e instanceof Error, e.name, e.message, e.cause === undefined]); }}"
+        );
+        assert_eq!(
+            finished(&source),
+            Value::List(
+                vec![
+                    Value::Bool(true),
+                    Value::String(name.into()),
+                    Value::String(message.into()),
+                    Value::Bool(true),
+                ]
+                .into()
+            ),
+            "{statement}"
+        );
+        assert_eq!(
+            uncaught(statement),
+            (name.to_string(), message.to_string()),
+            "uncaught: {statement}"
+        );
+    }
+    // Through a `finally` with nothing to catch it, the error leaves as the
+    // thrown object, not as the substrate failure it was raised from.
+    assert_eq!(
+        uncaught("try { const n: any = null; n.x; } finally { console.log('cleanup'); }"),
+        (
+            "TypeError".to_string(),
+            "Cannot read properties of null (reading 'x')".to_string()
+        )
+    );
+    assert_eq!(
+        finished(
+            "try { try { const n: any = null; n.x; } finally { } } catch (e) { finish(e instanceof TypeError); }"
+        ),
+        Value::Bool(true)
+    );
+}
+
+/// A write that ECMA answers by creating an own property on an object this
+/// value model gives no slot refuses by name; a write ECMA makes read-only in
+/// strict code throws its TypeError.
+#[test]
+fn writes_onto_exotic_objects_refuse_or_throw_as_ecma_does() {
+    for (source, code) in [
+        (
+            "const f: any = () => 1; f.cache = 1;",
+            "TS_EXOTIC_PROPERTY_UNSUPPORTED",
+        ),
+        (
+            "const e: any = new Error('m'); e.name = 'Custom';",
+            "TS_EXOTIC_PROPERTY_UNSUPPORTED",
+        ),
+        (
+            "const a: any = [1]; a.size = 3;",
+            "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED",
+        ),
+        (
+            "const d: any = new Date(0); d.label = 'x';",
+            "TS_DATE_IMMUTABLE",
+        ),
+    ] {
+        let error = execute(&format!("{source} finish(1);")).expect_err(source);
+        assert!(error.to_string().contains(code), "{source}: {error}");
+    }
+    for (source, message) in [
+        (
+            "const f: any = () => 1; f.name = 'x';",
+            "Cannot assign to read only property 'name' of function",
+        ),
+        (
+            "const f: any = () => 1; f.caller = 1;",
+            "'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them",
+        ),
+        (
+            "(Number as any).MAX_VALUE = 1;",
+            "Cannot assign to read only property 'MAX_VALUE' of function 'Number'",
+        ),
+    ] {
+        assert_eq!(
+            uncaught(source),
+            ("TypeError".to_string(), message.to_string()),
+            "{source}"
+        );
+    }
+}
+/// A record that passes GetSetRecord validation — numeric `size`, callable
+/// `has` and `keys` — still cannot be a Set argument: those members are guest
+/// closures and a synchronous builtin cannot invoke them, so the method
+/// refuses only when the algorithm actually reaches a callback (FIG-3704).
+#[test]
+fn set_like_objects_with_guest_callbacks_stay_a_refusal() {
+    for source in [
+        "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set([1]).union(o));",
+        "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set([1]).isSubsetOf(o));",
+    ] {
+        let error =
+            execute(source).expect_err("a set-like record's guest callbacks cannot be invoked");
+        assert!(
+            error.to_string().contains("TS_METHOD_UNSUPPORTED"),
+            "{source}: {error}"
+        );
+    }
+    // An empty `this` never reaches a callback, so the validated set-like
+    // still answers ECMA's result.
+    assert_eq!(
+        finished(
+            "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set().isSubsetOf(o)+'|'+new Set().isDisjointFrom(o));"
+        ),
+        Value::String("true|true".into())
     );
 }

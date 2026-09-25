@@ -149,7 +149,7 @@ impl Heap {
                 }
                 error.errors = Some(value);
             }
-            _ => return Err(unassignable()),
+            _ => return Err(exotic_own_property_refusal(error.kind.name(), key)),
         }
         Ok(())
     }
@@ -161,9 +161,9 @@ impl Heap {
     ) -> Result<bool, RuntimeError> {
         let Value::Ref(target_id) = receiver else {
             return match receiver {
-                Value::Null | Value::Undefined => Err(RuntimeError::ValidationFailed {
-                    reason: "TypeError: Cannot convert undefined or null to object".to_string(),
-                }),
+                Value::Null | Value::Undefined => Err(RuntimeError::type_error(
+                    "Cannot convert undefined or null to object",
+                )),
                 _ => Ok(true),
             };
         };
@@ -252,6 +252,23 @@ impl Heap {
             // reporting it as an unassignable path.
             if matches!(root, Value::Image(_)) {
                 return Err(RuntimeError::ImmutableImageFields);
+            }
+            // Strict code cannot create a property on a primitive.
+            if let (
+                Value::Bool(_) | Value::Number(_) | Value::String(_),
+                [CompiledAssignPathStep::Field(field)],
+            ) = (root, &path.steps[..])
+            {
+                let kind = match root {
+                    Value::Bool(_) => "boolean",
+                    Value::Number(_) => "number",
+                    _ => "string",
+                };
+                return Err(RuntimeError::type_error(format!(
+                    "Cannot create property '{}' on {kind} '{}'",
+                    names[*field].text,
+                    crate::runtime::javascript_to_string(root)
+                )));
             }
             // Nothing else has a writable slot. Name the step that was
             // written so the diagnostic points at the program's own syntax
@@ -428,9 +445,7 @@ impl Heap {
                     || length.fract() != 0.0
                     || length > u32::MAX as f64
                 {
-                    return Err(RuntimeError::ValidationFailed {
-                        reason: "RangeError: Invalid array length".to_string(),
-                    });
+                    return Err(RuntimeError::range_error("Invalid array length"));
                 }
                 let length = length as usize;
                 if length > values.len() {
@@ -498,31 +513,9 @@ impl Heap {
             (HeapObject::Tuple(_), CompiledAssignPathStep::Index) => {
                 return Err(RuntimeError::ImmutableTupleIndexes);
             }
-            // A function's `name`/`length` are non-writable. `Function.prototype`
-            // carries them as non-writable data properties too, so a write never
-            // creates an own property — even after `delete` cleared the own
-            // slot, the inherited non-writable property still blocks the set.
-            (HeapObject::Closure { .. }, CompiledAssignPathStep::Field(field)) => {
-                return Err(RuntimeError::CannotAssignField {
-                    field: names[field].text.to_string(),
-                    actual: "function".to_string(),
-                });
-            }
-            (HeapObject::Closure { .. }, CompiledAssignPathStep::Index) => {
-                return Err(RuntimeError::CannotAssignIndex {
-                    actual: "function".to_string(),
-                });
-            }
-            (object, CompiledAssignPathStep::Field(field)) => {
-                return Err(RuntimeError::CannotAssignField {
-                    field: names[field].text.to_string(),
-                    actual: object.kind_name().to_string(),
-                });
-            }
-            (object, CompiledAssignPathStep::Index) => {
-                return Err(RuntimeError::CannotAssignIndex {
-                    actual: object.kind_name().to_string(),
-                });
+            (object, _) => {
+                let key = leaf_key.ok_or(RuntimeError::MissingAssignmentIndex)?;
+                return Err(unwritable_member(object, &key));
             }
         }
         self.commit_reference_assignment(target_id, old_object, new_object)
@@ -555,6 +548,93 @@ impl Heap {
         self.invalidate_materialized_reaching(target_id);
         self.debug_assert_byte_accounting();
         Ok(())
+    }
+}
+
+/// Why a write of `key` onto `object` cannot land.
+///
+/// Where ECMA-262 makes the property read-only in strict code — a strict
+/// function's `caller` and `arguments`, a function's `name` and `length`, an
+/// accessor with no setter — the write throws its `TypeError`, exactly as in
+/// Node. Anywhere else ECMA would create an own property, and this value model
+/// has no slot for one on the object, so the write is refused by name.
+pub(crate) fn unwritable_member(object: &HeapObject, key: &str) -> RuntimeError {
+    match object {
+        HeapObject::Closure { .. } => match key {
+            "caller" | "arguments" => restricted_function_property(),
+            "name" | "length" => RuntimeError::type_error(format!(
+                "Cannot assign to read only property '{key}' of function"
+            )),
+            _ => function_expando_refusal(key),
+        },
+        HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
+            RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported {
+                key: key.to_string(),
+            }
+        }
+        HeapObject::Map(_) | HeapObject::Set(_) | HeapObject::UrlSearchParams(_)
+            if key == "size" =>
+        {
+            getter_only_property(object, key)
+        }
+        HeapObject::RegExp(_)
+            if matches!(
+                key,
+                "source"
+                    | "flags"
+                    | "global"
+                    | "ignoreCase"
+                    | "multiline"
+                    | "dotAll"
+                    | "sticky"
+                    | "unicode"
+                    | "hasIndices"
+                    | "unicodeSets"
+            ) =>
+        {
+            getter_only_property(object, key)
+        }
+        HeapObject::Date(_) => RuntimeError::ValidationFailed {
+            reason: format!(
+                "TS_DATE_IMMUTABLE: a Date has no own property `{key}` to write, because durable Date values are immutable; keep the value beside the Date in a plain object"
+            ),
+        },
+        object => exotic_own_property_refusal(object.kind_name(), key),
+    }
+}
+
+/// ECMA-262's `TypeError` for touching `caller` or `arguments` on a strict
+/// function (%ThrowTypeError%), in Node's words.
+pub(crate) fn restricted_function_property() -> RuntimeError {
+    RuntimeError::type_error(
+        "'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them",
+    )
+}
+
+fn getter_only_property(object: &HeapObject, key: &str) -> RuntimeError {
+    RuntimeError::type_error(format!(
+        "Cannot set property {key} of #<{}> which has only a getter",
+        object.kind_name()
+    ))
+}
+
+/// A property a built-in object's type does not declare. `tsc --strict`
+/// rejects the same write (TS2339), so the refusal is TypeScript-faithful.
+fn exotic_own_property_refusal(kind: &str, key: &str) -> RuntimeError {
+    RuntimeError::ValidationFailed {
+        reason: format!(
+            "TS_EXOTIC_PROPERTY_UNSUPPORTED: `{key}` is not a property of {kind} (tsc TS2339), and this value model has no slot to add it; keep the value in a plain object beside it"
+        ),
+    }
+}
+
+/// A function expando. ECMA and `tsc` both accept it; the refusal is the
+/// value model's limit alone, since a function value has no property slots.
+fn function_expando_refusal(key: &str) -> RuntimeError {
+    RuntimeError::ValidationFailed {
+        reason: format!(
+            "TS_EXOTIC_PROPERTY_UNSUPPORTED: `{key}` cannot be added to a function, which has no property slots in this value model (an unsupported feature: ECMA and tsc both allow it); keep the value in a plain object beside the function"
+        ),
     }
 }
 
@@ -592,9 +672,7 @@ fn javascript_array_length(number: f64) -> Result<usize, RuntimeError> {
     if number.is_finite() && number >= 0.0 && number.fract() == 0.0 && number <= u32::MAX as f64 {
         return Ok(number as usize);
     }
-    Err(RuntimeError::ValidationFailed {
-        reason: "RangeError: Invalid array length".to_string(),
-    })
+    Err(RuntimeError::range_error("Invalid array length"))
 }
 
 fn regexp_last_index(number: f64) -> u64 {

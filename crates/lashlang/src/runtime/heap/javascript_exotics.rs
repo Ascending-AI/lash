@@ -119,6 +119,19 @@ impl ErrorKind {
     }
 }
 
+impl From<crate::runtime::EcmaErrorClass> for ErrorKind {
+    fn from(class: crate::runtime::EcmaErrorClass) -> Self {
+        use crate::runtime::EcmaErrorClass;
+        match class {
+            EcmaErrorClass::TypeError => Self::TypeError,
+            EcmaErrorClass::RangeError => Self::RangeError,
+            EcmaErrorClass::SyntaxError => Self::SyntaxError,
+            EcmaErrorClass::ReferenceError => Self::ReferenceError,
+            EcmaErrorClass::URIError => Self::URIError,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ErrorObject {
     pub(crate) kind: ErrorKind,
@@ -736,6 +749,26 @@ impl Heap {
         Ok(false)
     }
 
+    /// OrdinaryToPrimitive's `TypeError`. A plain object whose own `toString`
+    /// is not callable shadows `Object.prototype.toString`, and the
+    /// `valueOf` it inherits answers the object itself, so no step yields a
+    /// primitive — unless an own callable `valueOf` does, which is guest code
+    /// that the callers of this conversion refuse before they get here.
+    fn ensure_record_has_primitive(&self, record: &Record) -> Result<(), RuntimeError> {
+        let callable = |name: &str| -> Result<bool, RuntimeError> {
+            Ok(match record.get(name) {
+                Some(Value::Ref(id)) => matches!(self.get(*id)?, HeapObject::Closure { .. }),
+                _ => false,
+            })
+        };
+        if record.get("toString").is_some() && !callable("toString")? && !callable("valueOf")? {
+            return Err(RuntimeError::type_error(
+                "Cannot convert object to primitive value",
+            ));
+        }
+        Ok(())
+    }
+
     /// This is the ECMA-exact conversion: an object with no string of its own
     /// answers `"[object Object]"`. Property keys, `console.log`'s fallback
     /// text and `Map.prototype.toString` all ask for exactly that. The string
@@ -896,10 +929,10 @@ impl Heap {
                 let string = match value {
                     Value::Null | Value::Undefined => String::new(),
                     Value::Ref(id) if matches!(self.get(*id)?, HeapObject::Date(_)) => {
-                        return Err(RuntimeError::ValidationFailed {
-                            reason: "TS_DATE_STRING_COERCION_PENDING: Date string coercion inside a container is unavailable; use .toISOString()"
-                                .to_string(),
-                        });
+                        let HeapObject::Date(date) = self.get(*id)? else {
+                            unreachable!()
+                        };
+                        crate::runtime::vm::javascript_date::date_to_string(date.milliseconds)
                     }
                     other => {
                         let primitive = self
@@ -920,11 +953,12 @@ impl Heap {
     }
 
     pub(crate) fn javascript_to_string(&self, value: &Value) -> Result<String, RuntimeError> {
-        if matches!(value, Value::Ref(id) if matches!(self.get(*id)?, HeapObject::Date(_))) {
-            return Err(RuntimeError::ValidationFailed {
-                reason: "TS_DATE_STRING_COERCION_PENDING: Date string coercion is unavailable; use .toISOString()"
-                    .to_string(),
-            });
+        if let Value::Ref(id) = value
+            && let HeapObject::Date(date) = self.get(*id)?
+        {
+            return Ok(crate::runtime::vm::javascript_date::date_to_string(
+                date.milliseconds,
+            ));
         }
         let primitive = self.javascript_to_primitive_string_or_number(value)?;
         Ok(javascript_to_string(&primitive))
@@ -965,10 +999,19 @@ impl Heap {
                 self.javascript_sequence_string(&result.items, active, depth, objects)?
                     .into(),
             ),
-            Some(HeapObject::Record(_)) => {
+            Some(HeapObject::Record(record)) => {
+                self.ensure_record_has_primitive(record)?;
                 objects.string_or_refuse("[object Object]", "a plain object", depth)?
             }
-            Some(HeapObject::Date(date)) => Value::Number(date.milliseconds),
+            // A Date's default ToPrimitive hint is string — unlike every other
+            // object — so the `+`/`String()`/template conversion answers its
+            // DateString, while the number-hinted coercion keeps the epoch.
+            Some(HeapObject::Date(date)) => match objects {
+                ObjectStringCoercion::Refuse => Value::String(
+                    crate::runtime::vm::javascript_date::date_to_string(date.milliseconds).into(),
+                ),
+                ObjectStringCoercion::Ecma => Value::Number(date.milliseconds),
+            },
             Some(HeapObject::Map(_)) => objects.string_or_refuse("[object Map]", "a Map", depth)?,
             Some(HeapObject::Set(_)) => objects.string_or_refuse("[object Set]", "a Set", depth)?,
             Some(HeapObject::RegExp(regexp)) => Value::String(regexp_string(regexp).into()),
@@ -995,7 +1038,11 @@ impl Heap {
                     self.javascript_sequence_string(values, active, depth, objects)?
                         .into(),
                 ),
-                Value::Record(_) | Value::Image(_) | Value::Resource(_) => {
+                Value::Record(record) => {
+                    self.ensure_record_has_primitive(record)?;
+                    objects.string_or_refuse("[object Object]", "a plain object", depth)?
+                }
+                Value::Image(_) | Value::Resource(_) => {
                     objects.string_or_refuse("[object Object]", "a plain object", depth)?
                 }
                 // A projected handle is a host-side view of a value, not an
@@ -1031,10 +1078,12 @@ impl Heap {
             .map(|value| match value {
                 Value::Null | Value::Undefined => Ok(String::new()),
                 Value::Ref(id) if matches!(self.get(*id)?, HeapObject::Date(_)) => {
-                    Err(RuntimeError::ValidationFailed {
-                        reason: "TS_DATE_STRING_COERCION_PENDING: Date string coercion inside a container is unavailable; use .toISOString()"
-                            .to_string(),
-                    })
+                    let HeapObject::Date(date) = self.get(*id)? else {
+                        unreachable!()
+                    };
+                    Ok(crate::runtime::vm::javascript_date::date_to_string(
+                        date.milliseconds,
+                    ))
                 }
                 other => self
                     .javascript_to_primitive_inner(other, active, depth + 1, objects)

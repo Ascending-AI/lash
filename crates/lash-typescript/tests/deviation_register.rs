@@ -198,11 +198,17 @@ const PROBES: &[Probe] = &[
         refusal: "TS_SOURCE_NESTING_LIMIT",
         source: Source::Generated(nested_source),
     },
-    // 12. Dense arrays.
+    // 12. Dense arrays: the skipped-index write, and a literal elision refused
+    // statically rather than filled with `undefined` (FIG-3702).
     probe(
         12,
         "TS_SPARSE_ARRAY_UNSUPPORTED",
         "const a = [1]; a[3] = 9; finish(a.length);",
+    ),
+    probe(
+        12,
+        "TS_SPARSE_ARRAY_UNSUPPORTED",
+        "const a = [0, , 2]; finish(a);",
     ),
     probe(
         12,
@@ -290,6 +296,16 @@ const PROBES: &[Probe] = &[
         "TS_REGEX_ITERATOR_POSITION",
         "const matches = 'aa'.matchAll(/a/g); finish(1);",
     ),
+    // Both halves: the TS2339-backed write onto a built-in object, and the
+    // function expando that ECMA and tsc accept.
+    readme_probe(
+        "TS_EXOTIC_PROPERTY_UNSUPPORTED",
+        "const m: any = new Map(); m.cache = 1; finish(1);",
+    ),
+    readme_probe(
+        "TS_EXOTIC_PROPERTY_UNSUPPORTED",
+        "const f = () => 1; const g: any = f; g.cache = 1; finish(1);",
+    ),
     readme_probe(
         "TS_DELETE_ARRAY_INDEX_UNSUPPORTED",
         "const a = [1, 2]; delete a[0]; finish(a.length);",
@@ -306,10 +322,6 @@ const PROBES: &[Probe] = &[
     readme_probe(
         "TS_DATE_IMMUTABLE",
         "const d = new Date(0); d.setUTCFullYear(2020); finish(1);",
-    ),
-    readme_probe(
-        "TS_DATE_STRING_COERCION_PENDING",
-        "finish('' + new Date(0));",
     ),
     readme_probe(
         "TS_URL_SCHEME_UNSUPPORTED",

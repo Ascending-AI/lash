@@ -190,6 +190,34 @@ Mutually recursive function declarations reject with
 `TS_MUTUAL_RECURSION_UNSUPPORTED`; a function *expression* may still be named
 and call itself by that name, and self-recursive declarations are unaffected.
 
+Some rejections are strictness the real toolchain shares rather than
+missing surface: `tsc --strict` — typescript@7.0.2, the version the
+differential generator pins — rejects the same program, and the refusal
+names its diagnostic (FIG-3705; the full register, with the splits where a
+`TS_*` code also covers `tsc`-accepted shapes and the ticket that owns each,
+is ADR 0064's dialect-strictness section). Reading a name nothing binds is
+`TS_UNKNOWN_BINDING` (TS2304); a `let`/`const` read before its declaration
+is `TS_TEMPORAL_DEAD_ZONE` (TS2448); a missing field of a statically closed
+object literal is `TS_LINK_ERROR` (TS2339), and a member a built-in
+namespace lacks is `TS_METHOD_UNSUPPORTED` to read and `TS_UNKNOWN_BINDING`
+to write (TS2339, or TS2540 on a read-only member). A listed method,
+builtin, or constructor called with the wrong arity is
+`TS_METHOD_UNSUPPORTED` (`[1].map()`), `TS_EXPRESSION_UNSUPPORTED`
+(`parseInt()`), or `TS_CONSTRUCTOR_UNSUPPORTED` at run time
+(`new Map(1, 2)`) — all TS2554; an authored function called short is *not*
+refused, since ECMA supplies `undefined`. `+` on an object without a string
+operand is `TS_OBJECT_STRING_COERCION` at run time (TS2365); `new` on an
+authored function is `TS_NEW_UNSUPPORTED` (TS7009), as is `new RegExp` with
+a non-string literal pattern (TS2769). Assigning a `const` or a function
+declaration is `TS_ASSIGN_CONST` (TS2588, TS2630); `instanceof` on a
+primitive is `TS_INSTANCEOF_UNSUPPORTED` (TS2358); `with` is
+`TS_WITH_UNSUPPORTED` (TS1101 — the dialect is strict-only, where `with` is
+already a syntax error); a comma whose left operand does nothing is
+`TS_SEQUENCE_UNSUPPORTED` (TS2695); destructuring or spreading a
+non-iterable (`const [a] = null;`) is `TS_METHOD_UNSUPPORTED` at run time
+(TS2488). The probes are pinned in `tests/rejections.rs` and the census's
+`typescript`-kind rows.
+
 The canonical classic `for` lowering rejects a `continue` that crosses a
 `finally` with `TS_FOR_UNSUPPORTED`, because the current loop epilogue would
 otherwise run before the `finally`. `for...of` follows its iterable live, as
@@ -421,9 +449,27 @@ no probe that fires it fails that test.
 - Appending at exactly `array.length` is supported. An assignment that skips an
   index would create holes the v1 dense-list representation cannot distinguish
   from explicit `undefined`, so it rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`.
-  Negative and other non-index writes would create named object properties and
-  reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; neither path mutates an
-  element.
+  An elision in an array literal — a hole anywhere, including a trailing one
+  as in `[1, , ]`; a single trailing comma is not an elision — creates the
+  same hole, so it rejects statically with the same code rather than silently
+  storing `undefined`. Negative and other non-index writes would create named
+  object properties and reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`;
+  neither path mutates an element.
+- A write that ECMA would answer by creating an own property the value model
+  has no slot for rejects at runtime as `TS_EXOTIC_PROPERTY_UNSUPPORTED`;
+  keep the value in a plain object beside it. The code covers two cases:
+  - on an `Error`, `Map`, `Set`, `RegExp` or `URLSearchParams`
+    (`error.name = …`, `map.cache = …`) it is TypeScript-faithful: `tsc
+    --strict` rejects the same write as TS2339 (verified on the pinned
+    TypeScript 7.0.2);
+  - on a function (`f.cache = …`) it is an unsupported-feature refusal,
+    stricter than both ECMA and `tsc`, which accept the expando: a function
+    value has no property slots in this value model. Where ECMA makes the property read-only in strict code —
+  a function's `name`, `length`, `caller` and `arguments`, or an accessor
+  with no setter such as `map.size` and `regexp.source` — the write throws
+  ECMA's `TypeError` instead. A write onto a `Date` rejects as
+  `TS_DATE_IMMUTABLE`, and a named property on an array as
+  `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`.
 - Deleting an object field preserves aliases and returns the ECMA boolean.
   Deleting a present dense-array index would create a hole, so it rejects at
   runtime with `TS_DELETE_ARRAY_INDEX_UNSUPPORTED` and directs the author to
@@ -475,9 +521,11 @@ no probe that fires it fails that test.
   `getUTC*` replacement; locale and local string methods direct the author to
   `toISOString()`.
 - Date numeric coercion is supported, including subtraction and relational
-  comparison. String coercion—directly or through an array/Error-message join—
-  rejects as `TS_DATE_STRING_COERCION_PENDING` and directs the author to
-  `.toISOString()`; the VM never substitutes a host-local date string.
+  comparison. String coercion—`d.toString()`, `d.toUTCString()`, `String(d)`,
+  `d + ''`, template interpolation, or through an array/Error-message join—
+  produces the deterministic UTC-pinned ECMA DateString, such as
+  `Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)`; the VM
+  never substitutes a host-local date string.
 - Map, Set, and URLSearchParams `forEach` all use live durable cursors: entries
   appended during a callback are visited, while entries deleted before their
   turn are skipped. Deleting and reinserting a Map key or Set value schedules
@@ -525,12 +573,17 @@ corpus cites:
   from a global object property, so `globalThis.x = 2` beside `let x = 1`
   leaves `x` reading `1` in Node and `2` here. `var` and function declarations
   alias the global object in both.
-- `runtime-fault-brand`: a fault the VM raises — reading a member of `null`,
-  calling a non-function — is an `Error` branded `RuntimeError`, with its
-  typed code on `cause` ([ADR 0062](../../docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md)),
-  not the ECMA class (`TypeError`) Node throws. `instanceof Error` holds;
-  `instanceof TypeError` does not. An error the program or a builtin throws
-  keeps its own class.
+- `runtime-fault-brand`: a failure with no ECMA-262 counterpart — a value
+  that cannot cross the host boundary, a failed tool result unwrapped with
+  `?`, a process control used outside a process — is an `Error` branded
+  `RuntimeError`, with its typed code on `cause` ([ADR 0062](../../docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md)).
+  An operation ECMA-262 specifies to throw throws that class instead, with
+  Node's message: reading or writing a member of `null` or `undefined`,
+  calling a non-function, destructuring `null` or `undefined`, iterating a
+  non-iterable, touching a strict function's `caller` or `arguments`, and each
+  built-in's own `TypeError`, `RangeError` or `SyntaxError`. So
+  `instanceof TypeError` and `error.name` answer as in Node, caught or
+  uncaught.
 - `process-literal-is-a-process-value`: a top-level `const`-bound uncalled
   `async` arrow is a `Process` value
   ([ADR 0095](../../docs/adr/0095-processes-are-values-and-process-controls-are-tools.md)):
@@ -638,7 +691,7 @@ The shipped static families are:
   program at all.
 - URL: `canParse(input[, base])`.
 
-The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
+The shipped instance names are `at`, `concat`, `copyWithin`, `charAt`, `charCodeAt`,
 `codePointAt`, `append`, `add`, `clear`, `delete`, `entries`, `exec`, `endsWith`, `filter`, `fill`,
 `find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `forEach`,
 `get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `match`, `matchAll`,
@@ -652,16 +705,18 @@ The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
 `symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`,
 `toJSON`, `getTime`, `getUTCFullYear`, `getUTCMonth`, `getUTCDate`,
 `getUTCDay`, `getUTCHours`, `getUTCMinutes`, `getUTCSeconds`,
-`getUTCMilliseconds`, and `toISOString`. The signature table in
+`getUTCMilliseconds`, `toISOString`, and `toUTCString`. The signature table in
 `src/signatures.rs` gives every optional form.
 
-`Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, `MAX_VALUE`, and
+`Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, `MAX_VALUE`,
+`MIN_VALUE`, `POSITIVE_INFINITY`, `NEGATIVE_INFINITY`, and
 `NaN` are accepted constants. Array callbacks run synchronously and sequentially inside
 the durable VM callback driver. `sort` is stable, mutates and returns its
 receiver; `toSorted`, `toReversed`, `toSpliced`, and `with` return fresh arrays.
 The array representation is dense: `arr.length = 0` is accepted, while writes
-that would create holes reject as `TS_SPARSE_ARRAY_UNSUPPORTED` instead of
-silently changing callback semantics. `push`, `pop`, `shift`, and `unshift`
+that would create holes, and elisions in array literals, reject as
+`TS_SPARSE_ARRAY_UNSUPPORTED` instead of silently changing callback
+semantics. `push`, `pop`, `shift`, and `unshift`
 mutate the receiver in place with their ECMA return values — the new length for
 `push`/`unshift`, the removed element or `undefined` for `pop`/`shift` — and
 compose with the callback methods, so accumulating into an array inside
@@ -671,8 +726,7 @@ compose with the callback methods, so accumulating into an array inside
 data is host-dependent. Rewrite comparisons as
 `a < b ? -1 : a > b ? 1 : 0`; format numbers with `toFixed(digits)`.
 `String.normalize` also remains rejected because the pinned VM has no Unicode
-normalization database; normalize in a deterministic host tool. JSON parse
-revivers remain rejected: parse first and walk the result explicitly. Missing
+normalization database; normalize in a deterministic host tool. Missing
 methods reject with `TS_METHOD_UNSUPPORTED`.
 
 ## Source nesting budget

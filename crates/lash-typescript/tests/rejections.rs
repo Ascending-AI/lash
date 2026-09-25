@@ -340,6 +340,33 @@ fn reserved_value_identifiers_refuse_only_at_the_top_level() {
     }
 }
 
+/// A hole in an array literal is a sparse array, which the dense v1
+/// representation cannot express; it refuses statically rather than filling
+/// the slot with `undefined` (FIG-3702). A trailing comma alone is not an
+/// elision, and a hole in a destructuring *pattern* skips an element without
+/// creating one.
+#[test]
+fn array_literal_elisions_reject_but_commas_and_pattern_holes_do_not() {
+    for source in [
+        "const a = [, 2];",
+        "const a = [0, , 2];",
+        "const a = [1, , ];",
+        "const a = [0, , 2, , 4];",
+        "const a = [[0, , 2]];",
+        "const a = [1, ...[0, , 2]];",
+    ] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        assert_eq!(error.code, Code::SparseArrayUnsupported, "{error}");
+    }
+    for source in [
+        "const a = [1,];",
+        "const a = [];",
+        "const [x, , z] = [1, 2, 3]; finish(z);",
+    ] {
+        lash_typescript::validate(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+}
+
 #[test]
 fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
     for source in [
@@ -401,8 +428,8 @@ fn instance_method_inventory_matches_the_lowerer() {
         unaccepted.is_empty(),
         "the register documents {unaccepted:?}, which the lowerer does not accept"
     );
-    assert_eq!(documented.len(), 89);
-    assert_eq!(lash_typescript::stdlib_name_count(), 149);
+    assert_eq!(documented.len(), 91);
+    assert_eq!(lash_typescript::stdlib_name_count(), 152);
     for candidate in ["substr", "localeCompare", "toLocaleString", "normalize"] {
         assert!(
             !lash_typescript::accepts_instance_method(candidate),
@@ -442,10 +469,6 @@ fn retained_stdlib_rejections_carry_exact_repairs() {
         (
             "finish('e'.normalize());",
             "Normalize text in a deterministic host tool",
-        ),
-        (
-            "finish(JSON.parse('{}',(k,v)=>v));",
-            "Parse first, then walk the returned value explicitly",
         ),
     ] {
         let error = lash_typescript::validate(source).expect_err("call remains rejected");
@@ -638,4 +661,111 @@ fn a_multi_use_code_gives_advice_that_matches_the_actual_refusal() {
             "{source}: advice about `{must_not_contain}` does not fit this refusal:\n{rendered}"
         );
     }
+}
+
+// Refusals the pinned `tsc --strict` shares (FIG-3705, ADR 0064).
+//
+// Each refusal below is one typescript@7.0.2 under `strict`/`noEmit` also
+// rejects; the comment names the checker's diagnostic. A refusal that is
+// also the checker's is strictness the toolchain shares, not a coverage
+// gap, so it is registered rather than fixed. Where the same `TS_*` code
+// also refuses a shape `tsc` accepts, the ADR's dialect-strictness register
+// records the split and the ticket that owns the accepted shape — nothing
+// here moves that boundary. `rejects_with` above is the TS1101 pin — the
+// dialect is strict-only, where `with` is already a syntax error. The
+// refusals that fire only at run time — `TS_OBJECT_STRING_COERCION` on
+// `{a: 1} + 1` (tsc TS2365) and `TS_CONSTRUCTOR_UNSUPPORTED` on
+// `new Map(1, 2)` (TS2554) — are pinned by the same-named census
+// probes. `const [a] = null;` (TS2488) no longer refuses: it throws
+// ECMA's `TypeError` at run time (FIG-3654), so it has no probe.
+// tsc TS2304.
+rejection_test!(
+    rejects_an_undeclared_name_tsc_also_rejects,
+    "const x = notDeclaredAnywhere;",
+    Code::UnknownBinding
+);
+// tsc TS2448 (with TS7022, the circular-initializer note).
+rejection_test!(
+    rejects_a_dead_zone_read_tsc_also_rejects,
+    "const x = x;",
+    Code::TemporalDeadZone
+);
+// tsc TS2339 on a missing member of a built-in namespace.
+rejection_test!(
+    rejects_a_missing_builtin_member_read_tsc_also_rejects,
+    "const x = Math.extra;",
+    Code::MethodUnsupported
+);
+// tsc TS2339 on the write of one too (TS2540 when the member exists but is
+// read-only, e.g. `Math.PI = 2` — the same refusal covers both).
+rejection_test!(
+    rejects_a_builtin_member_write_tsc_also_rejects,
+    "Math.extra = 1;",
+    Code::UnknownBinding
+);
+// tsc TS2554 on a missing-argument call to a listed method.
+rejection_test!(
+    rejects_a_missing_argument_call_tsc_also_rejects,
+    "[1].map();",
+    Code::MethodUnsupported
+);
+// tsc TS2554 on a missing-argument call to a listed builtin.
+rejection_test!(
+    rejects_a_missing_builtin_argument_tsc_also_rejects,
+    "parseInt();",
+    Code::UnsupportedExpression
+);
+// tsc TS7009 on `new` of an authored function.
+rejection_test!(
+    rejects_new_on_an_authored_function_tsc_also_rejects,
+    "function F() { } const o = new F();",
+    Code::NewUnsupported
+);
+// tsc TS2769 on a non-string `RegExp` pattern; `new RegExp(re)` on a regex
+// argument is tsc-accepted and stays refused under the same code until
+// FIG-3698's constructor work lands.
+rejection_test!(
+    rejects_a_non_string_regexp_pattern_tsc_also_rejects,
+    "const r = new RegExp(null);",
+    Code::NewUnsupported
+);
+// tsc TS2588 on a `const` reassignment; the same code's refusals of `var`,
+// parameter and `catch` bindings are tsc-accepted shapes FIG-3703 owns.
+rejection_test!(
+    rejects_const_reassignment_tsc_also_rejects,
+    "const v = 1; v = 2;",
+    Code::AssignConst
+);
+// tsc TS2630 on assignment to a function declaration.
+rejection_test!(
+    rejects_function_reassignment_tsc_also_rejects,
+    "function f() { } f = () => 1;",
+    Code::AssignConst
+);
+// tsc TS2358 on `instanceof` with a primitive left operand; authored and
+// unlisted right-hand sides stay refused under the same code — `instanceof`
+// admits exactly the heap kinds the dialect has.
+rejection_test!(
+    rejects_primitive_instanceof_tsc_also_rejects,
+    "const b = 'a' instanceof String;",
+    Code::InstanceOfUnsupported
+);
+// tsc TS2695 on a comma whose left operand has no side effects; the dialect
+// refuses the whole construct, so `(f(), 2)` stays refused too.
+rejection_test!(
+    rejects_a_dead_left_operand_comma_tsc_also_rejects,
+    "const x = (1, 2);",
+    Code::SequenceUnsupported
+);
+
+/// The closed-shape field guard refuses a missing-field read at link time —
+/// the same check `tsc` runs as TS2339 (ADR 0062 entry 22, FIG-3626).
+#[test]
+fn a_missing_field_of_a_closed_literal_is_tsc2339() {
+    let error = lash_typescript::link(
+        "const o = { a: 1 }; const c = o.c;",
+        &lashlang::testing::harness::test_environment(),
+    )
+    .expect_err("a closed shape refuses a field it lacks");
+    assert_eq!(error.code, Code::LinkError, "{error}");
 }

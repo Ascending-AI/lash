@@ -162,6 +162,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
         !self.handlers.is_empty() || !self.finally_stack.is_empty()
     }
 
+    /// Where an operation's ECMA-specified throw becomes the error object it
+    /// throws (see [`RuntimeError::ecma_error`]): from here on it is an
+    /// ordinary thrown value, exactly as if the guest had written
+    /// `throw new TypeError(message)` at the failing expression.
+    pub(super) fn ecma_throw(&mut self, error: RuntimeError) -> Result<RuntimeError, RuntimeError> {
+        let Some((class, message)) = error.ecma_error() else {
+            return Ok(error);
+        };
+        let value = self
+            .heap
+            .allocate_error(ErrorKind::from(class), Some(message), None, None)?;
+        Ok(RuntimeError::UncaughtException { value })
+    }
+
     pub(super) fn throw_runtime_error(
         &mut self,
         error: &RuntimeError,
@@ -169,14 +183,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
         span: Option<Span>,
     ) -> Result<bool, RuntimeError> {
         let value = self.runtime_error_value(error, instruction_ip)?;
-        self.throw_value(
-            value,
-            Some(Box::new(PendingErrorOrigin {
+        // A thrown value is its own completion: a cleanup chain that ends with
+        // nothing catching it re-raises the value, as it would an explicit
+        // `throw`. Only a routed substrate failure keeps its typed origin.
+        let origin = (!matches!(error, RuntimeError::UncaughtException { .. })).then(|| {
+            Box::new(PendingErrorOrigin {
                 error: error.clone(),
                 instruction_ip,
                 span,
-            })),
-        )
+            })
+        });
+        self.throw_value(value, origin)
     }
 
     #[expect(
@@ -301,30 +318,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let RuntimeError::UncaughtException { value } = error {
             return Ok(value.clone());
         }
-        if matches!(
-            error,
-            RuntimeError::CannotAssignField { actual, .. }
-                | RuntimeError::CannotAssignIndex { actual }
-                if matches!(actual.as_str(), "RegExp" | "Map" | "Set" | "Date" | "function")
-                    || ErrorKind::from_name(actual).is_some()
-        ) {
-            return self.heap.allocate_error(
-                ErrorKind::TypeError,
-                Some(error.to_string()),
-                None,
-                None,
-            );
-        }
-        // Calling a value without [[Call]] raises a TypeError in ECMA-262; the
-        // message keeps the substrate's naming ("attempted to call a
-        // non-function value") inside the guest-visible error.
-        if matches!(error, RuntimeError::NonFunctionCall { .. }) {
-            return self.heap.allocate_error(
-                ErrorKind::TypeError,
-                Some(error.to_string()),
-                None,
-                None,
-            );
+        if let Some((class, message)) = error.ecma_error() {
+            return self
+                .heap
+                .allocate_error(ErrorKind::from(class), Some(message), None, None);
         }
         let mut details = record_with_capacity(3);
         details.insert(

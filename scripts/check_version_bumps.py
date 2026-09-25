@@ -739,9 +739,17 @@ IDENTIFIER_RENAME_BASELINES = {
     # `TS_CYCLIC_VALUE_UNSUPPORTED` prefix in its `#[error]` Display text.
     # Serde serializes the variant fields (`id`), not the rendered message, so
     # the continuation bytes are identical and the version stays 22.
+    #
+    # FIG-3653 supersedes again: `RuntimeError` gained the `EcmaThrow`
+    # variant, which is `#[serde(skip)]`. The VM's error routing turns it into
+    # a thrown error object before any handler or `finally` sees it, so it is
+    # never a suspended finally's pending origin and has no wire form.
+    # `continuation_runtime_error_wire_variants_are_pinned` passes unchanged:
+    # the serialized variant vocabulary, and so the continuation bytes, are
+    # identical, and the version stays 23.
     "crates/lashlang/src/runtime/vm/continuation.rs:"
     "VM_CONTINUATION_FORMAT_VERSION": (
-        "sha256:e5c3cbcdf1a9a83db44f6f55b60e4629fc1bbbd6bc7ed40895e2f1e19e493b98"
+        "sha256:4aed7dc999a0c19392c42d78a5197be8b5457b026fcaf44c9d26c0f342d8c035"
     ),
     # FIG-2992: a process identity's `definition` became the typed
     # `ProcessDefinitionRef` instead of a bare `serde_json::Value`. Both trigger

@@ -392,7 +392,9 @@ async fn reference_object_key_nested_array_write_returns_a_deterministic_error()
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn date_reference_index_key_uses_the_pending_string_coercion_error() {
+async fn date_reference_index_key_coerces_to_the_ecma_date_string() {
+    // FIG-3704: a Date used as a property key ToString's to its UTC DateString,
+    // so it reads (and writes) the member named after that string.
     let program = Program::block(vec![
         ts_assign("record", Expr::Record(Vec::new())),
         ts_assign("date_key", heap_new("Date", vec![Expr::Number(42.0)])),
@@ -401,15 +403,9 @@ async fn date_reference_index_key_uses_the_pending_string_coercion_error() {
             index: Box::new(Expr::Variable("date_key".into())),
         })),
     ]);
-    let compiled = compile_ast(&program).expect("compile Date index-key coercion regression");
-    let error = execute(&compiled, &mut State::new(), &Host)
-        .await
-        .expect_err("Date index-key coercion remains a loud deviation");
-    assert!(
-        error
-            .to_string()
-            .contains("TS_DATE_STRING_COERCION_PENDING"),
-        "{error}"
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::Undefined)
     );
 }
 
@@ -526,20 +522,16 @@ async fn global_regexp_match_value_of_preserves_identity() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn date_to_string_uses_the_pending_string_coercion_error() {
+async fn date_to_string_produces_the_ecma_date_string() {
     let program = Program::block(vec![
         ts_assign("date", heap_new("Date", vec![Expr::Number(42.0)])),
         Expr::Finish(Box::new(heap_method("toString", "date", Vec::new()))),
     ]);
-    let compiled = compile_ast(&program).expect("compile Date toString regression");
-    let error = execute(&compiled, &mut State::new(), &Host)
-        .await
-        .expect_err("Date toString remains a loud deviation");
-    assert!(
-        error
-            .to_string()
-            .contains("TS_DATE_STRING_COERCION_PENDING"),
-        "{error}"
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::String(
+            "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)".into()
+        ))
     );
 }
 
@@ -779,7 +771,9 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
         ExecutionOutcome::Finished(Value::Number(5.0))
     );
 
-    let unsupported_date_add = Program::block(vec![
+    // A Date's default ToPrimitive hint is string (FIG-3704), so `date + "x"`
+    // concatenates the deterministic UTC DateString rather than refusing.
+    let date_add = Program::block(vec![
         ts_assign("date", heap_new("Date", vec![Expr::Number(9.0)])),
         Expr::Finish(Box::new(Expr::JavaScriptBinary {
             left: Box::new(Expr::Variable("date".into())),
@@ -787,15 +781,11 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
             right: Box::new(Expr::String("x".into())),
         })),
     ]);
-    let compiled = compile_ast(&unsupported_date_add).expect("compile Date addition regression");
-    let error = execute(&compiled, &mut State::new(), &Host)
-        .await
-        .expect_err("Date addition needs pending string semantics");
-    assert!(
-        error
-            .to_string()
-            .contains("TS_DATE_STRING_COERCION_PENDING"),
-        "{error}"
+    assert_eq!(
+        run_typescript_ast_across_every_effect(date_add).await,
+        ExecutionOutcome::Finished(Value::String(
+            "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)x".into()
+        ))
     );
 }
 

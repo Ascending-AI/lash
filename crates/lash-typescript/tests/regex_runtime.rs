@@ -784,3 +784,98 @@ fn match_and_search_coerce_non_regexp_arguments() {
         "the refusal is the named one: {error}"
     );
 }
+
+#[test]
+fn match_and_search_evaluate_every_argument_in_order() {
+    // ECMA-262 evaluates every argument for its side effects even though only
+    // the first is used (FIG-3698).
+    assert_eq!(
+        finished("let i=0; 'a'.match(/a/, i++); finish(i);"),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        finished("let i=0; 'a'.search(/a/, i++); finish(i);"),
+        Value::Number(1.0)
+    );
+    // The extra argument's value is still ignored semantically: the match
+    // uses only the first.
+    assert_eq!(
+        finished("let i=0; finish('ab'.match(/b/, i++)[0]);"),
+        Value::String("b".into())
+    );
+    assert_eq!(
+        finished("let i=0; finish('ab'.search(/b/, i++));"),
+        Value::Number(1.0)
+    );
+}
+
+#[test]
+fn regexp_constructor_flags_object_coercion_refuses() {
+    // `new RegExp(regexp, flags)` must apply the same guest-coercion guard to
+    // flags as the string-coercion paths do (FIG-3698).
+    let error = execute(
+        "const p=/a/g; const f={toString:function(){return 'i';}}; finish(new RegExp(p, f).flags);",
+    )
+    .expect_err("an object with a guest toString must refuse as flags");
+    assert!(
+        error.to_string().contains("TS_OBJECT_STRING_COERCION"),
+        "the refusal is the named one: {error}"
+    );
+    // String and absent flags still work.
+    assert_eq!(
+        finished("const p=/a/g; finish(new RegExp(p, 'i').flags);"),
+        Value::String("i".into())
+    );
+    assert_eq!(
+        finished("const p=/a/g; finish(new RegExp(p).flags);"),
+        Value::String("g".into())
+    );
+}
+
+/// FIG-3704: `RegExp(pattern, flags)` called as a function constructs as
+/// `new RegExp` would, and returns `pattern` itself when it is a RegExp and
+/// `flags` is `undefined` (ECMA-262 `RegExp()` — no subclassing exists, so a
+/// RegExp's constructor is always `RegExp`).
+#[test]
+fn regexp_called_without_new_constructs_or_returns_the_pattern() {
+    assert_eq!(
+        finished("const r=RegExp('a+','i'); finish([r.source,r.flags,r.ignoreCase]);"),
+        Value::List(
+            vec![
+                Value::String("a+".into()),
+                Value::String("i".into()),
+                Value::Bool(true),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished("finish([RegExp().source,RegExp(undefined,'g').source]);"),
+        Value::List(vec![Value::String("(?:)".into()), Value::String("(?:)".into())].into())
+    );
+    assert_eq!(
+        finished("const re=/x/i; finish([RegExp(re)===re,RegExp(re,undefined)===re]);"),
+        Value::List(vec![Value::Bool(true), Value::Bool(true)].into())
+    );
+    assert_eq!(
+        finished("const re=/x/i; const r=RegExp(re,'g'); finish([r===re,r.source,r.flags]);"),
+        Value::List(
+            vec![
+                Value::Bool(false),
+                Value::String("x".into()),
+                Value::String("g".into()),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished("finish(RegExp(/y+/m).flags);"),
+        Value::String("m".into())
+    );
+    assert_eq!(
+        finished(
+            "let verdict='uncaught'; try { RegExp('\\\\'); } catch (e) { verdict = e instanceof SyntaxError; } finish(verdict);"
+        ),
+        Value::Bool(true)
+    );
+}

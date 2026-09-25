@@ -218,7 +218,10 @@ impl Emitter {
                             self.emit_insn(Insn::Char(c))
                         } else {
                             core::debug_assert!(
-                                unicode::fold_code_point(c, self.result.flags.unicode) == c,
+                                unicode::fold_code_point(
+                                    c,
+                                    self.result.flags.has_either_unicode_flag()
+                                ) == c,
                                 "Char {:x} should be folded",
                                 c
                             );
@@ -329,7 +332,7 @@ impl Emitter {
                         stack.push(Emitter::Node(contents));
                     }
                     &Node::WordBoundary { invert, icase } => {
-                        if self.result.flags.unicode && icase {
+                        if self.result.flags.has_either_unicode_flag() && icase {
                             self.emit_insn(Insn::WordBoundaryUnicodeICase { invert })
                         } else {
                             self.emit_insn(Insn::WordBoundary { invert })

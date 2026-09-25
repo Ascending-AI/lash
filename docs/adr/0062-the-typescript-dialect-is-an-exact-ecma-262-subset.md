@@ -101,9 +101,9 @@ modules and imports, JSX, enums, namespaces, decorators, `eval` and `Function`,
 prototype access, accessors, object methods, regular expressions, BigInt,
 spread, optional chaining, `switch`, `do`/`while`, labels, `this`, `super`,
 `new`, `delete`, `in`, `instanceof`, exponentiation, bitwise operators, sequence
-expressions, tagged templates, computed properties, parameter defaults and rest
-parameters, and the compound assignment operators (`x += 1` and `a[0] += 5`
-alike). Identifiers beginning with `__typescript_` are reserved for the
+expressions, tagged templates, computed properties, array-literal elisions
+(`[0, , 2]`), parameter defaults and rest parameters, and the compound
+assignment operators (`x += 1` and `a[0] += 5` alike). Identifiers beginning with `__typescript_` are reserved for the
 lowerer's generated bindings.
 
 Three rejections are dialect-specific enough to state their reasons here.
@@ -210,9 +210,16 @@ variant does not compile until it declares its class.
 **A delivered rejection is an `Error`, not a record shaped like one.** A caught
 tool or effect failure satisfies `error instanceof Error`, renders as
 `EffectError: <host text>` under `String(error)`, and carries the host's own text
-as `message`; a catchable runtime fault is the same value branded
-`RuntimeError`. The typed payload rides on `cause`, the one ECMA-documented slot
-an error carries for exactly this. Runtime faults expose `code` and `details`;
+as `message`; a catchable runtime fault with no ECMA-262 counterpart is the
+same value branded `RuntimeError`. A fault in an operation ECMA-262 specifies
+to throw is not branded: it is that operation's own error, a `TypeError` for
+reading a member of `null` or calling a non-function and each built-in's own
+`TypeError`, `RangeError` or `SyntaxError`, with Node's message and no
+`cause` (FIG-3653). One mapping on the error variant decides it, and the VM's
+error routing throws the error object in the fault's place, so a `catch`, an
+uncaught exception and `instanceof TypeError` all see what Node shows. The
+typed payload rides on `cause`, the one ECMA-documented slot
+an error carries for exactly this. Branded runtime faults expose `code` and `details`;
 tool failures additionally expose their stable `class`, `source`, and full
 `retry` disposition while the tool's message remains the Error's `message`.
 The brand is what a
@@ -225,9 +232,10 @@ record failed `instanceof Error`, stringified as `[object Object]`, and sent a
 frontier model's standard try/catch discrimination down its fallback branch.
 
 An `Error` is therefore also the one JavaScript exotic that crosses the host
-boundary, detaching into `{ name, message, cause?, errors? }`. It has no live
-mutation surface (assigning to an error is a `TypeError`) and no internal slot
-the guest cannot already read, so nothing is destroyed or exposed by detaching
+boundary, detaching into `{ name, message, cause?, errors? }`. Its only
+mutable surface is its own data properties (`message`, `cause`, `errors`; any
+other name has no slot and refuses as `TS_EXOTIC_PROPERTY_UNSUPPORTED`), and it
+has no internal slot the guest cannot already read, so nothing is destroyed or exposed by detaching
 it, and a caught rejection is returnable whenever its `cause` is data — which is
 how a cell reports a tool failure. A `cause` holding another exotic (a `Map`, a
 `Date`) still refuses at the child export. `Map`, `Set`, `Date`, `RegExp`, `URL`
@@ -614,7 +622,11 @@ that each entry is a limit taken knowingly.
     that would skip an index rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`, and a
     negative or non-index write rejects as
     `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`. Neither path mutates an element.
-    Holes are indistinguishable from explicit `undefined` in the v1 dense
+    An elision in an array literal — a hole anywhere, including a trailing one
+    as in `[1, , ]`, where a single trailing comma is not an elision — creates
+    the same hole, so it rejects statically as `TS_SPARSE_ARRAY_UNSUPPORTED`
+    rather than silently storing `undefined` (FIG-3702). Holes are
+    indistinguishable from explicit `undefined` in the v1 dense
     representation, which is why they are refused rather than approximated.
 13. **`console.log` is host-defined**, not ECMA-262. *(Superseded on the
     coercion point by FIG-2767: this ruling originally said the arguments are
@@ -686,9 +698,11 @@ that each entry is a limit taken knowingly.
 19. **One session namespace** (`global-object-aliases-lexical-bindings`).
     `globalThis.name` reads and writes the session slot of a top-level
     `let`/`const`, which ECMA-262 keeps apart from the global object.
-20. **Runtime fault brand** (`runtime-fault-brand`). A fault the VM raises is
-    an `Error` branded `RuntimeError`, not the ECMA class (`TypeError`) Node
-    throws; see "Errors" above.
+20. **Runtime fault brand** (`runtime-fault-brand`). A fault the VM raises
+    with no ECMA-262 counterpart (a host-boundary, tool or process-control
+    failure) is an `Error` branded `RuntimeError`. A fault in an operation
+    ECMA-262 specifies to throw is that operation's own class, as in Node
+    (FIG-3653); see "Errors" above.
 21. **Process literal as a value** (`process-literal-is-a-process-value`). A
     top-level `const`-bound uncalled `async` arrow is a `Process` value
     ([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)),

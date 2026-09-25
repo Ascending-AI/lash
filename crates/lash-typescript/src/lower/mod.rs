@@ -22,6 +22,7 @@ mod array_map;
 mod attribute_update;
 mod await_expr;
 mod binding;
+mod bitwise;
 mod calls;
 mod captures;
 mod constructs;
@@ -41,7 +42,6 @@ use captures::{CaptureLedger, Site};
 use constructs::*;
 pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_workflow_fragment};
 use graph::{shortest_cycle_through, strongly_connected_components};
-use json_replacer::reject_json_parse_reviver;
 use param_types::process_param_type;
 pub(crate) use process_wrapper::{process_run_wrapper, wrapped_run_body};
 use triggers::{
@@ -1039,7 +1039,6 @@ impl Lowerer {
 
     fn lower_expr_inner(&mut self, expr: &Expr) -> Result<LashExpr, Diagnostic> {
         Ok(match expr {
-            Expr::Undefined => LashExpr::Undefined,
             Expr::Null => LashExpr::Null,
             Expr::Bool(value) => LashExpr::Bool(*value),
             Expr::Number(value) => LashExpr::Number(*value),
@@ -1092,7 +1091,12 @@ impl Lowerer {
             Expr::Ident(name, _) => LashExpr::Variable(self.resolve(name)?.into()),
             Expr::Array(items) => self.lower_array_literal(items)?,
             Expr::Object(entries) => self.lower_object_literal(entries)?,
-            Expr::Assign { target, op, value } => self.lower_assignment(target, *op, value)?,
+            Expr::Assign { target, op, value } => {
+                match self.builtin_constant_write(target, value)? {
+                    Some(write) => write,
+                    None => self.lower_assignment(target, *op, value)?,
+                }
+            }
             Expr::Member {
                 object, property, ..
             } => self.lower_member(object, property)?,
@@ -1426,23 +1430,7 @@ impl Lowerer {
                 MemberProperty::Field(field) => field.as_str(),
                 MemberProperty::Index(_) => "computed property",
             };
-            let constant = match (owner.as_str(), name) {
-                ("Number", "EPSILON") => Some(f64::EPSILON),
-                ("Number", "NaN") => Some(f64::NAN),
-                ("Number", "MIN_SAFE_INTEGER") => Some(-9_007_199_254_740_991.0),
-                ("Number", "MAX_SAFE_INTEGER") => Some(9_007_199_254_740_991.0),
-                ("Number", "MAX_VALUE") => Some(f64::MAX),
-                ("Math", "PI") => Some(std::f64::consts::PI),
-                ("Math", "E") => Some(std::f64::consts::E),
-                ("Math", "LN2") => Some(std::f64::consts::LN_2),
-                ("Math", "LN10") => Some(std::f64::consts::LN_10),
-                ("Math", "LOG2E") => Some(std::f64::consts::LOG2_E),
-                ("Math", "LOG10E") => Some(std::f64::consts::LOG10_E),
-                ("Math", "SQRT2") => Some(std::f64::consts::SQRT_2),
-                ("Math", "SQRT1_2") => Some(std::f64::consts::FRAC_1_SQRT_2),
-                _ => None,
-            };
-            if let Some(value) = constant {
+            if let Some(value) = builtin_constant(owner, name) {
                 return Ok(LashExpr::Number(value));
             }
             return Err(Diagnostic::refusal(

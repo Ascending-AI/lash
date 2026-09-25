@@ -210,7 +210,6 @@ pub(crate) enum FunctionBody {
 
 #[derive(Clone, Debug)]
 pub(crate) enum Expr {
-    Undefined,
     Null,
     Bool(bool),
     Number(f64),
@@ -1209,7 +1208,11 @@ impl Adapter<'_> {
                     .iter()
                     .map(|element| {
                         let Some(element) = element else {
-                            return Ok(ArrayElement::Value(Expr::Undefined));
+                            return Err(reject(
+                                DiagnosticCode::SparseArrayUnsupported,
+                                "array literal elisions",
+                                span,
+                            ));
                         };
                         let value = self.convert_expr(&element.expr)?;
                         Ok(if element.spread.is_some() {

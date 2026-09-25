@@ -48,6 +48,14 @@ TS2300); and `TS_DELETE_NON_REFERENCE_UNSUPPORTED`, `delete` of an operand
 that is not a property reference (TS2703). An ECMA-262 early error in the
 same cell still reports first.
 
+Amended 2026-09-24 (FIG-3705): a refusal the pinned `tsc --strict` also
+issues is registered strictness, not a gap awaiting a ruling. The
+dialect-strictness register below cites the checker's diagnostic for each
+shared refusal — probed against typescript@7.0.2, the version the
+differential generator and the enum oracle pin — and records the split where
+a `TS_*` code also covers shapes `tsc` accepts, with the ticket that owns
+each accepted shape.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves
@@ -173,6 +181,79 @@ allocation size derives from a guest-supplied number bounds the allocation
 *before* allocating — Node-exact `RangeError` at the ECMA limits and a heap
 budget pre-charge above them. Allocate-then-check is how guest code becomes
 host memory pressure; it is treated as a P0 wherever found.
+
+### Dialect strictness: refusals `tsc --strict` shares (FIG-3705)
+
+A refusal is not automatically a gap in the accepted surface. When the
+pinned checker — `tsc` from typescript@7.0.2 run with `strict`/`noEmit`/
+ESNext, the version `tests/differential/generate.mjs` pins — rejects the
+same program, the dialect's refusal is strictness the real TypeScript
+toolchain shares, and it is registered, not fixed. Each class below names
+the dialect diagnostic that fires, the checker diagnostic it corresponds
+to, and a minimal probe; the probes are executable in
+`tests/rejections.rs` and in the census's `typescript`-kind rows, so the
+registration fails CI if a refusal stops firing.
+
+| tsc | probe `tsc` rejects | dialect refusal | stage |
+|---|---|---|---|
+| TS2304 | `const x = notDeclaredAnywhere;` | `TS_UNKNOWN_BINDING` | validate |
+| TS2448 | `const x = x;` | `TS_TEMPORAL_DEAD_ZONE` | validate |
+| TS2339 | `const o = { a: 1 }; o.c;` | `TS_LINK_ERROR` — the closed-shape field guard, ADR 0062 entry 22 | link |
+| TS2339 | `const x = Math.extra;` | `TS_METHOD_UNSUPPORTED` | validate |
+| TS2339 | `Math.extra = 1;` | `TS_UNKNOWN_BINDING` | validate |
+| TS2554 | `[1].map();` | `TS_METHOD_UNSUPPORTED` | validate |
+| TS2554 | `parseInt();` | `TS_EXPRESSION_UNSUPPORTED` | validate |
+| TS2554 | `new Map(1, 2);` | `TS_CONSTRUCTOR_UNSUPPORTED` | run time |
+| TS2365 | `const o = { a: 1 }; o + 1;` | `TS_OBJECT_STRING_COERCION` | run time |
+| TS7009 | `function F() { } new F();` | `TS_NEW_UNSUPPORTED` | validate |
+| TS2769 | `new RegExp(null);` | `TS_NEW_UNSUPPORTED` | validate |
+| TS2588 | `const v = 1; v = 2;` | `TS_ASSIGN_CONST` | validate |
+| TS2630 | `function f() { } f = () => 1;` | `TS_ASSIGN_CONST` | validate |
+| TS2358 | `'a' instanceof String;` | `TS_INSTANCEOF_UNSUPPORTED` | validate |
+| TS1101 | `with ({}) { }` | `TS_WITH_UNSUPPORTED` | validate |
+| TS2695 | `(1, 2);` | `TS_SEQUENCE_UNSUPPORTED` | validate |
+
+A code in the right-hand column often covers more than the shape `tsc`
+rejects, and occasionally less. The splits are recorded here so the
+registered half is never "fixed" by accident and the accepted half keeps
+its owner:
+
+- `TS_ASSIGN_CONST` also refuses `var`, parameter and `catch` bindings,
+  which `tsc` accepts — that is FIG-3703's defect, and its census probe
+  (`var v = 1; v = 2;`) is a `tsc`-accepted shape until that lands.
+- `TS_UNKNOWN_BINDING` also refuses the call form `RegExp(p, f)` and
+  built-in objects read as values (`var o = JSON`), which `tsc` accepts —
+  FIG-3704 and FIG-3700's built-in-values ruling respectively (method
+  values are FIG-3701). Any write to a built-in namespace member takes the
+  same code, covering `tsc`'s TS2339 on a missing member and TS2540 on a
+  read-only one (`Math.PI = 2`).
+- `TS_NEW_UNSUPPORTED` also refuses `new` on every unlisted constructor
+  (`new WeakMap()` — the designed exception list this ADR's heap-kinds
+  clause records) and `new RegExp(re)` on a regex argument, which `tsc`
+  accepts (FIG-3698).
+- `TS_SEQUENCE_UNSUPPORTED` refuses the comma wherever it appears,
+  including a left operand with side effects (`(f(), 2)`) that `tsc`
+  accepts: the whole construct is outside the dialect, not only the
+  dead-left-operand shape.
+- `TS_INSTANCEOF_UNSUPPORTED` also refuses right-hand sides `tsc` accepts
+  (`o instanceof F`, `o instanceof WeakMap`): `instanceof` admits exactly
+  the heap kinds the dialect has.
+- `TS_OBJECT_STRING_COERCION` also refuses the coercions `tsc` accepts —
+  `'' + o`, `String(o)`, `` `${o}` `` — which are FIG-3652's. Non-`+`
+  arithmetic on an object (`o - 1`, `tsc` TS2362) has no refusal at all:
+  it runs ECMA's ToNumber to `NaN`, so there is nothing to register.
+- TS2554's counterparts are narrower than `tsc` in one direction too: an
+  authored function called short (`function f(a, b) { } f(1);`) is not
+  refused — ECMA supplies `undefined` — while every arity miss on the
+  listed builtin and method surface is.
+- `const [a] = null;` and every other non-iterable destructure or spread
+  (`undefined`, `5`, a plain object — all TS2488) is not refused at all:
+  it throws ECMA's `TypeError` at run time (FIG-3653, FIG-3654), the same
+  fault plain JavaScript raises. The neighbouring shapes `tsc` also
+  rejects — `const { p } = null` (TS2339), `for...of` over `null`
+  (TS18050), a member write on a built-in value (`arr.x = 2`, TS2339) —
+  throw their ECMA `TypeError` the same way, so none of this is
+  registered strictness.
 
 ## Consequences
 

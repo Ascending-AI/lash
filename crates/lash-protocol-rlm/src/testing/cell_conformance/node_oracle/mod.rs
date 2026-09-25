@@ -209,9 +209,11 @@ fn link_rejection(
 
 /// The class of an uncaught failure. An uncaught thrown value reaches the
 /// host detached, as `{ name, message }` for an Error, and its class is that
-/// `name`. Any other failure is a fault the VM raised, which a `catch` would
-/// have received as the substrate's `RuntimeError` brand (ADR 0062, register
-/// entry `runtime-fault-brand`), so that is its class.
+/// `name` — which is also how a fault in an operation ECMA-262 specifies to
+/// throw arrives, as the `TypeError` (or other class) the VM threw in its
+/// place. Any other failure is a fault with no ECMA counterpart, which a
+/// `catch` would have received as the substrate's `RuntimeError` brand
+/// (ADR 0062, register entry `runtime-fault-brand`), so that is its class.
 fn thrown_class(message: &str) -> String {
     message
         .strip_prefix("uncaught lashlang exception: ")

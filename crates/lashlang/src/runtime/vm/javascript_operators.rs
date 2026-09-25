@@ -3,7 +3,6 @@
 use super::super::{
     ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
 };
-use super::javascript_stdlib::js_stdlib_error;
 use super::*;
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -95,7 +94,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut left = self.pop_stack()?;
         debug_assert!(!matches!(left, Value::Projected(_)));
         debug_assert!(!matches!(right, Value::Projected(_)));
-        self.validate_javascript_binary_operands(op, &left, &right)?;
         let (coerce_left, coerce_right) = javascript_binary_operand_coercions(op, &left, &right);
         if coerce_left && matches!(left, Value::Ref(_)) {
             left = self.javascript_binary_operand_primitive(op, &left)?;
@@ -133,7 +131,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<(Value, Value), RuntimeError> {
         let mut left = materialize_javascript_operand(left).await?;
         let mut right = materialize_javascript_operand(right).await?;
-        self.validate_javascript_binary_operands(op, &left, &right)?;
         let (coerce_left, coerce_right) = javascript_binary_operand_coercions(op, &left, &right);
         if coerce_left {
             left = self
@@ -179,24 +176,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .javascript_to_primitive_string_or_number_async(value)
                 .await
         }
-    }
-
-    fn validate_javascript_binary_operands(
-        &self,
-        op: JavaScriptBinaryOp,
-        left: &Value,
-        right: &Value,
-    ) -> Result<(), RuntimeError> {
-        if op == JavaScriptBinaryOp::Add
-            && [left, right].into_iter().any(
-                |value| matches!(value, Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::Date(_)))),
-            )
-        {
-            return Err(js_stdlib_error(
-                "TS_DATE_STRING_COERCION_PENDING: Date addition requires unavailable host-local string semantics; use .toISOString()",
-            ));
-        }
-        Ok(())
     }
 }
 

@@ -142,27 +142,48 @@ const typescriptNames = [
   "async-calls-unawaited",
   "binding-reassignment",
   "builtin-arity",
+  // Members a built-in namespace lacks: tsc --strict rejects the same reads
+  // and writes as TS2339 (FIG-3705).
+  "builtin-member-read",
+  "builtin-member-write",
   "classic-for-forms",
   "closed-shape-field-guard",
+  "comma-operator",
+  // Arity past a constructor's signature: `new Map(1, 2)` refuses at run
+  // time, the same shape tsc --strict rejects as TS2554 (FIG-3705).
+  "constructor-arity",
   "date-mutation",
   "date-string-coercion",
   "debugger",
   // Forms `tsc --strict` rejects, refused rather than implemented (FIG-3651,
   // ADR 0064).
   "delete-non-reference",
+  // Destructuring or spreading a non-iterable (`const [a] = null;`) faults
+  // at run time; tsc --strict rejects it as TS2488 (FIG-3705).
+  "destructuring-non-iterable",
   "direct-eval",
+  // A write that would give an object an own property the value model has no
+  // slot for: on an Error, Map, Set, RegExp or URLSearchParams tsc rejects it
+  // too (TS2339); on a function it is an unsupported feature that ECMA and
+  // tsc both accept (a function value has no property slots).
+  "exotic-own-properties",
   "function-constructor",
   "function-redeclaration",
   "instanceof-arbitrary",
   "labels",
   "lone-surrogate-values",
   "matchall-iterator-position",
+  // Arity short of a listed method's signature: `[1].map()` refuses, the
+  // same shape tsc --strict rejects as TS2554 (FIG-3705).
+  "method-arity",
   "mutable-captures",
   "new-arbitrary",
   "object-string-coercion",
   "private-names-outside-classes",
+  // A `new RegExp` pattern that is not a string literal: tsc --strict
+  // rejects `new RegExp(null)` as TS2769 (FIG-3705).
+  "regexp-pattern-argument",
   "reserved-identifiers",
-  "comma-operator",
   "source-nesting",
   "tagged-templates",
   "temporal-dead-zone",

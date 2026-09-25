@@ -1,0 +1,40 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3704	1	accept	"Number.POSITIVE_INFINITY"	"Infinity"	-
+FIG-3704	2	accept	"Number.NEGATIVE_INFINITY"	"-Infinity"	-
+FIG-3704	3	accept	"Number.MIN_VALUE"	"5e-324"	-
+FIG-3704	4	accept	"Number.MIN_VALUE > 0"	"true"	-
+FIG-3704	5	accept	"RegExp('a+', 'gi').source"	"a+"	-
+FIG-3704	6	accept	"RegExp('a+', 'gi').flags"	"gi"	-
+FIG-3704	7	accept	"RegExp().source"	"(?:)"	-
+FIG-3704	8	accept	"(() => { const r = /x+/y; return RegExp(r) === r; })()"	"true"	-
+FIG-3704	9	accept	"(() => { const r = /x+/y; return RegExp(r, 'g') === r; })()"	"false"	-
+FIG-3704	10	accept	"RegExp(/a+/).flags"	""	-
+FIG-3704	11	accept	"[1,2,3,4,5].copyWithin(0,3).join(',')"	"4,5,3,4,5"	-
+FIG-3704	12	accept	"[1,2,3,4,5].copyWithin(-2).join(',')"	"1,2,3,1,2"	-
+FIG-3704	13	accept	"[1,2,3,4,5].copyWithin(1,-2,-1).join(',')"	"1,4,3,4,5"	-
+FIG-3704	14	accept	"[1,2,3,4,5].copyWithin(2,0,4).join(',')"	"1,2,1,2,3"	-
+FIG-3704	15	accept	"(() => { const a = [1,2,3]; return a.copyWithin(0,1) === a; })()"	"true"	-
+FIG-3704	16	accept	"[1,2,3].copyWithin(0, NaN).join(',')"	"1,2,3"	-
+FIG-3704	17	accept	"String.raw({raw:['a','b','c']},1,2)"	"a1b2c"	-
+FIG-3704	18	accept	"String.raw({raw:['x']},1,2)"	"x"	-
+FIG-3704	19	accept	"String.raw({raw:{length:0}})"	""	-
+FIG-3704	20	accept	"String.raw({raw:['a',undefined,'b']})"	"aundefinedb"	-
+FIG-3704	21	accept	"JSON.parse('{\"a\":1,\"b\":2}',(k,v)=>k==='b'?undefined:v).b"	"undefined"	-
+FIG-3704	22	accept	"JSON.parse('[1,2,3]',(k,v)=>k==='1'?undefined:v).length"	"3"	-
+FIG-3704	23	accept	"JSON.parse('{\"n\":5}',(k,v)=>typeof v==='number'?v*2:v).n"	"10"	-
+FIG-3704	24	accept	"JSON.parse('{\"a\":{\"b\":1}}',(k,v)=>typeof v==='object'&&v!==null?v:v+1).a.b"	"2"	-
+FIG-3704	25	accept	"(() => { const log=[]; JSON.parse('{\"x\":{\"y\":1}}',(k,v)=>{log.push(k);return v;}); return log.join(','); })()"	"y,x,"	-
+FIG-3704	26	accept	"JSON.parse('4',7)"	"4"	-
+FIG-3704	27	accept	"new Date(0).toUTCString()"	"Thu, 01 Jan 1970 00:00:00 GMT"	-
+FIG-3704	28	accept	"new Date(0).toString()"	"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"	-
+FIG-3704	29	accept	"new Date(NaN).toUTCString()"	"Invalid Date"	-
+FIG-3704	30	accept	"String(new Date(0))"	"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"	-
+FIG-3704	31	accept	"new Date(0) + ''"	"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"	-
+FIG-3704	32	accept	"[...new Set([1,2]).union(new Map([[2,'a'],[3,'b']]))].join(',')"	"1,2,3"	-
+FIG-3704	33	accept	"[...new Set([3,2,1,0]).intersection(new Set([1,3,5]))].join(',')"	"1,3"	-
+FIG-3704	34	accept	"new Set([2]).isSubsetOf(new Map([[2,'a']]))"	"true"	-
+FIG-3704	35	accept	"(() => { try { new Set([1]).union([3]); return 'no'; } catch(e) { return e.name; } })()"	"TypeError"	-
+FIG-3704	36	accept	"(() => { const o={size:2,has:()=>true,keys:undefined}; try { new Set([1]).union(o); return 'no'; } catch(e) { return e.name; } })()"	"TypeError"	-
+FIG-3704	37	accept	"(() => { const o={size:2,has:()=>true,keys:()=>[9]}; return new Set().isSubsetOf(o); })()"	"true"	-
+FIG-3704	38	runtime-reject	"(() => { const o={size:1,has:()=>true,keys:()=>[9]}; return [...new Set([1]).union(o)].join(','); })()"	"ERR<TypeError>"	TS_METHOD_UNSUPPORTED
+FIG-3704	39	accept	"[0,0].fill(1,0,undefined).join(',')"	"1,1"	-

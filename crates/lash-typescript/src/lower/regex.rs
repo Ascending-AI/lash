@@ -24,13 +24,19 @@ impl Lowerer {
                 ))
             }
             "match" | "search" => {
-                // ECMA-262 reads only the first argument; extras are ignored
-                // and an absent argument is `undefined` (the empty pattern).
-                let regexp = match args.first() {
-                    Some(regexp) => self.lower_expr(regexp)?,
-                    None => LashExpr::Undefined,
-                };
-                Ok(regexp_call(method, vec![self.lower_expr(object)?, regexp]))
+                // ECMA-262 evaluates every argument in order for its side
+                // effects but reads only the first; an absent argument is
+                // `undefined` (the empty pattern). The runtime operation
+                // pattern-matches the leading values and ignores the rest.
+                let mut call_args = Vec::with_capacity(args.len() + 1);
+                call_args.push(self.lower_expr(object)?);
+                for arg in args {
+                    call_args.push(self.lower_expr(arg)?);
+                }
+                if args.is_empty() {
+                    call_args.push(LashExpr::Undefined);
+                }
+                Ok(regexp_call(method, call_args))
             }
             "matchAll" => {
                 let [regexp] = args else {
