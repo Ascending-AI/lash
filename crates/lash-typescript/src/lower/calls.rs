@@ -1079,49 +1079,52 @@ impl Lowerer {
                 .with_hint("use Object.hasOwn(object, key)"));
             };
             let own_check = super::array_callbacks::may_be_plain_object(object);
-            let receiver = self.temporary("has_own_receiver");
-            let key_value = self.temporary("has_own_key");
             let variable = |name: &str| LashExpr::Variable(name.into());
-            let builtin = LashExpr::BuiltinCall {
-                name: "__typescript_stdlib".into(),
-                args: vec![
-                    LashExpr::String("Object.hasOwn".into()),
-                    variable(&receiver),
-                    variable(&key_value),
-                ],
-            };
-            // A plain object's own `hasOwnProperty` is its method.
+            // A plain object's own `hasOwnProperty` is its method. The member
+            // is bound before the key is evaluated, as ECMA's call evaluation
+            // orders them: the key lowers inside each arm.
             let call = if own_check {
-                LashExpr::If {
-                    condition: Box::new(LashExpr::BuiltinCall {
-                        name: "__typescript_stdlib".into(),
-                        args: vec![
-                            LashExpr::String("Lash.OwnMethod".into()),
-                            variable(&receiver),
-                            LashExpr::String("hasOwnProperty".into()),
-                        ],
-                    }),
-                    then_block: Box::new(LashExpr::MethodCall {
-                        receiver: Box::new(variable(&receiver)),
-                        method: MethodKey::Field("hasOwnProperty".into()),
-                        args: vec![variable(&key_value)],
-                    }),
-                    else_block: Box::new(builtin),
-                }
+                let receiver = self.temporary("has_own_receiver");
+                LashExpr::Block(vec![
+                    LashExpr::Assign {
+                        target: AssignTarget::variable(receiver.as_str().into()),
+                        expr: Box::new(self.lower_expr(object)?),
+                    },
+                    LashExpr::If {
+                        condition: Box::new(LashExpr::BuiltinCall {
+                            name: "__typescript_stdlib".into(),
+                            args: vec![
+                                LashExpr::String("Lash.OwnMethod".into()),
+                                variable(&receiver),
+                                LashExpr::String("hasOwnProperty".into()),
+                            ],
+                        }),
+                        then_block: Box::new(LashExpr::MethodCall {
+                            receiver: Box::new(variable(&receiver)),
+                            method: MethodKey::Field("hasOwnProperty".into()),
+                            args: vec![self.lower_expr(key)?],
+                        }),
+                        else_block: Box::new(LashExpr::BuiltinCall {
+                            name: "__typescript_stdlib".into(),
+                            args: vec![
+                                LashExpr::String("Object.hasOwn".into()),
+                                variable(&receiver),
+                                self.lower_expr(key)?,
+                            ],
+                        }),
+                    },
+                ])
             } else {
-                builtin
+                LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![
+                        LashExpr::String("Object.hasOwn".into()),
+                        self.lower_expr(object)?,
+                        self.lower_expr(key)?,
+                    ],
+                }
             };
-            return Ok(LashExpr::Block(vec![
-                LashExpr::Assign {
-                    target: AssignTarget::variable(receiver.as_str().into()),
-                    expr: Box::new(self.lower_expr(object)?),
-                },
-                LashExpr::Assign {
-                    target: AssignTarget::variable(key_value.as_str().into()),
-                    expr: Box::new(self.lower_expr(key)?),
-                },
-                call,
-            ]));
+            return Ok(call);
         }
         if !receiver_is_module_authority
             && method == "replace"

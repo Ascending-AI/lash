@@ -161,8 +161,15 @@ impl Lowerer {
             then_block: Box::new(callback_branch),
             else_block: Box::new(string_branch),
         };
+        let builtin_arm = LashExpr::Block(vec![
+            temp_assignment(&search_slot, self.lower_expr(search)?),
+            temp_assignment(&replacement_slot, self.lower_expr(replacement)?),
+            builtin,
+        ]);
         // A plain object has no string `replace`: its own member is called
         // with the arguments as given, and the generated plan never sees it.
+        // The member is bound before the arguments are evaluated, as ECMA's
+        // call evaluation orders them: they lower inside each arm.
         let call = if own_method_guard {
             LashExpr::If {
                 condition: Box::new(LashExpr::BuiltinCall {
@@ -176,17 +183,15 @@ impl Lowerer {
                 then_block: Box::new(LashExpr::MethodCall {
                     receiver: Box::new(variable(&input_slot)),
                     method: MethodKey::Field(method.into()),
-                    args: vec![variable(&search_slot), variable(&replacement_slot)],
+                    args: vec![self.lower_expr(search)?, self.lower_expr(replacement)?],
                 }),
-                else_block: Box::new(builtin),
+                else_block: Box::new(builtin_arm),
             }
         } else {
-            builtin
+            builtin_arm
         };
         Ok(LashExpr::Block(vec![
             temp_assignment(&input_slot, self.lower_expr(input)?),
-            temp_assignment(&search_slot, self.lower_expr(search)?),
-            temp_assignment(&replacement_slot, self.lower_expr(replacement)?),
             call,
         ]))
     }

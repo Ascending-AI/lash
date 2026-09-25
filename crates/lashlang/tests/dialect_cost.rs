@@ -16,7 +16,7 @@
 //! program is additionally held to the corpus's own checked-in budget — the
 //! one in `scripts/perf_guard_budgets.json`, read here, never edited — which
 //! anchors the comparison to a number the perf guard already enforces. The
-//! three append spellings are measured beside it, so a regression says which
+//! append spellings are measured beside it, so a regression says which
 //! spelling regressed.
 //!
 //! Bytes, never a clock: a counting global allocator records what the VM asks
@@ -245,12 +245,26 @@ for (let n = 0; n < 2000; n++) {
 finish(rows.length);
 ";
 
+/// The same 2,000 appends spelled as a write through a bound key.
+///
+/// ECMA converts the index expression to a property key when the reference
+/// is created (`ToPropertyKey`, once, before the value evaluates), and the
+/// `rows[n]` write carries that conversion the `push` call does not. Beside
+/// `TYPESCRIPT_INDEX_ASSIGN` this spelling differs only in the `.length`
+/// read, which `TYPESCRIPT_LENGTH_READS` measures on its own.
+const TYPESCRIPT_KEYED_ASSIGN: &str = "const rows: number[] = [];
+for (let n = 0; n < 2000; n++) {
+  rows[n] = n;
+}
+finish(rows.length);
+";
+
 /// 2,000 `.length` reads and no appends at all.
 ///
-/// This is the difference in *spelling* between the two appends above:
-/// `rows[rows.length] = n` reads the field the `push` call does not. Measuring
-/// it here is what lets the index-assign assertion charge the append for the
-/// append and nothing else.
+/// This is the remaining difference in *spelling* between the keyed write
+/// and the write one past the end above: `rows[rows.length] = n` reads the
+/// field `rows[n] = n` does not. Measuring it here is what lets the
+/// index-assign assertion charge the append for the append and nothing else.
 const TYPESCRIPT_LENGTH_READS: &str = "const rows: number[] = [0];
 let total = 0;
 for (let n = 0; n < 2000; n++) {
@@ -320,16 +334,18 @@ async fn typescript_heap_list_iteration_is_measured_beside_the_ast_corpus() {
     );
 }
 
-/// The three append spellings, measured beside the corpus so a regression names
+/// The append spellings, measured beside the corpus so a regression names
 /// the spelling that regressed.
 ///
-/// `push` and the write one past the end are the O(1) appends FIG-3063
-/// delivered, and they must now cost the same: the only difference the
-/// measurement may show is the `.length` read the second spelling contains,
-/// which is measured on its own and subtracted. `concat` is a copy in
+/// `push`, the keyed write and the write one past the end are the O(1)
+/// appends FIG-3063 delivered, and they must cost the same modulo what each
+/// spelling carries: the keyed write spells ECMA's `ToPropertyKey` on the
+/// index, and the write past the end additionally reads `.length`. Both
+/// differences are measured on their own programs and charged, so the
+/// comparisons hold the appends themselves equal. `concat` is a copy in
 /// JavaScript and stays one here, so it is held *above* a floor — fusing it
-/// into the accumulator would change what the program means, not just what it
-/// costs.
+/// into the accumulator would change what the program means, not just what
+/// it costs.
 #[tokio::test(flavor = "current_thread")]
 async fn each_append_spelling_is_measured_beside_the_corpus() {
     let ast = bytes_per_iteration(
@@ -339,6 +355,7 @@ async fn each_append_spelling_is_measured_beside_the_corpus() {
     )
     .await;
     let push = typescript_bytes_per_iteration(TYPESCRIPT_PUSH, 4).await;
+    let keyed = typescript_bytes_per_iteration(TYPESCRIPT_KEYED_ASSIGN, 4).await;
     let indexed = typescript_bytes_per_iteration(TYPESCRIPT_INDEX_ASSIGN, 4).await;
     let length_reads = typescript_bytes_per_iteration(TYPESCRIPT_LENGTH_READS, 4).await;
     let concatenated = typescript_bytes_per_iteration(TYPESCRIPT_CONCAT, 4).await;
@@ -348,13 +365,22 @@ async fn each_append_spelling_is_measured_beside_the_corpus() {
         "2000 `push` appends must stay within {DIALECT_HEADROOM_OVER_AST}x of the AST corpus \
          scenario: {push:.0} bytes/iter against {ast:.0}"
     );
+    // The keyed write carries the `ToPropertyKey` conversion `push` does
+    // not; 2.0 covers that conversion, not a second append: a write that
+    // cloned the backing vector again would land hundreds of times over this
+    // line, not inside two.
+    assert!(
+        keyed <= push * 2.0,
+        "a keyed write must cost a `push` plus the key conversion it spells: \
+         keyed {keyed:.0} bytes/iter against push {push:.0}"
+    );
     // 1.1 covers measurement noise in the subtraction, not a second append:
     // an index assignment that cloned the backing vector again would land
     // hundreds of times over this line, not ten percent over it.
     assert!(
-        indexed <= (push + length_reads) * 1.1,
-        "a write one past the end must cost a `push` plus the `.length` read it spells: \
-         indexed {indexed:.0} bytes/iter against push {push:.0} plus \
+        indexed <= (keyed + length_reads) * 1.1,
+        "a write one past the end must cost a keyed write plus the `.length` read it spells: \
+         indexed {indexed:.0} bytes/iter against keyed {keyed:.0} plus \
          {length_reads:.0} for the same number of `.length` reads"
     );
     assert!(

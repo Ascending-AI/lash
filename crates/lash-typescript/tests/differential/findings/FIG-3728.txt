@@ -1,0 +1,8 @@
+(() => { const o = { hasOwnProperty: function (k) { return ['old', k].join(':'); } }; const change = function () { o.hasOwnProperty = function () { return 'new'; }; return 'f'; }; return o.hasOwnProperty(change()); })()
+(() => { const o = { replace: function (a, b) { return ['old', a, b].join(':'); } }; const change = function () { o.replace = function () { return 'new'; }; return 'x'; }; return o.replace(change(), 'y'); })()
+(() => { const o = { map: function (f) { return 'old:' + f(7); } }; const change = function () { o.map = function () { return 'new'; }; return function (x) { return x + 1; }; }; return o.map(change()); })()
+(() => { const o = { filter: function () { return 'old'; } }; const change = function () { delete o.filter; return function () { return true; }; }; return o.filter(change()); })()
+(() => { const o = {}; const add = function () { o.map = function () { return 'added'; }; return function () { return 0; }; }; try { o.map(add()); return 'no throw'; } catch (e) { return e instanceof TypeError; } })()
+(() => { const o = { reduce: function (f, i) { return i + f(i); } }; const change = function () { o.reduce = function () { return 'new'; }; return function (x) { return x + 1; }; }; return o.reduce(change(), 10); })()
+(() => { const log = []; const s = 'ab'; const arg = function (name, value) { log.push(name); return value; }; const r = s.replace(arg('a', 'a'), arg('b', 'c')); return r + '|' + log.join(','); })()
+(() => { const log = []; const o = { x: 1 }; const k = { toString: function () { log.push('k'); return 'x'; } }; const v = function () { log.push('v'); return 10; }; o[k] += v(); return [o.x, log.indexOf('k') < log.indexOf('v')].join('|'); })()

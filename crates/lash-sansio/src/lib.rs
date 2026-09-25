@@ -56,7 +56,13 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// intrinsics (`__typescript_cell_new`, `__typescript_cell_get`,
 /// `__typescript_cell_set`), and a closure's capture of a binding something
 /// assigns means that shared binding, not a copy.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v22";
+///
+/// v23 (FIG-3728, FIG-3745): the TypeScript lowerer converts a computed
+/// member key once at reference creation, probes a composite dispatch's own
+/// member before the arguments evaluate, and converts a computed
+/// object-literal key before its value, so unchanged source lowers to a
+/// program an artifact minted under v22 does not carry.
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v23";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,

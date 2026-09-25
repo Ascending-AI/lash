@@ -1588,7 +1588,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "A callback-driven collection transform (`map`, `filter`, ...). `expr` is `Block([receiver = r, callback = f, operand = x*, driver = function, result+])`: it binds the receiver, then the callback, then any further operands (an initial value, evaluated extra arguments), then a driver function that captures the receiver and the callback, and ends with the one or two expressions that run the driver and yield the transform's result. `operation` is the front end's name for the transform; structure never depends on it. See [`CollectionTransformParts`].",
+          "description": "A callback-driven collection transform (`map`, `filter`, ...). `expr` is `Block([receiver = r, callback = f, operand = x*, driver = function, result+])`: it binds the receiver, then the callback, then any further operands (an initial value, evaluated extra arguments), then a driver function that captures the receiver and the callback, and ends with the one or two expressions that run the driver and yield the transform's result. A transform whose call binds its member before its arguments evaluate puts everything after the receiver binding in the else of an `If` whose then arm is the bound member call: `Block([receiver = r, If { condition, then: MethodCall, else: Block([callback = f, operand = x*, driver = function, result+]) }])`. `operation` is the front end's name for the transform; structure never depends on it. See [`CollectionTransformParts`].",
           "properties": {
             "kind": {
               "enum": [

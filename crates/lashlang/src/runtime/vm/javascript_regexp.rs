@@ -636,12 +636,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         };
         let stateful = global || sticky;
-        // `lastIndex` stores the raw written value; `exec` coerces at use.
-        let start = if stateful {
-            self.heap.regexp_last_index_coerced(receiver)? as usize
-        } else {
-            0
-        };
+        // `lastIndex` stores the raw written value; `exec` performs
+        // `ToLength(Get(R, "lastIndex"))` on every call — a guest hook in the
+        // stored value runs even when the flags discard the number — and the
+        // flags then decide whether the index applies.
+        let last_index = self.heap.regexp_last_index_coerced(receiver)? as usize;
+        let start = if stateful { last_index } else { 0 };
         if start > units.len() {
             if stateful {
                 self.heap.set_regexp_last_index(receiver, 0)?;

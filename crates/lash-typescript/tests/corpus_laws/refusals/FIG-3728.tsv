@@ -1,0 +1,12 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+differential:FIG-3728:1	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a guarded member call lowers to a standard-library own-method probe, which the lens printer does not re-sugar
+differential:FIG-3728:2	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a guarded member call lowers to a standard-library own-method probe, which the lens printer does not re-sugar
+differential:FIG-3728:4	generated binding `__typescript_heap_delete_member` has no authored TypeScript spelling	a member `delete` lowers to the heap's delete builtin, which the lens printer does not re-sugar
+differential:FIG-3728:5	generated binding `__typescript_heap_instanceof` has no authored TypeScript spelling	`instanceof` lowers to a heap builtin, which the lens printer does not re-sugar
+differential:FIG-3728:6	cannot render a collection transform with extra arguments as TypeScript	`reduce` binds its initial value as an operand, and a transform with extra arguments has no one-call spelling
+differential:FIG-3728:7	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a guarded member call lowers to a standard-library own-method probe, which the lens printer does not re-sugar
+differential:FIG-3728:8	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a guarded member call lowers to a standard-library own-method probe, which the lens printer does not re-sugar

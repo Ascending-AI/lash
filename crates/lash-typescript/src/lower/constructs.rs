@@ -481,7 +481,23 @@ impl Lowerer {
                 ObjectProperty::KeyValue(key, value) => {
                     // A statically known key names the function; a computed key cannot.
                     let inferred = static_key(key);
-                    let key = self.lower_property_key(key)?;
+                    // PropertyDefinitionEvaluation converts a computed name
+                    // (ToPropertyKey) before the value expression is
+                    // evaluated; the store's own conversion is a no-op on the
+                    // string the temp then holds.
+                    let key = if matches!(key, PropertyKey::Computed(_)) {
+                        let converted = self.temporary("object_literal_key");
+                        expressions.push(Self::temp_assignment(
+                            &converted,
+                            Self::stdlib_call(
+                                "Lash.ToPropertyKey",
+                                vec![self.lower_property_key(key)?],
+                            ),
+                        ));
+                        Self::variable(&converted)
+                    } else {
+                        self.lower_property_key(key)?
+                    };
                     expressions.push(LashExpr::Assign {
                         target: AssignTarget {
                             root: result.as_str().into(),
@@ -719,7 +735,14 @@ impl Lowerer {
                     ),
                     MemberProperty::Index(index) => {
                         let key = self.temporary("reference_key");
-                        setup.push(Self::temp_assignment(&key, self.lower_expr(index)?));
+                        // The reference holds the converted key
+                        // (ToPropertyKey once, at member evaluation): the
+                        // read and the store then share it instead of each
+                        // converting the raw value again.
+                        setup.push(Self::temp_assignment(
+                            &key,
+                            Self::stdlib_call("Lash.ToPropertyKey", vec![self.lower_expr(index)?]),
+                        ));
                         (
                             AssignPathStep::Index(Self::variable(&key)),
                             LashExpr::Index {

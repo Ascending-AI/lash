@@ -38,6 +38,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
+mod collection_transform;
 mod for_loop;
 mod templates;
 
@@ -1104,6 +1105,11 @@ impl<'p> Printer<'p> {
                 self.identifier("global", global.as_str())?
             )));
         }
+        // A member reference's key is already converted once, at member
+        // evaluation; the authored index spells it.
+        if let Some([key]) = stdlib_call(expression, "Lash.ToPropertyKey") {
+            return Ok(Some(self.expression(key)?));
+        }
         if let Some(sugared) = self.collection_transform(expression)? {
             return Ok(Some(sugared));
         }
@@ -1125,37 +1131,6 @@ impl<'p> Printer<'p> {
             )));
         }
         Ok(None)
-    }
-
-    /// A collection-transform role prints back as `receiver.<operation>(fn)`
-    /// when it binds no operand beyond its receiver and callback; any other
-    /// setup (an initial value, extra arguments) has no one-call spelling
-    /// here.
-    fn collection_transform(
-        &self,
-        expression: &Expr,
-    ) -> Result<Option<String>, TypeScriptSourceError> {
-        let Expr::Role {
-            role: StructuralRole::CollectionTransform { operation },
-            expr,
-        } = expression
-        else {
-            return Ok(None);
-        };
-        let Some(parts) = lashlang::CollectionTransformParts::of(expr) else {
-            return Ok(None);
-        };
-        if !parts.operands.is_empty() {
-            return Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a collection transform with extra arguments",
-            });
-        }
-        Ok(Some(format!(
-            "{}.{}({})",
-            self.member_target(parts.receiver)?,
-            self.identifier("operation", operation.as_str())?,
-            self.expression(parts.callback)?
-        )))
     }
 
     /// A closure prints as an arrow, and as an `async` arrow when its own body
