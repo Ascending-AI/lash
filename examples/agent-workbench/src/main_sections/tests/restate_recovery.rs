@@ -2132,8 +2132,6 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         )
         .expect("valid Restate authority id"),
         Arc::clone(&stores.stores),
-        // Only its turn-work driver is used; no core runs on it.
-        lash_restate::RestateQueuedWork::Disabled,
     )
     .turn_work_driver();
     let receipt = driver

@@ -300,10 +300,6 @@ async fn async_main() -> anyhow_like::Result<()> {
                         .clone()
                         .expect("Restate authority configured"),
                     Arc::new(stores),
-                    // The service runs every turn in the foreground through a
-                    // handler-scoped controller and enqueues no work; an
-                    // in-process queue pump would race the Restate handlers.
-                    lash_restate::RestateQueuedWork::Disabled,
                 ));
                 // Restate-backed turns pass a handler-scoped controller per
                 // turn via `.stream_to_with_effects(..., &controller)`; the

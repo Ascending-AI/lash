@@ -1624,8 +1624,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
         restate_http: restate_http.clone(),
         active_turns: active_turns.clone(),
     });
-    let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle.clone());
-    let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
+    let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle);
     let backend = Arc::new(lash_restate::RestateBackend::new(
         lash_restate::RestateConnection::with_client(
             restate_ingress_url.clone(),
@@ -1633,7 +1632,6 @@ async fn live_workbench_restate_state_with_provider_and_database(
         ),
         live_restate_authority_id(),
         store_set,
-        lash_restate::RestateQueuedWork::Engine(queued_work_port),
     ));
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()

@@ -251,13 +251,12 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         restate_http: restate_http.clone(),
         active_turns: active_turns.clone(),
     });
-    let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle.clone());
-    let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
+    let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle);
 
     // One Restate backend over the store set: the engine host journals the
     // turns' effects, runs the background processes, whose appended events
-    // reach the sink best-effort after their durable write, and hands each
-    // queued turn to the workbench's queued-turn workflow.
+    // reach the sink best-effort after their durable write, and drives each
+    // session's accepted input through its `LashSession` service.
     let backend = Arc::new(lash_restate::RestateBackend::with_process_event_sink(
         lash_restate::RestateConnection::with_client_and_config(
             restate_ingress_url.clone(),
@@ -269,7 +268,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         ),
         restate_authority_id.clone(),
         Arc::clone(&stores.stores),
-        lash_restate::RestateQueuedWork::Engine(queued_work_port),
         Some(Arc::clone(&process_event_sink)),
     ));
     let attachment_store = stores.stores.attachment_store();

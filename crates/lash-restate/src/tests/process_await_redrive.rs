@@ -2195,7 +2195,6 @@ lash_conformance::backend_tests!({
         "http://127.0.0.1:8080",
         crate::RestateAuthorityId::new("lash-restate-backend-law").expect("valid authority"),
         Arc::new(stores),
-        crate::RestateQueuedWork::Disabled,
     )) as Arc<dyn lash_core::Backend>;
     ((), backend)
 });

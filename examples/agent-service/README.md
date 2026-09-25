@@ -84,9 +84,8 @@ The durability mode can also be passed as `--durability local`. Both modes keep
 their stores in one SQLite store set under `$AGENT_SERVICE_DATA_DIR/lash-sessions`.
 Local durability opens that root as a file `SqliteBackend`, its effect journal
 beside the stores. Restate durability opens the same root as a `SqliteStoreSet`
-and runs the `RestateBackend` host over it with `RestateQueuedWork::Disabled`:
-every turn runs in the foreground under a handler-scoped controller, so no
-queue pump races the Restate handlers. Restate mode is feature-gated and
+and runs the `RestateBackend` host over it: every turn runs in the foreground
+under a handler-scoped controller. Restate mode is feature-gated and
 uses these local defaults:
 
 | Path | App | Restate endpoint | Ingress | Admin |

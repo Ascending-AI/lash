@@ -93,12 +93,13 @@ mod process_attach;
 mod process_stop;
 mod services;
 mod session_administration;
+mod session_driver;
 mod turn;
 mod turn_handler;
 
 pub use restate_sdk;
 
-pub use backend::{RestateBackend, RestateQueuedWork};
+pub use backend::RestateBackend;
 pub use controller::{
     EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
@@ -141,6 +142,10 @@ pub use process::{
 };
 pub use process_attach::RestateProcessAttachRequest;
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
+pub use session_driver::{
+    LASH_SESSION_DRIVE_VERSION, RestateSessionDriveRequest, RestateSessionDriverSlot,
+    RestateSessionWork, RestateTurnDriveRequest,
+};
 pub use turn::RestateTurnAttach;
 pub use turn_handler::{
     TURN_HANDLER_MAX_ATTEMPTS, park_generation_refused_turn, parked_turn_failure,

@@ -442,7 +442,6 @@ async fn restate_deployment(
         ingress_url,
         authority.clone(),
         Arc::new(stores) as Arc<dyn lash_core::StoreSet>,
-        lash_restate::RestateQueuedWork::Disabled,
     ));
     let core = lash::LashCore::standard_builder(
         Arc::clone(&backend) as Arc<dyn lash_core::Backend>,

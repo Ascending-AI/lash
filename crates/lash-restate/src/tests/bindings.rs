@@ -16,7 +16,7 @@ use restate_sdk::endpoint::Endpoint;
 use restate_sdk::prelude::{HandlerResult, WorkflowContext};
 
 use crate::services::LASH_SERVICES;
-use crate::{RestateAuthorityId, RestateBackend, RestateQueuedWork};
+use crate::{RestateAuthorityId, RestateBackend};
 
 /// A host's own turn workflow, bound beside lash's services.
 #[restate_sdk::workflow]
@@ -91,7 +91,6 @@ async fn backend_and_process_worker()
                 .await
                 .expect("open the memory store set"),
         ) as Arc<dyn lash_core::StoreSet>,
-        RestateQueuedWork::Disabled,
     ));
     let core = lash::LashCore::standard_builder(
         Arc::clone(&backend) as Arc<dyn lash_core::Backend>,

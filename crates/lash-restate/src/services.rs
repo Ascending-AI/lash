@@ -27,6 +27,10 @@ use crate::effect_group::{EffectGroupDispatch, EffectGroupIndex, EffectGroupPayl
 use crate::ingress::RestateIngressClient;
 use crate::process::{LashProcessWorkflow as _, LashProcessWorkflowImpl, RestateProcessRunner};
 use crate::process_attach::{LashProcessAttach as _, LashProcessAttachImpl};
+use crate::session_driver::{
+    LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateSessionDriverSlot,
+};
+use crate::turn_service;
 
 /// Declares [`LashService`] and its complete [`LASH_SERVICES`] together, so
 /// a variant cannot exist without being listed.
@@ -68,6 +72,11 @@ lash_services! {
     EffectGroupPayload => "EffectGroupPayload",
     /// Sends an effect group's children and runs each one.
     EffectGroupDispatch => "EffectGroupDispatch",
+    /// One session's drive: admits roots and runs each in its `LashTurn`
+    /// (FIG-3600).
+    SessionDriver => "LashSession",
+    /// One admitted root: its seal, turns and commits (FIG-3600).
+    TurnDriver => "LashTurn",
 }
 
 /// What the lash services of one deployment run over.
@@ -82,6 +91,8 @@ pub(crate) struct LashServiceParts<'a, R> {
     pub(crate) sessions: Arc<dyn lash_core::SessionStoreFactory>,
     /// The process workflow over the deployment's process worker.
     pub(crate) process_workflow: LashProcessWorkflowImpl<R>,
+    /// Where the session handlers find the driver the core installs.
+    pub(crate) session_driver: RestateSessionDriverSlot,
 }
 
 /// Bind every [`LashService`] on `builder`.
@@ -97,6 +108,7 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
         ingress,
         sessions,
         process_workflow,
+        session_driver,
     } = parts;
     // `LASH_SERVICES` lists each variant once, so the process-workflow arm runs once and
     // always finds the workflow here.
@@ -121,6 +133,19 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
                 ingress.clone(),
                 RunRetryPolicy::new(),
                 Arc::clone(&sessions),
+            )),
+            // Both run lash turns: a parked root fails its attempt
+            // retryably, and the handler pauses after its attempt budget
+            // with its journal kept.
+            LashService::SessionDriver => builder.bind(turn_service(
+                LashSessionImpl::new(session_driver.clone(), effect_host.authority_id().clone())
+                    .serve(),
+                "drive",
+            )),
+            LashService::TurnDriver => builder.bind(turn_service(
+                LashTurnImpl::new(session_driver.clone(), effect_host.authority_id().clone())
+                    .serve(),
+                "run",
             )),
         })
 }

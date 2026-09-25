@@ -1,0 +1,497 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
+
+//! The session driver on Restate (FIG-3600, ADR 0104 O1/O2/O6): the engine
+//! that runs every session's drive.
+//!
+//! Two lash services split one drive across handlers, each on its own
+//! journal:
+//!
+//! - **`LashSession/{session}`** is a virtual object keyed by the session.
+//!   Its exclusive `drive` handler loops the kernel's recorded admission
+//!   (`AdmitDrive`, ordinal 0, 1, ..) on a controller scoped to
+//!   [`drive_admission_scope`], and for every admitted root calls that
+//!   root's `LashTurn` and awaits it. It returns once admission answers
+//!   anything but an admitted root. The object's key serializes the
+//!   session: one authorized drive at a time (O1).
+//! - **`LashTurn/{session}:{root}`** is a workflow, one per logical root. Its
+//!   `run` handler seals the admission and runs the root's turns on a
+//!   controller scoped to [`drive_root_scope`], under the retry contract of a
+//!   turn handler ([`turn_handler_options`](crate::turn_handler_options)): a
+//!   parked root fails its attempt retryably and pauses after the budget, so
+//!   its journal is kept for a restored build.
+//!
+//! The kernel owns what a drive admits and how a root runs; these handlers
+//! only give each step its journal. The core installs its
+//! [`SessionDriver`] on the engine ([`SessionWorkEngine::install_session_driver`]),
+//! and both handlers read it from the deployment's
+//! [`RestateSessionDriverSlot`], so a host wires nothing.
+//!
+//! **Scheduling (O2).** [`SessionWorkEngine::schedule_drive`] is a one-way
+//! send to `LashSession/{session}/drive` whose idempotency key is the drive
+//! request's id. Every schedule names its own request (the committed row it
+//! follows, or one reconcile sweep's ask), never the session or a running
+//! drive, so a schedule issued while a drive runs is never deduplicated
+//! away: it queues behind the running drive on the object, and its first
+//! admission is the re-check that admits whatever that drive left pending. A
+//! schedule lost with its process is healed by the reconcile sweep at the
+//! next boot or `drain_status`, or by the session's next schedule.
+//!
+//! **Generations.** Both handlers' requests carry
+//! [`LASH_SESSION_DRIVE_VERSION`], the generation of the commands their
+//! journals lead with. A request built for another generation decodes and
+//! is refused, terminally and before the handler journals anything, so a
+//! journal written under one generation is never replayed against another.
+
+use std::sync::{Arc, OnceLock};
+
+use lash_core::engine::{
+    AdmitVerdict, Admitted, BuildGeneration, DriveAbort, DriveOutcome, DriveRequest,
+    DriveRequestId, DriveStop, RootOutcome, drive_admission_scope, drive_root_scope,
+};
+use lash_core::{SessionDriver, SessionId, SessionWorkEngine};
+use restate_sdk::context::{ContextClient, ObjectContext, WorkflowContext};
+use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
+use restate_sdk::serde::Json;
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    LashService, RestateAuthorityId, RestateIngressClient, RestateRuntimeEffectController,
+    parked_turn_failure,
+};
+
+/// The generation of the session driver's journaled command prefix: the
+/// input stamp of every `LashSession` and `LashTurn` request (ADR 0105 §12).
+///
+/// It owns what the two handlers journal ahead of the kernel's own recorded
+/// effects: `LashSession`'s admission steps and its `LashTurn` calls, and the
+/// seal `LashTurn` records first. Any change to those commands, their order,
+/// or what they key on bumps it. The scheduler stamps it on every request, and
+/// each handler refuses any other generation before it journals anything. An
+/// unstamped request is generation 0, which no build drives.
+pub const LASH_SESSION_DRIVE_VERSION: u32 = 1;
+
+/// The drive handler's name on `LashSession`.
+const DRIVE_HANDLER: &str = "drive";
+
+/// The generation an unstamped request was written by: none this build
+/// drives.
+fn unstamped_drive_version() -> u32 {
+    0
+}
+
+/// The request `LashSession/{session}/drive` runs: one drive of the session.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestateSessionDriveRequest {
+    /// [`LASH_SESSION_DRIVE_VERSION`] of the build that scheduled the drive.
+    #[serde(default = "unstamped_drive_version")]
+    pub drive_version: u32,
+    pub request: DriveRequest,
+}
+
+/// The request `LashTurn/{session}:{root}/run` runs: one admitted root.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestateTurnDriveRequest {
+    /// [`LASH_SESSION_DRIVE_VERSION`] of the drive that admitted the root.
+    #[serde(default = "unstamped_drive_version")]
+    pub drive_version: u32,
+    /// The recorded admission the root runs under. The root replays from its
+    /// recorded base, never from the live head.
+    pub admitted: Admitted,
+}
+
+/// The build generation every drive request of this build is pinned to.
+fn build_generation() -> BuildGeneration {
+    BuildGeneration::new(format!("lash-session-drive-v{LASH_SESSION_DRIVE_VERSION}"))
+}
+
+/// The `LashTurn` workflow key of `root` in `session`: one workflow per
+/// logical root, so a replay of the session's drive re-calls the same root.
+pub(crate) fn turn_workflow_key(session: &SessionId, root: &lash_core::TurnId) -> String {
+    format!("{}:{}", session.as_str(), root.as_str())
+}
+
+// ---------------------------------------------------------------------------
+// The driver slot
+// ---------------------------------------------------------------------------
+
+/// The core's [`SessionDriver`] as a deployment's session handlers see it.
+///
+/// The endpoint binds `LashSession` and `LashTurn` before any core over the
+/// backend exists, so they read the driver from this slot when a drive runs.
+/// The core fills it once, get-or-init, through the engine's
+/// [`install_session_driver`](SessionWorkEngine::install_session_driver): one
+/// engine has one answer to what runs its drives, whichever core was built
+/// first. A drive that runs before the install fails its attempt retryably,
+/// naming the empty slot. Clones share one slot.
+#[derive(Clone, Default)]
+pub struct RestateSessionDriverSlot {
+    driver: Arc<OnceLock<Arc<dyn SessionDriver>>>,
+}
+
+impl RestateSessionDriverSlot {
+    /// An empty slot.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Install `driver` unless one is installed already; returns the driver
+    /// the slot holds.
+    pub fn install(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
+        Arc::clone(self.driver.get_or_init(|| driver))
+    }
+
+    /// The installed driver, if a core installed one.
+    pub fn installed(&self) -> Option<Arc<dyn SessionDriver>> {
+        self.driver.get().cloned()
+    }
+
+    /// The installed driver, or the retryable failure of a drive that ran
+    /// before any core installed one.
+    fn driver_for(&self, handler: &str) -> Result<Arc<dyn SessionDriver>, HandlerError> {
+        self.installed().ok_or_else(|| {
+            HandlerError::from(std::io::Error::other(format!(
+                "{handler}: no session driver is installed on this deployment yet; \
+                 a core over this backend installs it when it is built"
+            )))
+        })
+    }
+}
+
+impl std::fmt::Debug for RestateSessionDriverSlot {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RestateSessionDriverSlot")
+            .field("installed", &self.driver.get().is_some())
+            .finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The engine: scheduling
+// ---------------------------------------------------------------------------
+
+/// Restate's [`SessionWorkEngine`]: a drive is a one-way send to the
+/// session's `LashSession` object, and the core's driver lives in the
+/// deployment's [`RestateSessionDriverSlot`].
+#[derive(Clone)]
+pub struct RestateSessionWork {
+    ingress: RestateIngressClient,
+    slot: RestateSessionDriverSlot,
+}
+
+impl RestateSessionWork {
+    pub(crate) fn new(ingress: RestateIngressClient, slot: RestateSessionDriverSlot) -> Self {
+        Self { ingress, slot }
+    }
+
+    /// The slot the deployment's session handlers read the driver from.
+    pub fn driver_slot(&self) -> &RestateSessionDriverSlot {
+        &self.slot
+    }
+
+    /// Send `request`'s drive to `LashSession/{session}`, keyed by the
+    /// request id: a repeated send of one request attaches to its first
+    /// invocation instead of driving twice. Resolves once Restate accepted
+    /// the send, not once the drive ran.
+    pub async fn send_drive(
+        &self,
+        session: &SessionId,
+        request: DriveRequestId,
+    ) -> Result<crate::RestateInvocationId, crate::RestateHttpError> {
+        let body = RestateSessionDriveRequest {
+            drive_version: LASH_SESSION_DRIVE_VERSION,
+            request: DriveRequest {
+                session: session.clone(),
+                request: request.clone(),
+                build_generation: build_generation(),
+            },
+        };
+        self.ingress
+            .send_object_json_idempotent(
+                LashService::SessionDriver.name(),
+                session.as_str(),
+                DRIVE_HANDLER,
+                &body,
+                request.as_str(),
+            )
+            .await
+    }
+
+    /// Attach to `request`'s drive of `session` and return how it ended,
+    /// sending it first if nothing sent it yet: the same idempotency key as
+    /// [`send_drive`](Self::send_drive), so the call and an earlier send name
+    /// one invocation.
+    pub async fn attach_drive(
+        &self,
+        session: &SessionId,
+        request: DriveRequestId,
+    ) -> Result<DriveOutcome, crate::RestateHttpError> {
+        let body = RestateSessionDriveRequest {
+            drive_version: LASH_SESSION_DRIVE_VERSION,
+            request: DriveRequest {
+                session: session.clone(),
+                request: request.clone(),
+                build_generation: build_generation(),
+            },
+        };
+        self.ingress
+            .call_object_json_idempotent(
+                LashService::SessionDriver.name(),
+                session.as_str(),
+                DRIVE_HANDLER,
+                &body,
+                request.as_str(),
+            )
+            .await
+    }
+}
+
+impl std::fmt::Debug for RestateSessionWork {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RestateSessionWork")
+            .field("slot", &self.slot)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SessionWorkEngine for RestateSessionWork {
+    fn schedule_drive(&self, session: &SessionId, request: DriveRequestId) {
+        // The ask is fire-and-forget by contract: the row it follows is
+        // already durable, and a send that never reached Restate is healed by
+        // the reconcile sweep or the session's next schedule.
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!(
+                session_id = session.as_str(),
+                request = request.as_str(),
+                "session drive not sent: scheduled outside a Tokio runtime; the reconcile sweep drives it"
+            );
+            return;
+        };
+        let engine = self.clone();
+        let session = session.clone();
+        runtime.spawn(async move {
+            if let Err(error) = engine.send_drive(&session, request.clone()).await {
+                tracing::warn!(
+                    session_id = session.as_str(),
+                    request = request.as_str(),
+                    error = %error,
+                    "session drive send failed; the reconcile sweep drives the session"
+                );
+            }
+        });
+    }
+
+    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
+        self.slot.install(driver)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The handlers
+// ---------------------------------------------------------------------------
+
+/// One session's drive. Every lash deployment serves it
+/// (`crate::services::bind_lash_services`): a deployment that accepted input
+/// without it would schedule drives nothing runs.
+#[restate_sdk::object]
+pub trait LashSession {
+    async fn drive(request: Json<RestateSessionDriveRequest>) -> HandlerResult<Json<DriveOutcome>>;
+}
+
+/// One admitted root, keyed `{session}:{root}`.
+#[restate_sdk::workflow]
+pub trait LashTurn {
+    async fn run(request: Json<RestateTurnDriveRequest>) -> HandlerResult<Json<RootOutcome>>;
+}
+
+/// The `LashSession` object over the deployment's driver slot.
+#[derive(Clone)]
+pub(crate) struct LashSessionImpl {
+    slot: RestateSessionDriverSlot,
+    authority_id: RestateAuthorityId,
+}
+
+/// The `LashTurn` workflow over the deployment's driver slot.
+#[derive(Clone)]
+pub(crate) struct LashTurnImpl {
+    slot: RestateSessionDriverSlot,
+    authority_id: RestateAuthorityId,
+}
+
+impl LashSessionImpl {
+    pub(crate) fn new(slot: RestateSessionDriverSlot, authority_id: RestateAuthorityId) -> Self {
+        Self { slot, authority_id }
+    }
+}
+
+impl LashTurnImpl {
+    pub(crate) fn new(slot: RestateSessionDriverSlot, authority_id: RestateAuthorityId) -> Self {
+        Self { slot, authority_id }
+    }
+}
+
+/// The terminal refusal of a request stamped for another generation. It is
+/// returned before the handler journals anything.
+fn retired_generation(service: LashService, found: u32) -> HandlerError {
+    TerminalError::new(format!(
+        "{} request carries lash-session-drive-v{found}; this handler journals generation \
+         {LASH_SESSION_DRIVE_VERSION}",
+        service.name()
+    ))
+    .into()
+}
+
+/// How a handler ends an attempt the kernel aborted.
+fn abort_failure(abort: DriveAbort) -> HandlerError {
+    match abort {
+        // A live fault: the invocation retries, replaying what it recorded.
+        DriveAbort::Retry(error) => HandlerError::from(error),
+        // The park is durable; the invocation keeps its journal and pauses
+        // after its attempt budget.
+        DriveAbort::Parked { error, .. } => parked_turn_failure(error),
+        DriveAbort::Refused(error) => TerminalError::new(error.to_string()).into(),
+    }
+}
+
+fn refused_scope(error: lash_core::RuntimeError) -> HandlerError {
+    TerminalError::new(error.to_string()).into()
+}
+
+impl LashSession for LashSessionImpl {
+    async fn drive(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(input): Json<RestateSessionDriveRequest>,
+    ) -> HandlerResult<Json<DriveOutcome>> {
+        // The generation gate precedes every journaled command.
+        if input.drive_version != LASH_SESSION_DRIVE_VERSION {
+            return Err(retired_generation(
+                LashService::SessionDriver,
+                input.drive_version,
+            ));
+        }
+        let request = input.request;
+        if ctx.key() != request.session.as_str() {
+            return Err(TerminalError::new(format!(
+                "LashSession/{} was asked to drive session `{}`",
+                ctx.key(),
+                request.session
+            ))
+            .into());
+        }
+        let driver = self.slot.driver_for(LashService::SessionDriver.name())?;
+        let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
+        let admission_scope = drive_admission_scope(&request.session, &request.request);
+        let mut ran = Vec::new();
+        let mut ordinal = 0_u32;
+        loop {
+            let scoped = controller
+                .scoped_effect_controller(admission_scope.clone())
+                .map_err(refused_scope)?;
+            let verdict = driver
+                .admit(scoped, &request, ordinal)
+                .await
+                .map_err(abort_failure)?;
+            let stop = match verdict {
+                AdmitVerdict::Admit(admitted) => {
+                    let key = turn_workflow_key(admitted.session(), admitted.root());
+                    let Json(outcome) = controller
+                        .context()
+                        .workflow_client::<LashTurnClient>(key)
+                        .run(Json(RestateTurnDriveRequest {
+                            drive_version: LASH_SESSION_DRIVE_VERSION,
+                            admitted,
+                        }))
+                        .call()
+                        .await?;
+                    ran.push(outcome);
+                    ordinal = ordinal.checked_add(1).ok_or_else(|| {
+                        HandlerError::from(TerminalError::new(format!(
+                            "session `{}` drive `{}` exhausted its admission ordinals",
+                            request.session,
+                            request.request.as_str()
+                        )))
+                    })?;
+                    continue;
+                }
+                AdmitVerdict::Idle => DriveStop::Idle,
+                AdmitVerdict::Parked(park) => DriveStop::Parked(park),
+                AdmitVerdict::SubstrateLost { root } => DriveStop::SubstrateLost { root },
+                AdmitVerdict::RootTerminal { root, by } => DriveStop::RootTerminal { root, by },
+            };
+            return Ok(Json(DriveOutcome { ran, stop }));
+        }
+    }
+}
+
+impl LashTurn for LashTurnImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<RestateTurnDriveRequest>,
+    ) -> HandlerResult<Json<RootOutcome>> {
+        if input.drive_version != LASH_SESSION_DRIVE_VERSION {
+            return Err(retired_generation(
+                LashService::TurnDriver,
+                input.drive_version,
+            ));
+        }
+        let admitted = input.admitted;
+        let expected = turn_workflow_key(admitted.session(), admitted.root());
+        if ctx.key() != expected {
+            return Err(TerminalError::new(format!(
+                "LashTurn/{} was asked to run root `{expected}`",
+                ctx.key()
+            ))
+            .into());
+        }
+        let driver = self.slot.driver_for(LashService::TurnDriver.name())?;
+        let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
+        let scoped = controller
+            .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
+            .map_err(refused_scope)?;
+        let outcome = driver
+            .run_root(scoped, admitted)
+            .await
+            .map_err(abort_failure)?;
+        Ok(Json(outcome))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_request_decodes_whatever_generation_it_carries() {
+        let request = DriveRequest {
+            session: SessionId::from("s"),
+            request: DriveRequestId::new("r"),
+            build_generation: build_generation(),
+        };
+        let mut stamped = serde_json::to_value(RestateSessionDriveRequest {
+            drive_version: LASH_SESSION_DRIVE_VERSION,
+            request,
+        })
+        .expect("encode");
+        assert_eq!(
+            stamped["drive_version"],
+            serde_json::json!(LASH_SESSION_DRIVE_VERSION)
+        );
+        stamped["drive_version"] = serde_json::json!(LASH_SESSION_DRIVE_VERSION + 1);
+        let successor: RestateSessionDriveRequest =
+            serde_json::from_value(stamped.clone()).expect("a successor's stamp decodes");
+        assert_eq!(successor.drive_version, LASH_SESSION_DRIVE_VERSION + 1);
+        stamped
+            .as_object_mut()
+            .expect("an object")
+            .remove("drive_version");
+        let unstamped: RestateSessionDriveRequest =
+            serde_json::from_value(stamped).expect("an unstamped request decodes");
+        assert_eq!(unstamped.drive_version, 0);
+    }
+}

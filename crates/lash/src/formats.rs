@@ -74,7 +74,7 @@ pub use lash_protocol_rlm::{
 #[cfg(feature = "restate")]
 pub use lash_restate::{
     DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION,
-    EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EFFECT_JOURNAL_VERSION,
+    EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EFFECT_JOURNAL_VERSION, LASH_SESSION_DRIVE_VERSION,
     PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, RESTATE_PROCESS_JOURNAL_VERSION,
 };
 pub use lash_sansio::{LASHLANG_SEMANTIC_HASH_VERSION, TURN_CHECKPOINT_SCHEMA_VERSION};
@@ -179,6 +179,9 @@ pub enum DurableFormat {
     /// The generation stamped into every recorded effect's Restate journal
     /// entry (ADR 0105 §12).
     RestateEffectJournal,
+    /// The leading commands of the Restate session driver's handlers, stamped
+    /// on every `LashSession` and `LashTurn` request (ADR 0105 §12, FIG-3600).
+    RestateSessionDrive,
     /// The Lashlang VM ABI this build implements. Never persisted — see
     /// [`FormatProbe::NotPersisted`].
     VmAbi,
@@ -225,6 +228,7 @@ impl DurableFormat {
             DurableFormat::RestateEffectGroupIndexProtocol => "Restate effect-group index protocol",
             DurableFormat::RestateProcessJournal => "Restate process journal prefix",
             DurableFormat::RestateEffectJournal => "Restate effect journal",
+            DurableFormat::RestateSessionDrive => "Restate session drive prefix",
             DurableFormat::VmAbi => "Lashlang VM ABI",
         }
     }
@@ -573,6 +577,14 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
             version: FormatVersion::Counter(EFFECT_JOURNAL_VERSION),
             owning_crate: "lash-restate",
             constant: "EFFECT_JOURNAL_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "restate")]
+        DurableFormatEntry {
+            format: DurableFormat::RestateSessionDrive,
+            version: FormatVersion::Counter(LASH_SESSION_DRIVE_VERSION),
+            owning_crate: "lash-restate",
+            constant: "LASH_SESSION_DRIVE_VERSION",
             probe: FormatProbe::Comparable,
         },
     ]
