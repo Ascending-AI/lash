@@ -1288,17 +1288,25 @@ fn error_return_journal() -> TestBackend {
     })
 }
 
-/// A turn-crash runner fixture over `journal`'s own effect host: the runner
-/// cuts turns with that journal's fault injector.
-fn journal_runner_fixture(
-    journal: TestBackend,
-) -> (
+/// The `make` element of a turn-crash runner fixture: opens a crash-law
+/// scenario's session store over the fixture's substrate.
+type JournalStoreOpener =
+    Box<dyn Fn(&str) -> Arc<lash_sqlite_store::Store> + Send + Sync + 'static>;
+
+/// The `(guard, stores, make, host, runner)` tuple the turn-crash runner
+/// macros destructure: `guard` keeps the fixture's backends alive, `host` is
+/// the journal's own effect host and `runner` cuts its turns.
+type JournalRunnerFixture = (
     Retained,
     Arc<dyn lash_core_execution::StoreSet>,
-    impl Fn(&str) -> Arc<lash_sqlite_store::Store> + Send + Sync + 'static,
+    JournalStoreOpener,
     Arc<dyn EffectHost>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
-) {
+);
+
+/// A turn-crash runner fixture over `journal`'s own effect host: the runner
+/// cuts turns with that journal's fault injector.
+fn journal_runner_fixture(journal: TestBackend) -> JournalRunnerFixture {
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
     let retained = Retained::default();
     let stores = retained.open_blocking().as_stores();
@@ -1309,7 +1317,7 @@ fn journal_runner_fixture(
     (
         retained,
         stores,
-        move |scenario: &str| scenarios.concrete_store(scenario),
+        Box::new(move |scenario: &str| scenarios.concrete_store(scenario)),
         Arc::clone(&host),
         lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
     )
