@@ -1159,7 +1159,9 @@ impl E2eTools {
         // `false` is the process replay scenario, whose ratified witness is
         // journal replay on the reincarnated worker itself (FIG-1671 cede
         // semantics; see `assert_failover_convergence`). Holding the endpoint
-        // there waits on a terminal result only the held worker can produce.
+        // there waits on a terminal result only the held worker can produce,
+        // and the reincarnated worker must not exit again when the retry
+        // re-executes this call.
         let peer_takeover_expected = call
             .args
             .get("peer_takeover")
@@ -1368,6 +1370,14 @@ async fn should_exit_for_peer_failover(
     };
     if inserted {
         return true;
+    }
+    // A journal-replay scenario exits exactly once. The exit lands inside the
+    // tool call, so no result is journaled and Restate's retry re-executes
+    // `crash_once`. When that retry reaches the reincarnated worker, exiting
+    // again would repeat on every attempt, and the workflow could finish only
+    // if some retry happened to reach the peer.
+    if !peer_takeover_expected {
+        return false;
     }
 
     match sqlx::query_scalar::<_, String>(
