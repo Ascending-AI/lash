@@ -147,9 +147,26 @@ pub enum EmbedError {
     #[error("runtime control unavailable: {0}")]
     Control(#[from] lash_core::facade_support::PluginOperationInvokeError),
     /// A [`send`](crate::LashSession::send) or one of its handles could not
-    /// answer (FIG-3600).
+    /// answer (FIG-3600). Boxed: a [`SendError`] can carry a parked root's
+    /// whole status, and every facade result carries this enum.
     #[error("send: {0}")]
-    Send(#[from] SendError),
+    Send(Box<SendError>),
+}
+
+impl From<SendError> for EmbedError {
+    fn from(error: SendError) -> Self {
+        Self::Send(Box::new(error))
+    }
+}
+
+impl EmbedError {
+    /// The [`SendError`] this is, when it is one.
+    pub fn send_error(&self) -> Option<&SendError> {
+        match self {
+            Self::Send(error) => Some(error),
+            _ => None,
+        }
+    }
 }
 
 /// Why a [`send`](crate::LashSession::send), or a handle it returned, did not
@@ -386,8 +403,11 @@ impl EmbedError {
             | Self::ProcessExecutionConcurrency(_)
             | Self::QueuedWorkExecutionConcurrency(_)
             | Self::UnknownSession { .. }
-            | Self::StaticTurnStreamRequiresStaticEffectHost
-            | Self::Send(SendError::NoSessionWork | SendError::LiveTurnContext { .. }) => true,
+            | Self::StaticTurnStreamRequiresStaticEffectHost => true,
+            Self::Send(error) => matches!(
+                **error,
+                SendError::NoSessionWork | SendError::LiveTurnContext { .. }
+            ),
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),
             Self::Plugin(err) => err.is_terminal(),
@@ -415,8 +435,7 @@ impl EmbedError {
             | Self::DecodeProtocolTurnOptions(_)
             | Self::Control(_)
             | Self::NativeSubstrateConfig(_)
-            | Self::Session(_)
-            | Self::Send(_) => false,
+            | Self::Session(_) => false,
         }
     }
 }

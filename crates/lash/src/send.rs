@@ -277,7 +277,7 @@ pub(crate) fn root(target: SendTarget, root: TurnId) -> RootHandle {
 fn settled_output(input_id: InputId, outcome: SendOutcome) -> Result<TurnOutput> {
     match outcome.output {
         Some(output) => Ok(output),
-        None => Err(EmbedError::Send(SendError::NotSettled {
+        None => Err(EmbedError::from(SendError::NotSettled {
             input_id,
             status: outcome.status,
         })),
@@ -394,12 +394,12 @@ impl std::future::IntoFuture for CancelBuilder {
 pub enum CancelReceipt {
     /// The input was still queued: its row is cancelled and no turn applied
     /// it. Its handle answers Cancelled with no output.
-    Withdrawn(PendingTurnInputCancelReceipt),
+    Withdrawn(Box<PendingTurnInputCancelReceipt>),
     /// The input's root is running: a durable cancel request was placed on
     /// the root's cancellation gate.
     Requested {
         root: TurnId,
-        receipt: TurnCancelReceipt,
+        receipt: Box<TurnCancelReceipt>,
     },
     /// The root already has a terminal (or the input was already applied and
     /// settled).
