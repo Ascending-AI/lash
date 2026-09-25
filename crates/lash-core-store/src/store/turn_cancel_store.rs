@@ -2,7 +2,7 @@
 //! obligations a cancel leaves, and the request record with its outcome
 //! (ADR 0039, ADR 0101 §10).
 
-use super::{SessionExecutionLeaseAuthority, StoreError};
+use super::{DriveFence, StoreError};
 use crate::SessionId;
 
 /// Durable turn-cancellation capability.
@@ -12,35 +12,35 @@ pub trait TurnCancelStore: Send + Sync {
     /// session and, for a Process or runtime-operation controller, its physical
     /// journal scope. Session-bound turns keep their exact canonical address in
     /// each closure authorization, so distinct turns may share this authority.
-    /// The check occurs under the current execution fence before any session
+    /// The check occurs under the drive's current fence before any session
     /// work and never replaces the original selection.
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        fence: &DriveFence,
         binding_id: &str,
         admitted_scope: &crate::ExecutionScope,
     ) -> Result<(), StoreError>;
 
     /// Authorize exact closure of one cancellation gate pair for the admitted
-    /// session and binding. The recorded lease identity authenticates the
-    /// proposal, but its liveness and generation do not fence final settlement.
+    /// session and binding. The fence's drive epoch is recorded with the
+    /// proposal, but it does not fence final settlement.
     /// A vacant slot accepts this value, an identical retry adopts it, and a
     /// different occupied value or retired physical scope returns a typed refusal.
     /// Final publication additionally requires the session-head CAS.
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        fence: &DriveFence,
         authorization: &crate::TurnCancelClosureAuthorization,
     ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
 
     /// Load every unconsumed closure obligation for the bound session after
-    /// validating the current execution fence, selected binding, and any
+    /// validating the drive's current fence, selected binding, and any
     /// original non-session physical scope.
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
+        fence: &DriveFence,
         binding_id: &str,
         admitted_scope: &crate::ExecutionScope,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;

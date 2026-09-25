@@ -24,7 +24,8 @@ pub const CURRENT_SESSION_STATE_VERSION: u32 = 3;
 pub struct SessionStateAdmission {
     pub session_id: SessionId,
     pub version: u32,
-    pub lease_fencing_token: u64,
+    /// The drive epoch of the fence that admitted the session state.
+    pub drive_epoch: u64,
 }
 
 /// Interpret an independently read physical marker.

@@ -106,7 +106,7 @@ pub async fn load_persisted_session_admitted(
     let lease = acquisition.lease;
     let fence = lease.fence();
     let result = async {
-        store.admit_session_state(&fence).await?;
+        store.read_session_state_version().await?;
         load_persisted_session(store).await
     }
     .await;

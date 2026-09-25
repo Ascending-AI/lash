@@ -1086,16 +1086,16 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         Ok(OLDEST_SUPPORTED_SESSION_STATE_VERSION)
     }
-    /// Revalidate `lease`, then classify the independently read session-state marker.
+    /// Revalidate `fence`, then classify the independently read session-state marker.
     async fn admit_session_state(
         &self,
-        lease: &SessionExecutionLeaseAuthority,
+        fence: &DriveFence,
     ) -> Result<SessionStateAdmission, StoreError> {
         let version = self.read_session_state_version().await?;
         Ok(SessionStateAdmission {
-            session_id: lease.session_id.clone(),
+            session_id: fence.session().clone(),
             version,
-            lease_fencing_token: lease.fencing_token,
+            drive_epoch: fence.epoch(),
         })
     }
 
@@ -1150,8 +1150,8 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// Keep `base` readable by [`load_session_at`](Self::load_session_at)
     /// until the session's next admission replaces it (FIG-3682).
     ///
-    /// Called by a turn's admission under the session's execution lease, once
-    /// per first execution. While it stands, maintenance that reclaims
+    /// Called by a turn's admission under the drive's fence, once per first
+    /// execution. While it stands, maintenance that reclaims
     /// unreferenced checkpoints treats `base.checkpoint` as a root, so a
     /// replay of the admitted turn can rebuild its input state even after the
     /// turn's own commit superseded the head and a vacuum ran. A backend that
@@ -1159,7 +1159,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// default.
     async fn retain_admission_base(
         &self,
-        _lease: &SessionExecutionLeaseAuthority,
+        _fence: &DriveFence,
         _base: &SessionHeadRef,
     ) -> Result<(), StoreError> {
         Ok(())

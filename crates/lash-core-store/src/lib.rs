@@ -104,9 +104,8 @@ pub(crate) use store::{
     AppendRequestIdentity, AttachmentManifestEntry, AttachmentOwner, AttachmentWriteToken, BlobRef,
     CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent, LeaseOwnerIdentity,
     OperationId, QueuedWorkClaimOutcome, RuntimePersistence, SelectedQueuedWorkClaimOutcome,
-    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseObservation, SessionMeta, StoreError,
-    WorkClaim,
+    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseObservation, SessionMeta, StoreError, WorkClaim,
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
 pub(crate) use usage::{LedgerUsageDisposition, TokenLedgerEntry, UnreportedLedgerAttempt};

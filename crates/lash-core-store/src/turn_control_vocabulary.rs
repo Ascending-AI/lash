@@ -94,7 +94,7 @@ pub struct TurnCancelClosureAuthorization {
     terminal_key: AwaitEventKey,
     proposed_base: TurnCancelClosureProposal,
     observed_intent: TurnCancelIntentSnapshot,
-    authorizing_fencing_token: u64,
+    authorizing_drive_epoch: u64,
 }
 /// Authenticated terminal produced by the exact durable promise owner for one
 /// persisted cancellation-closure authorization.
@@ -161,7 +161,7 @@ impl TurnCancelClosureAuthorization {
         terminal_key: AwaitEventKey,
         proposed_base: TurnCancelClosureProposal,
         observed_intent: TurnCancelIntentSnapshot,
-        fence: &crate::SessionExecutionLeaseAuthority,
+        fence: &crate::store::DriveFence,
     ) -> Result<Self, RuntimeError> {
         address.validate()?;
         admitted_scope.validate()?;
@@ -172,9 +172,9 @@ impl TurnCancelClosureAuthorization {
                 "turn cancellation closure requires a non-empty binding id",
             ));
         }
-        if fence.session_id != address.session_id {
+        if *fence.session() != address.session_id {
             return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::SessionExecutionLeaseLost,
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
                 "turn cancellation closure fence belongs to another session",
             ));
         }
@@ -207,7 +207,7 @@ impl TurnCancelClosureAuthorization {
             terminal_key,
             proposed_base,
             observed_intent,
-            authorizing_fencing_token: fence.fencing_token,
+            authorizing_drive_epoch: fence.epoch(),
         })
     }
 
@@ -276,8 +276,9 @@ impl TurnCancelClosureAuthorization {
     pub fn observed_intent(&self) -> &TurnCancelIntentSnapshot {
         &self.observed_intent
     }
-    pub fn authorizing_fencing_token(&self) -> u64 {
-        self.authorizing_fencing_token
+    /// The drive epoch whose fence authorized this closure.
+    pub fn authorizing_drive_epoch(&self) -> u64 {
+        self.authorizing_drive_epoch
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

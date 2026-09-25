@@ -2,20 +2,18 @@
 //! and its settlement. The run record outlives the queue that fed it; its
 //! members are ingress items (ADR 0101).
 
-use super::{
-    BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, SessionExecutionLeaseAuthority, StoreError,
-};
+use super::{BeginQueuedRun, DriveFence, QueuedRunAdmission, QueuedRunCommit, StoreError};
 use crate::SessionId;
 
 /// Durable queued-run capability: one unfinished run per session, admitted,
-/// resumed and settled under the caller's fence.
+/// resumed and settled under the drive's fence.
 #[async_trait::async_trait]
 pub trait QueuedRunStore: Send + Sync {
     /// Acquire or resume the session's sole unfinished queued run under the
-    /// current lane fence. Retry preserves identity and physical position.
+    /// drive's fence. Retry preserves identity and physical position.
     async fn begin_or_resume_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &DriveFence,
         request: BeginQueuedRun,
     ) -> Result<QueuedRunAdmission, StoreError>;
 
@@ -42,7 +40,7 @@ pub trait QueuedRunStore: Send + Sync {
     /// Fenced disposition for an empty run or a failure before physical commit.
     async fn settle_queued_run(
         &self,
-        fence: &SessionExecutionLeaseAuthority,
+        fence: &DriveFence,
         settlement: QueuedRunCommit,
     ) -> Result<QueuedRunAdmission, StoreError>;
 }

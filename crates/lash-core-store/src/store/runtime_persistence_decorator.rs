@@ -31,11 +31,11 @@ macro_rules! persistence_operations {
             }
             SessionCommitStore {
                 fn read_session_state_version(&self) -> Result<u32, StoreError>;
-                fn admit_session_state(&self, lease: &SessionExecutionLeaseAuthority) -> Result<SessionStateAdmission, StoreError>;
+                fn admit_session_state(&self, fence: &DriveFence) -> Result<SessionStateAdmission, StoreError>;
                 fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError>;
                 fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError>;
                 fn load_session_at(&self, base: &SessionHeadRef) -> Result<PersistedSessionRead, StoreError>;
-                fn retain_admission_base(&self, lease: &SessionExecutionLeaseAuthority, base: &SessionHeadRef) -> Result<(), StoreError>;
+                fn retain_admission_base(&self, fence: &DriveFence, base: &SessionHeadRef) -> Result<(), StoreError>;
                 fn committed_turn_exists(&self, turn_id: &crate::TurnId) -> Result<bool, StoreError>;
                 fn drain_end_exists(&self, drain_id: &str) -> Result<bool, StoreError>;
                 fn load_node(&self, node_id: &str) -> Result<Option<crate::SessionNodeRecord>, StoreError>;
@@ -60,15 +60,15 @@ macro_rules! persistence_operations {
                 fn vacuum_session_ingress(&self, session_id: &SessionId) -> Result<u64, StoreError>;
             }
             QueuedRunStore {
-                fn begin_or_resume_queued_run(&self, fence: &SessionExecutionLeaseAuthority, request: BeginQueuedRun) -> Result<QueuedRunAdmission, StoreError>;
+                fn begin_or_resume_queued_run(&self, fence: &DriveFence, request: BeginQueuedRun) -> Result<QueuedRunAdmission, StoreError>;
                 fn pending_queued_run(&self, session_id: &SessionId) -> Result<Option<QueuedRunAdmission>, StoreError>;
                 fn queued_run(&self, scope: &crate::ExecutionScope) -> Result<Option<QueuedRunAdmission>, StoreError>;
-                fn settle_queued_run(&self, fence: &SessionExecutionLeaseAuthority, settlement: QueuedRunCommit) -> Result<QueuedRunAdmission, StoreError>;
+                fn settle_queued_run(&self, fence: &DriveFence, settlement: QueuedRunCommit) -> Result<QueuedRunAdmission, StoreError>;
             }
             TurnCancelStore {
-                fn validate_turn_cancellation_binding(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<(), StoreError>;
-                fn authorize_turn_cancel_closure(&self, session_execution_lease: &SessionExecutionLeaseAuthority, authorization: &crate::TurnCancelClosureAuthorization) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
-                fn pending_turn_cancel_closures(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
+                fn validate_turn_cancellation_binding(&self, session_id: &SessionId, fence: &DriveFence, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<(), StoreError>;
+                fn authorize_turn_cancel_closure(&self, fence: &DriveFence, authorization: &crate::TurnCancelClosureAuthorization) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
+                fn pending_turn_cancel_closures(&self, session_id: &SessionId, fence: &DriveFence, binding_id: &str, admitted_scope: &crate::ExecutionScope) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
                 fn pending_turn_cancel_closure_pins(&self) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
                 fn record_turn_cancel_request(&self, request: crate::TurnCancelRequest) -> Result<crate::TurnCancelRequestRecord, StoreError>;
                 fn turn_cancel_request(&self, address: &crate::TurnAddress) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError>;
