@@ -101,6 +101,8 @@ type InvocationJournal = (String, String, Vec<(MessageType, Option<String>)>);
 #[derive(Debug)]
 struct Run {
     answer: String,
+    /// The accepted input's id, minted afresh by every execution.
+    input_id: String,
     llm_calls: usize,
     tool_executions: usize,
     crashes: u64,
@@ -116,9 +118,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     let backend: RestateTestBackend = lash_restate_test::backend(seed, ServerConfig::default())
         .await
         .expect("build the Restate test backend");
-    if let Some(rule) = crash {
-        backend.server().crash_on(rule);
-    }
+    let crash = crash.inspect(|rule| backend.server().crash_on(rule.clone()));
     let llm_calls = Arc::new(AtomicUsize::new(0));
     let tool_executions = Arc::new(AtomicUsize::new(0));
     let provider = {
@@ -205,6 +205,14 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     server.settle().await;
     let mut views = server.invocations();
     views.sort_by(|left, right| left.id.cmp(&right.id));
+    if crash.is_none() {
+        for view in &views {
+            println!(
+                "reference invocation {} attempts={} last_failure={:?}",
+                view.target, view.attempts, view.last_failure
+            );
+        }
+    }
     let journals = views
         .into_iter()
         .map(|view| {
@@ -220,6 +228,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .collect();
     Run {
         answer,
+        input_id: receipt.input_id.to_string(),
         llm_calls: llm_calls.load(Ordering::SeqCst),
         tool_executions: tool_executions.load(Ordering::SeqCst),
         crashes: server.stats().crashes,
@@ -250,8 +259,10 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
                 lost_on_command,
             ));
             if *ty == MessageType::RunCommand {
+                // By position: a drive's admission and seal names embed the
+                // accepted input's id, which each execution mints afresh.
                 points.push((
-                    CrashRule::new(CrashPoint::BeforeRunResult { name: name.clone() })
+                    CrashRule::new(CrashPoint::BeforeRunResultAt { index })
                         .service(service)
                         .within_attempts(1),
                     name.clone(),
@@ -336,11 +347,26 @@ async fn one_seed_reproduces_the_turn_journals_and_ids() {
     // extra index call, a different wait), so the full invocation set is not
     // a function of the seed. Payload bytes also differ where lash records a
     // fresh call id or a measured duration in a `ctx.run` result (FIG-3672).
+    // The accepted input's id is minted afresh by every acceptance, and the
+    // drive's admission and seal names carry it, so it is compared as a
+    // placeholder.
     let turn_journal = |run: &Run| {
         run.journals
             .iter()
             .find(|(_, service, _)| service == TURN_DRIVER_SERVICE)
-            .map(|(id, _, entries)| (id.clone(), entries.clone()))
+            .map(|(id, _, entries)| {
+                let entries: Vec<_> = entries
+                    .iter()
+                    .map(|(ty, name)| {
+                        (
+                            *ty,
+                            name.as_ref()
+                                .map(|name| name.replace(&run.input_id, "<input>")),
+                        )
+                    })
+                    .collect();
+                (id.clone(), entries)
+            })
     };
     assert_eq!(turn_journal(&first), turn_journal(&second));
     assert_eq!(first.answer, second.answer);
