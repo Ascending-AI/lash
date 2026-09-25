@@ -44,7 +44,10 @@ mod backend;
 pub mod protocol;
 pub mod server;
 
-pub use backend::{BackendError, HandlerAttempt, RestateTestBackend, backend};
+pub use backend::{
+    BackendError, HandlerAttempt, RestateTestBackend, SESSION_DRIVER_SERVICE, TURN_DRIVER_SERVICE,
+    backend,
+};
 pub use protocol::ProtocolVersion;
 pub use server::{
     CrashPoint, CrashRule, DropWatch, InvocationView, JournalEntryView, OutsideGate, OutsideGates,

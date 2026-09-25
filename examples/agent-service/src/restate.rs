@@ -941,9 +941,6 @@ finish("done via Restate E2E");
             ingress_url,
             lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
             Arc::new(stores),
-            // Turns run in the foreground under a handler-scoped controller;
-            // an in-process queue pump would race the Restate handlers.
-            lash_restate::RestateQueuedWork::Disabled,
         ));
         // The worked example keeps its Sleep-only resolver as the deployment's
         // one answer, so no tool-child host is installed here — the same shape

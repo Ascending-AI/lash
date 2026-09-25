@@ -470,11 +470,6 @@ pub fn e2e_backend(
             storage,
             attachment_store,
         )),
-        // Restate turns must enter through an explicit handler-scoped effect
-        // controller. The harness drains durable ingress from its workflow
-        // handlers, so an ambient local queue pump would race those handlers
-        // and cannot legally execute their effects.
-        lash_restate::RestateQueuedWork::Disabled,
     ))
 }
 

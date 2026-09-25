@@ -1129,32 +1129,10 @@ pub(super) async fn restate_effect_host_cancellation_records_and_returns_the_dur
     }
 }
 
-pub(super) struct PostCommitFailingQueuedWorkRunHandle {
-    attempts: AtomicUsize,
-    recovered: tokio::sync::Notify,
-}
-
-#[async_trait::async_trait]
-impl lash_core::facade_support::QueuedWorkRunHandle for PostCommitFailingQueuedWorkRunHandle {
-    async fn run_queued_work(
-        &self,
-        _request: lash_core::facade_support::QueuedWorkRunRequest,
-    ) -> Result<(), lash_core::facade_support::QueuedWorkRunError> {
-        if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-            return Err(lash_core::facade_support::QueuedWorkRunError::transient(
-                PluginError::Session(
-                    "FIG-430 deterministic post-commit dispatch failure".to_string(),
-                ),
-            ));
-        }
-        self.recovered.notify_one();
-        Ok(())
-    }
-}
-
 /// FIG-430: durable acceptance is final once the pending-input row commits.
-/// Dispatch failure is operational telemetry, and the wake retries itself
-/// without waiting for another enqueue or unrelated host event.
+/// The drive the enqueue schedules is a separate, fire-and-forget ask: an
+/// engine that cannot be reached leaves the row pending for the reconcile
+/// sweep, and never turns the committed enqueue into an error.
 #[tokio::test]
 pub(super) async fn restate_enqueue_never_errors_after_commit() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1164,24 +1142,16 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
         .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
         .build()
         .into_handle();
-    let queued_work = Arc::new(PostCommitFailingQueuedWorkRunHandle {
-        attempts: AtomicUsize::new(0),
-        recovered: tokio::sync::Notify::new(),
-    });
-    let recovered = queued_work.recovered.notified();
-    // A Restate backend whose engine-backed queued driver is the failing
-    // run handle: the enqueue commits, then the driver's wake fails.
+    // A Restate backend whose ingress nothing listens on: the enqueue
+    // commits, then the drive's send fails.
     let backend = Arc::new(crate::RestateBackend::new(
-        "http://127.0.0.1:8080",
+        "http://127.0.0.1:9",
         crate::RestateAuthorityId::new("lash-restate-fig430").expect("valid authority"),
         Arc::new(
             lash_sqlite_store::SqliteStoreSet::open(dir.path().join("sessions"))
                 .await
                 .expect("open FIG-430 store set"),
         ),
-        crate::RestateQueuedWork::Engine(Arc::new(lash_core::NativeQueuedWork::new(
-            queued_work.clone(),
-        ))),
     ));
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(provider)
@@ -1208,9 +1178,6 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
         .id("fig-430-retry")
         .send()
         .await;
-    tokio::time::timeout(std::time::Duration::from_secs(1), recovered)
-        .await
-        .expect("the failed post-commit wake must retry on its own");
     let persisted = session
         .durable()
         .pending_turn_inputs()
@@ -1236,12 +1203,6 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
              caller_outcome={receipt:?}, persisted_rows={stored:?}"
         ),
     }
-    assert_eq!(
-        queued_work.attempts.load(Ordering::SeqCst),
-        2,
-        "the wake path retries exactly once after the injected failure"
-    );
-
     let retry_receipt = session
         .durable()
         .enqueue(lash_core::TurnInput::text("commit before dispatch"))

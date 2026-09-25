@@ -718,7 +718,6 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
                 .await
                 .expect("open the SQLite store set"),
         ),
-        lash_restate::RestateQueuedWork::Disabled,
     ));
     let durable_host: Arc<dyn lash::durability::EffectHost> = restate.effect_host();
     let scope = lash::runtime::AdmittedScope::turn("routing-session", "routing-turn");

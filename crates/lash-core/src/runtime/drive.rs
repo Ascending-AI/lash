@@ -21,7 +21,10 @@
 //! [`drive_root_scope`]: crate::engine::drive_root_scope
 
 mod admission;
+mod reconcile;
 mod root;
+
+pub use reconcile::{ReconcileReport, reconcile_drive_request, reconcile_session_work};
 
 use std::collections::BTreeSet;
 use std::sync::Arc;

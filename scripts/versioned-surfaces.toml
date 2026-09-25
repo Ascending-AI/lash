@@ -82,6 +82,33 @@ paths = ["crates/lash-restate/src/process/admission.rs"]
 symbols = ["ADMIT_STEP", "START_STEP", "AdmissionVerdict", "StartOutcome"]
 
 [[surface]]
+constant = "LASH_SESSION_DRIVE_VERSION"
+constant_path = "crates/lash-restate/src/session_driver.rs"
+description = "leading journaled commands of the Restate session driver: LashSession's admission steps and LashTurn calls, and LashTurn's seal (the input stamp of both handlers' requests)"
+manifest = "RestateSessionDrive"
+
+# ADR 0105 section 12 (FIG-3600 S5). Both handlers' requests carry the
+# generation of the commands their journals lead with, and each handler
+# refuses any other generation, terminally, before it journals anything. Any
+# change to the request shapes, the handlers' leading commands or their order,
+# or the keys they address bumps this constant. The kernel's recorded bodies
+# are guarded by EFFECT_JOURNAL_VERSION.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-restate/src/session_driver.rs"]
+must_cover = ["RestateSessionDriveRequest", "RestateTurnDriveRequest"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/session_driver.rs"]
+symbols = ["DRIVE_HANDLER", "unstamped_drive_version", "build_generation", "turn_workflow_key"]
+
+[[surface.guard]]
+kind = "rust_impls"
+paths = ["crates/lash-restate/src/session_driver.rs"]
+symbols = ["LashSession for LashSessionImpl", "LashTurn for LashTurnImpl"]
+
+[[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 description = "PostgreSQL tables, indexes, constraints, and persisted column shapes"

@@ -604,6 +604,9 @@ impl LiveConformanceHarness {
                     Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
                     Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessContinuationStore>,
                 ),
+                // The laws run their turns in the probe's handler; no core
+                // installs a session driver on this endpoint.
+                session_driver: crate::RestateSessionDriverSlot::new(),
             },
         )
         .bind(ScopeLivenessProbeImpl.serve())
@@ -784,7 +787,6 @@ impl LiveConformanceHarness {
                             .await
                             .expect("open the law's store set"),
                     ),
-                    crate::RestateQueuedWork::Disabled,
                 )) as Arc<dyn lash_core::Backend>
             })
         }
