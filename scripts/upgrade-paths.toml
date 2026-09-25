@@ -33,6 +33,12 @@ upgrade = "drain"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
+constant = "LASH_SESSION_DRIVE_VERSION"
+constant_path = "crates/lash-restate/src/session_driver.rs"
+upgrade = "drain"
+note = "Restate journal: LashSession and LashTurn replay only under the code that wrote them; drains by generation G"
+
+[[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 upgrade = "migrate"
