@@ -3,6 +3,12 @@
 //! at the step boundary. Captured before commit content moved onto the
 //! driver's recorded state (FIG-3672 P6); a difference is a durable-format
 //! change, not a new pin.
+//!
+//! Re-pinned once for a change of value and not of shape (FIG-3600): drive
+//! admission mints a turn's root from its durable input, so a direct turn's
+//! accepted input now carries its turn id in the existing optional
+//! `source_key` field. That field is the only difference in the committed
+//! bytes.
 
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;
@@ -64,7 +70,7 @@ async fn code_execution_turn_commits_the_pinned_bytes() {
     assert_commit_pins(
         "code execution",
         &commits,
-        &["2f329b527164c7af93e5672e7c85b36e0ca89576cef61fdc00a34585b75e30c8"],
+        &["cd26ce1d113bcce09246f5790cc30c5dbf2fd8564635ab25e1aa80e523c8e74c"],
     );
 }
 
@@ -87,7 +93,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["7bb755469db2ae18b534bc20a24e23cd5427c38fc39af254f3b014aaded3e1b6"],
+        &["7b8316537a044646f724b1f132d3d41f33a364618cebf67fbcedb998ad84c062"],
     );
 }
 
@@ -111,6 +117,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["61ed5bc1d2147635c5ddeef62195c4c8312889a8d44e3616a37a1899e698f81c"],
+        &["f48b65b61585dff1328d44d4ee76b9c17238599be6c93f2ee57bc210bcfc62fe"],
     );
 }
