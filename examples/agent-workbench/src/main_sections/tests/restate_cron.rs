@@ -54,6 +54,32 @@ pub(crate) fn live_restate_cron_provider(expr: String) -> ProviderHandle {
         .into_handle()
 }
 
+/// A schedule that fires twice a few seconds out, then not again for a day.
+/// The pair proves `run()` re-arms the chain while a queued turn is gated, and
+/// pinning both fires inside one wall-clock minute leaves no third armed tick
+/// that could observe the disabled registration before the queued turn's sync
+/// cancels it (FIG-3634).
+fn sync_cancel_probe_cron_expr() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_secs();
+    let next_minute = (now / 60 + 1) * 60;
+    let first = if next_minute - now >= 10 {
+        now + 6
+    } else {
+        next_minute + 4
+    };
+    let second = first + LIVE_RESTATE_CRON_SCHEDULE_INTERVAL.as_secs();
+    format!(
+        "{},{} {} {} * * *",
+        first % 60,
+        second % 60,
+        (first / 60) % 60,
+        (first / 3600) % 24
+    )
+}
+
 pub(crate) fn gated_live_restate_cron_provider() -> (
     ProviderHandle,
     mpsc::UnboundedReceiver<usize>,
@@ -79,11 +105,7 @@ pub(crate) fn gated_live_restate_cron_provider() -> (
                 Ok(if call == 0 {
                     text_response(&format!(
                         "<typescript>\n{}\n</typescript>",
-                        test_cron_trigger_source(&format!(
-                            "*/{} * * * * *",
-                            LIVE_RESTATE_CRON_SCHEDULE_INTERVAL.as_secs()
-                        ))
-                        .trim()
+                        test_cron_trigger_source(&sync_cancel_probe_cron_expr()).trim()
                     ))
                 } else {
                     text_response("<typescript>\nfinish(\"cron tick observed\");\n</typescript>")
