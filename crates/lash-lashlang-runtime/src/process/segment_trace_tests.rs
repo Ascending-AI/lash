@@ -41,7 +41,7 @@ fn traced_process() -> (LashlangProcessExecutionTrace, Arc<TraceLashlangGraphSto
             process_name: "main".to_string(),
             attempt: 1,
             incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
-            restate_invocation_id: None,
+            engine_execution_id: None,
         },
     );
     (trace, store)
@@ -236,7 +236,7 @@ fn process_trace_session_attribution_comes_only_from_a_session_originator() {
                 process_name: "main".to_string(),
                 attempt,
                 incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-                restate_invocation_id: None,
+                engine_execution_id: None,
             },
         )
         .identity()
@@ -288,7 +288,7 @@ fn interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generati
                 process_name: "main".to_string(),
                 attempt,
                 incarnation: lash_core::ProcessIncarnation::from_registration_sequence(3),
-                restate_invocation_id: None,
+                engine_execution_id: None,
             },
         )
     };
@@ -372,7 +372,7 @@ fn untraced_completed_resource_calls_retain_no_correlation_state() {
             process_name: "main".to_string(),
             attempt: 1,
             incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
-            restate_invocation_id: None,
+            engine_execution_id: None,
         },
     );
     assert!(trace.sink.is_none(), "the witness must run without tracing");

@@ -382,7 +382,7 @@ fn native_authority_retains_attempt_correlation_without_restate_identity() {
     .build()
     .into_runtime();
 
-    assert_eq!(context.restate_invocation_id(), None);
+    assert_eq!(context.engine_execution_id(), None);
     assert_eq!(context.admitted_process_attempt(), Some(3));
 }
 

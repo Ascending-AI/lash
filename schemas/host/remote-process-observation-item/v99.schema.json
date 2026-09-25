@@ -2222,6 +2222,12 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "engine_execution_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "entry_kind": {
           "type": "string"
         },
@@ -2241,12 +2247,6 @@
         },
         "module_ref": {
           "type": "string"
-        },
-        "restate_invocation_id": {
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "scope": {
           "$ref": "#/definitions/TraceRuntimeScope"
@@ -2510,7 +2510,7 @@
         },
         "schema_version": {
           "enum": [
-            34
+            35
           ],
           "format": "uint32",
           "minimum": 0.0,
@@ -4504,7 +4504,7 @@
         },
         "schema_version": {
           "enum": [
-            34
+            35
           ],
           "format": "uint32",
           "minimum": 0.0,

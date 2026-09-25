@@ -80,8 +80,8 @@ pub(super) fn language_execution_attributes(
     ));
     push_opt(
         attrs,
-        attr::LASH_LANGUAGE_EXECUTION_RESTATE_INVOCATION_ID,
-        &event.identity.restate_invocation_id,
+        attr::LASH_LANGUAGE_EXECUTION_ENGINE_EXECUTION_ID,
+        &event.identity.engine_execution_id,
     );
     match &event.identity.subject {
         crate::TraceRuntimeSubject::Effect { effect_id, .. } => {

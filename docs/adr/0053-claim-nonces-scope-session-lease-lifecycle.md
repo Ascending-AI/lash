@@ -111,7 +111,7 @@ replacing such an authority across a protocol change.
 - Same-owner `try_claim` always rotates the token and returns an acquisition,
   never `Busy`. Incarnation-reusing hosts therefore fence overlapping attempts
   at claim time; for example, Restate retries that reuse
-  `restate_process_execution` identity rotate each other's execution fence.
+  `engine_process_execution` identity rotate each other's execution fence.
   Default runtime owners use a per-runtime UUID and are unaffected.
 - Fresh-acquire and takeover retries cannot double-bump generation, and the
   public nonce type prevents stable host identity from silently defeating

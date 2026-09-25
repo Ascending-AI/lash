@@ -31,7 +31,7 @@ fn identity() -> LanguageIdentity {
         entry_kind: "main".to_string(),
         entry_ref: None,
         entry_name: "main".to_string(),
-        restate_invocation_id: None,
+        engine_execution_id: None,
         generation: None,
     }
 }

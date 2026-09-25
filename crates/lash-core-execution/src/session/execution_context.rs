@@ -1116,22 +1116,22 @@ impl<'run> RuntimeExecutionContext<'run> {
             .and_then(|exec| exec.event_context.as_ref())
     }
 
-    /// Restate invocation that owns the enclosing process execution, when this
-    /// context runs inside an attempt-bound Restate process.
-    pub fn restate_invocation_id(&self) -> Option<&str> {
+    /// Engine execution that owns the enclosing process execution, when this
+    /// context runs inside an attempt-bound engine process.
+    pub fn engine_execution_id(&self) -> Option<&str> {
         if let Some(execution) = self.process_execution.as_ref() {
             return execution
                 .event_context
                 .as_ref()?
                 .execution_write_authority
-                .restate_invocation_id(&execution.process_id);
+                .engine_execution_id(&execution.process_id);
         }
         let correlation = self
             .turn_context
             .runtime_correlation::<ProcessInvocationCorrelation>()?;
         correlation
             .authority
-            .restate_invocation_id(&correlation.process_id)
+            .engine_execution_id(&correlation.process_id)
     }
 
     pub(crate) fn is_run_local_process(&self, process_id: &ProcessId) -> bool {

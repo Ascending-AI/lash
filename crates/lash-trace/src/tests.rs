@@ -150,7 +150,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                     entry_kind: "p".to_string(),
                     entry_ref: None,
                     entry_name: "main".to_string(),
-                    restate_invocation_id: None,
+                    engine_execution_id: None,
                     generation: None,
                 },
                 payload,

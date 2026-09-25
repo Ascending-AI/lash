@@ -58,6 +58,8 @@ FIXTURE_FILES = [
 ]
 FIXTURE_DRIVE_FILE = "crates/lash-core/src/runtime/logical_turn.rs"
 FIXTURE_HIT_LINE = "    tokio::spawn(worker());"
+FIXTURE_ENGINE_ID_FILE = "crates/lash-core/src/runtime/turn_loop/engine_ids.rs"
+FIXTURE_ENGINE_ID_LINE = "    let _ = context.restate_invocation_id();"
 
 
 class DriveDeterminismRatchetTests(unittest.TestCase):
@@ -154,6 +156,24 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             result = self.run_check(root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rule 5 failed", result.stderr)
+
+    def test_engine_named_identifier_in_a_kernel_crate_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn drive() {", "}"], [])
+            (root / FIXTURE_ENGINE_ID_FILE).write_text(FIXTURE_ENGINE_ID_LINE + "\n")
+            result = self.run_check(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rule 4 failed", result.stderr)
+
+    def test_engine_named_identifier_in_the_engine_crate_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn drive() {", "}"], [])
+            hit = root / "crates/lash-restate/src/controller/engine_ids.rs"
+            hit.write_text(FIXTURE_ENGINE_ID_LINE + "\n")
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_removed_hit_with_stale_entry_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

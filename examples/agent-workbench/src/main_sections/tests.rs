@@ -209,7 +209,7 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
         entry_kind: graph.entry_kind.clone(),
         entry_ref: graph.entry_ref.clone(),
         entry_name: graph.entry_name.clone(),
-        restate_invocation_id: None,
+        engine_execution_id: None,
         generation: None,
     };
     let context = TraceContext {

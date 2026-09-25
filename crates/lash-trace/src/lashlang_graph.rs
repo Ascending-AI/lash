@@ -364,7 +364,7 @@ fn canonical_language_identity(
             entry_kind: graph.entry_kind.clone(),
             entry_ref: graph.entry_ref.clone(),
             entry_name: graph.entry_name.clone(),
-            restate_invocation_id: None,
+            engine_execution_id: None,
             generation: graph
                 .history
                 .first()
@@ -385,10 +385,7 @@ fn canonical_identity_fields(left: LanguageIdentity, right: LanguageIdentity) ->
         entry_kind: left.entry_kind.min(right.entry_kind),
         entry_ref: canonical_value(left.entry_ref, right.entry_ref),
         entry_name: left.entry_name.min(right.entry_name),
-        restate_invocation_id: canonical_value(
-            left.restate_invocation_id,
-            right.restate_invocation_id,
-        ),
+        engine_execution_id: canonical_value(left.engine_execution_id, right.engine_execution_id),
         generation: canonical_value(left.generation, right.generation),
     }
 }

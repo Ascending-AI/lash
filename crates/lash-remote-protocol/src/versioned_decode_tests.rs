@@ -133,7 +133,7 @@ fn process_node_record() -> lash_trace::TraceRecord {
                     entry_kind: "main".to_string(),
                     entry_ref: None,
                     entry_name: "main".to_string(),
-                    restate_invocation_id: None,
+                    engine_execution_id: None,
                     generation: Some(lash_trace::TraceLanguageExecutionGeneration::new(1, 1)),
                 },
                 payload: lash_trace::TraceLanguageExecutionPayload::NodeStarted {

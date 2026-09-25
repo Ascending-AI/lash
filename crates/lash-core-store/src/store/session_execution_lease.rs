@@ -251,20 +251,22 @@ impl LeaseOwnerIdentity {
         }
     }
 
-    /// Stable owner identity for one Restate process execution invocation.
+    /// Stable owner identity for one engine process execution.
     ///
     /// Construction and recognition share this single representation so a
     /// formatting drift cannot silently turn a continuation into a fresh
-    /// execution.
-    pub fn restate_process_execution(
+    /// execution. The `restate:` owner-id spelling is durable: it is already
+    /// written into lease rows and process start records, so it stays even
+    /// though the constructor name no longer names an engine.
+    pub fn engine_process_execution(
         process_id: &ProcessId,
         execution_id: impl Into<String>,
     ) -> LeaseOwnerIdentity {
         Self::opaque(format!("restate:{process_id}"), execution_id)
     }
 
-    pub fn restate_process_execution_id(&self, process_id: &ProcessId) -> Option<&str> {
-        let expected = Self::restate_process_execution(process_id, &self.incarnation_id);
+    pub fn engine_process_execution_id(&self, process_id: &ProcessId) -> Option<&str> {
+        let expected = Self::engine_process_execution(process_id, &self.incarnation_id);
         self.same_incarnation(&expected)
             .then_some(self.incarnation_id.as_str())
     }

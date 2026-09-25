@@ -1040,7 +1040,7 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
     .expect("foreground trace");
 
     assert_eq!(
-        trace.identity().restate_invocation_id.as_deref(),
+        trace.identity().engine_execution_id.as_deref(),
         Some("invocation-rlm-cell")
     );
     assert_eq!(

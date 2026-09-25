@@ -731,7 +731,7 @@ pub(super) async fn root_segment_admits_only_rows_that_never_started() {
         .expect("the start step recorded first_started");
     assert!(
         root.owner
-            .restate_process_execution_id(&fresh_id)
+            .engine_process_execution_id(&fresh_id)
             .is_some_and(|nonce| nonce != fresh_id.as_str()),
         "segment 0's execution is its journaled nonce, not the key-derived invocation id: {root:?}"
     );

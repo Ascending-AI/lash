@@ -241,6 +241,30 @@ if [[ -s "$tmp_dir/rule4b.hits" ]]; then
   failed=1
 fi
 
+# The kernel names no engine (ADR 0104 §2): the execution identifiers that
+# named Restate moved to engine-neutral names under FIG-3670. Only the engine
+# crate, its test crate, and deployments that are explicitly Restate may still
+# spell the retired identifiers.
+engine_id_forbidden='(^|[^[:alnum:]_])(restate_invocation_id|restate_process_execution)([^[:alnum:]_]|$)'
+capture_search "engine execution identifiers" "$engine_id_forbidden" "$tmp_dir/rule4c.raw" "${rule4_roots[@]}"
+: >"$tmp_dir/rule4c.hits"
+while IFS=: read -r file line source; do
+  [[ -n "$file" ]] || continue
+  case "$file" in
+    crates/lash-restate/* | crates/lash-restate-test/* | \
+      examples/agent-service/* | examples/agent-workbench/* | \
+      runbooks/restate-postgres-workers/*)
+      continue
+      ;;
+  esac
+  printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$tmp_dir/rule4c.hits"
+done <"$tmp_dir/rule4c.raw"
+if [[ -s "$tmp_dir/rule4c.hits" ]]; then
+  cat "$tmp_dir/rule4c.hits" >&2
+  echo "substrate boundary rule 4 failed: an engine-named execution identifier was found outside the engine crates" >&2
+  failed=1
+fi
+
 # Rule 5 — drive determinism ratchet.
 #
 # The turn driver is workflow code: on replay it must re-issue exactly the
