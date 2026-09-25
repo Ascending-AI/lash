@@ -1180,13 +1180,8 @@ class RestateSuiteSelectionTests(unittest.TestCase):
         self.assertEqual("true", plan["fail_open"])
         self.assertEqual("true", plan["restate_suites"])
 
-    def test_the_pr_legs_run_only_on_a_selected_trusted_pull_request(self) -> None:
+    def test_the_e2e_and_workers_jobs_are_dispatch_only(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-        term = (
-            "github.event_name == 'pull_request'"
-            " && needs.plan.outputs.bazel_trusted == 'true'"
-            " && needs.plan.outputs.restate_suites == 'true'"
-        )
         for job in (
             "functional-e2e",
             "functional-e2e-process-operations",
@@ -1196,15 +1191,17 @@ class RestateSuiteSelectionTests(unittest.TestCase):
         ):
             with self.subTest(job=job):
                 condition = " ".join(jobs[job]["if"].split())
-                self.assertIn(term, condition)
-                # The merge group keeps the board it had.
+                self.assertIn("github.event_name == 'workflow_dispatch'", condition)
+                # The fast board runs no E2E or workers leg at all; the merge
+                # group never had them.
+                self.assertNotIn("pull_request", condition)
                 self.assertNotIn("merge_group", condition)
         self.assertEqual(
             "${{ steps.classify.outputs.restate_suites }}",
             jobs["plan"]["outputs"]["restate_suites"],
         )
 
-    def test_only_the_restate_legs_run_on_a_pull_request(self) -> None:
+    def test_every_leg_still_runs_behind_the_dispatch_gate(self) -> None:
         job = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
             "functional-e2e"
         ]
@@ -1213,14 +1210,15 @@ class RestateSuiteSelectionTests(unittest.TestCase):
             {"agent-service", "agent-workbench", "effect-group-conformance"},
             {leg["name"] for leg in legs if leg["restate"]},
         )
-        # A leg the selection leaves off runs only its explanation step.
+        # Every step stays behind the leg selector: a leg that does not run
+        # checks out nothing.
         for step in job["steps"]:
             self.assertIn("RUN_FUNCTIONAL_E2E", str(step.get("if", "")))
 
-    def test_a_selected_pull_request_runs_the_restate_board(self) -> None:
+    def test_a_selected_pull_request_still_defers_the_board(self) -> None:
         needs = apply_event_deferrals(successful_needs(), "pull_request")
         for job in ci_plan.RESTATE_SUITE_JOBS | ci_plan.WORKERS_E2E_JOBS:
-            self.assertEqual("success", needs[job]["result"])
+            self.assertEqual("skipped", needs[job]["result"])
         self.assertEqual(
             [],
             ci_plan.evaluate_conclusion(
@@ -1228,7 +1226,7 @@ class RestateSuiteSelectionTests(unittest.TestCase):
             ),
         )
         for job in sorted(ci_plan.RESTATE_SUITE_JOBS | ci_plan.WORKERS_E2E_JOBS):
-            for result in ("skipped", "failure", "cancelled"):
+            for result in ("success", "failure", "cancelled"):
                 with self.subTest(job=job, result=result):
                     trial = apply_event_deferrals(successful_needs(), "pull_request")
                     trial[job]["result"] = result
@@ -1238,9 +1236,13 @@ class RestateSuiteSelectionTests(unittest.TestCase):
                     self.assertTrue(any(job in p for p in problems), problems)
 
     def test_other_events_keep_the_board_deferred(self) -> None:
-        # An untrusted pull request cannot stage the suite binaries from the
-        # shared cache, and the merge group runs the same board it had.
-        for event, trusted in (("pull_request", False), ("merge_group", True)):
+        # No pull request — trusted or not — runs a live suite, and the
+        # merge group runs the same board it had.
+        for event, trusted in (
+            ("pull_request", True),
+            ("pull_request", False),
+            ("merge_group", True),
+        ):
             with self.subTest(event=event):
                 needs = apply_event_deferrals(
                     successful_needs(), event, trusted=trusted
@@ -1249,11 +1251,18 @@ class RestateSuiteSelectionTests(unittest.TestCase):
                     self.assertEqual("skipped", needs[job]["result"])
                 for job in ci_plan.WORKERS_E2E_JOBS:
                     needs[job]["result"] = "skipped"
+                needs["postgres-store"]["result"] = (
+                    "success" if event == "merge_group" else "skipped"
+                )
                 needs["workspace-tests"]["result"] = "success" if not trusted else "skipped"
                 needs["check"]["result"] = "success" if not trusted else "skipped"
-                for job in ci_plan.BAZEL_TEST_JOBS | {ci_plan.FEATURE_LANES_JOB}:
+                for job in ci_plan.BAZEL_TEST_JOBS:
+                    if event == "pull_request":
+                        needs["bazel-tests-tail"]["result"] = "skipped"
                     if not trusted:
                         needs[job]["result"] = "skipped"
+                if not trusted:
+                    needs[ci_plan.FEATURE_LANES_JOB]["result"] = "skipped"
                 self.assertEqual(
                     [],
                     ci_plan.evaluate_conclusion(
@@ -1302,11 +1311,15 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
         needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
     if event == "pull_request":
         needs["bazel-tests-tail"]["result"] = "skipped"
-        # A trusted pull request whose plan selects `restate_suites` runs the
-        # live Restate legs rather than deferring them.
-        if trusted and needs["plan"]["outputs"].get("restate_suites") == "true":
-            for job in ci_plan.RESTATE_SUITE_JOBS:
-                needs[job]["result"] = "success"
+        # The fast board runs no live suite: the workers jobs are
+        # dispatch-only and the store suite is merge-group work.
+        for job in ci_plan.WORKERS_E2E_JOBS:
+            needs[job]["result"] = "skipped"
+        needs["postgres-store"]["result"] = "skipped"
+        # The feature lanes run on a pull request only when the diff
+        # touches feature-gated code.
+        if needs["plan"]["outputs"].get("feature_lanes") != "true":
+            needs[ci_plan.FEATURE_LANES_JOB]["result"] = "skipped"
     return needs
 
 
@@ -1460,11 +1473,9 @@ class ProducerConclusionTests(unittest.TestCase):
     def event_needs(self, event, enabled=True):
         needs = successful_needs()
         if not enabled:
-            # `enabled` models the event's opt-ins, so an unlabeled pull
-            # request is also one whose diff did not select the suites.
             needs["plan"]["outputs"]["restate_suites"] = "false"
         apply_event_deferrals(needs, event)
-        if not enabled:
+        if event in ci_plan.DEFERRED_EVENTS:
             for job in ci_plan.WORKERS_E2E_JOBS:
                 needs[job]["result"] = "skipped"
         self.assertEqual([], self.evaluate(needs, event, enabled))
@@ -1489,14 +1500,19 @@ class ProducerConclusionTests(unittest.TestCase):
     def test_dispatch_main_producer_skipped_rejected(self):
         self.assert_producer_rejected("workflow_dispatch", "skipped")
 
-    def test_labeled_pr_producer_failure_rejected(self):
+    def test_pr_producer_failure_rejected(self):
         self.assert_producer_rejected("pull_request", "failure")
 
-    def test_labeled_pr_producer_cancelled_rejected(self):
+    def test_pr_producer_cancelled_rejected(self):
         self.assert_producer_rejected("pull_request", "cancelled")
 
-    def test_labeled_pr_producer_skipped_rejected(self):
-        self.assert_producer_rejected("pull_request", "skipped")
+    def test_pr_producer_skipped_accepted(self):
+        needs = self.event_needs("pull_request")
+        self.assertEqual("skipped", needs["worker-artifacts"]["result"])
+        self.assertEqual([], self.evaluate(needs, "pull_request"))
+
+    def test_pr_producer_success_rejected(self):
+        self.assert_producer_rejected("pull_request", "success")
 
     def test_skipped_consumer_cascade_rejected(self):
         for event in ("workflow_dispatch", "pull_request"):
@@ -1507,7 +1523,11 @@ class ProducerConclusionTests(unittest.TestCase):
             for consumer in consumers:
                 with self.subTest(event=event, consumer=consumer):
                     needs = self.event_needs(event)
-                    needs[consumer]["result"] = "skipped"
+                    # A consumer run is the violation on the fast board;
+                    # skipped is the answer it must give there.
+                    needs[consumer]["result"] = (
+                        "skipped" if event == "workflow_dispatch" else "success"
+                    )
                     self.assertTrue(any(consumer in p for p in self.evaluate(needs, event)))
 
     def test_process_operations_consumer_failure_cancelled_and_skipped_rejected(self):
@@ -1527,11 +1547,6 @@ class ProducerConclusionTests(unittest.TestCase):
             problems = self.evaluate(needs, event)
             for job in ("worker-artifacts", "functional-e2e-process-operations"):
                 self.assertTrue(any(job in p for p in problems))
-
-    def test_unlabeled_pr_worker_producer_skipped_accepted(self):
-        needs = self.event_needs("pull_request", False)
-        self.assertEqual("skipped", needs["worker-artifacts"]["result"])
-        self.assertEqual([], self.evaluate(needs, "pull_request", False))
 
     def test_merge_group_worker_producer_and_segments_skipped_accepted(self):
         needs = self.event_needs("merge_group", False)
@@ -1732,8 +1747,16 @@ class PostgresMatrixTests(unittest.TestCase):
                 self.assertIn(oracle, cargo)
 
     def test_postgres_conclusion_fails_closed_for_every_supported_event(self) -> None:
-        for event in ("pull_request", "merge_group", "workflow_dispatch"):
-            for result in ("skipped", "failure", "cancelled"):
+        # A pull request runs no store suite: skipped is its only valid
+        # result. The merge group and the dispatch keep the fail-closed
+        # matrix, where skipped answers a selection that required the run.
+        invalid = {
+            "pull_request": ("success", "failure", "cancelled"),
+            "merge_group": ("skipped", "failure", "cancelled"),
+            "workflow_dispatch": ("skipped", "failure", "cancelled"),
+        }
+        for event, results in invalid.items():
+            for result in results:
                 with self.subTest(event=event, result=result):
                     needs = successful_needs()
                     apply_event_deferrals(needs, event)
@@ -1748,6 +1771,15 @@ class PostgresMatrixTests(unittest.TestCase):
                 del needs["postgres-store"]
                 problems = ci_plan.evaluate_conclusion(needs, event_name=event)
                 self.assertTrue(any("postgres-store" in problem for problem in problems))
+            with self.subTest(event=event, result="expected"):
+                needs = successful_needs()
+                apply_event_deferrals(needs, event)
+                needs["postgres-store"]["result"] = (
+                    "skipped" if event == "pull_request" else "success"
+                )
+                self.assertEqual(
+                    [], ci_plan.evaluate_conclusion(needs, event_name=event)
+                )
 
 
 class FuzzSmokeTests(unittest.TestCase):
@@ -2244,13 +2276,20 @@ class FeatureLanesTests(unittest.TestCase):
     """Every trusted event proves that every feature variant compiles.
 
     #1979 merged a `lash-remote-protocol` variant that did not compile while
-    `feature-lanes` ran on workflow_dispatch alone (FIG-3572). The condition
-    is spelled out by hand rather than read from the plan module.
+    `feature-lanes` ran on workflow_dispatch alone (FIG-3572). The fast
+    pull-request board keeps the job only for diffs that touch feature-gated
+    code -- lane membership covers nearly every package, so a lane compile
+    proves nothing an ungated diff can move. The condition is spelled out by
+    hand rather than read from the plan module.
     """
 
-    def board(self, event: str, trusted: bool = True, rust: bool = True) -> dict:
-        needs = apply_event_deferrals(successful_needs(), event, trusted=trusted)
+    def board(
+        self, event: str, trusted: bool = True, rust: bool = True, gated: bool = True
+    ) -> dict:
+        needs = successful_needs()
         needs["plan"]["outputs"]["rust"] = str(rust).lower()
+        needs["plan"]["outputs"]["feature_lanes"] = str(gated).lower()
+        apply_event_deferrals(needs, event, trusted=trusted)
         if not trusted:
             for job in ci_plan.BAZEL_TEST_JOBS:
                 needs[job]["result"] = "skipped"
@@ -2263,15 +2302,20 @@ class FeatureLanesTests(unittest.TestCase):
             for job in ci_plan.BAZEL_TEST_JOBS:
                 needs[job]["result"] = "skipped"
         needs[ci_plan.FEATURE_LANES_JOB]["result"] = (
-            "success" if trusted and rust else "skipped"
+            "success"
+            if trusted and rust and (event != "pull_request" or gated)
+            else "skipped"
         )
         return needs
 
-    def test_the_job_runs_on_every_trusted_rust_event(self) -> None:
+    def test_the_job_runs_on_trusted_events_and_gated_pull_requests(self) -> None:
         job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["feature-lanes"]
         self.assertEqual(
-            "needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'",
-            job["if"],
+            "needs.plan.outputs.bazel_trusted == 'true'"
+            " && needs.plan.outputs.rust == 'true'"
+            " && (github.event_name != 'pull_request'"
+            " || needs.plan.outputs.feature_lanes == 'true')",
+            " ".join(job["if"].split()),
         )
         self.assertNotIn("feature-lanes", ci_plan.DISPATCH_ONLY_JOBS)
         steps = [step.get("name") for step in job["steps"]]
@@ -2289,6 +2333,23 @@ class FeatureLanesTests(unittest.TestCase):
                         " expected success",
                         ci_plan.evaluate_conclusion(needs, event),
                     )
+
+    def test_an_ungated_pull_request_skips_the_lanes(self) -> None:
+        needs = self.board("pull_request", gated=False)
+        self.assertEqual("skipped", needs["feature-lanes"]["result"])
+        self.assertEqual(
+            [], ci_plan.evaluate_conclusion(needs, "pull_request")
+        )
+        for result in ("success", "failure", "cancelled"):
+            with self.subTest(result=result):
+                trial = self.board("pull_request", gated=False)
+                trial["feature-lanes"]["result"] = result
+                self.assertTrue(
+                    any(
+                        "feature-lanes" in problem
+                        for problem in ci_plan.evaluate_conclusion(trial, "pull_request")
+                    )
+                )
 
     def test_an_untrusted_or_non_rust_event_requires_a_skip(self) -> None:
         for trusted, rust in ((False, True), (True, False)):
@@ -2404,14 +2465,23 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
         needs["repo-gates"]["result"] = "success"
         self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
 
-    def test_stores_diff_requires_postgres_store(self) -> None:
+    def test_stores_diff_defers_postgres_store_to_the_queue(self) -> None:
+        # The fast board covers a store diff through its affected Bazel
+        # labels: postgres-store is merge-group and dispatch work, and a run
+        # on a pull request is a contract violation, not spare coverage.
         needs = self.board(stores="true")
-        # With stores on, a skipped postgres-store is rejected.
         self.assertEqual("skipped", needs["postgres-store"]["result"])
+        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
+        needs["postgres-store"]["result"] = "success"
         problems = ci_plan.evaluate_conclusion(needs, "pull_request")
         self.assertTrue(any("postgres-store" in problem for problem in problems))
+        # The merge group keeps requiring the selected suite.
+        needs = self.board("merge_group", stores="true")
+        needs["postgres-store"]["result"] = "skipped"
+        problems = ci_plan.evaluate_conclusion(needs, "merge_group")
+        self.assertTrue(any("postgres-store" in problem for problem in problems))
         needs["postgres-store"]["result"] = "success"
-        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
+        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "merge_group"))
 
 
 if __name__ == "__main__":

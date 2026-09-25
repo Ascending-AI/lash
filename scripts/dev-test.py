@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import fcntl
 import hashlib
 import json
@@ -94,28 +93,6 @@ def script_gates() -> dict[str, list[list[str]]]:
     return commands
 
 
-def dev_inventory() -> tuple[set[str], dict[str, list[str]]]:
-    wanted = {"WORKSPACE_DEV_TEST_TARGETS", "WORKSPACE_TEST_BATCHES"}
-    values = {}
-    tree = ast.parse((ROOT / "tools/bazel/workspace_targets.bzl").read_text())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
-            name = node.targets[0].id
-            if name in wanted:
-                values[name] = ast.literal_eval(node.value)
-    return set(values["WORKSPACE_DEV_TEST_TARGETS"]), values["WORKSPACE_TEST_BATCHES"]
-
-
-def batch_labels(members: set[str], batches: dict[str, list[str]]) -> list[str]:
-    labels = set(members)
-    for batch, children in batches.items():
-        # Partial reverse-dependency selections must not widen to other members.
-        if set(children) <= members:
-            labels.difference_update(children)
-            labels.add(batch)
-    return sorted(labels)
-
-
 def select(paths: list[str], gates: dict[str, list[list[str]]]) -> tuple[list[str], bool, bool, list[list[str]]]:
     # `scripts/ci_plan.py` is the repository's one change classifier; this is
     # its dev-test projection plus the commands each part of it runs.
@@ -129,7 +106,7 @@ def plan(base: str, dependents: bool) -> dict:
     identity = input_id(base)
     paths = changed_files(base)
     packages, broad, facade, commands = select(paths, script_gates())
-    allowed, batches = dev_inventory()
+    allowed, batches = ci_plan.dev_test_inventory(ROOT)
     members = {label for label in allowed if label.split(":")[0] in packages}
     if dependents and packages and not broad:
         # Restrict the query universe to first-party packages. `//...` also
@@ -149,18 +126,14 @@ def plan(base: str, dependents: bool) -> dict:
     # change to a deferred test's inputs (#2109's corpus expectations file)
     # otherwise lands untested. This holds on a broad plan too -- a package
     # manifest widens the selection but is still a deferred test's input.
+    # The label assembly is ci_plan.affected_bazel_labels: the same selection
+    # the pull-request leg of `bazel-tests` runs in CI.
     tail = ci_plan.pr_tail_labels(paths, ROOT)
-    members |= set(tail)
-    labels = ["//:dev_tests", *tail] if broad else batch_labels(members, batches)
-    if facade:
-        labels.append("//crates/lash:ui_fixtures")
-    uncovered = [p for p in packages if not any(label.split(":")[0] == p for label in members)]
-    if uncovered and not broad:
-        # Service-only and compile-only packages still need compilation proof,
-        # including mixed diffs that also select tests in another package.
-        commands.append(["kiln", "build", *(p + ":all" for p in uncovered), "//:schema_checks"])
+    scope = ci_plan.DevTestScope(tuple(sorted(packages)), broad, facade, False, ())
+    labels, builds = ci_plan.affected_bazel_labels(scope, members, tail, batches)
+    if builds:
+        commands.append(["kiln", "build", *builds])
     if labels:
-        labels.append("//:schema_checks")
         commands.append(["kiln", "test", *labels])
     result = {
         "base": base,
