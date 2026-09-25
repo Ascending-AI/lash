@@ -476,51 +476,193 @@ async fn a_redescribed_tool_never_parks() -> Result<()> {
     Ok(())
 }
 
-/// T11 end to end: the iteration's journaled sync carries no cell journal
-/// grammar stamp, as one written before the stamp existed does, or names
-/// grammar 2, as one written before cells journaled their binding set
-/// (FIG-3587) does. The redrive reaches the cutover refusal through the
-/// replayed sync and parks, before the cell runs.
+/// FIG-3571 end to end: a turn admitted under another executable generation
+/// than this build runs — one a previous build recorded, or none, as an
+/// admission a pre-cutover build journaled records — is refused at its
+/// admission on every redrive, typed, before any model, tool or provider
+/// effect, and parks carrying both generations so drain status can count it
+/// per generation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_cell_whose_sync_predates_the_grammar_stamp_parks_its_turn() -> Result<()> {
-    for (session_id, probe_id, stamp) in [
-        ("stamp-real", "stamp-prob", ""),
-        ("stamp-old2", "stamp-prb2", ",\"cell_replay_grammar\":2"),
-        // Grammar 3 predates the journaled cancel checkpoints (FIG-3672 P9).
-        ("stamp-old3", "stamp-prb3", ",\"cell_replay_grammar\":3"),
+async fn a_turn_admitted_under_another_generation_parks_before_any_effect() -> Result<()> {
+    let current = lash_lashlang_runtime::lashlang_cell_generation();
+    let retired = lash_core::ExecutableGeneration::new("blake3:retired");
+    for (session_id, probe_id, recorded) in [
+        ("gen-retired", "gen-probe01", Some(retired)),
+        ("gen-unstamp", "gen-probe02", None),
     ] {
         let backend = Backend::open().await;
         let attempt_key = backend.first_attempt_key(probe_id, session_id).await;
         backend.abort_after_dispatch(session_id, &attempt_key).await;
         let dispatched = backend.executions.load(Ordering::SeqCst);
+        let asked = backend.provider_calls.load(Ordering::SeqCst);
 
         let restamped = backend
             .journal()
             .execute(
                 "UPDATE runtime_effect_replay
                     SET outcome_json = replace(outcome_json, ?2, ?3)
-                  WHERE replay_key LIKE ?1 AND outcome_json LIKE '%cell_replay_grammar%'",
+                  WHERE replay_key LIKE ?1 AND outcome_json LIKE ?4",
                 [
                     format!("%{session_id}%"),
+                    format!("\"generation\":\"{current}\""),
                     format!(
-                        ",\"cell_replay_grammar\":{}",
-                        lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION
+                        "\"generation\":{}",
+                        serde_json::to_string(&recorded).expect("encode the recorded generation")
                     ),
-                    stamp.to_string(),
+                    format!("%\"generation\":\"{current}\"%"),
                 ],
             )
-            .expect("restamp the sync's grammar");
-        assert!(restamped >= 1, "the turn journaled a stamped sync");
+            .expect("restamp the admission's generation");
+        assert_eq!(restamped, 1, "the turn journaled one stamped admission");
 
         let core = backend.core("probe");
         for _ in 0..2 {
             let code = redrive(&core, session_id).await;
-            assert_eq!(
-                code,
-                lash_core::RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
-            );
+            assert_eq!(code, lash_core::RuntimeErrorCode::RetiredGeneration);
             assert_parked(&backend, &core, session_id, code).await;
-            assert_eq!(backend.executions.load(Ordering::SeqCst), dispatched);
+            let park = backend.park_of(session_id).await.expect("parked");
+            assert_eq!(
+                park.reason,
+                lash_core::store::ParkReason::retired_generation(
+                    lash_core::ExecutableGenerationRefusal {
+                        found: recorded.clone(),
+                        current: Some(current.clone()),
+                    }
+                ),
+                "the park carries both generations"
+            );
+            assert_eq!(
+                backend.executions.load(Ordering::SeqCst),
+                dispatched,
+                "no tool ran"
+            );
+            assert_eq!(
+                backend.provider_calls.load(Ordering::SeqCst),
+                asked,
+                "no model was asked"
+            );
+        }
+    }
+    Ok(())
+}
+
+const DRAIN: &str = "generation-drain";
+
+impl Backend {
+    /// Runs one queued input on `session_id` through the drain `DRAIN`.
+    async fn drain(
+        &self,
+        session_id: &str,
+    ) -> Result<crate::turn::QueuedTurnDrain<crate::TurnOutput>> {
+        let core = self.core("probe");
+        let session = core.session(session_id).open().await?;
+        if session.durable().pending_queued_run().await?.is_none() {
+            session
+                .durable()
+                .enqueue(TurnInput::text("call the probe"))
+                .id(format!("{session_id}-input"))
+                .send()
+                .await?;
+        }
+        session.queued_turn().drain_id(DRAIN).run().await
+    }
+
+    /// Rewrites the generation the pending queued run of `session_id` was
+    /// admitted under, as a run a previous build admitted records it.
+    fn restamp_queued_run(
+        &self,
+        session_id: &str,
+        current: &lash_core::ExecutableGeneration,
+        recorded: Option<&lash_core::ExecutableGeneration>,
+    ) {
+        let core = rusqlite::Connection::open(
+            self.directory
+                .path()
+                .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+        )
+        .expect("open the durable core");
+        let restamped = core
+            .execute(
+                "UPDATE queued_runs SET admission_json = replace(admission_json, ?2, ?3)
+                  WHERE session_id = ?1 AND status = 'pending'",
+                [
+                    session_id.to_string(),
+                    format!("\"generation\":\"{current}\""),
+                    format!(
+                        "\"generation\":{}",
+                        serde_json::to_string(&recorded).expect("encode the recorded generation")
+                    ),
+                ],
+            )
+            .expect("restamp the queued run's generation");
+        assert_eq!(restamped, 1, "the drain left one pending run");
+    }
+}
+
+/// FIG-3571 for a queue drain: a pending queued run admitted under another
+/// executable generation resumes only to be refused, typed, before the run
+/// drives anything, and its turn parks carrying both generations.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_queued_run_admitted_under_another_generation_parks_before_any_effect() -> Result<()> {
+    let current = lash_lashlang_runtime::lashlang_cell_generation();
+    let retired = lash_core::ExecutableGeneration::new("blake3:retired");
+    for (session_id, probe_id, recorded) in [
+        ("qgen-retired", "qgen-probe01", Some(retired)),
+        ("qgen-unstamp", "qgen-probe02", None),
+    ] {
+        let backend = Backend::open().await;
+        backend
+            .drain(probe_id)
+            .await
+            .expect("the probe drain completes");
+        let attempt_key = backend
+            .keys_of(probe_id)
+            .into_iter()
+            .find(|key| key.ends_with(":lk2:0000000000:attempt:1"))
+            .expect("the probe's cell journaled its tool attempt")
+            .replace(probe_id, session_id);
+        let faults = backend.backend.effect_host().effect_journal_faults();
+        faults.fail_next(EffectJournalFaultPoint::Finalize, &attempt_key);
+        let aborted = backend.drain(session_id).await;
+        assert!(
+            faults.fired(),
+            "the armed finalize fault fired: {aborted:?}"
+        );
+        let dispatched = backend.executions.load(Ordering::SeqCst);
+        let asked = backend.provider_calls.load(Ordering::SeqCst);
+        backend.restamp_queued_run(session_id, &current, recorded.as_ref());
+
+        for _ in 0..2 {
+            let refused = backend.drain(session_id).await;
+            let EmbedError::Runtime(error) = refused.expect_err("the resumed run is refused")
+            else {
+                panic!("the refusal is the typed runtime error");
+            };
+            assert_eq!(error.code, lash_core::RuntimeErrorCode::RetiredGeneration);
+            let park = backend
+                .park_of(session_id)
+                .await
+                .expect("the run's turn parked");
+            assert_eq!(
+                park.reason,
+                lash_core::store::ParkReason::retired_generation(
+                    lash_core::ExecutableGenerationRefusal {
+                        found: recorded.clone(),
+                        current: Some(current.clone()),
+                    }
+                ),
+                "the park carries both generations"
+            );
+            assert_eq!(
+                backend.executions.load(Ordering::SeqCst),
+                dispatched,
+                "no tool ran"
+            );
+            assert_eq!(
+                backend.provider_calls.load(Ordering::SeqCst),
+                asked,
+                "no model was asked"
+            );
         }
     }
     Ok(())

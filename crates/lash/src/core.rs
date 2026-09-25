@@ -153,6 +153,7 @@ impl LashCore {
             turns: lash_core::store::ParkSummary {
                 by_reason: turns.parked_by_reason.clone(),
                 oldest_since_ms: turns.oldest_parked_since_ms,
+                retired_by_executable_generation: turns.retired_by_executable_generation.clone(),
             },
             processes,
         };
@@ -164,6 +165,7 @@ impl LashCore {
             parked_turns: turns.parked_turns,
             parked_processes: parked.processes.total(),
             oldest_parked_since_ms: parked.oldest_since_ms(),
+            retired_by_executable_generation: parked.retired_by_executable_generation(),
             checked_at,
         })
     }

@@ -367,7 +367,6 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<(), RuntimeError> {
         let crate::runtime::effect::ServedExecutionEnvironmentSync {
             result,
-            cell_replay_grammar,
             tool_surface,
         } = match self
             .invoke_turn_execution_environment_sync_effect(machine, id, event_tx)
@@ -399,14 +398,7 @@ impl RuntimeTurnDriver<'_> {
                     )
                 })?;
         }
-        self.handle_machine_response(
-            machine,
-            Response::ExecutionEnvironmentSynced {
-                id,
-                result,
-                cell_replay_grammar,
-            },
-        )?;
+        self.handle_machine_response(machine, Response::ExecutionEnvironmentSynced { id, result })?;
         Ok(())
     }
 

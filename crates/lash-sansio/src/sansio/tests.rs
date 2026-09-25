@@ -170,7 +170,7 @@ fn turn_checkpoint_stamps_current_generation() {
     );
     let checkpoint = machine.checkpoint();
     assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 10);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 11);
 }
 
 #[test]
@@ -1860,7 +1860,6 @@ fn initial_execution_environment_sync_installs_the_synced_environment() {
             tool_specs: Arc::new(Vec::new()),
             projector_turn_inputs: None,
         })),
-        cell_replay_grammar: None,
     });
 
     let effects = drain_effects(&mut machine);
@@ -1882,7 +1881,6 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: initial_sync_id,
         result: Ok(None),
-        cell_replay_grammar: None,
     });
 
     let effects = drain_effects(&mut machine);
@@ -1923,7 +1921,6 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
             }]),
             projector_turn_inputs: None,
         })),
-        cell_replay_grammar: None,
     });
 
     let effects = drain_effects(&mut machine);

@@ -24,7 +24,7 @@ pub use replay_run::{
     CommandAdmission, CommandShape, DispatchedOrdinalsDigest, IssuedCommand,
     LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION, LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
     LashlangReplayNamespace, LashlangReplayRun, LashlangRunOrdinals, ReplayDivergence, RunSeal,
-    SealAttribution,
+    SealAttribution, lashlang_cell_generation,
 };
 mod language_trace_host;
 pub use language_trace_host::{LanguageTraceHost, trace_failure};

@@ -530,7 +530,15 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // vocabulary. Component-131 catalogs are rejected and recreated: tear down
 // the whole lash schema (or recreate the database) before the new build
 // opens it.
-const SCHEMA_VERSION: i32 = 132;
+// Version 133 (FIG-3571) records the executable generation a turn was
+// admitted under (`lash_queued_runs.admission_json` gains `generation`), parks
+// a redrive under another one with the `retired_generation` reason (replacing
+// `key_format_cutover`; the durable runtime error code
+// `lashlang_cell_replay_key_format_cutover` becomes `retired_generation`), and
+// adds the projected, indexed `lash_turn_parks.park_executable_generation` column the
+// drain counts retired parks by. Component-132 catalogs are rejected and
+// recreated.
+const SCHEMA_VERSION: i32 = 133;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

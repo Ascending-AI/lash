@@ -5,6 +5,7 @@
 //! live beside it. The session-facing mapping into `SessionError` stays in
 //! `lash-core`.
 
+pub use crate::executable_generation::{ExecutableGeneration, ExecutableGenerationRefusal};
 use crate::{RuntimeEffectKind, SessionId};
 use serde::{Deserialize, Serialize};
 
@@ -234,10 +235,12 @@ pub enum RuntimeErrorCode {
     /// turn parks until an operator redeploys the build that wrote the
     /// journal, cancels, or forks.
     LashlangCellReplayDivergence,
-    /// A re-executed lashlang run met a journal written under an earlier
-    /// replay-key grammar (FIG-3586). Its keys cannot be read by this build,
-    /// so it is refused before the run starts rather than re-issued live.
-    LashlangCellReplayKeyFormatCutover,
+    /// A turn was redriven under another executable generation than the one
+    /// its admission recorded (FIG-3571): the build running the redrive would
+    /// compile, key or meter its cells differently from the build that wrote
+    /// its journal, so it is refused at admission, before any effect, and the
+    /// turn parks for a build of its own generation.
+    RetiredGeneration,
     /// A redriven code cell needed a host tool binding its journaled binding
     /// set names, and the live tool for it is now missing or changed
     /// (FIG-3587). The binding is served only from recorded results: a call
@@ -599,7 +602,7 @@ impl RuntimeErrorCode {
             Self::EngineEffectController => "engine_effect_controller",
             Self::ToolIntentReplayKeyFormatCutover => "tool_intent_replay_key_format_cutover",
             Self::LashlangCellReplayDivergence => "lashlang_cell_replay_divergence",
-            Self::LashlangCellReplayKeyFormatCutover => "lashlang_cell_replay_key_format_cutover",
+            Self::RetiredGeneration => "retired_generation",
             Self::LashlangCellBindingDrift => "lashlang_cell_binding_drift",
             Self::RecordedJournalReadUnsupported => "recorded_journal_read_unsupported",
             Self::EffectReplayDivergence => "effect_replay_divergence",
@@ -746,7 +749,7 @@ impl RuntimeErrorCode {
                 | Self::EffectReplayDivergence
                 | Self::ToolIntentReplayKeyFormatCutover
                 | Self::LashlangCellReplayDivergence
-                | Self::LashlangCellReplayKeyFormatCutover
+                | Self::RetiredGeneration
                 | Self::LashlangCellBindingDrift
         )
     }
@@ -858,7 +861,7 @@ impl RuntimeErrorCode {
         Self::EffectReplayDivergence,
         Self::ToolIntentReplayKeyFormatCutover,
         Self::LashlangCellReplayDivergence,
-        Self::LashlangCellReplayKeyFormatCutover,
+        Self::RetiredGeneration,
         Self::LashlangCellBindingDrift,
         Self::RecordedJournalReadUnsupported,
         Self::EngineEffectHostRequiresHandlerScope,
@@ -1053,7 +1056,7 @@ impl RuntimeErrorCode {
             "engine_effect_controller" => Self::EngineEffectController,
             "tool_intent_replay_key_format_cutover" => Self::ToolIntentReplayKeyFormatCutover,
             "lashlang_cell_replay_divergence" => Self::LashlangCellReplayDivergence,
-            "lashlang_cell_replay_key_format_cutover" => Self::LashlangCellReplayKeyFormatCutover,
+            "retired_generation" => Self::RetiredGeneration,
             "lashlang_cell_binding_drift" => Self::LashlangCellBindingDrift,
             "recorded_journal_read_unsupported" => Self::RecordedJournalReadUnsupported,
             "effect_replay_divergence" => Self::EffectReplayDivergence,
@@ -1308,6 +1311,10 @@ pub struct RuntimeError {
     /// persisted; see [`SessionStateVersionRefusal`].
     #[serde(skip)]
     session_state_version_refusal: Option<SessionStateVersionRefusal>,
+    /// The generations an executable-generation admission refused (FIG-3571).
+    /// Never persisted, like the session-state refusal above.
+    #[serde(skip)]
+    executable_generation_refusal: Option<Box<ExecutableGenerationRefusal>>,
 }
 impl RuntimeError {
     /// Constructs a `RuntimeError` for effect-host implementors while creating, observing, or
@@ -1321,7 +1328,33 @@ impl RuntimeError {
             turn_input_acceptance: None,
             foreign_cause: None,
             session_state_version_refusal: None,
+            executable_generation_refusal: None,
         }
+    }
+
+    /// The refusal of a turn redriven under another executable generation
+    /// than its admission recorded (FIG-3571). The turn parks, carrying both
+    /// generations.
+    #[must_use]
+    pub fn retired_generation(refusal: ExecutableGenerationRefusal) -> Self {
+        let mut error = Self::new(
+            RuntimeErrorCode::RetiredGeneration,
+            format!(
+                "the turn was admitted under executable generation {} and this build runs {}: \
+                 its redrive was refused before any effect",
+                ExecutableGenerationRefusal::spell(refusal.found.as_ref()),
+                ExecutableGenerationRefusal::spell(refusal.current.as_ref()),
+            ),
+        );
+        error.executable_generation_refusal = Some(Box::new(refusal));
+        error
+    }
+
+    /// The generations an executable-generation admission refused, on the
+    /// error the refused turn returned. `None` on any other error, and on an
+    /// error read back from storage.
+    pub fn executable_generation_refusal(&self) -> Option<&ExecutableGenerationRefusal> {
+        self.executable_generation_refusal.as_deref()
     }
 
     #[must_use]

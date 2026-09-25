@@ -357,15 +357,8 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
         self.state.execution_state_dirty()
     }
 
-    fn replay_key_grammar(&self) -> Option<u32> {
-        Some(lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION)
-    }
-
-    fn admit_replay_key_grammar(
-        &self,
-        served: Option<u32>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        crate::executor::admit_replay_key_grammar(served)
+    fn executable_generation(&self) -> Option<lash_core::ExecutableGeneration> {
+        Some(lash_lashlang_runtime::lashlang_cell_generation())
     }
 
     async fn snapshot_execution_state(

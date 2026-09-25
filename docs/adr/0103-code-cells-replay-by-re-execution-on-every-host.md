@@ -537,3 +537,41 @@ next attempt runs on a rebuilt context: a plain call parks until the tool is
 restored, a drifted orchestrating body's second nested call is refused before
 the engine and every retry parks with no journal mismatch, and a drifted
 orchestrating body starts no process.
+
+## Amendment (FIG-3571): one executable generation per turn, at admission
+
+Amended 2026-09-25. The per-iteration grammar stamp is replaced by one stamp
+per turn. The code executor names the **executable generation** it runs cells
+under (`CodeExecutorPlugin::executable_generation`). For lashlang, that is a
+digest of the semantic-hash and bytecode generations, the instruction
+accounting and `LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION`. A turn's admission
+records it:
+
+- the journaled `ClaimAcceptedTurnInput` drive of a direct turn;
+- the queued run's admission of a queue drain.
+
+Every redrive checks the recorded generation before any model, tool or
+provider effect. The stamp and the check live in one place
+(`lash-core/src/runtime/turn_loop/generation_fence.rs`); FIG-3600 moves the
+calls onto the one driver claim.
+
+A redrive under another generation, or an admission recorded without one, is
+refused with `retired_generation`. The turn parks with
+`ParkReason::RetiredGeneration { generation }`, which carries the generation
+its admission recorded. The store projects it onto an indexed
+`park_executable_generation` column, so `drain_status` counts retired parks per
+generation. The park is resolved in one of three ways: an old-build drain
+redrives it, an operator forks it onto the new generation, or an operator
+cancels it.
+
+Deleted:
+
+- the sync outcome's `cell_replay_grammar`;
+- the checkpoint's `synced_cell_replay_grammar` (`TURN_CHECKPOINT_SCHEMA_VERSION` 11);
+- the executor's grammar admission;
+- `lashlang_cell_replay_key_format_cutover` and the `key_format_cutover` park reason.
+
+The recorded generation stays readable on every admission, so a later drain
+or migration can identify the generation a turn was admitted under. The
+process side of this cutover (a body's `replay_grammar`) is FIG-3571's
+generation fence for processes and lands separately.

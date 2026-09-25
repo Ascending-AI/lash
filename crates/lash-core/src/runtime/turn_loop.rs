@@ -14,6 +14,7 @@ mod accept;
 mod commit;
 mod drain_end;
 mod execute;
+mod generation_fence;
 mod initial_drive;
 mod lease;
 mod post_commit;

@@ -24,6 +24,7 @@ pub mod await_event_identity;
 pub mod chronological;
 pub mod effect_identity;
 pub mod effect_opener;
+pub mod executable_generation;
 pub mod execution_state;
 pub mod input_normalization;
 pub mod message_projection;

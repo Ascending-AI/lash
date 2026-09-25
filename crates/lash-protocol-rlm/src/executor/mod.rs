@@ -1,5 +1,4 @@
 mod cell_run;
-pub(crate) use cell_run::admit_replay_key_grammar;
 mod host_bridge;
 mod snapshot;
 mod state;

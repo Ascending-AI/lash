@@ -5,9 +5,6 @@ use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 struct LocalTurnEffectRunner {
     driver: RuntimeTurnDriver<'static>,
     protocol_iteration: usize,
-    /// The cell replay-key grammar the iteration's journaled sync named
-    /// (FIG-3586), which a code cell must run under.
-    cell_replay_grammar: Option<u32>,
     messages: crate::MessageSequence,
     event_tx: TurnObserver,
 }
@@ -85,7 +82,6 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         &code,
                         runner.messages.clone(),
                         runner.protocol_iteration,
-                        runner.cell_replay_grammar,
                         envelope.invocation.into_runtime_invocation(),
                         &runner.event_tx,
                     )
@@ -125,20 +121,8 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                             .retryable_uncommitted_derivation());
                     }
                 };
-                // Every sync names the code executor's replay-key grammar,
-                // the protocol-start one included: it is what the iteration's
-                // cells run under on replay (FIG-3586).
-                let cell_replay_grammar = result.is_ok().then(|| {
-                    runner
-                        .driver
-                        .session
-                        .plugins()
-                        .code_executor()
-                        .and_then(|executor| executor.replay_key_grammar())
-                });
                 Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
                     result,
-                    cell_replay_grammar: cell_replay_grammar.flatten(),
                     tool_surface,
                 })
             }
@@ -211,7 +195,6 @@ pub(super) fn turn_effect_executor(
         Box::new(LocalTurnEffectRunner {
             driver: owned_driver,
             protocol_iteration: machine.protocol_iteration(),
-            cell_replay_grammar: machine.synced_cell_replay_grammar(),
             messages: machine.message_sequence(),
             event_tx,
         }),

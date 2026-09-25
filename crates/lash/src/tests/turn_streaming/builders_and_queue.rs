@@ -914,6 +914,7 @@ pub(super) async fn automatic_pickup_keeps_an_explicit_empty_run_receipt() -> Re
                 configuration: lash_core::store::persisted_session_config_from_state(&state),
                 expected_head_revision: state.head_revision,
                 initial_turn_index: state.turn_index as u64 + 1,
+                generation: None,
             },
         )
         .await?;
@@ -977,6 +978,7 @@ pub(super) async fn explicit_reentry_keeps_an_anonymous_empty_run_receipt() -> R
                 configuration: lash_core::store::persisted_session_config_from_state(&state),
                 expected_head_revision: state.head_revision,
                 initial_turn_index: state.turn_index as u64 + 1,
+                generation: None,
             },
         )
         .await?;
@@ -1003,6 +1005,7 @@ pub(super) async fn explicit_reentry_keeps_an_anonymous_empty_run_receipt() -> R
                 configuration: admission.configuration.clone(),
                 expected_head_revision: state.head_revision,
                 initial_turn_index: state.turn_index as u64 + 1,
+                generation: None,
             },
         )
         .await?;
@@ -1072,6 +1075,7 @@ pub(super) async fn automatic_pickup_settles_a_frozen_selected_empty_run() -> Re
                 configuration: lash_core::store::persisted_session_config_from_state(&state),
                 expected_head_revision: state.head_revision,
                 initial_turn_index: state.turn_index as u64 + 1,
+                generation: None,
             },
         )
         .await?;

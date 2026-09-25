@@ -297,6 +297,7 @@ pub async fn bound_claim_skips_a_pending_queued_runs_inputs(store: Arc<dyn Runti
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await

@@ -525,7 +525,27 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
+        let generation_rows = sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .count_retired_parks_by_executable_generation
+                .sql(),
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
+        let retired_by_executable_generation = generation_rows
+            .into_iter()
+            .map(|row| {
+                let generation: String = row.get(0);
+                let count: i64 = row.get(1);
+                (
+                    lash_core_execution::ExecutableGeneration::new(generation),
+                    usize::try_from(count).unwrap_or_default(),
+                )
+            })
+            .collect();
         let mut parked_by_reason = std::collections::BTreeMap::new();
         for row in reason_rows {
             let code: String = row.get(0);
@@ -543,6 +563,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
             oldest_parked_since_ms: oldest_since_ms.map(|ms| u64::try_from(ms).unwrap_or_default()),
             parked_by_reason,
+            retired_by_executable_generation,
         })
     }
 

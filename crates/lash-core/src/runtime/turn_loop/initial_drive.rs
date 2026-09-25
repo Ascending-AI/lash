@@ -27,6 +27,8 @@ pub(super) struct AcceptedTurnInputDriveRunner {
     pub(super) base: crate::store::SessionHeadRef,
     /// The admitted turn's index: the next one after `base`.
     pub(super) turn_index: usize,
+    /// The executable generation the turn is admitted under (FIG-3571).
+    pub(super) generation: Option<crate::ExecutableGeneration>,
     pub(super) trace: DriveTrace,
 }
 
@@ -231,6 +233,7 @@ impl AcceptedTurnInputDriveRunner {
             claim: Box::new(claim),
             base,
             turn_index: self.turn_index as u64,
+            generation: self.generation.clone(),
         })
     }
 

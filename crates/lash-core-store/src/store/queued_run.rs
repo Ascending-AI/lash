@@ -76,6 +76,9 @@ pub struct QueuedRunAdmission {
     pub assigned_members: Vec<QueuedRunMember>,
     pub terminal: Option<QueuedRunTerminal>,
     pub last_commit: Option<QueuedRunCommit>,
+    /// The executable generation the run was admitted under (FIG-3571). A
+    /// resume under another one is refused before the run drives anything.
+    pub generation: Option<crate::executable_generation::ExecutableGeneration>,
 }
 
 /// Input to admission. Only an explicitly supplied identity is replayed after
@@ -88,6 +91,8 @@ pub struct BeginQueuedRun {
     pub configuration: PersistedSessionConfig,
     pub expected_head_revision: u64,
     pub initial_turn_index: u64,
+    /// The executable generation the drain runs under; a new run records it.
+    pub generation: Option<crate::executable_generation::ExecutableGeneration>,
 }
 
 impl BeginQueuedRun {
@@ -166,6 +171,7 @@ impl BeginQueuedRun {
             assigned_members: Vec::new(),
             terminal: None,
             last_commit: None,
+            generation: self.generation,
         }
     }
 }

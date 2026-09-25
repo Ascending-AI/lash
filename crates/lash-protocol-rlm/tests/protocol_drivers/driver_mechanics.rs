@@ -2194,13 +2194,7 @@ fn drive_rlm_to_second_llm_request(
                 } else {
                     Ok(Some(journaled_sync.clone()))
                 };
-                machine.handle_response(Response::ExecutionEnvironmentSynced {
-                    id,
-                    result,
-                    cell_replay_grammar: Some(
-                        lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
-                    ),
-                });
+                machine.handle_response(Response::ExecutionEnvironmentSynced { id, result });
             }
             Effect::LlmCall { id, request } => {
                 requests.push((*request).clone());

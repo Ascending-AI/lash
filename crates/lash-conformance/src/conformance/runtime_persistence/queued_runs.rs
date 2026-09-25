@@ -28,6 +28,7 @@ pub async fn queued_run_active_turn_member_reclaims_after_lane_rotation(
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -128,6 +129,7 @@ pub async fn queued_run_repaired_checkpoint_input_remains_deferred_after_settle(
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -285,6 +287,7 @@ async fn queued_run_advance_repair_case(store: Arc<dyn RuntimePersistence>, host
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -547,6 +550,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -629,6 +633,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
                 configuration: admission.configuration,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -648,6 +653,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
                 configuration: renewed.configuration.clone(),
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -703,6 +709,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
                 configuration: renewed.configuration,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -738,6 +745,7 @@ pub async fn queued_run_refused_selection_can_settle_empty(store: Arc<dyn Runtim
         configuration: RuntimeCommit::persisted_state_for_test(&selected_state, &[]).config,
         expected_head_revision: 0,
         initial_turn_index: 1,
+        generation: None,
     };
     let anonymous_selected = store
         .begin_or_resume_queued_run(&selected_lease.authority(), selected_request.clone())
@@ -861,6 +869,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -955,6 +964,7 @@ pub async fn queued_run_members_survive_host_cancellation_after_lane_rotation(
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -1024,6 +1034,7 @@ pub async fn queued_run_identity_survives_lane_rotation(store: Arc<dyn RuntimePe
         configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
         expected_head_revision: 0,
         initial_turn_index: 1,
+        generation: None,
     };
     let first_fence = claim_session_execution_lease_for_test(&store, &session_id, "first")
         .await
@@ -1097,6 +1108,7 @@ pub async fn queued_run_selection_excludes_later_input_after_takeover(
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -1200,6 +1212,7 @@ pub async fn queued_run_commit_receipt_precedes_revisions_but_not_lane_fence(
         configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
         expected_head_revision: 0,
         initial_turn_index: 1,
+        generation: None,
     };
     let admitted = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -1302,6 +1315,7 @@ pub async fn queued_run_terminal_disposition_preserves_unassigned_work(
         configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
         expected_head_revision: 0,
         initial_turn_index: 1,
+        generation: None,
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -1470,6 +1484,7 @@ pub async fn queued_run_cancelled_follow_on_receipt_retains_withheld_members(
         configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
         expected_head_revision: 0,
         initial_turn_index: 1,
+        generation: None,
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -1644,6 +1659,7 @@ pub async fn queued_run_frozen_batches_survive_takeover_and_changed_limits(
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -1729,6 +1745,7 @@ pub async fn queued_run_continuation_commits_outbox_and_retains_receipts(
         configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
         expected_head_revision: 0,
         initial_turn_index: 1,
+        generation: None,
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -1922,6 +1939,7 @@ pub async fn queued_run_exact_selection_never_commits_a_partial_claim(
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -2064,6 +2082,7 @@ pub async fn queued_run_advance_rejects_unassigned_members_but_keeps_checkpoint_
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await

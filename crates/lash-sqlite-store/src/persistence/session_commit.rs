@@ -282,6 +282,9 @@ impl SessionCommitStore for Store {
             }
         })?;
         let reason = park.reason.clone();
+        let park_executable_generation = reason
+            .retired_executable_generation_key()
+            .map(str::to_string);
         let at_ms = i64::try_from(park.at_ms).map_err(|_| {
             StoreError::Backend(format!(
                 "turn park instant {} exceeds the stored range",
@@ -323,7 +326,8 @@ impl SessionCommitStore for Store {
                                     turn_id,
                                     reason_code,
                                     reason_json,
-                                    at_ms
+                                    at_ms,
+                                    park_executable_generation
                                 ],
                             )
                             .map_err(sqlite_error)?;
@@ -388,7 +392,8 @@ impl SessionCommitStore for Store {
                             reason_json,
                             at_ms,
                             at_ms,
-                            1
+                            1,
+                            park_executable_generation
                         ],
                     )
                     .map_err(sqlite_error)?;

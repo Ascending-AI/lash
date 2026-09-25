@@ -175,7 +175,12 @@ fn surface_turn_park(key: u8) -> lash_core::store::TurnParkWrite {
     let message = format!("surface park {key}: the journal refused replay");
     let reason = match key % 4 {
         0 => lash_core::store::ParkReason::ReplayDivergence { message },
-        1 => lash_core::store::ParkReason::KeyFormatCutover { message },
+        1 => lash_core::store::ParkReason::RetiredGeneration {
+            generation: Some(lash_core::ExecutableGeneration::new(format!(
+                "blake3:surface-{key}"
+            ))),
+            message,
+        },
         2 => lash_core::store::ParkReason::BindingDrift { message },
         _ => lash_core::store::ParkReason::EffectReplayDivergence {
             effect_kind: "llm_call".to_string(),

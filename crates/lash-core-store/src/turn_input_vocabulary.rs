@@ -919,12 +919,16 @@ pub enum AcceptedTurnInputDrive {
     /// admitted on: the session head (`base`) and the turn index. A replay
     /// rebuilds the turn's input state from `base` and addresses its effects
     /// under `turn_index`, never re-reading either from the live head, which
-    /// the turn's own commit may already have advanced (FIG-3682). S5's
-    /// `AdmitDrive` absorbs both as `Admitted::{base, turn_index}`.
+    /// the turn's own commit may already have advanced (FIG-3682). It also
+    /// records the executable generation the turn runs under (FIG-3571). S5's
+    /// `AdmitDrive` absorbs all three onto `Admitted`.
     Claimed {
         claim: Box<TurnInputClaim>,
         base: crate::store::SessionHeadRef,
         turn_index: u64,
+        /// The executable generation the turn was admitted under (FIG-3571):
+        /// a redrive under another one is refused before any effect.
+        generation: Option<crate::executable_generation::ExecutableGeneration>,
     },
     /// The accepted row is open but sits behind more earlier admissions than
     /// one claim absorbs. Nothing is driven and nothing is dropped: the row

@@ -46,19 +46,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_run_offset,
             cumulative_usage: TokenUsage::default(),
             synced_protocol_iteration: None,
-            synced_cell_replay_grammar: None,
             observed_cancellation: None,
         }
-    }
-
-    /// The cell replay-key grammar the current protocol iteration's journaled
-    /// execution-environment sync named (FIG-3586): `None` when the iteration
-    /// has not synced, or when its sync named none — a record written before
-    /// the grammar was stamped.
-    pub fn synced_cell_replay_grammar(&self) -> Option<u32> {
-        (self.synced_protocol_iteration == Some(self.protocol_iteration))
-            .then_some(self.synced_cell_replay_grammar)
-            .flatten()
     }
 
     /// Record the cancellation request the host has observed for this turn.
@@ -118,7 +107,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_run_offset: self.protocol_run_offset,
             cumulative_usage: self.cumulative_usage.clone(),
             synced_protocol_iteration: self.synced_protocol_iteration,
-            synced_cell_replay_grammar: self.synced_cell_replay_grammar,
         }
     }
 
@@ -150,7 +138,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_run_offset: checkpoint.protocol_run_offset,
             cumulative_usage: checkpoint.cumulative_usage,
             synced_protocol_iteration: checkpoint.synced_protocol_iteration,
-            synced_cell_replay_grammar: checkpoint.synced_cell_replay_grammar,
             observed_cancellation: None,
         })
     }
@@ -405,7 +392,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 DriverAction::AdvanceProtocolIteration => {
                     self.protocol_iteration += 1;
                     self.synced_protocol_iteration = None;
-                    self.synced_cell_replay_grammar = None;
                     progress_dirty = true;
                 }
                 DriverAction::FinishCancelled { evidence } => {
@@ -450,12 +436,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// suitable for durable accumulation.
     pub fn try_handle_response(&mut self, response: Response) -> Result<(), TokenUsageOverflow> {
         match response {
-            Response::ExecutionEnvironmentSynced {
-                id,
-                result,
-                cell_replay_grammar,
-            } => {
-                self.handle_execution_environment_synced(id, result, cell_replay_grammar);
+            Response::ExecutionEnvironmentSynced { id, result } => {
+                self.handle_execution_environment_synced(id, result);
             }
             Response::LlmComplete {
                 id,
@@ -482,7 +464,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &mut self,
         id: EffectId,
         result: Result<Option<ExecutionEnvironmentSync>, String>,
-        cell_replay_grammar: Option<u32>,
     ) {
         let delivery = match std::mem::replace(&mut self.state, MachineState::Finished) {
             MachineState::WaitingExecutionEnvironment { delivery } => delivery,
@@ -505,7 +486,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         self.config.projector_turn_inputs = projector_turn_inputs;
                     }
                 }
-                self.synced_cell_replay_grammar = cell_replay_grammar;
                 self.synced_protocol_iteration = Some(self.protocol_iteration);
                 self.state = MachineState::PrepareIteration;
             }

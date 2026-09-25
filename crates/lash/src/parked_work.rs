@@ -166,6 +166,19 @@ impl ParkedWorkSummary {
             (turns, processes) => turns.or(processes),
         }
     }
+
+    /// Live retired-generation parks over both kinds, per the executable
+    /// generation their admission recorded (FIG-3571).
+    #[must_use]
+    pub fn retired_by_executable_generation(
+        &self,
+    ) -> std::collections::BTreeMap<lash_core::ExecutableGeneration, usize> {
+        let mut counts = self.turns.retired_by_executable_generation.clone();
+        for (generation, parks) in &self.processes.retired_by_executable_generation {
+            *counts.entry(generation.clone()).or_default() += parks;
+        }
+        counts
+    }
 }
 
 /// One transition of a park, from either feed.
@@ -319,6 +332,7 @@ impl ParkedWork {
             turns: ParkSummary {
                 by_reason: turns.parked_by_reason,
                 oldest_since_ms: turns.oldest_parked_since_ms,
+                retired_by_executable_generation: turns.retired_by_executable_generation,
             },
             processes,
         };

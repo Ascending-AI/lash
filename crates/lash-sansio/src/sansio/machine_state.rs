@@ -29,7 +29,12 @@ use super::*;
 /// now returns the environment the iteration's model call is built from, and
 /// a v9 checkpoint parked on a host-only protocol-start sync would resume
 /// with its first model call built from the live registry.
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 10;
+/// Version 11 (FIG-3571) drops `synced_cell_replay_grammar`: a turn's
+/// executable generation is recorded once, at its admission, and checked
+/// there before any effect, so no iteration carries a grammar of its own. A
+/// v10 checkpoint's cells were fenced by a per-iteration stamp this build no
+/// longer reads, so it is refused.
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 11;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1
@@ -120,12 +125,6 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: TokenUsage,
     pub(super) synced_protocol_iteration: Option<usize>,
-    /// The cell replay-key grammar the synced iteration's execution
-    /// environment named (FIG-3586). Absent in a checkpoint a build without
-    /// the field wrote, which leaves that iteration's cells unrunnable on
-    /// replay — the fail-closed answer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) synced_cell_replay_grammar: Option<u32>,
 }
 
 impl<M: TurnProtocol> TurnCheckpoint<M> {
@@ -321,10 +320,6 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: TokenUsage,
     pub(super) synced_protocol_iteration: Option<usize>,
-    /// The cell replay-key grammar the synced iteration's execution
-    /// environment named (FIG-3586); `None` until that sync lands and again
-    /// from the next iteration on.
-    pub(super) synced_cell_replay_grammar: Option<u32>,
     /// Cancellation evidence the host has observed for this turn, recorded
     /// before the machine is told the provider call was cancelled. Lets the
     /// machine name the request that stopped it instead of minting internal

@@ -48,3 +48,25 @@ lash_store_sql::statements! {
              WHERE singleton = 1";
     }
 }
+
+/// Live retired-generation parks per the generation their admission recorded
+/// (FIG-3571), read off the projected `park_executable_generation` column.
+pub(crate) fn count_retired_parks_by_executable_generation(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<std::collections::BTreeMap<lash_core_execution::ExecutableGeneration, usize>>
+{
+    let mut statement = conn.prepare(
+        super::turn_ingress_sql()
+            .family
+            .count_retired_parks_by_executable_generation
+            .sql(),
+    )?;
+    statement
+        .query_map([], |row| {
+            Ok((
+                lash_core_execution::ExecutableGeneration::new(row.get::<_, String>(0)?),
+                usize::try_from(row.get::<_, i64>(1)?).unwrap_or_default(),
+            ))
+        })?
+        .collect()
+}
