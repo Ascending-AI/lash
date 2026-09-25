@@ -12,7 +12,9 @@ required inside CI while supplying the `kiln build` configuration outside it.
 The behaviour half runs the wrapper against a fake `docker` on PATH, so the
 lifecycle it promises -- the chosen port reaching the command, teardown on a
 readiness failure, teardown on Ctrl-C, `all` in declared order -- is proven
-rather than asserted about the source.
+rather than asserted about the source. The `restate` service is a native
+process rather than a container, so its checks run a fake `restate-server`
+that answers the two health probes the real one does.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ WRAPPER = ROOT / "scripts" / "ci" / "with-service.sh"
 STORE_TESTS = ROOT / "scripts" / "ci" / "store-tests.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
-SERVICES = ("pg14", "pg16", "pg18", "s3")
+SERVICES = ("pg14", "pg16", "pg18", "s3", "restate")
 
 
 def workflow_text() -> str:
@@ -382,6 +384,113 @@ class WithServiceBehaviour(unittest.TestCase):
             result, _ = self.run_wrapper(pathlib.Path(raw), ["pg16"])
             self.assertEqual(2, result.returncode)
             self.assertIn("no command given", result.stderr)
+
+
+# A stand-in `restate-server`: it answers the admin and ingress health probes on
+# the addresses the launcher assigns, and records its pid so a test can see it
+# stopped.
+FAKE_RESTATE_SERVER = """\
+#!/usr/bin/env python3
+import http.server, os, pathlib, threading
+
+class Ok(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args):
+        pass
+
+pathlib.Path(os.environ["FAKE_RESTATE_PIDFILE"]).write_text(str(os.getpid()))
+servers = []
+for variable in ("RESTATE_ADMIN__BIND_ADDRESS", "RESTATE_INGRESS__BIND_ADDRESS"):
+    host, port = os.environ[variable].rsplit(":", 1)
+    servers.append(http.server.ThreadingHTTPServer((host, int(port)), Ok))
+for server in servers[1:]:
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+servers[0].serve_forever()
+"""
+
+
+class WithServiceRestate(unittest.TestCase):
+    def run_restate(
+        self, directory: pathlib.Path, command: list[str], *, docker: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        server = directory / "restate-server"
+        server.write_text(FAKE_RESTATE_SERVER, encoding="utf-8")
+        server.chmod(0o755)
+        env = FakeDocker(directory).env() if docker else os.environ.copy()
+        if not docker:
+            # A PATH whose `docker` fails: the Restate service needs none.
+            broken = directory / "docker"
+            broken.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+            broken.chmod(0o755)
+            env["PATH"] = f"{directory}:{env['PATH']}"
+            env.pop("GITHUB_ACTIONS", None)
+        env["LASH_RESTATE_SERVER_BIN"] = str(server)
+        env["FAKE_RESTATE_PIDFILE"] = str(directory / "server.pid")
+        env["RESTATE_AUTHORITY_ID"] = "left-over-from-an-earlier-server"
+        return subprocess.run(
+            ["bash", str(WRAPPER), "restate", "--", *command],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+
+    def test_the_server_addresses_and_a_fresh_authority_reach_the_command(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            probe = (
+                "import os, urllib.request\n"
+                "opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))\n"
+                "for name, path in (('RESTATE_ADMIN_URL', '/health'),"
+                " ('RESTATE_INGRESS_URL', '/restate/health')):\n"
+                "    assert opener.open(os.environ[name] + path, timeout=5).status == 200\n"
+                "print(os.environ['RESTATE_INGRESS_URL'])\n"
+                "print(os.environ['RESTATE_ADMIN_URL'])\n"
+                "print(os.environ['RESTATE_AUTHORITY_ID'])\n"
+            )
+            first = self.run_restate(directory, ["python3", "-c", probe])
+            self.assertEqual(0, first.returncode, first.stderr)
+            ingress, admin, authority = first.stdout.split()
+            self.assertRegex(ingress, r"^http://127\.0\.0\.1:\d+$")
+            self.assertRegex(admin, r"^http://127\.0\.0\.1:\d+$")
+            self.assertNotEqual(ingress, admin)
+            # The server is new, so the authority naming its state is new: a
+            # value the caller carried in from an earlier server is replaced.
+            self.assertNotEqual("left-over-from-an-earlier-server", authority)
+            second = self.run_restate(directory, ["python3", "-c", probe])
+            self.assertEqual(0, second.returncode, second.stderr)
+            self.assertNotEqual(authority, second.stdout.split()[2])
+            self.assertIn("restate: command passed", first.stderr)
+
+    def test_the_server_is_stopped_when_the_command_ends(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            result = self.run_restate(directory, ["bash", "-c", "exit 7"])
+            self.assertEqual(1, result.returncode)
+            self.assertIn("restate: FAILED (exit 7)", result.stderr)
+            pid = int((directory / "server.pid").read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.1)
+            else:
+                os.kill(pid, signal.SIGKILL)
+                self.fail("the Restate server outlived the command")
+
+    def test_the_restate_service_needs_no_container_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            result = self.run_restate(pathlib.Path(raw), ["true"], docker=False)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertNotIn("docker is unavailable", result.stderr)
 
 
 if __name__ == "__main__":
