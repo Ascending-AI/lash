@@ -31,6 +31,9 @@ pub(crate) fn eval_javascript_unary(
     Ok(match op {
         JavaScriptUnaryOp::Plus => Value::Number(javascript_to_number(&value)),
         JavaScriptUnaryOp::Negate => Value::Number(-javascript_to_number(&value)),
+        JavaScriptUnaryOp::BitNot => Value::Number(f64::from(!javascript_to_int32(
+            javascript_to_number(&value),
+        ))),
         JavaScriptUnaryOp::Not => Value::Bool(!is_truthy(&value)?),
         JavaScriptUnaryOp::TypeOf => Value::String(
             match value {
@@ -82,6 +85,23 @@ pub(crate) fn eval_javascript_binary(left: Value, op: JavaScriptBinaryOp, right:
         Op::Multiply => Value::Number(javascript_to_number(&left) * javascript_to_number(&right)),
         Op::Divide => Value::Number(javascript_to_number(&left) / javascript_to_number(&right)),
         Op::Remainder => Value::Number(javascript_to_number(&left) % javascript_to_number(&right)),
+        Op::BitAnd | Op::BitOr | Op::BitXor | Op::ShiftLeft | Op::ShiftRight => {
+            let left = javascript_to_int32(javascript_to_number(&left));
+            let right = javascript_to_number(&right);
+            Value::Number(f64::from(match op {
+                Op::BitAnd => left & javascript_to_int32(right),
+                Op::BitOr => left | javascript_to_int32(right),
+                Op::BitXor => left ^ javascript_to_int32(right),
+                Op::ShiftLeft => left.wrapping_shl(javascript_to_uint32(right) & 31),
+                Op::ShiftRight => left >> (javascript_to_uint32(right) & 31),
+                _ => unreachable!(),
+            }))
+        }
+        Op::ShiftRightUnsigned => {
+            let left = javascript_to_uint32(javascript_to_number(&left));
+            let shift = javascript_to_uint32(javascript_to_number(&right)) & 31;
+            Value::Number(f64::from(left >> shift))
+        }
         Op::Less | Op::LessEqual | Op::Greater | Op::GreaterEqual => {
             let left = javascript_to_primitive_string_or_number(&left);
             let right = javascript_to_primitive_string_or_number(&right);
@@ -237,6 +257,22 @@ pub(crate) fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
         ),
         other => other.clone(),
     }
+}
+
+/// ECMA-262 ToUint32 of a number: truncated toward zero and reduced modulo
+/// 2^32, with NaN, the infinities and both zeros answering 0.
+pub(crate) fn javascript_to_uint32(number: f64) -> u32 {
+    if !number.is_finite() || number == 0.0 {
+        return 0;
+    }
+    // Both steps are exact: the truncation is an integer and its remainder
+    // modulo 2^32 is an integer of magnitude below 2^32.
+    number.trunc().rem_euclid(4_294_967_296.0) as u32
+}
+
+/// ECMA-262 ToInt32 of a number: ToUint32 read as a two's-complement integer.
+pub(crate) fn javascript_to_int32(number: f64) -> i32 {
+    javascript_to_uint32(number) as i32
 }
 
 pub(crate) fn javascript_to_number(value: &Value) -> f64 {

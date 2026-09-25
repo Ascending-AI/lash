@@ -1,6 +1,6 @@
 use super::super::{
     ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_number,
-    javascript_to_string, nullish_property_read,
+    javascript_to_string, javascript_to_uint32, nullish_property_read,
 };
 use super::javascript_array::{copy_within, javascript_array_method_for_value};
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
@@ -1097,7 +1097,7 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
         ("Math.cbrt", [value]) => Ok(Value::Number(javascript_to_number(value).cbrt())),
         ("Math.ceil", [value]) => Ok(Value::Number(javascript_to_number(value).ceil())),
         ("Math.clz32", [value]) => Ok(Value::Number(
-            to_uint32(javascript_to_number(value)).leading_zeros() as f64,
+            javascript_to_uint32(javascript_to_number(value)).leading_zeros() as f64,
         )),
         ("Math.cos", [value]) => Ok(Value::Number(javascript_to_number(value).cos())),
         ("Math.cosh", [value]) => Ok(Value::Number(javascript_to_number(value).cosh())),
@@ -1107,8 +1107,9 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
         ("Math.fround", [value]) => Ok(Value::Number(javascript_to_number(value) as f32 as f64)),
         ("Math.hypot", values) => Ok(Value::Number(javascript_hypot(values))),
         ("Math.imul", [left, right]) => Ok(Value::Number(
-            (to_uint32(javascript_to_number(left))
-                .wrapping_mul(to_uint32(javascript_to_number(right))) as i32) as f64,
+            (javascript_to_uint32(javascript_to_number(left))
+                .wrapping_mul(javascript_to_uint32(javascript_to_number(right)))
+                as i32) as f64,
         )),
         ("Math.log", [value]) => Ok(Value::Number(javascript_to_number(value).ln())),
         ("Math.log1p", [value]) => Ok(Value::Number(javascript_to_number(value).ln_1p())),
@@ -1557,14 +1558,6 @@ fn flatten_array(items: &[Value], depth: usize, output: &mut Vec<Value>) {
             }
         }
         output.push(item.clone());
-    }
-}
-
-fn to_uint32(value: f64) -> u32 {
-    if !value.is_finite() || value == 0.0 {
-        0
-    } else {
-        value.trunc().rem_euclid(4_294_967_296.0) as u32
     }
 }
 

@@ -11,9 +11,9 @@ impl<'module> Linker<'module> {
         let ty = match op {
             crate::ast::JavaScriptUnaryOp::Not => TypeExpr::Bool,
             crate::ast::JavaScriptUnaryOp::TypeOf => TypeExpr::Str,
-            crate::ast::JavaScriptUnaryOp::Plus | crate::ast::JavaScriptUnaryOp::Negate => {
-                TypeExpr::Float
-            }
+            crate::ast::JavaScriptUnaryOp::Plus
+            | crate::ast::JavaScriptUnaryOp::Negate
+            | crate::ast::JavaScriptUnaryOp::BitNot => TypeExpr::Float,
         };
         Ok((
             Expr::JavaScriptUnary {

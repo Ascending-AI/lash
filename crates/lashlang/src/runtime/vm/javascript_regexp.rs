@@ -3,7 +3,7 @@ use super::javascript_array::javascript_regexp_match_method;
 use super::*;
 use crate::runtime::{
     ErrorKind, canonical_regexp_flags, ensure_javascript_string_size, javascript_array_index_key,
-    javascript_string_size_error,
+    javascript_string_size_error, javascript_to_uint32,
 };
 
 pub const TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS: usize = 4_096;
@@ -734,7 +734,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let limit = if matches!(limit, Value::Undefined) {
             u32::MAX
         } else {
-            to_uint32(self.heap.javascript_to_number(limit)?)
+            javascript_to_uint32(self.heap.javascript_to_number(limit)?)
         };
         if limit == 0 {
             return Ok(Value::List(Vec::new().into()));
@@ -1239,13 +1239,6 @@ fn utf16_range(units: &[u16], range: std::ops::Range<usize>) -> Result<Value, Ru
     utf16_value(units[range].to_vec()).map_err(|_| RuntimeError::ValidationFailed {
         reason: "TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED: non-unicode RegExp output contains an unrepresentable lone surrogate".to_string(),
     })
-}
-
-fn to_uint32(number: f64) -> u32 {
-    if !number.is_finite() || number == 0.0 {
-        return 0;
-    }
-    number.trunc().rem_euclid(4_294_967_296.0) as u32
 }
 
 pub(super) fn advance_string_index(input: &[u16], index: usize, unicode: bool) -> usize {

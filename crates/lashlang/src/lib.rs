@@ -158,7 +158,10 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// it no longer folds to a constant `undefined`, and the continuation's
 /// heap-object wire carries a `builtin_function` kind and the
 /// `IncompatibleReceiver` error. A v23 stream is refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 24;
+/// v25 (FIG-3730): `JavaScriptUnary` and `JavaScriptBinary` carry ECMA's
+/// bitwise and shift operators (`~`, `&`, `|`, `^`, `<<`, `>>`, `>>>`) as
+/// single instructions. A v24 stream is refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 25;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

@@ -50,6 +50,8 @@ mod mutable_captures;
 mod no_abort_guarantee;
 #[path = "object_string_coercion.rs"]
 mod object_string_coercion;
+#[path = "operator_cost.rs"]
+mod operator_cost;
 #[path = "process_literal_captures.rs"]
 mod process_literal_captures;
 #[path = "projected_coercion.rs"]

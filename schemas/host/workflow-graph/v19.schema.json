@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-graph/v18",
+  "$id": "https://lash.dev/schemas/workflow-graph/v19",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -1189,7 +1189,13 @@
         "Less",
         "LessEqual",
         "Greater",
-        "GreaterEqual"
+        "GreaterEqual",
+        "BitAnd",
+        "BitOr",
+        "BitXor",
+        "ShiftLeft",
+        "ShiftRight",
+        "ShiftRightUnsigned"
       ],
       "type": "string"
     },
@@ -1206,7 +1212,8 @@
         "Plus",
         "Negate",
         "Not",
-        "TypeOf"
+        "TypeOf",
+        "BitNot"
       ],
       "type": "string"
     },
@@ -2919,7 +2926,7 @@
     },
     "schema_version": {
       "enum": [
-        18
+        19
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -2939,6 +2946,6 @@
   ],
   "title": "WorkflowGraph",
   "type": "object",
-  "x-lash-schema-version": 18,
+  "x-lash-schema-version": 19,
   "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
 }

@@ -562,7 +562,7 @@ fn reconcile_suppresses_pairs_for_ids_duplicated_at_unmatched_locations() {
 #[test]
 fn workflow_graph_ir_json_golden_is_exact() {
     let graph = workflow_graph_from_source(goldens::IR_JSON).expect("fixture projects");
-    assert_eq!(graph.schema_version, 18);
+    assert_eq!(graph.schema_version, 19);
     let kinds = serde_json::Value::Array(
         graph
             .main

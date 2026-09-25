@@ -977,6 +977,7 @@ impl<'p> Printer<'p> {
                     JavaScriptUnaryOp::Negate => "-",
                     JavaScriptUnaryOp::Not => "!",
                     JavaScriptUnaryOp::TypeOf => "typeof ",
+                    JavaScriptUnaryOp::BitNot => "~",
                 };
                 Ok(format!("{op}{}", self.unary_operand(expr)?))
             }
@@ -1695,5 +1696,11 @@ fn javascript_binary_op(op: JavaScriptBinaryOp) -> &'static str {
         JavaScriptBinaryOp::LessEqual => "<=",
         JavaScriptBinaryOp::Greater => ">",
         JavaScriptBinaryOp::GreaterEqual => ">=",
+        JavaScriptBinaryOp::BitAnd => "&",
+        JavaScriptBinaryOp::BitOr => "|",
+        JavaScriptBinaryOp::BitXor => "^",
+        JavaScriptBinaryOp::ShiftLeft => "<<",
+        JavaScriptBinaryOp::ShiftRight => ">>",
+        JavaScriptBinaryOp::ShiftRightUnsigned => ">>>",
     }
 }

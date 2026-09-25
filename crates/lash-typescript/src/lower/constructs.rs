@@ -847,11 +847,22 @@ impl Lowerer {
                 let rhs = self.lower_expr(value)?;
                 let updated = self.lower_binary_values(old, op, rhs)?;
                 // `object.step op= value` with an arithmetic operator is the
-                // attribute update the role names. The exponent, bitwise and
-                // shift operators lower through temporaries or a library
-                // call, so their value is not one operator applied to the
-                // current attribute, and they stay unmarked.
-                let update = member && matches!(updated, LashExpr::JavaScriptBinary { .. });
+                // attribute update the role names. The exponent lowers to a
+                // library call, and the bitwise and shift operators have no
+                // update operator in the role's vocabulary, so they stay
+                // unmarked.
+                let update = member
+                    && matches!(
+                        updated,
+                        LashExpr::JavaScriptBinary {
+                            op: JavaScriptBinaryOp::Add
+                                | JavaScriptBinaryOp::Subtract
+                                | JavaScriptBinaryOp::Multiply
+                                | JavaScriptBinaryOp::Divide
+                                | JavaScriptBinaryOp::Remainder,
+                            ..
+                        }
+                    );
                 output.push(Self::temp_assignment(&result, updated));
                 output.push(LashExpr::Assign {
                     target,
@@ -1028,28 +1039,6 @@ impl Lowerer {
     ) -> Result<LashExpr, Diagnostic> {
         Ok(match op {
             BinaryOp::Exponent => Self::stdlib_call("Math.pow", vec![left, right]),
-            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
-                let left_name = self.temporary("bitwise_left");
-                let right_name = self.temporary("bitwise_right");
-                LashExpr::Block(vec![
-                    Self::temp_assignment(&left_name, left),
-                    Self::temp_assignment(&right_name, right),
-                    self.lower_bitwise_pair(
-                        Self::variable(&left_name),
-                        op,
-                        Self::variable(&right_name),
-                    ),
-                ])
-            }
-            BinaryOp::ShiftLeft | BinaryOp::ShiftRight | BinaryOp::ShiftRightUnsigned => {
-                let left_name = self.temporary("shift_left");
-                let right_name = self.temporary("shift_right");
-                LashExpr::Block(vec![
-                    Self::temp_assignment(&left_name, left),
-                    Self::temp_assignment(&right_name, right),
-                    self.lower_shift(Self::variable(&left_name), op, Self::variable(&right_name)),
-                ])
-            }
             BinaryOp::In | BinaryOp::InstanceOf => unreachable!("handled before value lowering"),
             op => LashExpr::JavaScriptBinary {
                 left: Box::new(left),
@@ -1247,14 +1236,6 @@ pub(super) fn global_this_member_name<'a>(
             Some(field.as_str())
         }
         _ => None,
-    }
-}
-
-pub(super) fn js_subtract(left: LashExpr, right: LashExpr) -> LashExpr {
-    LashExpr::JavaScriptBinary {
-        left: Box::new(left),
-        op: JavaScriptBinaryOp::Subtract,
-        right: Box::new(right),
     }
 }
 
