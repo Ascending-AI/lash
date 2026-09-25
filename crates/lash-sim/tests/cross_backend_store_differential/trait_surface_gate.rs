@@ -109,6 +109,18 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
         "repair is authorized by a turn-cancellation intent snapshot this fixture cannot \
          produce without a TurnCancellationAuthority; owned by the turn_control conformance suite",
     ),
+    (
+        "load_session_at",
+        "turn-admission base-retention surface (FIG-3682): it answers only for a head a turn's \
+         admission retained, and this fixture never runs a turn admission; owned by the \
+         admission_base_retention conformance suite",
+    ),
+    (
+        "retain_admission_base",
+        "turn-admission base-retention surface (FIG-3682): called by a turn's admission under \
+         the session's execution lease, which this fixture never runs; owned by the \
+         admission_base_retention conformance suite",
+    ),
 ];
 
 /// Fallible attachment (blob artifact) store methods.
