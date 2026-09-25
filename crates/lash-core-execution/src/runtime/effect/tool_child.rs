@@ -164,7 +164,16 @@ use super::executor::RuntimeEffectControllerError;
 /// cooperative signal is fenced on, and no key lives only as long as the
 /// process that issued it. A v7 request is refused, typed and before any
 /// effect, at [`ToolChildRequest::validate`].
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 8;
+///
+/// Version 9 (FIG-3712) records the child's session facts at group open — the
+/// tool surface, tool access and subagent context it runs under, and which
+/// unrecordable sources its opener had — so a child runs under the same
+/// authority whether its opener lends its context or the deployment builds
+/// one. A v8 request is refused.
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 9;
+
+mod session_facts;
+pub use session_facts::{ToolChildRebuildRefusal, ToolChildSessionFacts, UnrecordedSessionSources};
 
 /// The authority a tool child was admitted under, pinned at formation.
 ///
@@ -467,6 +476,9 @@ pub struct ToolChildRequest {
     pub execution_env: ProcessExecutionEnvRef,
     /// How this child's completion is routed back to it.
     pub completion_routing: ToolChildCompletionRouting,
+    /// The session facts the child's authority is bound from on every path
+    /// (FIG-3712).
+    pub session: ToolChildSessionFacts,
 }
 
 impl ToolChildRequest {
@@ -500,6 +512,10 @@ impl ToolChildRequest {
     /// below, so a caller cannot omit an opener, an admission or a
     /// cancellation authority by forgetting a field.
     #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each argument is a recorded fact with no sensible absence; a builder would let a caller omit one"
+    )]
     pub fn new(
         call: PreparedToolCall,
         admission: ToolChildAdmission,
@@ -508,6 +524,7 @@ impl ToolChildRequest {
         cancellation_authority: TurnControlBindingId,
         execution_env: ProcessExecutionEnvRef,
         completion_routing: ToolChildCompletionRouting,
+        session: ToolChildSessionFacts,
     ) -> Self {
         Self {
             version: TOOL_CHILD_REQUEST_VERSION,
@@ -519,6 +536,7 @@ impl ToolChildRequest {
             cancellation_authority,
             execution_env,
             completion_routing,
+            session,
         }
     }
 

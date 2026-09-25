@@ -57,6 +57,7 @@ fn process_leaf_request(
         cancellation,
         env_ref.clone(),
         routing,
+        super::law_session_facts(),
     );
     if let Some(process_ref) = enclosing {
         request = request.with_enclosing_process(process_ref);

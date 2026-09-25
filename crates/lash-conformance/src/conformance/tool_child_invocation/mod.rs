@@ -963,14 +963,7 @@ fn build_opener_dispatch(
         vec![law_orchestrating_tool()],
     )
     .expect("the law's leaf provider and orchestrating tool register disjoint ids");
-    let mut definitions = leaf_definitions();
-    definitions.push(crate::ToolDefinition::raw(
-        LEAF_ORCHESTRATING,
-        LEAF_ORCHESTRATING.trim_start_matches("tool:"),
-        "conformance orchestrating leaf",
-        crate::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    ));
+    let definitions = law_definitions();
     let processes = processes.unwrap_or_else(|| {
         crate::testing::effect_backed_process_service(
             registry.expect("a dispatch without a process service takes the registry"),
@@ -1637,20 +1630,36 @@ fn leaf_request(
         cancellation,
         env_ref.clone(),
         routing,
+        law_session_facts(),
     )
 }
 
-fn catalog_admission(tool_id: &str) -> crate::runtime::effect::ToolChildAdmission {
-    let definitions = leaf_definitions();
-    let mut all = definitions.clone();
-    all.push(crate::ToolDefinition::raw(
+/// Every tool the law's openers can call: the leaves and the orchestrating
+/// leaf. It is the catalog a law opener dispatches against, and so the
+/// surface it records for its children (FIG-3712).
+fn law_definitions() -> Vec<crate::ToolDefinition> {
+    let mut definitions = leaf_definitions();
+    definitions.push(crate::ToolDefinition::raw(
         LEAF_ORCHESTRATING,
         LEAF_ORCHESTRATING.trim_start_matches("tool:"),
         "conformance orchestrating leaf",
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     ));
-    let manifest = all
+    definitions
+}
+
+/// The session facts a law opener records at group open: its catalog as the
+/// surface, in an ordinary root session.
+fn law_session_facts() -> crate::runtime::effect::ToolChildSessionFacts {
+    crate::runtime::effect::ToolChildSessionFacts {
+        tool_surface: law_definitions(),
+        ..Default::default()
+    }
+}
+
+fn catalog_admission(tool_id: &str) -> crate::runtime::effect::ToolChildAdmission {
+    let manifest = law_definitions()
         .into_iter()
         .find(|definition| definition.manifest().id == crate::ToolId::from(tool_id))
         .unwrap_or_else(|| unreachable!("every leaf has a definition"))

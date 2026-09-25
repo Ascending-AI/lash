@@ -16,25 +16,31 @@ mod live_openers;
 pub use live_openers::{LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry};
 mod tool_child;
 pub use tool_child::{
-    TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting, ToolChildRequest,
-    ToolChildScope,
+    TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting,
+    ToolChildRebuildRefusal, ToolChildRequest, ToolChildScope, ToolChildSessionFacts,
+    UnrecordedSessionSources,
 };
 mod tool_child_driver;
 pub(crate) use tool_child_driver::await_journaled_tool_completion;
 #[cfg(feature = "testing")]
 pub(crate) use tool_child_driver::validate_recorded_authorities;
 pub use tool_child_driver::{
-    DeploymentToolChildContext, ToolChildContextSource, ToolChildDriver, ToolChildHost,
-    opener_for_execution_scope,
+    ContextSourceInstall, DeploymentToolChildContext, ToolChildContextSource, ToolChildDriver,
+    ToolChildHost, opener_for_execution_scope,
 };
 mod tool_presentation;
 pub use tool_presentation::{
     SessionPresentationArtifacts, TOOL_PRESENTATION_VERSION, ToolPresentation,
 };
+mod recorded_stream;
+pub use recorded_stream::{
+    CHILD_STREAM_BYTE_BUDGET, ChildStreamTruncation, DecodedChildEvent, RecordedChildChannel,
+    RecordedChildEvent, RecordedChildStream,
+};
 mod tool_settlement;
 pub use tool_settlement::{
-    ChildStreamEvent, TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture,
-    ToolSettlement, ToolUsageDelta, ToolUsageLedger,
+    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture, ToolSettlement,
+    ToolUsageDelta, ToolUsageLedger,
 };
 mod outcome;
 pub use lash_core_effect::promise_semantics;

@@ -315,6 +315,7 @@ impl RuntimeExecutionContext<'_> {
         // The group's unique children are reserved against the opener's bound
         // before anything is journaled or dispatched (ADR 0099 §9).
         self.reserve_group_work(&group_key, children.len()).await?;
+        let session_facts = self.tool_child_session_facts();
         let mut envelopes = Vec::with_capacity(children.len());
         for (position, child) in children.iter().enumerate() {
             let leaf = match child {
@@ -368,6 +369,7 @@ impl RuntimeExecutionContext<'_> {
                 cancellation_authority.clone(),
                 execution_env.clone(),
                 completion_routing,
+                session_facts.clone(),
             );
             if let Some(process_ref) = opener.process_ref() {
                 request = request.with_enclosing_process(process_ref.clone());
@@ -719,7 +721,8 @@ impl RuntimeExecutionContext<'_> {
         // A child that ran with no live opener recorded its stream instead of
         // sending it (FIG-3712); it reaches the stream here, before the
         // child's own completion.
-        self.emit_recorded_child_stream(&settlement.stream).await;
+        self.emit_recorded_child_stream(&call_id, &outcome.record, &settlement.stream)
+            .await;
         for intent_outcome in &outcome.intent_outcomes {
             self.emit_turn_activity(
                 correlation_id.clone(),
@@ -853,6 +856,88 @@ fn cancelled_group_leaf(leaf: &PreparedToolChildLeaf) -> CompletedProtocolToolCa
         duration_ms: completed.duration_ms,
     };
     CompletedProtocolToolCall { completed, record }
+}
+
+/// What a group tool child records of its opener and emits back to it
+/// (FIG-3712).
+impl RuntimeExecutionContext<'_> {
+    /// Emits the stream events a group child recorded because no opener was
+    /// live where it ran (FIG-3712): its session events on the session
+    /// stream, its turn activities on the activity stream, each in recorded
+    /// order. A stream the recording budget cut says so on the session
+    /// stream, as a `child_stream_truncated` message.
+    async fn emit_recorded_child_stream(
+        &self,
+        call_id: &str,
+        record: &crate::ToolCallRecord,
+        stream: &crate::runtime::effect::RecordedChildStream,
+    ) {
+        let record = serde_json::to_value(record).unwrap_or_default();
+        let (events, undecodable) = stream.decode(&record);
+        if undecodable > 0 {
+            tracing::warn!(
+                call_id,
+                undecodable,
+                "a tool child's recorded stream held events this build cannot decode; \
+                 they are skipped"
+            );
+        }
+        for event in events {
+            match event {
+                crate::runtime::effect::DecodedChildEvent::Session(event) => {
+                    crate::session_model::send_event(&self.dispatch.event_tx, event).await;
+                }
+                crate::runtime::effect::DecodedChildEvent::Activity(activity) => {
+                    if let Some(tx) = &self.turn_event_tx {
+                        let _ = tx.send(activity).await;
+                    }
+                }
+            }
+        }
+        if let Some(truncated) = stream.truncated {
+            crate::session_model::send_event(
+                &self.dispatch.event_tx,
+                crate::SessionStreamEvent::Message {
+                    text: format!(
+                        "tool child `{call_id}` recorded more stream than its budget holds; \
+                         {} later events ({} bytes) were dropped",
+                        truncated.dropped_events, truncated.dropped_bytes
+                    ),
+                    kind: "child_stream_truncated".to_string(),
+                },
+            )
+            .await;
+        }
+    }
+
+    /// The session facts a group tool child this context opens records
+    /// (FIG-3712): the tool surface its calls are admitted against, the
+    /// session's tool access and subagent context, and which of this
+    /// context's sources have no recorded form.
+    pub(crate) fn tool_child_session_facts(&self) -> crate::runtime::effect::ToolChildSessionFacts {
+        let plugins = &self.dispatch.plugins;
+        crate::runtime::effect::ToolChildSessionFacts {
+            tool_surface: self
+                .dispatch
+                .tool_catalog
+                .tools
+                .iter()
+                .map(|entry| crate::ToolDefinition {
+                    manifest: entry.manifest.clone(),
+                    contract: entry.contract.as_ref().clone(),
+                })
+                .collect(),
+            tool_access: plugins.tool_access(),
+            subagent: plugins.subagent_context().cloned(),
+            unrecorded: self.unrecorded_sources.union(
+                crate::runtime::effect::UnrecordedSessionSources {
+                    fork_plugins: plugins.forked_plugins(),
+                    plugin_state: plugins.holds_plugin_state(),
+                    ..Default::default()
+                },
+            ),
+        }
+    }
 }
 
 #[cfg(test)]

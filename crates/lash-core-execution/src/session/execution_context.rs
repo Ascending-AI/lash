@@ -117,6 +117,9 @@ pub struct RuntimeExecutionContext<'run> {
     /// finalizes through. `None` on Restate, whose engine-side group index is
     /// the twin, and wherever no host wired one.
     pub(crate) group_closing: Option<Arc<dyn crate::StoreEffectGroupClosing>>,
+    /// Sources of this context that have no recorded form: a group tool child
+    /// it opens records them (FIG-3712).
+    pub(crate) unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources,
     /// Keeps this context's live-opener registration alive for the context's
     /// lifetime: a `LiveOpenerGuard` deregisters on drop, and a test context
     /// that opened a tool-child group while its guard was already dropped
@@ -514,6 +517,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             incorporation_ledger: Arc::default(),
             opener_groups: Arc::default(),
             group_closing: None,
+            unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
             parent_invocation: None,
             turn_phase_probe: None,
             turn_event_tx: None,
@@ -556,6 +560,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             tracing: self.tracing.clone(),
             code_block_graph_key: self.code_block_graph_key.clone(),
             issuing_language_node_id: self.issuing_language_node_id.clone(),
+            unrecorded_sources: self.unrecorded_sources,
             batch_parent_call_id: self.batch_parent_call_id.clone(),
             process_work: self.process_work.clone(),
             started_process_ids: Arc::clone(&self.started_process_ids),
@@ -662,25 +667,16 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Emits the stream events a group child recorded because no opener was
-    /// live where it ran (FIG-3712): its session events on the session
-    /// stream, its turn activities as they were recorded.
-    pub(super) async fn emit_recorded_child_stream(
-        &self,
-        stream: &[crate::runtime::effect::ChildStreamEvent],
-    ) {
-        for event in stream {
-            match event {
-                crate::runtime::effect::ChildStreamEvent::Session(event) => {
-                    crate::session_model::send_event(&self.dispatch.event_tx, event.clone()).await;
-                }
-                crate::runtime::effect::ChildStreamEvent::Activity(activity) => {
-                    if let Some(tx) = &self.turn_event_tx {
-                        let _ = tx.send(activity.clone()).await;
-                    }
-                }
-            }
-        }
+    /// Adds sources this context was built from that have no recorded form:
+    /// what the embedder's open supplied and the turn's context overlay. A
+    /// group tool child this context opens records them (FIG-3712).
+    #[must_use]
+    pub fn with_unrecorded_session_sources(
+        mut self,
+        sources: crate::runtime::effect::UnrecordedSessionSources,
+    ) -> Self {
+        self.unrecorded_sources = self.unrecorded_sources.union(sources);
+        self
     }
 
     pub fn with_turn_event_sender(mut self, turn_event_tx: Sender<TurnActivity>) -> Self {

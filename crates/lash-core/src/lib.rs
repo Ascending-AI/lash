@@ -104,8 +104,9 @@ pub use lash_core_execution::triggers;
 
 pub mod facade_support {
     pub use crate::runtime::effect::{
-        DeploymentToolChildContext, LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry,
-        ToolChildContextSource, ToolChildDriver, ToolChildHost, ToolChildRequest,
+        ContextSourceInstall, DeploymentToolChildContext, LiveOpenerContext, LiveOpenerGuard,
+        LiveOpenerRegistry, ToolChildContextSource, ToolChildDriver, ToolChildHost,
+        ToolChildRebuildRefusal, ToolChildRequest, ToolChildSessionFacts, UnrecordedSessionSources,
         opener_for_execution_scope,
     };
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};

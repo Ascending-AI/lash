@@ -73,9 +73,10 @@ pub struct LashCore {
         Arc<crate::tool_intent_ingress::RuntimeSubmissionGates>,
     /// The context a group tool child of this core's sessions runs under when
     /// its opener is not live where it runs (FIG-3712). The backend's
-    /// tool-child host holds it weakly; this keeps it alive for the core's
-    /// lifetime.
-    pub(crate) _tool_child_context_source:
+    /// tool-child host holds it weakly; the core and every session it opens
+    /// hold it strongly, so a host that keeps its sessions and drops its core
+    /// keeps rebuilding their children.
+    pub(crate) tool_child_context_source:
         Arc<dyn lash_core::facade_support::ToolChildContextSource>,
 }
 
@@ -1266,7 +1267,7 @@ impl LashCoreBuilder {
             substrate_slot,
             process_event_sink,
             tool_intent_submission_gates: Default::default(),
-            _tool_child_context_source: tool_child_context_source,
+            tool_child_context_source,
         })
     }
 

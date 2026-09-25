@@ -87,7 +87,7 @@ fn settlement() -> ToolSettlement {
             "committed mid-attempt",
         )],
         usage: vec![delta(0, "call-a", 1, 41)],
-        stream: Vec::new(),
+        stream: crate::runtime::effect::RecordedChildStream::default(),
         model_return: crate::ModelToolReturn::text("call".to_string(), "tool".to_string(), "ok"),
     }
 }

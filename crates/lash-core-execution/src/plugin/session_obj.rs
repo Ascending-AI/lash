@@ -198,6 +198,13 @@ pub struct PluginSession {
     pub(super) session_extensions: PluginExtensions,
     pub(super) triggers: crate::TriggerEventCatalog,
     pub(super) contributions: PluginContributions,
+    /// Whether a plugin kept its state store past registration or
+    /// `session_ready`: such a plugin can read and mutate session state at
+    /// any time (FIG-3712).
+    pub(super) retains_state: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the session's plugins were seeded from a parent session's
+    /// capture rather than built fresh or rematerialized from their own.
+    pub(super) forked: bool,
 }
 impl PluginSession {
     pub fn session_id(&self) -> &str {
@@ -222,6 +229,24 @@ impl PluginSession {
 
     pub fn subagent_context(&self) -> Option<&SubagentSessionContext> {
         self.subagent.as_ref()
+    }
+
+    /// Whether this session's plugins hold mutable session state: a plugin
+    /// kept its state store, or a namespace holds values (FIG-3712).
+    pub fn holds_plugin_state(&self) -> bool {
+        self.retains_state.load(std::sync::atomic::Ordering::SeqCst)
+            || self
+                .state
+                .lock_recover()
+                .data
+                .plugins
+                .values()
+                .any(|namespace| !namespace.values.is_empty())
+    }
+
+    /// Whether this session's plugins were forked from a parent session.
+    pub fn forked_plugins(&self) -> bool {
+        self.forked || !self.tool_catalog_overlay.is_empty()
     }
 
     pub fn extensions(&self) -> &PluginExtensions {

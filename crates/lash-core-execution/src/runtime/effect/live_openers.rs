@@ -164,9 +164,8 @@ impl LiveOpenerContext {
     }
 
     /// A context the deployment built for a child whose opener is not live
-    /// here (FIG-3712). Its cancellation is its own: nothing local signals it,
-    /// because the opener's turn cancel reaches such a child only through the
-    /// durable gate its recorded authority observes.
+    /// here (FIG-3712). Its cancellation is its own: no opener fires it; a
+    /// watch of the child's turn gate does.
     #[must_use]
     pub(crate) fn deployment_built(
         dispatch: crate::tool_dispatch::ToolDispatchContext<'static>,

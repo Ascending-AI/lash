@@ -72,6 +72,7 @@ mod tests {
             authority(),
             env(),
             ToolChildCompletionRouting::Durable,
+            lash_core_execution::runtime::effect::ToolChildSessionFacts::default(),
         )
     }
 
@@ -200,6 +201,7 @@ mod tests {
             authority(),
             env(),
             ToolChildCompletionRouting::Inline,
+            lash_core_execution::runtime::effect::ToolChildSessionFacts::default(),
         );
         let decoded: ToolChildRequest =
             serde_json::from_str(&serde_json::to_string(&pinned).expect("serializes"))

@@ -22,6 +22,10 @@ pub(crate) struct BoundSession {
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
     catalog: Arc<dyn SessionStoreFactory>,
+    /// The core's tool-child context source (FIG-3712), held for as long as
+    /// the session is: the backend's host holds it weakly, and a session
+    /// whose core was dropped still has children to rebuild.
+    tool_child_context_source: Option<Arc<dyn lash_core::facade_support::ToolChildContextSource>>,
 }
 
 impl BoundSession {
@@ -44,7 +48,23 @@ impl BoundSession {
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
             process_engines: env.core.process_engines.clone(),
             catalog,
+            tool_child_context_source: None,
         }
+    }
+
+    /// Keeps `source` alive for as long as this binding is.
+    pub(crate) fn holding_tool_child_context_source(
+        mut self,
+        source: Arc<dyn lash_core::facade_support::ToolChildContextSource>,
+    ) -> Self {
+        self.tool_child_context_source = Some(source);
+        self
+    }
+
+    /// Whether this binding keeps a tool-child context source alive.
+    #[cfg(test)]
+    pub(crate) fn holds_tool_child_context_source(&self) -> bool {
+        self.tool_child_context_source.is_some()
     }
 
     pub(crate) fn session_id(&self) -> &SessionId {

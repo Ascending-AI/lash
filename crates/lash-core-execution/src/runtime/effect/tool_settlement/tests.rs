@@ -110,7 +110,7 @@ fn settlement() -> ToolSettlement {
         triggers: Vec::new(),
         checkpoint_messages: Vec::new(),
         usage: Vec::new(),
-        stream: Vec::new(),
+        stream: crate::runtime::effect::RecordedChildStream::default(),
         model_return: model_return(),
     }
 }

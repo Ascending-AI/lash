@@ -36,14 +36,14 @@ impl crate::ToolProvider for NoopTools {
     }
 }
 
-fn spec(turns: usize) -> ProcessExecutionEnvSpec {
+pub(super) fn spec(turns: usize) -> ProcessExecutionEnvSpec {
     ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),
         crate::SessionPolicy::new(crate::TurnBudget::bounded(turns)),
     )
 }
 
-fn manifest(id: &str) -> ToolManifest {
+pub(super) fn manifest(id: &str) -> ToolManifest {
     let mut manifest = crate::ToolDefinition::raw(
         id,
         id,
@@ -97,12 +97,19 @@ fn request_with_identity(identity: ToolAttemptEffectIdentity) -> ToolChildReques
         crate::TurnControlBindingId::new("recorded-authority").expect("a valid binding id"),
         ProcessExecutionEnvRef::new("env-ref"),
         ToolChildCompletionRouting::Inline,
+        crate::runtime::effect::ToolChildSessionFacts {
+            tool_surface: vec![crate::ToolDefinition {
+                manifest: manifest("recorded-tool"),
+                contract: crate::ToolContract::default(),
+            }],
+            ..Default::default()
+        },
     )
 }
 
 /// The opener's own context, every recorded field set to something the child
 /// must not inherit.
-fn lent() -> ToolDispatchContext<'static> {
+pub(super) fn lent() -> ToolDispatchContext<'static> {
     lent_with_direct_completions(crate::DirectCompletionClient::unavailable(
         "direct completions are unavailable in this test context",
     ))
@@ -218,13 +225,22 @@ fn the_child_is_dispatched_against_its_admitted_manifest_not_the_live_catalog() 
         crate::tool_dispatch::resolve_callable_manifest_by_id(&child, &ToolId::from("search"))
             .expect("the admitted manifest resolves at the child's own id");
     assert_eq!(resolved.retry_policy, ToolRetryPolicy::safe(4, 10, 100));
-    // The ruling binds the recorded call's id; every other live entry is lent
-    // unchanged, because a call the child's orchestrating body issues is a
-    // fresh admission and consults the live catalog.
+    // Every other id answers from the surface the opener recorded at group
+    // open (FIG-3712), never from the context serving the child: a call the
+    // child's orchestrating body issues is admitted against what its opener
+    // could call.
+    assert!(
+        crate::tool_dispatch::resolve_callable_manifest_by_id(
+            &child,
+            &ToolId::from("recorded-tool")
+        )
+        .is_some(),
+        "a nested admission resolves through the recorded surface"
+    );
     assert!(
         crate::tool_dispatch::resolve_callable_manifest_by_id(&child, &ToolId::from("opener-tool"))
-            .is_some(),
-        "a fresh nested admission resolves through the lent live catalog"
+            .is_none(),
+        "a nested admission never resolves through the serving context's catalog"
     );
 }
 
@@ -940,17 +956,16 @@ async fn a_nested_retry_sleep_observes_the_childs_recorded_gate() {
         crate::AdmittedScope::turn("child-session", "turn"),
     )
     .expect("a valid child scope");
-    let request = request();
+    let mut request = request();
     let mut lent = lent();
     lent.tools = Arc::new(RetryOnceTools {
         attempts: std::sync::atomic::AtomicUsize::new(0),
     });
-    lent.tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![
-        crate::ToolDefinition {
-            manifest: manifest("retry-leaf"),
-            contract: crate::ToolContract::default(),
-        },
-    ]));
+    // The child's nested calls are admitted against its recorded surface.
+    request.session.tool_surface = vec![crate::ToolDefinition {
+        manifest: manifest("retry-leaf"),
+        contract: crate::ToolContract::default(),
+    }];
     let dispatch = Arc::new(
         rebind_child_dispatch(
             &lent,
@@ -1195,7 +1210,7 @@ async fn a_refused_presentation_refuses_the_child_rather_than_settling_as_its_re
 /// flight when the sibling is polled. `concurrent` makes it drive independent
 /// work the way a keyed journal's controller does; left false, it keeps the
 /// seam's default, which is what Restate's controller answers.
-struct IssueOrderRecorder {
+pub(super) struct IssueOrderRecorder {
     concurrent: bool,
     in_flight: std::sync::atomic::AtomicUsize,
     peak_in_flight: std::sync::atomic::AtomicUsize,
@@ -1203,7 +1218,7 @@ struct IssueOrderRecorder {
 }
 
 impl IssueOrderRecorder {
-    fn new(concurrent: bool) -> Self {
+    pub(super) fn new(concurrent: bool) -> Self {
         Self {
             concurrent,
             in_flight: std::sync::atomic::AtomicUsize::new(0),
@@ -1318,7 +1333,7 @@ async fn run_nested_batch(recorder: Arc<IssueOrderRecorder>) -> Vec<crate::ToolI
         crate::AdmittedScope::turn("child-session", "turn"),
     )
     .expect("a valid child scope");
-    let request = request();
+    let mut request = request();
     let mut lent = lent();
     // Every nested call emits its stream start on the lent channel; `lent()`'s
     // one-slot channel would block the second call's send.
@@ -1326,12 +1341,11 @@ async fn run_nested_batch(recorder: Arc<IssueOrderRecorder>) -> Vec<crate::ToolI
     std::mem::forget(event_rx);
     lent.event_tx = event_tx;
     lent.tools = Arc::new(EchoLeafTools);
-    lent.tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![
-        crate::ToolDefinition {
-            manifest: manifest("echo-leaf"),
-            contract: crate::ToolContract::default(),
-        },
-    ]));
+    // The child's nested calls are admitted against its recorded surface.
+    request.session.tool_surface = vec![crate::ToolDefinition {
+        manifest: manifest("echo-leaf"),
+        contract: crate::ToolContract::default(),
+    }];
     let dispatch = Arc::new(
         rebind_child_dispatch(
             &lent,

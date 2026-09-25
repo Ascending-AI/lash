@@ -72,39 +72,76 @@ fn model_reply(request: &LlmRequest, via_batch: bool) -> LlmResponse {
     }
 }
 
-fn tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+/// How long the tool's first attempt asks to wait before its retry, when it
+/// fails first: far past anything the test advances the clock by.
+const RETRY_AFTER_MS: u64 = 3_600_000;
+
+fn tool_definition(retries: bool) -> lash_core::ToolDefinition {
+    let mut definition = lash_core::ToolDefinition::raw(
         format!("tool:{TOOL}"),
         TOOL,
         "Answer once the test opens the gate.",
         json!({"type": "object", "properties": {}, "additionalProperties": false}),
         json!({"type": "object"}),
-    )
+    );
+    if retries {
+        definition.manifest.retry_policy =
+            lash_core::ToolRetryPolicy::safe(3, RETRY_AFTER_MS, RETRY_AFTER_MS);
+    }
+    definition
 }
 
 /// A tool that waits for the test to open its gate before it answers, so the
-/// test decides what the turn's handler goes through meanwhile.
+/// test decides what the turn's handler goes through meanwhile. When
+/// `fail_first` is set, its first attempt fails retryably instead and asks
+/// for its retry an hour later.
 struct GatedTool {
     executions: Arc<AtomicUsize>,
     gate: Arc<tokio::sync::Semaphore>,
+    fail_first: bool,
+    /// Set when an attempt saw its cancellation token fire while it waited
+    /// for the gate; the attempt then answers cancelled.
+    stopped: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for GatedTool {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![tool_definition().manifest()]
+        vec![tool_definition(self.fail_first).manifest()]
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == TOOL).then(|| Arc::new(tool_definition().contract()))
+        (name == TOOL).then(|| Arc::new(tool_definition(self.fail_first).contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        self.executions.fetch_add(1, Ordering::SeqCst);
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let execution = self.executions.fetch_add(1, Ordering::SeqCst);
+        if self.fail_first && execution == 0 {
+            return lash_core::ToolOutcome::retryable_failure(
+                lash_core::ToolFailureClass::External,
+                "transient",
+                "not yet; ask again in an hour",
+                Some(RETRY_AFTER_MS),
+            )
+            .into();
+        }
         // Held open for the rest of the test once the gate opens, so a
         // re-executed attempt answers at once.
-        let _permit = self.gate.acquire().await.expect("the gate never closes");
-        lash_core::ToolOutcome::ok(json!({"result": "gated result"})).into()
+        let stop = call
+            .context
+            .cancellation_token()
+            .cloned()
+            .unwrap_or_default();
+        tokio::select! {
+            permit = self.gate.acquire() => {
+                let _permit = permit.expect("the gate never closes");
+                lash_core::ToolOutcome::ok(json!({"result": "gated result"})).into()
+            }
+            () = stop.cancelled() => {
+                self.stopped.store(true, Ordering::SeqCst);
+                lash_core::ToolOutcome::cancelled("the turn asked the tool to stop").into()
+            }
+        }
     }
 }
 
@@ -115,9 +152,11 @@ struct Turn {
     /// wiring is what a child builds its context from when its turn is
     /// suspended.
     _core: lash::LashCore,
+    session: lash::LashSession,
     backend: RestateTestBackend,
     gate: Arc<tokio::sync::Semaphore>,
     executions: Arc<AtomicUsize>,
+    stopped: Arc<std::sync::atomic::AtomicBool>,
     answer: Arc<Mutex<Option<String>>>,
     /// The activities the turn reported on its last run.
     activities: Arc<Mutex<Vec<lash::TurnActivity>>>,
@@ -125,6 +164,39 @@ struct Turn {
 }
 
 async fn start_turn(config: ServerConfig, gate_open: bool, via_batch: bool) -> Turn {
+    start_turn_with(TurnOptions {
+        config,
+        gate_open,
+        via_batch,
+        fail_first: false,
+        hold_redrive: None,
+    })
+    .await
+}
+
+/// How a test's tool turn is set up.
+struct TurnOptions {
+    config: ServerConfig,
+    /// The tool answers as soon as it runs.
+    gate_open: bool,
+    /// The model reaches the tool through `batch`.
+    via_batch: bool,
+    /// The tool's first attempt fails retryably and asks for its retry an
+    /// hour later.
+    fail_first: bool,
+    /// Every attempt of the turn's handler after its first waits for a permit
+    /// here before it runs the turn, so the turn stays not live meanwhile.
+    hold_redrive: Option<Arc<tokio::sync::Semaphore>>,
+}
+
+async fn start_turn_with(options: TurnOptions) -> Turn {
+    let TurnOptions {
+        config,
+        gate_open,
+        via_batch,
+        fail_first,
+        hold_redrive,
+    } = options;
     let backend = lash_restate_test::backend(0x3712, config)
         .await
         .expect("build the Restate test backend");
@@ -133,6 +205,7 @@ async fn start_turn(config: ServerConfig, gate_open: bool, via_batch: bool) -> T
         gate.add_permits(tokio::sync::Semaphore::MAX_PERMITS);
     }
     let executions = Arc::new(AtomicUsize::new(0));
+    let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("suspended-turn")
         .complete(move |request: LlmRequest| async move {
@@ -153,7 +226,9 @@ async fn start_turn(config: ServerConfig, gate_open: bool, via_batch: bool) -> T
             )
             .tools(Arc::new(GatedTool {
                 executions: Arc::clone(&executions),
+                stopped: Arc::clone(&stopped),
                 gate: Arc::clone(&gate),
+                fail_first,
             }) as Arc<dyn lash_core::ToolProvider>)
             .build(lash_core::LeaseOwnerIdentity::opaque(
                 "lash-restate-test",
@@ -170,7 +245,9 @@ async fn start_turn(config: ServerConfig, gate_open: bool, via_batch: bool) -> T
         .expect("admit the turn scope");
     let answer = Arc::new(Mutex::new(None));
     let activities = Arc::new(Mutex::new(Vec::new()));
+    let attempts = Arc::new(AtomicUsize::new(0));
     let attempt: lash_restate_test::HandlerAttempt = {
+        let session = session.clone();
         let answer = Arc::clone(&answer);
         let activities = Arc::clone(&activities);
         Arc::new(move |scoped| {
@@ -178,7 +255,12 @@ async fn start_turn(config: ServerConfig, gate_open: bool, via_batch: bool) -> T
             let turn_id = turn_id.clone();
             let answer = Arc::clone(&answer);
             let activities = Arc::clone(&activities);
+            let redrive = attempts.fetch_add(1, Ordering::SeqCst) > 0;
+            let hold = hold_redrive.clone().filter(|_| redrive);
             Box::pin(async move {
+                if let Some(hold) = hold {
+                    let _permit = hold.acquire().await.expect("the hold never closes");
+                }
                 let output = session
                     .turn(lash::TurnInput::text("call the gated tool"))
                     .turn_id(turn_id)
@@ -204,9 +286,11 @@ async fn start_turn(config: ServerConfig, gate_open: bool, via_batch: bool) -> T
     });
     Turn {
         _core: core,
+        session,
         backend,
         gate,
         executions,
+        stopped,
         answer,
         activities,
         run,
@@ -265,6 +349,75 @@ impl Turn {
         }
     }
 
+    /// Waits until invocation `id` reports `status`.
+    async fn invocation_reaches(&self, id: &str, status: &str) {
+        loop {
+            if self
+                .backend
+                .server()
+                .invocations()
+                .into_iter()
+                .any(|view| view.id == id && view.status == status)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// The commands the tool child's drive journaled, in order, from its
+    /// read of its recorded environment on: what the child asked the engine
+    /// to do. Each is its type and what it names and carries; the completion
+    /// ids a command is numbered with are positions in the whole journal, so
+    /// they are left out, as is the group-admission prefix before the drive,
+    /// whose waits depend on when the child's dispatch overtook its opener's
+    /// registration of the group, not on the context the child ran on.
+    fn child_commands(&self, child: &str) -> Vec<(String, String, bytes::Bytes)> {
+        use lash_restate_test::protocol::MessageType;
+        use lash_restate_test::protocol::generated as pb;
+        use prost::Message as _;
+        self.backend
+            .server()
+            .journal(child)
+            .expect("the child's invocation exists")
+            .into_iter()
+            .filter(|entry| entry.ty.is_command())
+            .map(|entry| match entry.ty {
+                MessageType::CallCommand => {
+                    let call = pb::CallCommandMessage::decode(entry.payload)
+                        .expect("a journaled call decodes");
+                    (
+                        "call".to_owned(),
+                        format!("{}/{}/{}", call.service_name, call.key, call.handler_name),
+                        call.parameter,
+                    )
+                }
+                MessageType::RunCommand => {
+                    let run = pb::RunCommandMessage::decode(entry.payload)
+                        .expect("a journaled run decodes");
+                    ("run".to_owned(), run.name, bytes::Bytes::new())
+                }
+                other => (format!("{other:?}"), String::new(), entry.payload),
+            })
+            .skip_while(|(kind, name, _)| !(kind == "run" && name.ends_with(":env")))
+            .collect()
+    }
+
+    /// Waits until the turn is not live anywhere, when every redrive of its
+    /// handler is held: it is suspended, or a redrive has started and is
+    /// waiting on the hold, never running the turn.
+    async fn turn_held(&self) {
+        loop {
+            if self.backend.server().invocations().into_iter().any(|view| {
+                view.target.starts_with(TURN_HOST)
+                    && (view.status == "suspended" || view.attempts >= 2)
+            }) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
     /// Waits until the turn's handler has been suspended.
     async fn turn_suspended(&self) {
         loop {
@@ -317,14 +470,7 @@ async fn a_child_attempt_after_its_turn_was_suspended_still_finishes_the_turn() 
 /// With every await suspending the handler that makes it (the
 /// `INACTIVITY_TIMEOUT=0s` mode), the turn is suspended before its tool child
 /// ever starts. The turn must still finish with the tool's answer.
-///
-/// Ignored against FIG-3682 on this branch's base: the tool child runs and the
-/// turn reaches its answer, but the handler is then replayed after its final
-/// commit, and the replayed acceptance diverges on the committed turn index.
-/// FIG-3682's fix (#2195) is on main; this passes on main with it, so the
-/// ignore goes when this branch's base carries it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-3682: the replayed acceptance diverges on the committed turn index until this branch's base carries #2195"]
 async fn a_tool_turn_finishes_when_every_await_suspends_its_handler() {
     let turn = start_turn(ServerConfig::default().always_replay(true), true, false).await;
     let answer = turn.finish(Duration::from_secs(20)).await;
@@ -375,4 +521,245 @@ async fn a_batch_child_with_no_live_turn_records_its_nested_events_for_the_turn(
         vec![(TOOL.to_owned(), "call-1".to_owned())],
         "the batch's nested call completed on the turn's stream, under the batch"
     );
+}
+
+/// FIG-3672 P9's durable turn cancel reaches a child running on a context the
+/// deployment built, at the child's next durable wait.
+///
+/// The tool's first attempt fails and asks for its retry an hour later, so
+/// the child sleeps durably, and both it and its turn are suspended. The turn
+/// is then cancelled through its durable gate only, and every redrive of the
+/// turn's handler is held, so the turn is not live anywhere while the child
+/// resumes: the child runs on a built context, whose token nothing local
+/// signals. Its retry sleep must still lose to the cancel, so the tool never
+/// runs again. The child's attempt ends there as a live fault, never settled;
+/// what ends the child is its turn's group close, once the turn runs again
+/// and sees its own cancel, exactly as on a live opener.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_durable_turn_cancel_reaches_a_rebuilt_child_at_its_next_wait() {
+    let hold = Arc::new(tokio::sync::Semaphore::new(0));
+    let turn = start_turn_with(TurnOptions {
+        config: ServerConfig::default().time(TimeMode::Manual),
+        gate_open: true,
+        via_batch: false,
+        fail_first: true,
+        hold_redrive: Some(Arc::clone(&hold)),
+    })
+    .await;
+    let child = turn.tool_child().await;
+    while turn.executions.load(Ordering::SeqCst) == 0 {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // Idle past the inactivity timeout until the turn, waiting on its child,
+    // and the child, in its hour-long retry sleep, are both suspended. The
+    // server notices starvation at one advance and suspends at a later one,
+    // and the child may reach its sleep only after an advance, so this
+    // advances until both are suspended: a few minutes of virtual time, far
+    // short of the retry.
+    // Each advance is a minute of virtual time; forty of them stay far
+    // short of the hour-long retry.
+    let mut suspended = false;
+    for _ in 0..40 {
+        turn.backend.server().advance(Duration::from_secs(61));
+        if tokio::time::timeout(Duration::from_millis(500), async {
+            turn.turn_held().await;
+            turn.invocation_reaches(&child, "suspended").await;
+        })
+        .await
+        .is_ok()
+        {
+            suspended = true;
+            break;
+        }
+    }
+    assert!(
+        suspended,
+        "the turn and its child are both suspended: {:#?}",
+        turn.backend
+            .server()
+            .invocations()
+            .into_iter()
+            .filter(|view| view.status != "completed")
+            .map(|view| format!(
+                "{} {} attempts={} last_failure={:?}",
+                view.target, view.status, view.attempts, view.last_failure
+            ))
+            .collect::<Vec<_>>()
+    );
+
+    turn.session
+        .request_turn_cancel(&lash::TurnId::from("turn-1"), "stop", None, None)
+        .await
+        .expect("the durable cancel is accepted");
+
+    // The turn is held, so only the child's rebuilt context can observe the
+    // cancel: its retry sleep loses to the turn's durable gate.
+    let observed = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if turn.backend.server().invocations().into_iter().any(|view| {
+                view.id == child
+                    && view.last_failure.as_ref().is_some_and(|(_, message)| {
+                        message.contains("runtime_effect_sleep_cancelled")
+                    })
+            }) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    if observed.is_err() {
+        let open: Vec<_> = turn
+            .backend
+            .server()
+            .invocations()
+            .into_iter()
+            .map(|view| {
+                format!(
+                    "{} {} {} attempts={} last_failure={:?}",
+                    view.id, view.target, view.status, view.attempts, view.last_failure
+                )
+            })
+            .collect();
+        panic!(
+            "the cancel never reached the child's retry sleep while its turn was held: {open:#?}"
+        );
+    }
+    assert_eq!(
+        turn.executions.load(Ordering::SeqCst),
+        1,
+        "the cancelled child never ran its retry"
+    );
+
+    let executions = Arc::clone(&turn.executions);
+    hold.add_permits(tokio::sync::Semaphore::MAX_PERMITS);
+    let answer = turn.finish(Duration::from_secs(20)).await;
+    assert!(
+        answer.contains("Cancel"),
+        "the turn ends cancelled: {answer}"
+    );
+    assert_eq!(
+        executions.load(Ordering::SeqCst),
+        1,
+        "the tool never ran again after its turn was cancelled"
+    );
+}
+
+/// A rebuilt child's tool gets a stop its turn's durable gate fires, as a
+/// live opener's children get the stop the opener's drive fires (FIG-3672
+/// P9): a tool body that waits on nothing durable still sees the cancel.
+///
+/// The child's first attempt starts beside its live turn and is still inside
+/// the tool when the turn is suspended; that attempt dies, and every redrive
+/// of the turn is held, so the attempt that replaces it runs on a built
+/// context. The turn is then cancelled through its durable gate only. The
+/// tool, waiting on its own gate, must see its token fire and answer
+/// cancelled, and the turn must end cancelled.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_rebuilt_childs_tool_sees_its_turns_durable_cancel_as_its_token() {
+    let hold = Arc::new(tokio::sync::Semaphore::new(0));
+    let turn = start_turn_with(TurnOptions {
+        config: ServerConfig::default().time(TimeMode::Manual),
+        gate_open: false,
+        via_batch: false,
+        fail_first: false,
+        hold_redrive: Some(Arc::clone(&hold)),
+    })
+    .await;
+    let child = turn.tool_child().await;
+    while turn.executions.load(Ordering::SeqCst) == 0 {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let mut suspended = false;
+    for _ in 0..20 {
+        turn.backend.server().advance(Duration::from_secs(61));
+        if tokio::time::timeout(Duration::from_millis(250), turn.turn_held())
+            .await
+            .is_ok()
+        {
+            suspended = true;
+            break;
+        }
+    }
+    assert!(suspended, "the turn is suspended");
+    assert!(turn.backend.server().crash(&child), "the child is running");
+    let server = turn.backend.server().clone();
+    let ticker = tokio::spawn(async move {
+        loop {
+            server.advance(Duration::from_secs(1));
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while turn.executions.load(Ordering::SeqCst) < 2 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the replacement attempt runs the tool on a built context");
+
+    turn.session
+        .request_turn_cancel(&lash::TurnId::from("turn-1"), "stop", None, None)
+        .await
+        .expect("the durable cancel is accepted");
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while !turn.stopped.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the rebuilt child's tool saw its token fire while its turn was held");
+
+    hold.add_permits(tokio::sync::Semaphore::MAX_PERMITS);
+    let answer = turn.finish(Duration::from_secs(20)).await;
+    ticker.abort();
+    assert!(
+        answer.contains("Cancel"),
+        "the turn ends cancelled: {answer}"
+    );
+}
+
+/// A leaf tool child in an ordinary session asks the engine for the same
+/// commands whether it ran on its live opener's context or on one the
+/// deployment built: the rebuilt context changes where the child's context
+/// comes from, never what the child does. The second run's turn is never
+/// live while its child runs, so only a built context can serve the child
+/// there (without one, that child is never routed; see
+/// `a_tool_turn_finishes_when_every_await_suspends_its_handler`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_leaf_child_records_the_same_commands_on_a_rebuilt_context_as_on_its_live_opener() {
+    // The turn is live while its child runs.
+    let live = start_turn(ServerConfig::default(), true, false).await;
+    let live_child = live.tool_child().await;
+    live.invocation_reaches(&live_child, "completed").await;
+    let live_commands = live.child_commands(&live_child);
+    assert_eq!(live.finish(Duration::from_secs(20)).await, "done");
+
+    // Every await suspends the handler making it, so the turn is never live
+    // while its child runs.
+    let rebuilt = start_turn(ServerConfig::default().always_replay(true), true, false).await;
+    let rebuilt_child = rebuilt.tool_child().await;
+    rebuilt
+        .invocation_reaches(&rebuilt_child, "completed")
+        .await;
+    let rebuilt_commands = rebuilt.child_commands(&rebuilt_child);
+    assert_eq!(rebuilt.finish(Duration::from_secs(20)).await, "done");
+
+    assert!(
+        live_commands
+            .iter()
+            .any(|(kind, name, _)| kind == "run" && name.ends_with(":attempt:1")),
+        "the live child's drive ran its tool: {live_commands:#?}"
+    );
+    assert_eq!(
+        live_commands.len(),
+        rebuilt_commands.len(),
+        "live {live_commands:#?}\nrebuilt {rebuilt_commands:#?}"
+    );
+    for (index, (live, rebuilt)) in live_commands.iter().zip(&rebuilt_commands).enumerate() {
+        assert_eq!(
+            live, rebuilt,
+            "command {index} differs between the live and the rebuilt child"
+        );
+    }
 }

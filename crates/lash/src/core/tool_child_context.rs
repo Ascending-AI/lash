@@ -7,12 +7,14 @@
 //! a plugin host of the core's plugin factories (its own, because a plugin
 //! host admits one session of a given id and the child's session may be open
 //! in this process), the core's provider and work ports, and the recorded
-//! policy and plugin options. The runtime is storeless: it reads no session state and
-//! persists none, so a child never writes session state under an opener that
-//! is not running. Everything the child produces rides its settlement to the
-//! opener, as it does on the live path. Session-scoped plugin overlays a
-//! particular open added are not part of the core's wiring and are absent
-//! here, exactly as they are for a process runtime.
+//! policy and plugin options, under the session's recorded tool access and
+//! subagent context. The runtime is storeless: it persists nothing, and the
+//! driver refuses any session read or change the child makes on it.
+//! Everything the child produces rides its settlement to the opener, as it
+//! does on the live path. What a particular open or turn added (overlay
+//! tools, per-open plugins or provider, forked plugins, plugin state) is not
+//! part of the core's wiring: a child whose request records one is refused
+//! before this source is asked, and waits for its live opener.
 
 use std::sync::Arc;
 
@@ -48,8 +50,14 @@ pub(crate) struct CoreToolChildContextSource {
 
 impl CoreToolChildContextSource {
     /// Builds the core's source and installs it on the backend's tool-child
-    /// host. The core keeps the returned source alive; the host holds it
-    /// weakly.
+    /// host. The core and each of its sessions keep the returned source
+    /// alive; the host holds it weakly.
+    ///
+    /// One core per backend is what makes the rebuilt path usable. While
+    /// another live core's source is installed on the same host, the host is
+    /// ambiguous: no child is rebuilt under either core's wiring, and a child
+    /// with no live opener waits for its opener, refused typed, as it did
+    /// before FIG-3712. That is logged here, never a build failure.
     pub(crate) fn install(
         env: &RuntimeEnvironment,
         protocol_factory: Option<Arc<dyn PluginFactory>>,
@@ -68,8 +76,19 @@ impl CoreToolChildContextSource {
             work_ports,
             session_execution_owner,
         });
-        if let Some(tool_children) = env.core.control.tool_children.as_ref() {
-            tool_children.install_context_source(&source);
+        let installed = env
+            .core
+            .control
+            .tool_children
+            .as_ref()
+            .map(|tool_children| tool_children.install_context_source(&source));
+        if let Some(lash_core::facade_support::ContextSourceInstall::Ambiguous { live }) = installed
+        {
+            tracing::warn!(
+                live,
+                "another live core already rebuilds this backend's tool children; while both \
+                 live, a tool child with no live opener waits for its opener"
+            );
         }
         source
     }
@@ -106,11 +125,16 @@ impl ToolChildContextSource for CoreToolChildContextSource {
         env = env.with_work_ports(process, queued);
         let session_id = request.scope.session_id.clone();
         let policy = execution_env.policy.clone();
-        let state = RuntimeSessionState {
+        let mut state = RuntimeSessionState {
             session_id: session_id.clone(),
             policy: policy.clone(),
             ..RuntimeSessionState::new(policy.clone())
         };
+        // The session's recorded authority, never the fresh session's
+        // default: the plugins built below see the child's tool access and
+        // subagent depth, as its opener's plugins did (FIG-3712).
+        state.authority.tool_access = request.session.tool_access.clone();
+        state.authority.subagent = request.session.subagent.clone();
         let runtime = LashRuntime::from_environment_with_plugin_options(
             &env,
             policy,

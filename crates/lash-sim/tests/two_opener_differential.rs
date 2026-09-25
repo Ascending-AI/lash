@@ -669,6 +669,7 @@ fn request(
         cancellation,
         side.env_ref.clone(),
         side.routing.clone(),
+        lash_core::runtime::effect::ToolChildSessionFacts::default(),
     );
     if let Some(process) = &side.enclosing_process {
         request = request.with_enclosing_process(process.clone());

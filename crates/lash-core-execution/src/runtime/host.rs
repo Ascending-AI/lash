@@ -146,6 +146,12 @@ pub struct RuntimeControlConfig {
     /// which the conformance suites do deliberately. Openers are then not
     /// registered either, so nothing is half-wired.
     pub tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
+    /// What this open supplied beyond the deployment's own wiring — plugin
+    /// factories, a provider, a tool-source policy or open mode — as presence
+    /// flags. A group tool child records them (FIG-3712): a context the
+    /// deployment builds for it cannot reproduce them, so such a child waits
+    /// for its live opener. Set by the embedder that opened the session.
+    pub open_sources: crate::runtime::effect::UnrecordedSessionSources,
 }
 
 #[derive(Clone)]
@@ -216,6 +222,7 @@ impl RuntimeHostConfig {
                 engine_child_max_attempts: DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS,
                 opener_work_bound: crate::session::OpenerWorkBound::default(),
                 tool_children,
+                open_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
             },
             tracing: RuntimeTracingConfig {
                 trace_sink: None,

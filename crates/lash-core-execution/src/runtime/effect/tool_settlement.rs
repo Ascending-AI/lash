@@ -319,15 +319,15 @@ pub struct ToolSettlement {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub usage: Vec<ToolUsageDelta>,
     /// The stream events a child emitted while no opener was live where it
-    /// ran, in the order they arrived (FIG-3712).
+    /// ran (FIG-3712), in the journal's own bounded shape.
     ///
     /// A child that runs beside its live opener streams its events to the
     /// opener as they happen and records none here. A child that built its
     /// own context has no stream to reach, so its events are recorded, and
-    /// the opener emits them when it incorporates this settlement: late,
-    /// never dropped.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub stream: Vec<ChildStreamEvent>,
+    /// the opener emits them when it incorporates this settlement. See
+    /// [`RecordedChildStream`](super::RecordedChildStream).
+    #[serde(default, skip_serializing_if = "super::RecordedChildStream::is_empty")]
+    pub stream: super::RecordedChildStream,
     /// The resolved model-facing return: the session's singleton plugin
     /// projector run once at this child's presentation boundary, or its
     /// recorded fallback on projector error, plus the
@@ -390,28 +390,9 @@ impl ToolSettlement {
                 .iter()
                 .flat_map(|capture| capture.usage.iter().cloned())
                 .collect(),
-            stream: Vec::new(),
+            stream: super::RecordedChildStream::default(),
             model_return,
         }
-    }
-}
-
-/// One stream event a tool child emitted with no live opener to deliver it
-/// to, recorded on its [`ToolSettlement::stream`].
-///
-/// Equality is by serialized form: the stream DTOs it carries implement none.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "channel", content = "event", rename_all = "snake_case")]
-pub enum ChildStreamEvent {
-    /// A session stream event: a nested call's start, a plugin runtime event.
-    Session(crate::SessionStreamEvent),
-    /// A turn activity: a nested call's `ToolCallStarted`/`ToolCallCompleted`.
-    Activity(crate::TurnActivity),
-}
-
-impl PartialEq for ChildStreamEvent {
-    fn eq(&self, other: &Self) -> bool {
-        serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
     }
 }
 

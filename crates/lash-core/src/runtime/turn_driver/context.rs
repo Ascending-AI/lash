@@ -76,6 +76,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                         self.host.core.control.engine_child_max_attempts,
                     )
                     .with_turn_phase_probe(self.turn_phase_probe.clone())
+                    .with_unrecorded_session_sources(self.host.core.control.open_sources)
             })
     }
 

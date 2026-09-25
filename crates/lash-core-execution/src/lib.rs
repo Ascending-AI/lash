@@ -97,8 +97,9 @@ pub mod triggers;
 
 pub mod facade_support {
     pub use crate::runtime::effect::{
-        DeploymentToolChildContext, LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry,
-        ToolChildContextSource, ToolChildDriver, ToolChildHost, ToolChildRequest,
+        ContextSourceInstall, DeploymentToolChildContext, LiveOpenerContext, LiveOpenerGuard,
+        LiveOpenerRegistry, ToolChildContextSource, ToolChildDriver, ToolChildHost,
+        ToolChildRebuildRefusal, ToolChildRequest, ToolChildSessionFacts, UnrecordedSessionSources,
         opener_for_execution_scope,
     };
     /// Apply the canonical runtime invocation projection to an existing trace
