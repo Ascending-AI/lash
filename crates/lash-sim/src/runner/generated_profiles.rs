@@ -1500,6 +1500,7 @@ mod seed_tests {
         // A spent budget stops the sweep before the first seed; the run still
         // writes a summary so the caller can see how far it got.
         let artifact_root = tmp.path().to_path_buf();
+        let seeds = crate::quick_seed_sweep(4);
         let report = run_on_sim_harness_stack(
             "generated-sim-search-budget-test",
             SIM_HARNESS_STACK_LIMIT_BYTES,
@@ -1511,7 +1512,7 @@ mod seed_tests {
                 runtime.block_on(run_generated_sim_profile(
                     artifact_root,
                     "fast-random",
-                    4,
+                    seeds,
                     24,
                     SimShard::new(1, 2).expect("shard"),
                     SimRunMode::Search,
@@ -1524,8 +1525,13 @@ mod seed_tests {
 
         assert_eq!(report.mode, "search");
         assert_eq!(report.time_budget_seconds, Some(0));
-        // The shard still owns its two selected seeds; none of them ran.
-        assert_eq!(report.counts.generated_seeds, 2);
+        // The shard still owns its selected seeds; none of them ran.
+        assert_eq!(
+            report.counts.generated_seeds,
+            (0..seeds)
+                .filter(|index| SimShard::new(1, 2).expect("shard").selects(*index))
+                .count()
+        );
         assert_eq!(report.counts.reached_seeds, 0);
         assert_eq!(report.counts.boundary_events, 0);
         assert_eq!(report.determinism_sample.attempted_seeds, 0);

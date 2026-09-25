@@ -358,6 +358,93 @@ pub(crate) fn sample_paths() -> Vec<String> {
         .collect()
 }
 
+/// `LASH_QUICK` (AGENTS.md): the opt-in iteration knob for the heavy lanes.
+/// Set -- any value but `0` -- `quick_selection` narrows the full run to a
+/// deterministic subset. CI never sets it; the full selection stays the
+/// default and the release gate.
+fn quick_requested() -> bool {
+    std::env::var("LASH_QUICK").is_ok_and(|value| !value.is_empty() && value != "0")
+}
+
+/// FNV-1a over the path: the fixed hash the sample order is written against.
+/// `DefaultHasher`'s seed is unspecified, so the subset's order key is
+/// written out here.
+fn fnv1a64(text: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// The `LASH_QUICK` subset of `paths`: each stratum (the two directory levels
+/// under `test/`, as `sync.mjs` stratifies) contributes `ceil(count / 10)`
+/// paths in FNV-1a order, and every `includes` entry adds tests -- a shard
+/// name keeps that shard's tests whole, a `test/...` entry adds itself, `*`
+/// keeps everything. `scripts/dev-test.py` derives `includes` from the diff.
+pub(crate) fn quick_subset(paths: &[String], includes: &BTreeSet<String>) -> BTreeSet<String> {
+    if includes.contains("*") {
+        return paths.iter().cloned().collect();
+    }
+    let mut strata: BTreeMap<String, Vec<&String>> = BTreeMap::new();
+    for path in paths {
+        let stratum = path
+            .split('/')
+            .skip(1)
+            .take(2)
+            .collect::<Vec<_>>()
+            .join("/");
+        strata.entry(stratum).or_default().push(path);
+    }
+    let mut subset = BTreeSet::new();
+    for members in strata.values() {
+        let mut ordered = members
+            .iter()
+            .map(|path| (fnv1a64(path), *path))
+            .collect::<Vec<_>>();
+        ordered.sort_unstable();
+        subset.extend(
+            ordered
+                .into_iter()
+                .take(members.len().div_ceil(10))
+                .map(|(_, path)| path.clone()),
+        );
+    }
+    for include in includes {
+        if include.starts_with("test/") {
+            if paths.iter().any(|path| path == include) {
+                subset.insert(include.clone());
+            }
+        } else {
+            subset.extend(
+                paths
+                    .iter()
+                    .filter(|path| path.split('/').nth(1) == Some(include.as_str()))
+                    .cloned(),
+            );
+        }
+    }
+    subset
+}
+
+/// The paths the full selection runs: all of them, or `quick_subset`'s when
+/// `LASH_QUICK` is set. `LASH_TEST262_QUICK_INCLUDE` is the comma-separated
+/// include list `quick_subset` resolves.
+pub(crate) fn quick_selection(paths: &[String]) -> Option<Vec<String>> {
+    if !quick_requested() {
+        return None;
+    }
+    let includes = std::env::var("LASH_TEST262_QUICK_INCLUDE")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .collect();
+    Some(quick_subset(paths, &includes).into_iter().collect())
+}
+
 /// The harness includes with no in-dialect rendering, each with the dialect
 /// capability its rendering would need.
 pub(crate) fn unshimmable_includes() -> BTreeMap<String, String> {
@@ -790,6 +877,10 @@ pub(crate) fn bless(
     if std::env::var_os("TEST262_BLESS").is_none() {
         return false;
     }
+    assert!(
+        !quick_requested(),
+        "TEST262_BLESS rewrites the record from the run; unset LASH_QUICK so the whole selection is recorded"
+    );
     let workspace = std::env::var("BUILD_WORKSPACE_DIRECTORY")
         .expect("TEST262_BLESS writes the source tree; run it through `kiln run`");
     let directory = Path::new(&workspace).join("crates/lash-typescript/tests/test262");

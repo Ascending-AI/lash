@@ -271,10 +271,11 @@ fn full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler(
 
 /// The serial lane on the server double delivers one boundary sequence,
 /// reaches one outcome and grants the server's turn in one order, with no
-/// stall preemption, per seed: twenty seeds, each run twice.
+/// stall preemption, per seed: twenty seeds, each run twice (five under
+/// `LASH_QUICK`).
 #[test]
 fn serial_engine_lane_is_deterministic_across_seeds() {
-    for seed in 0_u64..20 {
+    for seed in 0_u64..crate::quick_seed_sweep(20) as u64 {
         let run = || {
             run_serial_lane(generate_workload(seed, "fast-random", 48).expect("workload"))
                 .expect("serial lane run")
@@ -380,7 +381,7 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
             })
     );
     let transcript = trace.render_session_transcript(&SessionId::from("suspend-tool"));
-    for seed in [2, 3] {
+    for seed in [2, 3].into_iter().take(crate::quick_seed_sweep(2)) {
         let workload = generate_workload(seed, "fast", 72).expect("workload");
         let varied = run_generated_workload_for_fixture(workload, "park-resume-transcript")
             .await
@@ -1024,6 +1025,11 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
     let tmp = tempfile::tempdir().expect("tempdir");
 
     let artifact_root = tmp.path().to_path_buf();
+    // `LASH_QUICK` shrinks the sweep; the shard still owns its even indices.
+    let seeds = crate::quick_seed_sweep(4);
+    let owned = (0..seeds)
+        .filter(|index| SimShard::new(1, 2).expect("shard").selects(*index))
+        .count();
     let report = run_on_sim_harness_stack(
         "generated-sim-search-test",
         SIM_HARNESS_STACK_LIMIT_BYTES,
@@ -1035,7 +1041,7 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
             runtime.block_on(run_generated_sim_profile(
                 artifact_root,
                 "fast-random",
-                4,
+                seeds,
                 24,
                 SimShard::new(1, 2).expect("shard"),
                 SimRunMode::Search,
@@ -1048,13 +1054,15 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
 
     assert_eq!(report.mode, "search");
     assert_eq!(report.shard, "1/2");
-    assert_eq!(report.configured_seeds, 4);
+    assert_eq!(report.configured_seeds, seeds);
     assert_eq!(report.seed_salt.as_deref(), Some("search-test-salt"));
     assert_eq!(report.seed_source, "salted_exploration");
-    // Shard 1/2 of 4 configured seeds owns seed indices 0 and 2.
-    assert_eq!(report.counts.generated_seeds, 2);
-    assert_eq!(report.determinism_sample.attempted_seeds, 1);
-    assert_eq!(report.determinism_sample.reproduced_identically, 1);
+    assert_eq!(report.counts.generated_seeds, owned);
+    let attempted = (0..seeds)
+        .filter(|index| SimShard::new(1, 2).expect("shard").selects(*index) && index % 20 == 0)
+        .count();
+    assert_eq!(report.determinism_sample.attempted_seeds, attempted);
+    assert_eq!(report.determinism_sample.reproduced_identically, attempted);
     assert_eq!(
         report.counts.real_observation_oracles + report.counts.model_property_oracles,
         report.counts.oracle_passes + report.counts.oracle_failures
@@ -1232,6 +1240,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     let tmp = tempfile::tempdir().expect("tempdir");
 
     let artifact_root = tmp.path().to_path_buf();
+    let seeds = crate::quick_seed_sweep(2);
     let report = run_on_sim_harness_stack(
         "generated-sim-profile-test",
         SIM_HARNESS_STACK_LIMIT_BYTES,
@@ -1243,7 +1252,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
             runtime.block_on(run_generated_sim_profile(
                 artifact_root,
                 "fast-random",
-                2,
+                seeds,
                 24,
                 SimShard::FULL,
                 SimRunMode::Evidence,
@@ -1255,9 +1264,9 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     .expect("generated sim");
 
     assert_eq!(report.profile, "fast-random");
-    assert_eq!(report.counts.generated_seeds, 2);
-    assert_eq!(report.counts.replay_reports, 2);
-    assert_eq!(report.counts.minimized_replays, 2);
+    assert_eq!(report.counts.generated_seeds, seeds);
+    assert_eq!(report.counts.replay_reports, seeds);
+    assert_eq!(report.counts.minimized_replays, seeds);
     for replay in &report.replay_reports {
         let transcript_path = replay
             .transcript_path
@@ -1643,8 +1652,8 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         "Runtime scripted answer."
     );
     assert_eq!(summary["counts"]["oracle_failures"], 0);
-    assert_eq!(summary["counts"]["backend_replays"], 2);
-    assert_eq!(summary["counts"]["minimized_replays"], 2);
+    assert_eq!(summary["counts"]["backend_replays"], seeds);
+    assert_eq!(summary["counts"]["minimized_replays"], seeds);
     assert_eq!(summary["scenario_contracts"].as_array().unwrap().len(), 4);
     assert_eq!(
         summary["scenario_contract_slices"]

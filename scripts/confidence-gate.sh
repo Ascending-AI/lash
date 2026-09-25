@@ -1173,7 +1173,11 @@ run_sim_generated_lane() {
     fast) sim_profile="${LASH_SIM_PROFILE:-fast-random}" ;;
     default) sim_profile="${LASH_SIM_PROFILE:-default-random}" ;;
     broad) sim_profile="${LASH_SIM_PROFILE:-full-random}" ;;
-    full) sim_profile="${LASH_SIM_PROFILE:-full-random}" ;;
+    full)
+      sim_profile="${LASH_SIM_PROFILE:-full-random}"
+      # The full lane is the release gate: it never takes LASH_QUICK's
+      # smaller sweeps, even if the variable is exported into the job.
+      unset LASH_QUICK ;;
   esac
   local cmd=(cargo run -p lash-sim --locked -- run --out "${out_dir}/sim" --profile "$sim_profile")
   if [ -n "${LASH_SIM_SEEDS:-}" ]; then
