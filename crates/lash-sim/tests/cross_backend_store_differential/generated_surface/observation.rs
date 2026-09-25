@@ -10,8 +10,13 @@ pub(super) struct ProcessLeaseObservation {
     pub(super) owner: serde_json::Value,
     pub(super) lease_token_present: bool,
     pub(super) fencing_token: u64,
+    // PostgreSQL stamps `lease_expires_at_ms` from database wall time and
+    // re-stamps it when a held lease is extended while `lease_claimed_at_ms`
+    // stays put, so `expires - claimed` carries real elapsed time there; the
+    // SQLite backend reads the harness's frozen injected clock and reports the
+    // requested term verbatim. The durable temporal contract that crosses the
+    // backend boundary is `claimed`, not an epoch-difference.
     pub(super) claimed: bool,
-    pub(super) ttl_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -38,22 +43,11 @@ pub(super) struct SurfaceState {
     pub(super) processes: ProcessRows,
     pub(super) wake_redelivery_fences: Vec<(String, String, u64)>,
     pub(super) triggers: TriggerRows,
-    pub(super) effect_journal: Vec<serde_json::Value>,
-    /// `runtime_effect_group`, normalized: the durable group shape and the
-    /// `next_seq`/`next_commit_seq` counters the arbitration ops move.
-    pub(super) effect_groups: Vec<serde_json::Value>,
-    /// `runtime_effect_group_child`: the retained accepted envelopes a
-    /// successor reconstructs the group's children from.
-    pub(super) effect_group_children: Vec<serde_json::Value>,
-    /// The outcome every grouped op recorded, in operation order. Compared
-    /// SQLite vs PostgreSQL.
-    pub(super) group_outcomes: Vec<serde_json::Value>,
     /// `turn_parks`, normalized: the session's parked-turn record (FIG-3586).
     pub(super) turn_parks: Vec<serde_json::Value>,
     /// The `load_turn_park` answers the record ops produced, in operation
     /// order. Recorded by the runner, not read off the tables.
     pub(super) turn_park_loads: Vec<serde_json::Value>,
-    pub(super) await_journal: Vec<serde_json::Value>,
 }
 
 pub(super) enum SurfaceReader {
@@ -61,8 +55,6 @@ pub(super) enum SurfaceReader {
         runtime_path: PathBuf,
         process_path: PathBuf,
         trigger_path: PathBuf,
-        effect_path: PathBuf,
-        group_path: PathBuf,
     },
     Postgres {
         pool: PgPool,
@@ -76,104 +68,9 @@ impl SurfaceReader {
                 runtime_path,
                 process_path,
                 trigger_path,
-                effect_path,
-                group_path,
-            } => {
-                let mut state = read_sqlite_surface(
-                    runtime_path,
-                    process_path,
-                    trigger_path,
-                    effect_path,
-                    group_path,
-                );
-                state.normalize_unordered_group();
-                state
-            }
-            Self::Postgres { pool } => {
-                let mut state = read_postgres_surface(pool).await;
-                state.normalize_unordered_group();
-                state
-            }
+            } => read_sqlite_surface(runtime_path, process_path, trigger_path),
+            Self::Postgres { pool } => read_postgres_surface(pool).await,
         }
-    }
-
-    /// Whether `group_key`'s durable lifecycle has reached `settled` — the
-    /// witness `EffectGroupClose` polls, because a close records `closing`
-    /// and returns while this host's finalizer runs the §7 steps on a
-    /// spawned task.
-    pub(super) async fn group_lifecycle_settled(&self, group_key: &str) -> bool {
-        let phase = match self {
-            Self::Sqlite { group_path, .. } => {
-                let Ok(connection) = rusqlite::Connection::open(group_path) else {
-                    return false;
-                };
-                connection
-                    .query_row(
-                        "SELECT json_extract(lifecycle, '$.type') FROM runtime_effect_group
-                         WHERE group_key = ?1",
-                        rusqlite::params![group_key],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()
-                    .ok()
-                    .flatten()
-            }
-            Self::Postgres { pool } => sqlx::query_scalar::<_, String>(
-                "SELECT lifecycle->>'type' FROM lash_runtime_effect_group WHERE group_key = $1",
-            )
-            .bind(group_key)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten(),
-        };
-        phase.as_deref() == Some("settled")
-    }
-
-    /// Whether the `(group_scope_id, replay_key)` journal row already holds
-    /// a settlement rank — the witness `EffectGroupRelease` polls so a
-    /// prefix ending on a release observes a quiesced row.
-    pub(super) async fn group_row_settled(&self, scope_id: &str, replay_key: &str) -> bool {
-        match self {
-            Self::Sqlite { group_path, .. } => {
-                let connection = match rusqlite::Connection::open(group_path) {
-                    Ok(connection) => connection,
-                    Err(_) => return false,
-                };
-                connection
-                    .query_row(
-                        "SELECT settlement_seq FROM runtime_effect_replay
-                         WHERE scope_id = ?1 AND replay_key = ?2",
-                        rusqlite::params![scope_id, replay_key],
-                        |row| row.get::<_, Option<i64>>(0),
-                    )
-                    .optional()
-                    .ok()
-                    .flatten()
-                    .flatten()
-                    .is_some()
-            }
-            Self::Postgres { pool } => sqlx::query_scalar::<_, Option<i64>>(
-                "SELECT settlement_seq FROM lash_runtime_effect_replay
-                 WHERE scope_id = $1 AND replay_key = $2",
-            )
-            .bind(scope_id)
-            .bind(replay_key)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten()
-            .flatten()
-            .is_some(),
-        }
-    }
-}
-
-impl SurfaceState {
-    /// Erase the scheduler-owned rank order of the unordered group from its
-    /// replay rows and attach the sorted sequence sets to its group row.
-    pub(super) fn normalize_unordered_group(&mut self) {
-        normalize_unordered_group(&mut self.effect_journal, &mut self.effect_groups);
     }
 }
 
@@ -306,188 +203,6 @@ pub(super) fn normalize_json_fields(
     }
 }
 
-/// The replay-row read every grouped surface shares: the pre-FIG-3471
-/// columns plus the durable arbitration and rank columns (`group_key`,
-/// `settlement_seq`, `commit_state`, `commit_seq`, `drain_input`). The
-/// SQLite journal spans `effect.db` and `groups.db`, so this statement is
-/// deliberately unordered; the union is sorted in memory.
-pub(crate) const SQLITE_EFFECT_REPLAY_READ: &str =
-    "SELECT scope_id, session_id, replay_key, envelope_hash, envelope_json, status,
-            outcome_json, error_json, lease_owner_id, lease_token,
-            lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
-            commit_state, commit_seq, drain_input
-     FROM runtime_effect_replay";
-
-/// `runtime_effect_group`: the durable group shape and the `next_seq` /
-/// `next_commit_seq` counters the arbitration ops move. `created_at_ms` is a
-/// wall clock and is not compared.
-pub(crate) const SQLITE_EFFECT_GROUP_READ: &str =
-    "SELECT group_key, scope_id, session_id, wake, loser_disposition,
-            expected_children, next_seq, next_commit_seq, lifecycle
-     FROM runtime_effect_group ORDER BY group_key";
-
-/// `runtime_effect_group_child`: the retained accepted envelopes a successor
-/// reconstructs the group's children from.
-pub(crate) const SQLITE_EFFECT_GROUP_CHILD_READ: &str =
-    "SELECT group_key, position, replay_key, envelope_json, command_version
-     FROM runtime_effect_group_child ORDER BY group_key, position";
-
-pub(crate) const POSTGRES_EFFECT_REPLAY_READ: &str =
-    "SELECT scope_id, session_id, replay_key, envelope_hash, envelope_json, status,
-            outcome_json, error_json, lease_owner_id, lease_token,
-            lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
-            commit_state, commit_seq, drain_input
-     FROM lash_runtime_effect_replay ORDER BY scope_id, replay_key";
-
-pub(crate) const POSTGRES_EFFECT_GROUP_READ: &str =
-    "SELECT group_key, scope_id, session_id, wake, loser_disposition,
-            expected_children, next_seq, next_commit_seq, lifecycle
-     FROM lash_runtime_effect_group ORDER BY group_key";
-
-pub(crate) const POSTGRES_EFFECT_GROUP_CHILD_READ: &str =
-    "SELECT group_key, position, replay_key, envelope_json, command_version
-     FROM lash_runtime_effect_group_child ORDER BY group_key, position";
-
-/// One normalized replay row. Rows that are not `completed` may still hold a
-/// live lease, so their lease columns compare as presence facts — `leased`
-/// for the expiry, and the owner/token booleans `normalized_json` already
-/// produces — while completed rows keep the pre-FIG-3471 normalization.
-#[expect(
-    clippy::expect_used,
-    reason = "test support: reader SQL only produces object rows; a non-object is a harness defect"
-)]
-pub(super) fn normalize_effect_journal_row(mut row: serde_json::Value) -> serde_json::Value {
-    let completed = row.get("status").and_then(serde_json::Value::as_str) == Some("completed");
-    if !completed {
-        let fields = row.as_object_mut().expect("a replay row is an object");
-        let leased = fields
-            .get("lease_expires_at_ms")
-            .and_then(serde_json::Value::as_i64)
-            .is_some_and(|value| value != 0);
-        fields.remove("lease_expires_at_ms");
-        fields.insert("leased".to_string(), serde_json::Value::Bool(leased));
-    }
-    normalized_json(row)
-}
-
-/// The two-concurrent-finals group decides its ranks by scheduler order, so
-/// the comparison erases its per-row sequence values and attaches the sorted
-/// `commit_seq`/`settlement_seq` sets to the group row instead.
-#[expect(
-    clippy::expect_used,
-    reason = "test support: reader SQL only produces object rows; a non-object is a harness defect"
-)]
-pub(super) fn normalize_unordered_group(
-    journal: &mut [serde_json::Value],
-    groups: &mut [serde_json::Value],
-) {
-    let mut commit_seqs = Vec::new();
-    let mut settlement_seqs = Vec::new();
-    for row in journal.iter_mut() {
-        if row.get("group_key").and_then(serde_json::Value::as_str) != Some(UNORDERED_GROUP_KEY) {
-            continue;
-        }
-        let fields = row.as_object_mut().expect("a replay row is an object");
-        if let Some(seq) = fields.get("commit_seq").and_then(serde_json::Value::as_u64) {
-            commit_seqs.push(seq);
-        }
-        fields.insert("commit_seq".to_string(), serde_json::Value::Null);
-        if let Some(seq) = fields
-            .get("settlement_seq")
-            .and_then(serde_json::Value::as_u64)
-        {
-            settlement_seqs.push(seq);
-        }
-        fields.insert("settlement_seq".to_string(), serde_json::Value::Null);
-    }
-    commit_seqs.sort_unstable();
-    settlement_seqs.sort_unstable();
-    for row in groups.iter_mut() {
-        if row.get("group_key").and_then(serde_json::Value::as_str) != Some(UNORDERED_GROUP_KEY) {
-            continue;
-        }
-        let fields = row.as_object_mut().expect("a group row is an object");
-        fields.insert("commit_seq_set".to_string(), serde_json::json!(commit_seqs));
-        fields.insert(
-            "settlement_seq_set".to_string(),
-            serde_json::json!(settlement_seqs),
-        );
-    }
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) fn read_sqlite_effect_journal(
-    connection: &rusqlite::Connection,
-) -> Vec<serde_json::Value> {
-    sqlite_simple_json_rows(connection, SQLITE_EFFECT_REPLAY_READ, |row| {
-        let envelope: String = row.get(4)?;
-        Ok(normalize_effect_journal_row(serde_json::json!({
-            "scope_id": row.get::<_, String>(0)?,
-            "session_id": row.get::<_, Option<String>>(1)?,
-            "replay_key": row.get::<_, String>(2)?,
-            "envelope_hash": row.get::<_, String>(3)?,
-            "envelope": serde_json::from_str::<serde_json::Value>(&envelope).unwrap(),
-            "status": row.get::<_, String>(5)?,
-            "outcome": row.get::<_, Option<String>>(6)?.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()),
-            "error": row.get::<_, Option<String>>(7)?.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()),
-            "lease_owner_id": row.get::<_, Option<String>>(8)?,
-            "lease_token": row.get::<_, Option<String>>(9)?,
-            "lease_expires_at_ms": row.get::<_, i64>(10)?,
-            "due_at_ms": row.get::<_, Option<i64>>(11)?,
-            "group_key": row.get::<_, Option<String>>(12)?,
-            "settlement_seq": row.get::<_, Option<i64>>(13)?,
-            "commit_state": row.get::<_, String>(14)?,
-            "commit_seq": row.get::<_, Option<i64>>(15)?,
-            "drain_input": row.get::<_, Option<String>>(16)?,
-        })))
-    })
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) fn read_sqlite_effect_groups(
-    connection: &rusqlite::Connection,
-) -> Vec<serde_json::Value> {
-    sqlite_simple_json_rows(connection, SQLITE_EFFECT_GROUP_READ, |row| {
-        let lifecycle: String = row.get(8)?;
-        Ok(normalized_json(serde_json::json!({
-            "group_key": row.get::<_, String>(0)?,
-            "scope_id": row.get::<_, String>(1)?,
-            "session_id": row.get::<_, Option<String>>(2)?,
-            "wake": row.get::<_, String>(3)?,
-            "loser_disposition": row.get::<_, String>(4)?,
-            "expected_children": row.get::<_, i64>(5)?,
-            "next_seq": row.get::<_, i64>(6)?,
-            "next_commit_seq": row.get::<_, i64>(7)?,
-            "lifecycle": serde_json::from_str::<serde_json::Value>(&lifecycle).unwrap(),
-        })))
-    })
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) fn read_sqlite_effect_group_children(
-    connection: &rusqlite::Connection,
-) -> Vec<serde_json::Value> {
-    sqlite_simple_json_rows(connection, SQLITE_EFFECT_GROUP_CHILD_READ, |row| {
-        let envelope: String = row.get(3)?;
-        Ok(normalized_json(serde_json::json!({
-            "group_key": row.get::<_, String>(0)?,
-            "position": row.get::<_, i64>(1)?,
-            "replay_key": row.get::<_, String>(2)?,
-            "envelope": serde_json::from_str::<serde_json::Value>(&envelope).unwrap(),
-            "command_version": row.get::<_, i64>(4)?,
-        })))
-    })
-}
-
 #[expect(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -497,14 +212,10 @@ pub(super) fn read_sqlite_surface(
     runtime_path: &Path,
     process_path: &Path,
     trigger_path: &Path,
-    effect_path: &Path,
-    group_path: &Path,
 ) -> SurfaceState {
     let runtime = rusqlite::Connection::open(runtime_path).expect("open SQLite runtime reader");
     let process = rusqlite::Connection::open(process_path).expect("open SQLite process reader");
     let trigger = rusqlite::Connection::open(trigger_path).expect("open SQLite trigger reader");
-    let effect = rusqlite::Connection::open(effect_path).expect("open SQLite effect reader");
-    let groups = rusqlite::Connection::open(group_path).expect("open SQLite group reader");
     let records = sqlite_simple_json_rows(
         &process,
         "SELECT record_json, change_seq FROM processes ORDER BY process_id",
@@ -555,7 +266,6 @@ pub(super) fn read_sqlite_surface(
             let owner_id: Option<String> = row.get(1)?;
             let incarnation_id: Option<String> = row.get(2)?;
             let claimed: i64 = row.get(5)?;
-            let expires: i64 = row.get(6)?;
             Ok(ProcessLeaseObservation {
                 process_id: ProcessId::from(row.get::<_, String>(0)?),
                 lease_token_present: row.get::<_, Option<String>>(3)?.is_some(),
@@ -566,7 +276,6 @@ pub(super) fn read_sqlite_surface(
                 },
                 fencing_token: row.get::<_, i64>(4)? as u64,
                 claimed: claimed != 0,
-                ttl_ms: (claimed != 0).then_some((expires - claimed) as u64),
             })
         })
         .unwrap()
@@ -676,27 +385,6 @@ pub(super) fn read_sqlite_surface(
         },
         wake_redelivery_fences,
         triggers: read_sqlite_triggers(&trigger),
-        effect_journal: {
-            // The ungrouped journal lives in `effect.db`, the grouped
-            // children's journal in `groups.db`; the surface reads the union
-            // in `(scope_id, replay_key)` order.
-            let mut journal = read_sqlite_effect_journal(&effect);
-            journal.extend(read_sqlite_effect_journal(&groups));
-            journal.sort_by(|left, right| {
-                (
-                    left["scope_id"].as_str().unwrap_or_default(),
-                    left["replay_key"].as_str().unwrap_or_default(),
-                )
-                    .cmp(&(
-                        right["scope_id"].as_str().unwrap_or_default(),
-                        right["replay_key"].as_str().unwrap_or_default(),
-                    ))
-            });
-            journal
-        },
-        effect_groups: read_sqlite_effect_groups(&groups),
-        effect_group_children: read_sqlite_effect_group_children(&groups),
-        group_outcomes: Vec::new(),
         turn_parks: sqlite_simple_json_rows(
             &runtime,
             "SELECT session_id, turn_id, park_id, reason_code, reason_json,
@@ -717,7 +405,6 @@ pub(super) fn read_sqlite_surface(
             },
         ),
         turn_park_loads: Vec::new(),
-        await_journal: read_sqlite_await(&effect, &process),
     }
 }
 
@@ -782,62 +469,6 @@ pub(super) fn read_sqlite_triggers(connection: &rusqlite::Connection) -> Trigger
     clippy::unwrap_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-pub(super) fn read_sqlite_await(
-    connection: &rusqlite::Connection,
-    process_registry: &rusqlite::Connection,
-) -> Vec<serde_json::Value> {
-    let mut rows = sqlite_simple_json_rows(
-        connection,
-        "SELECT key_id, scope_json, wait_json, session_id, turn_control, terminal_json, resolved_at_ms FROM await_event_waits ORDER BY key_id",
-        |row| {
-            let scope: String = row.get(1)?;
-            let wait: String = row.get(2)?;
-            let terminal: Option<String> = row.get(5)?;
-            Ok(normalized_json(serde_json::json!({
-                "kind": "wait", "key_id": row.get::<_, String>(0)?,
-                "scope": serde_json::from_str::<serde_json::Value>(&scope).unwrap(),
-                "wait": serde_json::from_str::<serde_json::Value>(&wait).unwrap(),
-                "session_id": row.get::<_, Option<String>>(3)?,
-                "turn_control": row.get::<_, i64>(4)? != 0,
-                "terminal": terminal.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()),
-                "resolved_at_ms": row.get::<_, Option<i64>>(6)?,
-            })))
-        },
-    );
-    rows.extend(sqlite_simple_json_rows(connection, "SELECT session_id FROM await_event_revoked_sessions ORDER BY session_id", |row| {
-        Ok(serde_json::json!({"kind": "revoked_session", "session_id": row.get::<_, String>(0)?}))
-    }));
-    // A scope fence is one row in one of the two SQLite files — the journal
-    // for runtime operations and unbound process scopes, the registry for a
-    // registered process (ADR 0049) — while PostgreSQL holds them in one
-    // table; the surface reads the union in one order.
-    let mut fences: Vec<String> = Vec::new();
-    for reader in [connection, process_registry] {
-        fences.extend(
-            sqlite_simple_json_rows(
-                reader,
-                "SELECT scope_id FROM effect_scope_retirements ORDER BY scope_id",
-                |row| Ok(serde_json::Value::String(row.get::<_, String>(0)?)),
-            )
-            .into_iter()
-            .map(|value| value.as_str().expect("scope id").to_string()),
-        );
-    }
-    fences.sort();
-    fences.dedup();
-    rows.extend(
-        fences
-            .into_iter()
-            .map(|scope_id| serde_json::json!({"kind": "retired_scope", "scope_id": scope_id})),
-    );
-    rows
-}
-
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
 pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     let record_rows: Vec<(String, i64)> =
         sqlx::query_as("SELECT record_json, change_seq FROM lash_processes ORDER BY process_id")
@@ -874,13 +505,12 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         Option<String>,
         i64,
         i64,
-        i64,
     );
-    let lease_rows: Vec<PgLeaseRow> = sqlx::query_as("SELECT process_id, lease_owner_id, lease_owner_incarnation_id, lease_token, lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms FROM lash_process_leases ORDER BY process_id").fetch_all(pool).await.unwrap();
+    let lease_rows: Vec<PgLeaseRow> = sqlx::query_as("SELECT process_id, lease_owner_id, lease_owner_incarnation_id, lease_token, lease_fencing_token, lease_claimed_at_ms FROM lash_process_leases ORDER BY process_id").fetch_all(pool).await.unwrap();
     let leases = lease_rows
         .into_iter()
         .map(
-            |(process_id, owner_id, incarnation, token, fencing, claimed, expires)| {
+            |(process_id, owner_id, incarnation, token, fencing, claimed)| {
                 ProcessLeaseObservation {
                     process_id: ProcessId::from(process_id),
                     owner: if token.is_some() {
@@ -891,7 +521,6 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
                     lease_token_present: token.is_some(),
                     fencing_token: fencing as u64,
                     claimed: claimed != 0,
-                    ttl_ms: (claimed != 0).then_some((expires - claimed) as u64),
                 }
             },
         )
@@ -985,13 +614,8 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         },
         wake_redelivery_fences,
         triggers: read_postgres_triggers(pool).await,
-        effect_journal: read_postgres_effects(pool).await,
-        effect_groups: read_postgres_effect_groups(pool).await,
-        effect_group_children: read_postgres_effect_group_children(pool).await,
-        group_outcomes: Vec::new(),
         turn_parks: read_postgres_turn_parks(pool).await,
         turn_park_loads: Vec::new(),
-        await_journal: read_postgres_await(pool).await,
     }
 }
 
@@ -1040,80 +664,6 @@ pub(super) async fn read_postgres_turn_parks(pool: &PgPool) -> Vec<serde_json::V
     clippy::unwrap_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-pub(super) async fn read_postgres_effect_groups(pool: &PgPool) -> Vec<serde_json::Value> {
-    type Row = (
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        i64,
-        i64,
-        i64,
-        serde_json::Value,
-    );
-    let rows: Vec<Row> = sqlx::query_as(POSTGRES_EFFECT_GROUP_READ)
-        .fetch_all(pool)
-        .await
-        .unwrap();
-    rows.into_iter()
-        .map(
-            |(
-                group_key,
-                scope_id,
-                session_id,
-                wake,
-                loser_disposition,
-                expected_children,
-                next_seq,
-                next_commit_seq,
-                lifecycle,
-            )| {
-                normalized_json(serde_json::json!({
-                    "group_key": group_key,
-                    "scope_id": scope_id,
-                    "session_id": session_id,
-                    "wake": wake,
-                    "loser_disposition": loser_disposition,
-                    "expected_children": expected_children,
-                    "next_seq": next_seq,
-                    "next_commit_seq": next_commit_seq,
-                    "lifecycle": lifecycle,
-                }))
-            },
-        )
-        .collect()
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) async fn read_postgres_effect_group_children(pool: &PgPool) -> Vec<serde_json::Value> {
-    type Row = (String, i64, String, String, i64);
-    let rows: Vec<Row> = sqlx::query_as(POSTGRES_EFFECT_GROUP_CHILD_READ)
-        .fetch_all(pool)
-        .await
-        .unwrap();
-    rows.into_iter()
-        .map(
-            |(group_key, position, replay_key, envelope, command_version)| {
-                normalized_json(serde_json::json!({
-                    "group_key": group_key,
-                    "position": position,
-                    "replay_key": replay_key,
-                    "envelope": serde_json::from_str::<serde_json::Value>(&envelope).unwrap(),
-                    "command_version": command_version,
-                }))
-            },
-        )
-        .collect()
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
 pub(super) async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
     let mut incarnations = BTreeMap::new();
     let subscriptions: Vec<String> = sqlx::query_scalar(
@@ -1149,106 +699,12 @@ pub(super) async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
     clippy::unwrap_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-pub(super) async fn read_postgres_effects(pool: &PgPool) -> Vec<serde_json::Value> {
-    let rows = sqlx::query(POSTGRES_EFFECT_REPLAY_READ)
-        .fetch_all(pool)
-        .await
-        .unwrap();
-    rows.iter()
-        .map(|row| {
-            use sqlx::Row as _;
-            let envelope: String = row.get(4);
-            let outcome: Option<String> = row.get(6);
-            let error: Option<String> = row.get(7);
-            normalize_effect_journal_row(serde_json::json!({
-                "scope_id": row.get::<String, _>(0),
-                "session_id": row.get::<Option<String>, _>(1),
-                "replay_key": row.get::<String, _>(2),
-                "envelope_hash": row.get::<String, _>(3),
-                "envelope": serde_json::from_str::<serde_json::Value>(&envelope).unwrap(),
-                "status": row.get::<String, _>(5),
-                "outcome": outcome.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()),
-                "error": error.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()),
-                "lease_owner_id": row.get::<Option<String>, _>(8),
-                "lease_token": row.get::<Option<String>, _>(9),
-                "lease_expires_at_ms": row.get::<i64, _>(10),
-                "due_at_ms": row.get::<Option<i64>, _>(11),
-                "group_key": row.get::<Option<String>, _>(12),
-                "settlement_seq": row.get::<Option<i64>, _>(13),
-                "commit_state": row.get::<String, _>(14),
-                "commit_seq": row.get::<Option<i64>, _>(15),
-                "drain_input": row.get::<Option<String>, _>(16),
-            }))
-        })
-        .collect()
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) async fn read_postgres_await(pool: &PgPool) -> Vec<serde_json::Value> {
-    type Row = (
-        String,
-        String,
-        String,
-        Option<String>,
-        bool,
-        Option<String>,
-        Option<i64>,
-    );
-    let waits: Vec<Row> = sqlx::query_as("SELECT key_id, scope_json, wait_json, session_id, turn_control, terminal_json, resolved_at_ms FROM lash_await_event_waits ORDER BY key_id").fetch_all(pool).await.unwrap();
-    let mut rows = waits.into_iter().map(|(key_id, scope, wait, session_id, turn_control, terminal, resolved)| normalized_json(serde_json::json!({"kind": "wait", "key_id": key_id, "scope": serde_json::from_str::<serde_json::Value>(&scope).unwrap(), "wait": serde_json::from_str::<serde_json::Value>(&wait).unwrap(), "session_id": session_id, "turn_control": turn_control, "terminal": terminal.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()), "resolved_at_ms": resolved}))).collect::<Vec<_>>();
-    let revoked: Vec<String> = sqlx::query_scalar(
-        "SELECT session_id FROM lash_await_event_revoked_sessions ORDER BY session_id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    rows.extend(revoked.into_iter().map(
-        |session_id| serde_json::json!({"kind": "revoked_session", "session_id": session_id}),
-    ));
-    let retired: Vec<String> =
-        sqlx::query_scalar("SELECT scope_id FROM lash_effect_scope_retirements ORDER BY scope_id")
-            .fetch_all(pool)
-            .await
-            .unwrap();
-    rows.extend(
-        retired
-            .into_iter()
-            .map(|scope_id| serde_json::json!({"kind": "retired_scope", "scope_id": scope_id})),
-    );
-    rows
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
 pub(super) fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
-    let common = observations.windows(2).all(|pair| {
+    observations.windows(2).all(|pair| {
         pair[0].1.processes == pair[1].1.processes
             && pair[0].1.wake_redelivery_fences == pair[1].1.wake_redelivery_fences
             && pair[0].1.triggers == pair[1].1.triggers
             && pair[0].1.turn_parks == pair[1].1.turn_parks
             && pair[0].1.turn_park_loads == pair[1].1.turn_park_loads
-    });
-    let sqlite = observations
-        .iter()
-        .find(|(name, _)| *name == "sqlite")
-        .unwrap()
-        .1
-        .clone();
-    let postgres = observations
-        .iter()
-        .find(|(name, _)| *name == "postgres")
-        .unwrap()
-        .1
-        .clone();
-    common
-        && sqlite.effect_journal == postgres.effect_journal
-        && sqlite.effect_groups == postgres.effect_groups
-        && sqlite.effect_group_children == postgres.effect_group_children
-        && sqlite.group_outcomes == postgres.group_outcomes
-        && sqlite.await_journal == postgres.await_journal
+    })
 }
