@@ -1522,20 +1522,17 @@ async fn try_build_runtime_on_host(
     stores: &dyn crate::StoreSet,
     store: Arc<dyn RuntimePersistence>,
     seam: &SeamLayer,
-    host: Arc<dyn crate::EffectHost>,
+    host: LawSeamHost,
     identity: &ReferenceIdentity,
     trace_tool: TraceTool,
     lease_timings: crate::LeaseTimings,
 ) -> Result<crate::LashRuntime, crate::SessionError> {
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::testing::LayeredEffectHost::new(
-        host,
-        Arc::new(seam.clone()),
-    ));
+    host.route_to(seam);
     Box::pin(try_build_runtime_over_host(
         stores,
         store,
         seam.control.clone(),
-        effect_host,
+        host.host(),
         identity,
         trace_tool,
         lease_timings,

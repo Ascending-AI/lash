@@ -557,10 +557,28 @@ impl EffectGroupDispatch {
                     child.scope.admitted_scope.clone(),
                     binding,
                 )
-                .and_then(|scoped| self.executors.route_handler_child_controller(scoped))
                 .map_err(TerminalError::from_error)?;
-            let mut drive =
-                driver.drive(child, request.envelope.invocation.address.clone(), scoped);
+            // Routed through the host's stack before its first effect. A
+            // failed route is the child's outcome, as any failure of its
+            // drive is, so the opener's rank wait always learns of it.
+            let routed = self.executors.route_handler_child_controller(scoped);
+            let address = request.envelope.invocation.address.clone();
+            let mut drive: std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                lash_core::RuntimeEffectOutcome,
+                                lash_core::RuntimeEffectControllerError,
+                            >,
+                        > + Send
+                        + '_,
+                >,
+            > = match routed {
+                Ok(scoped) => driver.drive(child, address, scoped),
+                Err(error) => Box::pin(std::future::ready(Err(
+                    lash_core::RuntimeEffectControllerError::from(error),
+                ))),
+            };
             let outcome = tokio::select! {
                 biased;
                 cancel = &mut cancel_watch => {
@@ -622,14 +640,18 @@ impl EffectGroupDispatch {
                 group: None,
                 ..request.envelope.clone()
             };
-            let scoped = lash_core::ScopedEffectController::borrowed(
+            let routed = lash_core::ScopedEffectController::borrowed(
                 &controller,
                 request.shape.opener.clone(),
             )
-            .and_then(|scoped| self.executors.route_handler_child_controller(scoped))
-            .map_err(TerminalError::from_error)?;
+            .and_then(|scoped| self.executors.route_handler_child_controller(scoped));
             let outcome = {
-                let wait = scoped.execute_effect(envelope, executor);
+                let wait = async {
+                    match routed {
+                        Ok(scoped) => scoped.execute_effect(envelope, executor).await,
+                        Err(error) => Err(lash_core::RuntimeEffectControllerError::from(error)),
+                    }
+                };
                 tokio::pin!(wait);
                 tokio::select! {
                     biased;
