@@ -264,6 +264,26 @@ if [[ -s "$tmp_dir/rule4c.hits" ]]; then
   failed=1
 fi
 
+# The error vocabulary is engine-neutral too (FIG-3670 error-code slice):
+# `RuntimeErrorCode` variants and their wiring may not carry a `Restate*`
+# name. The check is scoped to the runtime_error* files so engine-owned
+# Restate types elsewhere stay legal.
+engine_error_roots=()
+for path in crates/lash-core-store/src/runtime_error.rs \
+  crates/lash-core-store/src/runtime_error_tests.rs \
+  crates/lash-core-store/src/runtime_error; do
+  [[ -e $path ]] && engine_error_roots+=("$path")
+done
+if [[ ${#engine_error_roots[@]} -gt 0 ]]; then
+  engine_error_forbidden='(^|[^[:alnum:]_])Restate[A-Z][A-Za-z]*'
+  capture_search "engine-named error codes" "$engine_error_forbidden" "$tmp_dir/rule4d.hits" "${engine_error_roots[@]}"
+  if [[ -s "$tmp_dir/rule4d.hits" ]]; then
+    cat "$tmp_dir/rule4d.hits" >&2
+    echo "substrate boundary rule 4 failed: a Restate-named RuntimeErrorCode variant was found" >&2
+    failed=1
+  fi
+fi
+
 # Rule 5 — drive determinism ratchet.
 #
 # The turn driver is workflow code: on replay it must re-issue exactly the

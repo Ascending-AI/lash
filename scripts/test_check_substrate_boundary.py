@@ -60,6 +60,8 @@ FIXTURE_DRIVE_FILE = "crates/lash-core/src/runtime/logical_turn.rs"
 FIXTURE_HIT_LINE = "    tokio::spawn(worker());"
 FIXTURE_ENGINE_ID_FILE = "crates/lash-core/src/runtime/turn_loop/engine_ids.rs"
 FIXTURE_ENGINE_ID_LINE = "    let _ = context.restate_invocation_id();"
+FIXTURE_ENGINE_ERROR_FILE = "crates/lash-core-store/src/runtime_error.rs"
+FIXTURE_ENGINE_ERROR_LINE = "    RestateProcessAwait,"
 
 
 class DriveDeterminismRatchetTests(unittest.TestCase):
@@ -172,6 +174,27 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             self.build_fixture(root, ["fn drive() {", "}"], [])
             hit = root / "crates/lash-restate/src/controller/engine_ids.rs"
             hit.write_text(FIXTURE_ENGINE_ID_LINE + "\n")
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_engine_named_error_variant_in_runtime_error_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn drive() {", "}"], [])
+            hit = root / FIXTURE_ENGINE_ERROR_FILE
+            hit.parent.mkdir(parents=True, exist_ok=True)
+            hit.write_text("pub enum RuntimeErrorCode {\n" + FIXTURE_ENGINE_ERROR_LINE + "\n}\n")
+            result = self.run_check(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rule 4 failed", result.stderr)
+
+    def test_engine_named_type_outside_runtime_error_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn drive() {", "}"], [])
+            hit = root / "crates/lash-core-store/src/other.rs"
+            hit.parent.mkdir(parents=True, exist_ok=True)
+            hit.write_text("pub struct RestateBackend;\n")
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
 

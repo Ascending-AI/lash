@@ -99,7 +99,7 @@ impl fmt::Display for PoisonReason {
 
 fn poisoned_effect_error(effect: &str, reason: PoisonReason) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(
-        RuntimeErrorCode::RestateJournaledEffectPoisoned,
+        RuntimeErrorCode::EngineJournaledEffectPoisoned,
         format!("journaled effect `{effect}` gave up because {reason}"),
     )
 }
@@ -250,7 +250,7 @@ pub(super) fn gave_up_over_budget_entry(budget: u64) -> JournaledEffectRecord {
 /// give-up inside the effect the host is already waiting on: the substitution
 /// is replay-deterministic, its envelope was proven journalable before the
 /// effect ran, and the host observes
-/// [`RuntimeErrorCode::RestateJournaledEffectPoisoned`] as a terminal effect
+/// [`RuntimeErrorCode::EngineJournaledEffectPoisoned`] as a terminal effect
 /// failure instead of an uncommitted turn.
 pub(super) fn journalable_recorded_effect(
     effect: &str,

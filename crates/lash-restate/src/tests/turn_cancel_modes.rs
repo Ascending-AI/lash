@@ -304,7 +304,7 @@ async fn restate_await_rejects_cancel_scope_for_a_different_physical_turn() {
             .expect_err("a root cancellation scope must not guard a follow-on physical turn");
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateTurnCancelScopeMismatch
+        lash_core::RuntimeErrorCode::EngineTurnCancelScopeMismatch
     );
     assert_eq!(
         context.turn_cancel_gate.registration_count(),

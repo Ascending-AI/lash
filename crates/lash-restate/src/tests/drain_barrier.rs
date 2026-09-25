@@ -98,7 +98,7 @@ pub(super) async fn an_index_of_another_protocol_version_is_refused_typed() {
         .expect_err("the retired protocol is refused");
     assert_eq!(
         error.code,
-        RuntimeErrorCode::RestateEffectGroupProtocolRetired
+        RuntimeErrorCode::EngineEffectGroupProtocolRetired
     );
     assert!(error.code.is_terminal());
     assert!(context.group_waits.lock_recover().is_empty());

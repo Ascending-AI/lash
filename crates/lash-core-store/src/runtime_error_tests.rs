@@ -373,7 +373,7 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
     }
     for outcome in [
         RuntimeErrorCode::ProtocolBeforeLlmCall,
-        RuntimeErrorCode::RestateProcessJournalIdentityDrift,
+        RuntimeErrorCode::EngineProcessJournalIdentityDrift,
         RuntimeErrorCode::ToolIntentReplayKeyFormatCutover,
     ] {
         assert_eq!(
@@ -392,8 +392,8 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
         RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
         RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
         RuntimeErrorCode::RuntimeEffectAttachmentStore,
-        RuntimeErrorCode::RestateEffectController,
-        RuntimeErrorCode::RestateProcessAwait,
+        RuntimeErrorCode::EngineEffectController,
+        RuntimeErrorCode::EngineProcessAwait,
         RuntimeErrorCode::RuntimeEffectSleepCancelled,
         RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
     ] {

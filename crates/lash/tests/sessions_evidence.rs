@@ -271,50 +271,50 @@ fn drain_area_witnesses() {
             lash::runtime::RuntimeErrorCode::ProcessSignalWaitTimeout
         )
     });
-    // W0098: lash::runtime::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope [variant]
+    // W0098: lash::runtime::RuntimeErrorCode::EngineEffectHostRequiresHandlerScope [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
+            lash::runtime::RuntimeErrorCode::EngineEffectHostRequiresHandlerScope
         )
     });
-    // W0099: lash::runtime::RuntimeErrorCode::RestateJournaledEffectPoisoned [variant]
+    // W0099: lash::runtime::RuntimeErrorCode::EngineJournaledEffectPoisoned [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateJournaledEffectPoisoned
+            lash::runtime::RuntimeErrorCode::EngineJournaledEffectPoisoned
         )
     });
-    // W0100: lash::runtime::RuntimeErrorCode::RestateProcessAwait [variant]
+    // W0100: lash::runtime::RuntimeErrorCode::EngineProcessAwait [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(value, lash::runtime::RuntimeErrorCode::RestateProcessAwait)
+        matches!(value, lash::runtime::RuntimeErrorCode::EngineProcessAwait)
     });
-    // W0101: lash::runtime::RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel [variant]
+    // W0101: lash::runtime::RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel
+            lash::runtime::RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel
         )
     });
-    // W0102: lash::runtime::RuntimeErrorCode::RestateProcessTurnCancelContextMissing [variant]
+    // W0102: lash::runtime::RuntimeErrorCode::EngineProcessTurnCancelContextMissing [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateProcessTurnCancelContextMissing
+            lash::runtime::RuntimeErrorCode::EngineProcessTurnCancelContextMissing
         )
     });
-    // W0103: lash::runtime::RuntimeErrorCode::RestateTurnCancelScopeMismatch [variant]
+    // W0103: lash::runtime::RuntimeErrorCode::EngineTurnCancelScopeMismatch [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateTurnCancelScopeMismatch
+            lash::runtime::RuntimeErrorCode::EngineTurnCancelScopeMismatch
         )
     });
-    // W0104: lash::runtime::RuntimeErrorCode::RestateTurnCancelScopeMissing [variant]
+    // W0104: lash::runtime::RuntimeErrorCode::EngineTurnCancelScopeMissing [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateTurnCancelScopeMissing
+            lash::runtime::RuntimeErrorCode::EngineTurnCancelScopeMissing
         )
     });
     // W0105: lash::runtime::RuntimeErrorCode::RuntimeEffectAttachmentStore [variant]
@@ -585,81 +585,78 @@ fn drain_area_witnesses() {
             lash::runtime::RuntimeErrorCode::ResidentSessionReloadFailed
         )
     });
-    // W0160: lash::runtime::RuntimeErrorCode::RestateAwaitEventAwait [variant]
+    // W0160: lash::runtime::RuntimeErrorCode::EngineAwaitEventAwait [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateAwaitEventAwait
+            lash::runtime::RuntimeErrorCode::EngineAwaitEventAwait
         )
     });
-    // W0161: lash::runtime::RuntimeErrorCode::RestateAwaitEventCancel [variant]
+    // W0161: lash::runtime::RuntimeErrorCode::EngineAwaitEventCancel [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateAwaitEventCancel
+            lash::runtime::RuntimeErrorCode::EngineAwaitEventCancel
         )
     });
-    // W0163: lash::runtime::RuntimeErrorCode::RestateAwaitEventPeek [variant]
+    // W0163: lash::runtime::RuntimeErrorCode::EngineAwaitEventPeek [variant]
+    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
+        matches!(value, lash::runtime::RuntimeErrorCode::EngineAwaitEventPeek)
+    });
+    // W0164: lash::runtime::RuntimeErrorCode::EngineAwaitEventRevocationRead [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateAwaitEventPeek
+            lash::runtime::RuntimeErrorCode::EngineAwaitEventRevocationRead
         )
     });
-    // W0164: lash::runtime::RuntimeErrorCode::RestateAwaitEventRevocationRead [variant]
+    // W0165: lash::runtime::RuntimeErrorCode::EngineAwaitEventRevoke [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateAwaitEventRevocationRead
+            lash::runtime::RuntimeErrorCode::EngineAwaitEventRevoke
         )
     });
-    // W0165: lash::runtime::RuntimeErrorCode::RestateAwaitEventRevoke [variant]
+    // W0166: lash::runtime::RuntimeErrorCode::EngineAwaitEventSessionUpdate [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateAwaitEventRevoke
+            lash::runtime::RuntimeErrorCode::EngineAwaitEventSessionUpdate
         )
     });
-    // W0166: lash::runtime::RuntimeErrorCode::RestateAwaitEventSessionUpdate [variant]
+    // W0167: lash::runtime::RuntimeErrorCode::EngineEffectController [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateAwaitEventSessionUpdate
+            lash::runtime::RuntimeErrorCode::EngineEffectController
         )
     });
-    // W0167: lash::runtime::RuntimeErrorCode::RestateEffectController [variant]
+    // W0168: lash::runtime::RuntimeErrorCode::EngineProcessTerminalEncode [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateEffectController
+            lash::runtime::RuntimeErrorCode::EngineProcessTerminalEncode
         )
     });
-    // W0168: lash::runtime::RuntimeErrorCode::RestateProcessTerminalEncode [variant]
+    // W0169: lash::runtime::RuntimeErrorCode::EngineTurnTerminalAttach [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateProcessTerminalEncode
+            lash::runtime::RuntimeErrorCode::EngineTurnTerminalAttach
         )
     });
-    // W0169: lash::runtime::RuntimeErrorCode::RestateTurnTerminalAttach [variant]
+    // W0170: lash::runtime::RuntimeErrorCode::EngineTurnTerminalAttachCeilingElapsed [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateTurnTerminalAttach
+            lash::runtime::RuntimeErrorCode::EngineTurnTerminalAttachCeilingElapsed
         )
     });
-    // W0170: lash::runtime::RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed [variant]
+    // W0171: lash::runtime::RuntimeErrorCode::EngineTurnTerminalInvalidResolution [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed
-        )
-    });
-    // W0171: lash::runtime::RuntimeErrorCode::RestateTurnTerminalInvalidResolution [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::RestateTurnTerminalInvalidResolution
+            lash::runtime::RuntimeErrorCode::EngineTurnTerminalInvalidResolution
         )
     });
     // W0172: lash::runtime::RuntimeErrorCode::RuntimeEffectControllerTaskClosed [variant]

@@ -38,7 +38,7 @@ impl RestateAuthorityId {
         let value = value.as_ref().trim();
         if value.is_empty() {
             return Err(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateEffectController,
+                lash_core::RuntimeErrorCode::EngineEffectController,
                 "Restate authority id must not be empty",
             ));
         }

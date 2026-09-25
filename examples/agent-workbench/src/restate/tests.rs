@@ -789,7 +789,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             failure,
             lash::EmbedError::Runtime(ref error)
                 if error.code
-                    == lash::runtime::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
+                    == lash::runtime::RuntimeErrorCode::EngineEffectHostRequiresHandlerScope
         ),
         "the scoped Restate host must issue the handler-scope refusal: {failure:?}"
     );
@@ -884,7 +884,7 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
         counted_settlement_attempts(
             &state,
             &SessionId::from("fig1058-retryable-settlement"),
-            lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve,
+            lash::runtime::RuntimeErrorCode::EngineAwaitEventResolve,
         )
         .await,
         2,
@@ -894,7 +894,7 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
         counted_settlement_attempts(
             &state,
             &SessionId::from("fig1058-decode-settlement"),
-            lash::runtime::RuntimeErrorCode::RestateTurnTerminalDecode,
+            lash::runtime::RuntimeErrorCode::EngineTurnTerminalDecode,
         )
         .await,
         1,
