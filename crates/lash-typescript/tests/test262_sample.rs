@@ -192,6 +192,31 @@ fn every_selected_test_has_one_owned_outcome() {
     );
     let names = runner::refusal_codes();
     let unshimmable = runner::unshimmable_includes();
+    let cost_register = runner::cost_register();
+    // The cost register is a ratchet in one direction: every registered path
+    // is selected and records `harness instruction-cost`, so the register can
+    // only shrink as the VM gets faster. A registered path that is no longer
+    // selected, or whose recorded outcome changed, fails here.
+    for (path, (reason, ticket)) in &cost_register {
+        assert!(
+            selected.contains(path),
+            "{path}: registered for cost but not selected"
+        );
+        assert!(
+            matches!(outcomes.get(path), Some(Outcome::Harness(qualifier)) if qualifier == runner::INSTRUCTION_COST),
+            "{path}: registered for cost but records {}",
+            outcomes
+                .get(path)
+                .map_or("nothing".to_string(), |outcome| outcome.to_string())
+        );
+        assert!(reason.len() > 20, "{path}: a cost row says why");
+        assert!(
+            ticket.strip_prefix("FIG-").is_some_and(|number| {
+                !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+            }),
+            "{path}: a cost row names its ticket, not `{ticket}`"
+        );
+    }
     // A refusal is only as good as the ruling behind it: each code the
     // selection shows must be the diagnostic a rejected census row names.
     let census_codes = data_lines("census.tsv", 5)
@@ -224,6 +249,10 @@ fn every_selected_test_has_one_owned_outcome() {
                     "{path}: a failure must name its ticket or registered deviation, not `{owner}`"
                 );
             }
+            Outcome::Harness(include) if include == runner::INSTRUCTION_COST => assert!(
+                cost_register.contains_key(path),
+                "{path}: a harness instruction-cost outcome has no harness-cost.tsv row"
+            ),
             Outcome::Harness(include) => assert!(
                 unshimmable.contains_key(include),
                 "{path}: harness outcome {include} has no unshimmable.tsv row"

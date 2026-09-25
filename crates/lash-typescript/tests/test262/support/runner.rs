@@ -15,6 +15,7 @@ use std::{
         Mutex, OnceLock,
         atomic::{AtomicUsize, Ordering},
     },
+    time::{Duration, Instant},
 };
 
 use lash_typescript::DiagnosticCode;
@@ -30,6 +31,12 @@ use super::metadata::{self, Phase, TestFlag};
 /// deadline, so a test that exhausts it does so on every run; the slowest
 /// selected test uses well under a tenth of it.
 const INSTRUCTION_BUDGET: u64 = 4_000_000_000;
+
+/// The wall-clock bound one test may take, on top of the instruction budget.
+/// A worker cannot be killed once a test starts, so the bound is enforced by
+/// the orchestrating thread: past it, the run reports the unfinished tests by
+/// name and exits non-zero rather than letting the lane hang.
+const TEST_WALL_CLOCK: Duration = Duration::from_secs(300);
 
 /// The diagnostics that report an ECMAScript early error: what a negative
 /// test of phase `parse` expects as its `SyntaxError`.
@@ -49,6 +56,12 @@ pub(crate) const PROGRAM_SIZE: &str = "program-size";
 /// (`Date.now()`, `Math.random()`, a tool), which the runner's host does not
 /// answer.
 pub(crate) const HOST_EFFECTS: &str = "host-effects";
+
+/// The `harness` qualifier of a selected test whose full run exceeds the CI
+/// lane's cost bound. `harness-cost.tsv` names each, with the ticket that owns
+/// making it affordable; the runner records the qualifier without executing
+/// the test.
+pub(crate) const INSTRUCTION_COST: &str = "instruction-cost";
 
 const UNEXPECTED_ABILITY: &str = "the Test262 host answers no host effect";
 
@@ -304,6 +317,17 @@ pub(crate) fn unshimmable_includes() -> BTreeMap<String, String> {
         .collect()
 }
 
+/// The cost register, `harness-cost.tsv`: each selected test whose full run
+/// exceeds the CI cost bound, with the reason and the ticket that owns making
+/// it affordable. The register only shrinks: a test leaves it by running
+/// inside the bound again, not by being edited out.
+pub(crate) fn cost_register() -> BTreeMap<String, (String, String)> {
+    data_lines("harness-cost.tsv", 3)
+        .into_iter()
+        .map(|fields| (fields[0].clone(), (fields[1].clone(), fields[2].clone())))
+        .collect()
+}
+
 /// The first real `TS_*` diagnostic `text` names, if any: a runtime refusal
 /// reports its code at the head of its reason, and one caught and rethrown
 /// inside a message still names it.
@@ -403,8 +427,12 @@ fn evidence(text: impl fmt::Display) -> String {
 pub(crate) fn run(relative: &str) -> Observed {
     static NAMES: OnceLock<BTreeSet<String>> = OnceLock::new();
     static UNSHIMMABLE: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+    static COST: OnceLock<BTreeMap<String, (String, String)>> = OnceLock::new();
     let names = NAMES.get_or_init(refusal_codes);
     let unshimmable = UNSHIMMABLE.get_or_init(unshimmable_includes);
+    if COST.get_or_init(cost_register).contains_key(relative) {
+        return Observed::Harness(INSTRUCTION_COST.to_owned());
+    }
     let path = data_path(relative);
     let meta = metadata::read_metadata(&path).unwrap_or_else(|error| panic!("{relative}: {error}"));
     if let Some(include) = meta
@@ -543,9 +571,13 @@ fn classify_run(
 }
 
 /// Runs `paths` on every available core and returns what each observed, in
-/// input order. A panic inside the dialect is itself a divergence.
+/// input order. A panic inside the dialect is itself a divergence. A test that
+/// runs past the wall-clock bound fails the run with the unfinished tests'
+/// names: a running worker cannot be killed, so the orchestrating thread
+/// watches the per-test start times and exits non-zero itself.
 pub(crate) fn run_all(paths: &[String]) -> Vec<Observed> {
     let next = AtomicUsize::new(0);
+    let started = Mutex::new(vec![None; paths.len()]);
     let results = Mutex::new(vec![None; paths.len()]);
     let workers = std::thread::available_parallelism().map_or(1, |count| count.get());
     std::thread::scope(|scope| {
@@ -554,6 +586,7 @@ pub(crate) fn run_all(paths: &[String]) -> Vec<Observed> {
                 loop {
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     let Some(path) = paths.get(index) else { break };
+                    started.lock().expect("start times")[index] = Some(Instant::now());
                     let observed = std::panic::catch_unwind(|| run(path)).unwrap_or_else(|panic| {
                         let message = panic
                             .downcast_ref::<String>()
@@ -565,6 +598,37 @@ pub(crate) fn run_all(paths: &[String]) -> Vec<Observed> {
                     results.lock().expect("results")[index] = Some(observed);
                 }
             });
+        }
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let remaining: Vec<usize> = {
+                let results = results.lock().expect("results");
+                (0..paths.len())
+                    .filter(|index| results[*index].is_none())
+                    .collect()
+            };
+            if remaining.is_empty() {
+                break;
+            }
+            let now = Instant::now();
+            let overdue = {
+                let started = started.lock().expect("start times");
+                remaining.iter().any(|index| {
+                    started[*index].is_some_and(|start| now.duration_since(start) > TEST_WALL_CLOCK)
+                })
+            };
+            if overdue {
+                eprintln!(
+                    "a Test262 test exceeded the {} s wall-clock bound; unfinished: {}",
+                    TEST_WALL_CLOCK.as_secs(),
+                    remaining
+                        .iter()
+                        .map(|index| paths[*index].as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                std::process::exit(1);
+            }
         }
     });
     results
