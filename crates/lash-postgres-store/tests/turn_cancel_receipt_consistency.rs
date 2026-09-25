@@ -27,7 +27,7 @@ async fn reset(storage: &PostgresStorage) {
         "SELECT tablename FROM pg_tables
          WHERE schemaname = 'public'
            AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions')
+           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity')
          ORDER BY tablename",
     )
     .fetch_all(storage.pool())

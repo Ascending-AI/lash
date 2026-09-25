@@ -776,8 +776,19 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
     CONSTRAINT ck_release_stamp_singleton CHECK (singleton)
 );
 
--- Seed rows. Every open mode requires them: the component version stamp and
--- the transactional clock rows.
+-- The identity of this catalog: what a session catalog registers under with
+-- its turn-cancel-closure owner. Random per install, so two installations
+-- that share a database and schema name are still two catalogs. One row, like
+-- the other deployment-scoped singletons above.
+CREATE TABLE IF NOT EXISTS lash_catalog_identity (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    catalog_id TEXT NOT NULL,
+    CONSTRAINT ck_catalog_identity_singleton CHECK (singleton)
+);
+
+-- Seed rows. Every open mode requires them: the component version stamp, the
+-- transactional clock rows, and the catalog identity. `gen_random_uuid()` is
+-- core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version)
 VALUES ('lash-postgres-store', 132)
 ON CONFLICT (component) DO NOTHING;
@@ -790,4 +801,8 @@ ON CONFLICT (singleton) DO NOTHING;
 INSERT INTO lash_turn_park_clock (
     singleton, current_seq, compaction_horizon
 ) VALUES (TRUE, 0, 0)
+ON CONFLICT (singleton) DO NOTHING;
+
+INSERT INTO lash_catalog_identity (singleton, catalog_id)
+VALUES (TRUE, gen_random_uuid()::text)
 ON CONFLICT (singleton) DO NOTHING;

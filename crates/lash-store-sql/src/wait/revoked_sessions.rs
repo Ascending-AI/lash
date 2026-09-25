@@ -8,7 +8,7 @@ pub const TABLE: &str = "await_event_revoked_sessions";
 pub const INSERT_COLUMNS: &str = "session_id, revoked_at_ms";
 
 crate::statements! {
-    /// `await_event_revoked_sessions` statements both backends issue verbatim.
+    /// `await_event_revoked_sessions` statements SQLite's await-event journal issues.
     pub struct RevokedSessionStatements @ "await_event_revoked_session" {
         /// Whether session `?1` has been revoked.
         exists = "SELECT EXISTS(

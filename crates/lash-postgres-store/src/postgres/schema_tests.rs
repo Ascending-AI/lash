@@ -362,7 +362,7 @@ fn version_mismatch_refusal_derives_direction_and_catalog() {
         );
         assert!(
             message.contains("crates/lash-postgres-store/schema.sql")
-                && message.contains("await-event revocation ledger")
+                && message.contains("DROP SCHEMA")
                 && message.contains("0081-destructive-schema-changes"),
             "the remedy must state the recreate procedure inline: {message}"
         );

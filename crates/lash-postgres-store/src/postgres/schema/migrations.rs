@@ -29,8 +29,9 @@ use super::*;
 /// component 130 (FIG-3682) adds the `admission_base_checkpoint_ref` column
 /// of `lash_session_meta`, and component 131 (FIG-3735) extends the turn-park
 /// reason vocabulary and moves no relation, and component 132 (FIG-3667)
-/// drops the effect-engine tables. No arm targets 131 or 132: the current
-/// build refuses every predecessor.
+/// drops the effect-engine tables and adds the catalog identity. Every arm
+/// targets the retained endpoint 131, and no arm targets this build's 132:
+/// the current build refuses every predecessor.
 /// Source-shape
 /// declarations remain keyed to this build's catalog for precise older-store
 /// fixture construction.
@@ -49,6 +50,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_turn_cancel_affected_inputs",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -86,6 +88,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -118,6 +121,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -149,6 +153,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -181,6 +186,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -213,6 +219,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -247,6 +254,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -277,6 +285,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -314,6 +323,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -345,6 +355,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -371,6 +382,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -397,6 +409,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -423,6 +436,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -452,6 +466,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -482,6 +497,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -515,6 +531,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -542,6 +559,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -570,6 +588,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -595,6 +614,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -621,6 +641,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_turn_park_clock",
             "lash_turn_park_events",
             "lash_turn_parks",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -646,6 +667,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -674,6 +696,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_process_segment_handovers", "started_json"),
@@ -703,6 +726,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_session_meta", "drive_epoch"),
@@ -734,6 +758,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_session_meta", "drive_epoch"),
@@ -758,6 +783,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_session_meta", "drive_epoch"),
@@ -786,6 +812,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
+            "lash_catalog_identity",
         ],
         source_missing_columns: &[
             ("lash_session_meta", "drive_epoch"),
@@ -810,7 +837,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 127,
         to: 131,
-        source_missing_tables: &["lash_turn_park_clock", "lash_turn_park_events"],
+        source_missing_tables: &[
+            "lash_turn_park_clock",
+            "lash_turn_park_events",
+            "lash_catalog_identity",
+        ],
         source_missing_columns: &[
             ("lash_turn_parks", "park_id"),
             ("lash_turn_parks", "reason_code"),
@@ -833,7 +864,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 128,
         to: 131,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_catalog_identity"],
         source_missing_columns: &[("lash_session_meta", "admission_base_checkpoint_ref")],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -848,7 +879,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 129,
         to: 131,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_catalog_identity"],
         source_missing_columns: &[("lash_session_meta", "admission_base_checkpoint_ref")],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -864,7 +895,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 130,
         to: 131,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_catalog_identity"],
         source_missing_columns: &[],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],

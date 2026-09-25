@@ -200,14 +200,10 @@ pub fn backend_over(
     })
 }
 
-/// A backend over `stores` whose effect host is the recording double: for an
-/// embedder's storage law that reaches a backend's storage ports and runs no
-/// effect, over a substrate that is storage only.
+/// [`backend_over`] with the recording double as its effect host: for a
+/// storage law that reaches a backend's storage ports and runs no effect.
 pub fn recording_backend_over(stores: &dyn crate::StoreSet) -> Arc<dyn crate::Backend> {
-    Arc::new(LawBackend::over_stores(
-        stores,
-        Arc::new(crate::RecordingEffectHost::default()),
-    ))
+    backend_over(stores, Arc::new(crate::RecordingEffectHost::default()))
 }
 
 /// The backend of a store law's runtime: a law over one session store that

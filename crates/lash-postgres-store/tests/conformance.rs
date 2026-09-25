@@ -10,6 +10,7 @@
 
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
+use lash_sansio::TurnId;
 
 // No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
 // No live_replay_tests!: live replay is an in-process cache, not PostgreSQL-backed storage.
@@ -50,10 +51,13 @@ fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentByt
     })
 }
 
+use std::future::Future;
 #[path = "conformance/artifact_races.rs"]
 mod artifact_races;
 #[path = "conformance/attachment_catalog.rs"]
 mod attachment_catalog;
+#[path = "conformance/attachment_owner.rs"]
+mod attachment_owner;
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
 #[path = "conformance/attachment_recovery.rs"]
@@ -71,7 +75,7 @@ use lash_conformance::{
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
 use lash_core_execution::{
-    ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, RuntimePersistence,
+    ExecutionScope, ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, RuntimePersistence,
     SessionExecutionLeaseStore, SessionStoreFactory, StoreError, TriggerStore,
 };
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig};
@@ -138,9 +142,6 @@ async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
     Some((database_lock, storage))
 }
 
-/// A PostgreSQL backend over `storage` for a law's runtime. PostgreSQL keeps
-/// no attachment bytes, so the backend pairs it with a filesystem byte store
-/// in a directory the returned guard keeps.
 /// The storage ports of a law over `storage`, with filesystem attachment
 /// bytes in a directory the caller keeps alive.
 fn pg_law_stores(
@@ -152,6 +153,23 @@ fn pg_law_stores(
         Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
     ));
     (attachments, stores)
+}
+
+/// A backend for a law's runtime over `storage`'s store set, its effects
+/// journaled by the promise authority. The guard keeps the attachment bytes
+/// and the authority's journal alive.
+async fn pg_law_backend(
+    storage: &PostgresStorage,
+) -> (
+    (tempfile::TempDir, tempfile::TempDir),
+    Arc<dyn lash_core_execution::Backend>,
+) {
+    let (attachments, stores) = pg_law_stores(storage);
+    let (promise_dir, effect_host) = promise_authority().await;
+    (
+        (attachments, promise_dir),
+        lash_conformance::backend_over(stores.as_ref(), effect_host),
+    )
 }
 
 async fn postgres_lineage_handles() -> Option<(SharedDatabaseLock, LineageConformanceHandles)> {
@@ -254,6 +272,14 @@ async fn wait_for_session_lease_advisory_waiters(
     })
     .await
     .unwrap_or_else(|_| panic!("expected at least {at_least} session-lease advisory-lock waiters"));
+}
+
+fn durable_turn_scope(
+    session_id: impl Into<SessionId>,
+    turn_id: impl Into<TurnId>,
+) -> ExecutionScope {
+    let session_id = session_id.into();
+    ExecutionScope::turn(&session_id, turn_id)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1727,11 +1753,40 @@ lash_conformance::trigger_retention_fault_tests!({
 
 #[path = "conformance/process_retention.rs"]
 mod process_retention;
+#[path = "conformance/restored_claim_cede.rs"]
+mod restored_claim_cede;
 include!("conformance/append_identity.rs");
+#[path = "conformance/cancelled_turn_withheld_input.rs"]
+mod cancelled_turn_withheld_input;
+#[path = "conformance/direct_turn_acceptance.rs"]
+mod direct_turn_acceptance;
 #[path = "conformance/injectors.rs"]
 mod injectors;
-// No session_failure_evidence_tests!: that law runs a turn, and PostgreSQL
-// runs no effects of its own (the engine is Restate's; ADR 0104).
+lash_conformance::session_failure_evidence_tests!({
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres failure-evidence conformance: database URL is not set");
+        return;
+    };
+    reset(storage.pool()).await;
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
+        1_800_000_000_000,
+    ));
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let stores = lash_postgres_store::PostgresStoreSet::with_clock(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+        lash_core_execution::WakeDeliveryConfig::default(),
+        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+    );
+    let (promise_dir, effect_host) = promise_authority().await;
+    let backend = lash_conformance::backend_over(&stores, effect_host);
+    (
+        (_database_lock, attachments, promise_dir),
+        backend,
+        move || clock.advance(1),
+    )
+});
+
 lash_conformance::session_read_view_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres read-session conformance: database URL is not set");

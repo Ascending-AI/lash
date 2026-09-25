@@ -823,6 +823,13 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
             "owner_kind = 'execution'",
         ),
     ),
+    // The catalog identity names a PostgreSQL catalog to its turn-cancel
+    // closure owner; a SQLite catalog is named by its file.
+    postgres_only_constraint(rendered(
+        "lash_catalog_identity",
+        "ck_catalog_identity_singleton",
+        "singleton",
+    )),
     expected_constraint(
         &[SqliteConstraintDatabase::DurableCore],
         rendered(

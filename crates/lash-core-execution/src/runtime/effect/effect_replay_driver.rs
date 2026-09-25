@@ -125,7 +125,9 @@ static EFFECT_OWNER_COUNTER: AtomicU64 = AtomicU64::new(1);
 /// `sqlite_effect_replay_{suffix}` codes, the one journal this driver runs on.
 ///
 /// Hosts match on `RuntimeEffectControllerError::code`. Substrate failures
-/// stay in the backend, which owns its own `_store` mapping.
+/// stay in the backend, which owns its own `_store` mapping. The type goes
+/// with the SQLite engine (FIG-3668); until then it is the one place the
+/// driver names its codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectReplayVocabulary(());
 
@@ -1422,10 +1424,8 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     /// busy-retry backoff, and the lease renewal interval, and it never stamps
     /// a row or decides a lease — the substrate's own lease clock does that
     /// inside [`EffectReplayRowStore::claim`]. Pass the host's injected
-    /// clock when the substrate shares the host's clock domain (SQLite), and an
-    /// explicit [`SystemClock`](crate::facade_support::SystemClock) when its
-    /// lease decisions are server-side per the [`Clock`](crate::Clock)
-    /// contract.
+    /// clock: SQLite, the one substrate this driver runs on, shares the host's
+    /// clock domain.
     pub fn new(
         row_store: P,
         await_events: AwaitEventCoordinator<A>,

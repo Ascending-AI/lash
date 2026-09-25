@@ -387,6 +387,12 @@ const SQLITE_ONLY: &[(&str, RetentionClass)] = &[
 
 const POSTGRES_ONLY: &[(&str, RetentionClass)] = &[
     (
+        "catalog_identity",
+        PermanentlyExempt {
+            reason: "one random identity per install, which the session catalog registers under",
+        },
+    ),
+    (
         "lash_schema_versions",
         PermanentlyExempt {
             reason: "one current version per fixed component; not accumulating migration history",

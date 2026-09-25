@@ -13,7 +13,7 @@ pub const TABLE: &str = "effect_scope_retirements";
 pub const INSERT_COLUMNS: &str = "scope_id, retired_at_ms, artifact_cleanup_completed";
 
 crate::statements! {
-    /// `effect_scope_retirements` statements both backends issue verbatim.
+    /// `effect_scope_retirements` statements SQLite's effect journal issues.
     pub struct ScopeRetirementStatements @ "effect_scope_retirement" {
         /// Whether scope `?1` is fenced in this table.
         exists = "SELECT EXISTS(

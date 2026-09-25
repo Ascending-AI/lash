@@ -215,8 +215,8 @@ pub(super) enum Finalized {
 /// uncontended claim never touches the notifier table. Every later busy
 /// answer parks on the row, racing the lease's expiry on the clock — unless
 /// the clock already reached that expiry once and the store still called the
-/// lease live (a store whose lease clock runs behind the driver's), in which case only the row's own notification
-/// or the cross-process poll can move it.
+/// lease live, in which case only the row's own notification or the
+/// cross-process poll can move it.
 #[derive(Default)]
 pub(super) struct ClaimQueue {
     watch: Option<JournalWatch>,

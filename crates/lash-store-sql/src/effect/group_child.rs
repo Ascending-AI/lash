@@ -79,7 +79,7 @@ pub const UNSETTLED_CHILD_COLUMNS: &str =
                 r.commit_state, r.commit_seq";
 
 crate::statements! {
-    /// `runtime_effect_group_child` statements both backends issue verbatim.
+    /// `runtime_effect_group_child` statements SQLite's effect journal issues.
     pub struct GroupChildStatements @ "effect_group_child" {
         /// Every accepted child of group `?1`, in child order.
         ///
