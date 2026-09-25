@@ -117,7 +117,10 @@ pub enum DriveAbort {
     /// The root parked (ADR 0104 O3): its park is durable, and the engine
     /// keeps its history for a restored build instead of retrying it.
     #[error("root `{root}` parked: {error}")]
-    Parked { root: TurnId, error: RuntimeError },
+    Parked {
+        root: TurnId,
+        error: Box<RuntimeError>,
+    },
     /// A refusal no retry changes. The engine ends the attempt terminally.
     #[error("drive refused: {0}")]
     Refused(RuntimeError),
@@ -127,13 +130,15 @@ impl DriveAbort {
     /// The error the abort carries, whatever its disposition.
     pub fn error(&self) -> &RuntimeError {
         match self {
-            Self::Retry(error) | Self::Refused(error) | Self::Parked { error, .. } => error,
+            Self::Retry(error) | Self::Refused(error) => error,
+            Self::Parked { error, .. } => error,
         }
     }
 
     pub fn into_error(self) -> RuntimeError {
         match self {
-            Self::Retry(error) | Self::Refused(error) | Self::Parked { error, .. } => error,
+            Self::Retry(error) | Self::Refused(error) => error,
+            Self::Parked { error, .. } => *error,
         }
     }
 }

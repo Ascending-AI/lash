@@ -144,7 +144,7 @@ pub(crate) fn drive_abort(root: Option<&TurnId>, error: RuntimeError) -> DriveAb
     {
         return DriveAbort::Parked {
             root: root.clone(),
-            error,
+            error: Box::new(error),
         };
     }
     if error.is_retryable() {
