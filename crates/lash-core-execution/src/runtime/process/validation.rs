@@ -223,6 +223,22 @@ pub fn prepare_process_transition(
             // sweep never rewrites a row it coalesced onto.
             // a competing backend still reaches the fold's refusal.
             match record.external_ref.as_ref() {
+                // An ended process names no successor segment: its stored
+                // terminal revokes every execution that would carry it on
+                // (FIG-3820). A root reference recorded after a fast
+                // terminal names the carrier that ended it and still lands.
+                _ if record.is_terminal()
+                    && external_ref.segment_ordinal() > 0
+                    && record
+                        .external_ref
+                        .as_ref()
+                        .is_none_or(|existing| external_ref.supersedes(existing)) =>
+                {
+                    return Err(PluginError::ProcessAlreadyTerminal {
+                        process_id: record.id.clone(),
+                        status: record.status,
+                    });
+                }
                 // Nothing recorded yet: this writer names the owner.
                 None => ProcessEventAppendRequest::external_ref_set(&record.id, &external_ref),
                 // A competing backend is a refusal at every ordinal, and the

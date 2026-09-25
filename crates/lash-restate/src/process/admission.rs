@@ -146,7 +146,7 @@ pub(crate) struct SegmentPolicy {
 }
 
 /// What the verdict step journaled.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "verdict", rename_all = "snake_case")]
 enum AdmissionVerdict {
     Admit {
@@ -163,10 +163,15 @@ enum AdmissionVerdict {
         latest_segment_ordinal: u64,
     },
     MissingHandover,
+    /// The process already holds a terminal: a later segment of an ended
+    /// process runs nothing and republishes the stored terminal (FIG-3820).
+    Ended {
+        output: Box<lash_core::ProcessAwaitOutput>,
+    },
 }
 
 /// What the start step journaled.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "start", rename_all = "snake_case")]
 enum StartOutcome {
     Started {
@@ -175,6 +180,10 @@ enum StartOutcome {
     },
     SubstrateLost {
         lost: ProcessStarted,
+    },
+    /// The process ended between the verdict and the start (FIG-3820).
+    Ended {
+        output: Box<lash_core::ProcessAwaitOutput>,
     },
 }
 
@@ -215,6 +224,11 @@ pub(crate) enum SegmentAdmission {
     SubstrateLost { lost: ProcessStarted },
     /// The segment already completed; its successor carries the process.
     Superseded { latest_segment_ordinal: u64 },
+    /// The process already ended: its stored terminal revokes any later
+    /// segment that would carry it on (FIG-3820).
+    Ended {
+        output: Box<lash_core::ProcessAwaitOutput>,
+    },
 }
 
 fn store_fault(error: PluginError) -> HandlerError {
@@ -307,6 +321,13 @@ pub(crate) async fn admit_segment(
                     Some(handover_digest(&persisted.handover)?)
                 };
                 let record = read_record(&registry, &process_id).await?;
+                if segment_ordinal > 0
+                    && let Some(output) = record.outcome.clone().filter(|_| record.is_terminal())
+                {
+                    return Ok(Json(AdmissionVerdict::Ended {
+                        output: Box::new(output),
+                    }));
+                }
                 let started = if segment_ordinal == 0 {
                     record.first_started.as_deref().cloned()
                 } else {
@@ -341,6 +362,7 @@ pub(crate) async fn admit_segment(
             policy,
         } => (nonce, handover, policy),
         AdmissionVerdict::MissingHandover => return Ok(SegmentAdmission::MissingHandover),
+        AdmissionVerdict::Ended { output } => return Ok(SegmentAdmission::Ended { output }),
         AdmissionVerdict::SubstrateLost { lost } => {
             return Ok(SegmentAdmission::SubstrateLost { lost });
         }
@@ -393,6 +415,7 @@ pub(crate) async fn admit_segment(
             writer,
         }))),
         StartOutcome::SubstrateLost { lost } => Ok(SegmentAdmission::SubstrateLost { lost }),
+        StartOutcome::Ended { output } => Ok(SegmentAdmission::Ended { output }),
     }
 }
 
@@ -467,6 +490,11 @@ async fn start_later_segment(
     nonce: String,
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
+    if let Some(output) = record.outcome.clone().filter(|_| record.is_terminal()) {
+        return Ok(StartOutcome::Ended {
+            output: Box::new(output),
+        });
+    }
     let root = retained_start(&record, segment_ordinal)?;
     let execution_id = root
         .owner

@@ -149,6 +149,17 @@ pub enum ProcessCompletionAuthority {
     /// [`RecoveryContract::ExternallyOwned`] rows — a substrate never runs
     /// one, so it may not close one.
     WorkflowKey { workflow_key: String },
+    /// A workflow-key substrate ends a row that segment `segment_ordinal`
+    /// could not resume (a recovery that found the segment's journal lost).
+    /// Refused typed ([`crate::PluginError::ProcessHandedOver`]) when a later
+    /// segment already carries the row: the external reference names that
+    /// segment, and the check runs in the transaction that would append the
+    /// terminal, so a recovery and a handover to a later segment exclude each
+    /// other (FIG-3820).
+    WorkflowKeyRecovery {
+        workflow_key: String,
+        segment_ordinal: u64,
+    },
     /// The sweep reconciled a durable Abandon Request on an
     /// [`RecoveryContract::ExternallyOwned`] row (whose lease had lapsed, or
     /// which Lash never leased) into an
@@ -174,6 +185,7 @@ impl ProcessCompletionAuthority {
         match self {
             Self::ExternalOwner => "external-owner",
             Self::WorkflowKey { .. } => "workflow-key",
+            Self::WorkflowKeyRecovery { .. } => "workflow-key-recovery",
             Self::ReconciledAbandon => "reconciled-abandon",
         }
     }
@@ -186,10 +198,11 @@ impl ProcessCompletionAuthority {
     /// SQLite, and Postgres rather than at each scattered caller.
     pub fn validate(
         &self,
-        process_id: &ProcessId,
-        disposition: RecoveryContract,
+        record: &super::ProcessRecord,
         await_output: &ProcessAwaitOutput,
     ) -> Result<(), crate::PluginError> {
+        let process_id = &record.id;
+        let disposition = record.disposition;
         let reject = |reason: &str| {
             Err(crate::PluginError::Session(format!(
                 "process `{process_id}` cannot be completed with {} authority: {reason}",
@@ -205,12 +218,26 @@ impl ProcessCompletionAuthority {
                     );
                 }
             }
-            Self::WorkflowKey { .. } => {
+            Self::WorkflowKey { .. } | Self::WorkflowKeyRecovery { .. } => {
                 if disposition == RecoveryContract::ExternallyOwned {
                     return reject(
                         "externally-owned rows are never executed by a workflow substrate; they \
                          close through their external owner or a reconciled abandon request",
                     );
+                }
+                if let Self::WorkflowKeyRecovery {
+                    segment_ordinal, ..
+                } = self
+                    && let Some(carrier) = record
+                        .external_ref
+                        .as_ref()
+                        .map(super::ProcessExternalRef::segment_ordinal)
+                        .filter(|carrier| carrier > segment_ordinal)
+                {
+                    return Err(crate::PluginError::ProcessHandedOver {
+                        process_id: process_id.clone(),
+                        segment_ordinal: carrier,
+                    });
                 }
             }
             Self::ReconciledAbandon => {

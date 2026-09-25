@@ -43,7 +43,7 @@ pub(super) async fn complete_process(
                 // *inside* the transaction that appends, so a concurrent
                 // complete→prune→re-register with a different disposition cannot
                 // slip between the check and the append.
-                authority.validate(&process_id, record.disposition, &await_output)?;
+                authority.validate(&record, &await_output)?;
                 let request = lash_core_execution::facade_support::terminal_append_request(
                     &process_id,
                     &await_output,

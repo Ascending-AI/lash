@@ -244,6 +244,39 @@ pub async fn process_continuation_store(
         )
         .await
         .expect("complete prunable continuation owner");
+    // FIG-3820: the stored terminal is the revocation. A successor's handover
+    // put on an ended process is refused typed, in the transaction that would
+    // park it, and the retained handover stays the latest.
+    let refused = store
+        .put_segment_handover(
+            &ProcessId::from(pruned_process_id),
+            PersistedSegmentHandover {
+                segment_ordinal: 2,
+                writer: String::new(),
+                handover: SegmentHandover {
+                    reason: BoundaryReason::JournalBudget,
+                    program_hash: "pruned-program-v1".to_string(),
+                    engine_state: vec![8, 1, 2],
+                },
+            },
+        )
+        .await;
+    assert!(
+        matches!(
+            refused,
+            Err(crate::PluginError::ProcessAlreadyTerminal { .. })
+        ),
+        "a handover put on an ended process is refused typed: {refused:?}"
+    );
+    assert_eq!(
+        store
+            .latest_segment_handover(&ProcessId::from(pruned_process_id))
+            .await
+            .expect("read handover after the refused put")
+            .map(|handover| handover.segment_ordinal),
+        Some(1),
+        "the refused put parks nothing"
+    );
     registry
         .prune_terminal_processes(
             terminal.updated_at_ms.saturating_add(1),
