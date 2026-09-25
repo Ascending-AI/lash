@@ -8760,11 +8760,11 @@ test/built-ins/RegExp/prototype/exec/S15.10.6.2_A8.js	refused	TS_METHOD_UNSUPPOR
 test/built-ins/RegExp/prototype/exec/S15.10.6.2_A9.js	pass	-
 test/built-ins/RegExp/prototype/exec/duplicate-named-groups-properties.js	pass	-
 test/built-ins/RegExp/prototype/exec/failure-g-lastindex-reset.js	pass	-
-test/built-ins/RegExp/prototype/exec/failure-lastindex-access.js	fail	FIG-3745
+test/built-ins/RegExp/prototype/exec/failure-lastindex-access.js	pass	-
 test/built-ins/RegExp/prototype/exec/failure-lastindex-set.js	pass	-
 test/built-ins/RegExp/prototype/exec/name.js	pass	-
 test/built-ins/RegExp/prototype/exec/success-g-lastindex-no-access.js	pass	-
-test/built-ins/RegExp/prototype/exec/success-lastindex-access.js	fail	FIG-3745
+test/built-ins/RegExp/prototype/exec/success-lastindex-access.js	pass	-
 test/built-ins/RegExp/prototype/exec/u-captured-value.js	refused	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
 test/built-ins/RegExp/prototype/exec/u-lastindex-adv.js	pass	-
 test/built-ins/RegExp/prototype/exec/u-lastindex-value.js	pass	-
