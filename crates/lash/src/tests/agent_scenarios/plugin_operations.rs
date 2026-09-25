@@ -6,6 +6,8 @@ use crate::plugins::{
 
 use std::time::Duration;
 
+const SEED: u64 = 0x504c5547;
+
 macro_rules! operation {
     ($name:ident, $kind:ident, $wire:literal) => {
         struct $name;
@@ -55,8 +57,10 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
                     Ok(outcome(format!("task:{args}"), "completed"))
                 }
             });
+        let double = restate_double(SEED).await;
+        let backend = double.lash_backend();
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
-            memory_backend().await.into(),
+            backend,
             crate::TurnBudget::Unbounded,
         ))
         .provider(mock_provider())
