@@ -235,6 +235,29 @@ diff --git a/crates/lash-postgres-store/schema-shape.txt b/crates/lash-postgres-
         valid, _ = MODULE.validate_patch(mixed_change)
         self.assertFalse(valid)
 
+    def test_pre_release_switch_pauses_and_resumes_the_gate(self) -> None:
+        import contextlib
+        import io
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tools").mkdir()
+            diff = root / "change.diff"
+            diff.write_text(PAYLOAD_DIFF, encoding="utf-8")
+            for value, expected in (("true", 0), ("false", 1)):
+                with self.subTest(pre_release=value):
+                    (root / "tools" / "release-mode.toml").write_text(
+                        f"pre_release = {value}\n", encoding="utf-8"
+                    )
+                    with mock.patch.object(MODULE, "ROOT", root):
+                        output = io.StringIO()
+                        with contextlib.redirect_stdout(output):
+                            status = MODULE.main(["--diff-file", str(diff)])
+                    self.assertEqual(status, expected)
+                    if expected == 0:
+                        self.assertIn("paused pre-1.0", output.getvalue())
+
     def test_structural_column_change_alone_does_not_use_payload_gate(self) -> None:
         column_diff = PAYLOAD_DIFF.replace(
             "    shape /properties/old/type string",

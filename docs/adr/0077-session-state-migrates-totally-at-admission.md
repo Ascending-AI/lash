@@ -160,7 +160,11 @@ step, a mapping whose source or target codec disagrees with its record counter,
 and a guarded in-scope shape that has no disposition. Shapes outside this
 domain retain their own existing version rule. This mechanical gate proves
 coverage of declared source projections; the fixture and fault laws below
-prove operational totality.
+prove operational totality. The per-PR bump requirement the gate enforces is
+paused until the lash 1.0 cut under `tools/release-mode.toml`
+(`pre_release = true`, FIG-3660): while it holds the gate reports
+"paused pre-1.0" and exits 0, and the post-1.0 migration policy (ADR 0106)
+restores it.
 
 ### Executable state remains pinned
 

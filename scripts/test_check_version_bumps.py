@@ -571,6 +571,33 @@ class VersionBumpFixtureTest(unittest.TestCase):
 
                 self.assertEqual(result.returncode, expected_exit, result.stderr)
 
+    def test_pre_release_switch_pauses_the_gate(self) -> None:
+        fixture = self.fixture()
+        fixture.write(LIB_V1, WIRE_BASE)
+        base = fixture.commit("base")
+        fixture.write(LIB_V1, WIRE_CHANGED)
+        head = fixture.commit("bump violation under the switch")
+        fixture.write_file("tools/release-mode.toml", "pre_release = true\n")
+
+        result = self.check_cli(fixture, base, head)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("paused pre-1.0", result.stdout)
+
+    def test_pre_release_switch_off_enforces_as_before(self) -> None:
+        for switch in ("pre_release = false\n", "# no switch key\n"):
+            with self.subTest(switch=switch):
+                fixture = self.fixture()
+                fixture.write(LIB_V1, WIRE_BASE)
+                base = fixture.commit("base")
+                fixture.write(LIB_V1, WIRE_CHANGED)
+                head = fixture.commit("bump violation under the switch")
+                fixture.write_file("tools/release-mode.toml", switch)
+
+                result = self.check_cli(fixture, base, head)
+
+                self.assertEqual(result.returncode, 1, result.stdout)
+
     def test_wire_variant_without_bump_fails(self) -> None:
         fixture = self.fixture()
         fixture.write(LIB_V1, WIRE_BASE)

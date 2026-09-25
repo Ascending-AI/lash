@@ -1,0 +1,12 @@
+# Release mode for the durable-format version-bump gates (FIG-3660).
+#
+# Before lash 1.0 nothing is in production and the clean-slate 1.0 release
+# resets every stored format, so a per-PR version bump protects nothing: it
+# only collides, since every PR takes "main+1" and trips the bump check
+# against every other PR. While `pre_release` is true the bump gates
+# (check_version_bumps.py, check_version_bump_fixtures.py and
+# check-postgres-payload-shape-version.py) report "paused pre-1.0" and exit 0
+# on pull requests, the merge queue and main; their logic is untouched and
+# they turn back on when this flips. Set to false at the lash 1.0 cut, when
+# the post-1.0 migration policy (ADR 0106, FIG-3660) takes over.
+pre_release = true
