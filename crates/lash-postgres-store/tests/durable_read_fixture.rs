@@ -165,6 +165,9 @@ const ADMISSION_BASE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const GENERATION_PARK_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-123-6103c2810/postgres-expected.json",
 ];
+const SEQUENCE_IDENTITY_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-124-1d0b41349/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
