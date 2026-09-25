@@ -69,6 +69,18 @@ table lash_checkpoint_blob_refs
   primary-key (checkpoint_ref, blob_ref)
   foreign-key (blob_ref) references lash_blobs (hash) on delete no action
   foreign-key (checkpoint_ref) references lash_blobs (hash) on delete cascade
+table lash_control_intents
+  column attempts bigint not-null
+  column created_at_ms bigint not-null
+  column engine_ref text nullable
+  column format bigint not-null
+  column intent_id bigint not-null default
+  column kind text not-null
+  column kind_json text not-null
+  column session_id text not-null
+  column state text not-null
+  column state_json text not-null
+  primary-key (intent_id)
 table lash_deleted_sessions
   column created_at_ms bigint nullable
   column head_revision bigint nullable
@@ -1108,6 +1120,7 @@ table lash_session_meta
   column caused_by_subscription_incarnation text nullable
   column caused_by_subscription_revision text nullable
   column caused_by_turn_id text nullable
+  column closing_intent bigint nullable
   column created_at_ms bigint nullable
   column drive_admission_id text nullable
   column drive_epoch bigint not-null default
@@ -1127,6 +1140,19 @@ table lash_session_meta_pending_observer_intents
   unique (session_id, process_index)
   primary-key (session_id, process_id)
   foreign-key (session_id) references lash_session_meta (session_id) on delete cascade
+table lash_session_root_inputs
+  column input_id text not-null
+  column root text not-null
+  column session_id text not-null
+  primary-key (session_id, input_id)
+table lash_session_roots
+  column root text not-null
+  column session_id text not-null
+  column terminal_at_ms bigint nullable
+  column terminal_cause_json text nullable
+  column terminal_head_revision bigint nullable
+  column terminal_kind text nullable
+  primary-key (session_id, root)
 table lash_sessions
   column checkpoint_ref text nullable
   column head_json text not-null
@@ -1349,6 +1375,7 @@ table lash_turn_park_events
   primary-key (seq)
 table lash_turn_parks
   column attempts bigint not-null
+  column engine_ref text nullable
   column last_refused_ms bigint not-null
   column park_executable_generation text nullable
   column park_id bigint not-null
@@ -1679,6 +1706,7 @@ table lash_turn_parks
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/required/type field
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/type object
     shape /persisted-by/sqlite/turn_parks.reason_json/rust-type ParkReason
+  column resume_intent bigint nullable
   column session_id text not-null
   column since_ms bigint not-null
   column turn_id text not-null
