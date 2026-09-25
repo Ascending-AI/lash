@@ -209,7 +209,7 @@ async fn core(
             .await
             .expect("memory backend"),
     );
-    LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
         .model(

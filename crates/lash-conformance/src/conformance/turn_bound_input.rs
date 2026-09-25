@@ -126,7 +126,7 @@ async fn drain_as_another_worker(
 )]
 pub async fn aborted_direct_turn_input_is_bound_until_its_redrive(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-bound-until-redrive"));
@@ -180,7 +180,7 @@ pub async fn aborted_direct_turn_input_is_bound_until_its_redrive(
 )]
 pub async fn later_direct_turn_never_folds_in_a_bound_input(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let aborted_turn = TurnId::from(format!("{prefix}-aborted"));
@@ -241,7 +241,7 @@ pub async fn later_direct_turn_never_folds_in_a_bound_input(
 )]
 pub async fn cancelling_a_bound_input_returns_its_drive_to_the_queue(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-absorbing-aborted"));
@@ -328,7 +328,7 @@ pub async fn cancelling_a_bound_input_returns_its_drive_to_the_queue(
 )]
 pub async fn lost_drive_outcome_still_binds_its_claimed_input(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-lost-drive-outcome"));

@@ -100,7 +100,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
             let turns = turns.clone();
             Box::pin(async move {
                 let mut runtime = Box::pin(try_build_runtime_on_host(
-                    stores.as_ref(),
+                    Arc::clone(&stores),
                     store,
                     &seam,
                     host,

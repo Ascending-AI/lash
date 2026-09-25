@@ -27,6 +27,8 @@ pub struct PostgresStoreSet {
 
 struct StoreParts {
     storage: PostgresStorage,
+    /// `postgres:<database>.<schema>`, the catalog this store set is over.
+    binding: lash_core_execution::StoreBindingId,
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<PostgresSessionStoreFactory>,
     process_registry: Arc<PostgresProcessRegistry>,
@@ -59,6 +61,10 @@ impl PostgresStoreSet {
         Self {
             inner: Arc::new(StoreParts {
                 storage: storage.clone(),
+                binding: lash_core_execution::StoreBindingId::new(format!(
+                    "postgres:{}",
+                    storage.catalog_id()
+                )),
                 session_store_factory: Arc::new(
                     storage
                         .session_store_factory_with_shared_process_registry()
@@ -120,6 +126,10 @@ impl PostgresStoreSet {
 }
 
 impl lash_core_execution::StoreSet for PostgresStoreSet {
+    fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
+        &self.inner.binding
+    }
+
     fn clock(&self) -> Arc<dyn Clock> {
         Arc::clone(&self.inner.clock)
     }

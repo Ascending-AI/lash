@@ -88,14 +88,14 @@ impl RlmProtocolPluginFactory {
     /// sessions wrote. Pass the backend the runtime is built over; a runtime
     /// over another backend refuses this factory
     /// ([`PluginFactory::bound_backend`]).
-    pub fn new(config: RlmProtocolPluginConfig, backend: &dyn lash_core::Backend) -> Self {
+    pub fn new(config: RlmProtocolPluginConfig, backend: &lash_core::Backend) -> Self {
         Self {
             config,
             projection_resolver: Arc::new(ProjectionRegistry::default()),
             deferred_tool_resolver: None,
             deferred_trigger_resolver: None,
             artifact_store: LashlangArtifacts::of_backend(backend),
-            artifact_backend: Arc::from(backend.binding_identity()),
+            artifact_backend: Arc::from(backend.binding_identity().as_str()),
             lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig::default(),
             process_lifecycle: OnceLock::new(),
         }
@@ -532,7 +532,7 @@ mod label_annotation_tests {
                     .instruction_limit(crate::InstructionBound::instructions(1_000_000))
                     .memory_limit(crate::MemoryBound::mebibytes(64))
                     .build(),
-                &crate::testing::memory_backend().await,
+                &crate::testing::memory_backend().await.into(),
             )
             .with_process_lifecycle(false),
         );

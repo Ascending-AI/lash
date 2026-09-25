@@ -237,7 +237,7 @@ async fn race_recovery_worker() -> Result<()> {
     // The durable execution-environment store is the backend's own:
     // the loser's retained request names the environment its dead worker
     // published, and a recovered child never invents one (ADR 0099 §3).
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(
+    let backend: lash_core::Backend = Arc::new(
         lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
             directory.join("sessions"),
             lash_sqlite_store::SqliteBackendOptions::default(),
@@ -245,7 +245,8 @@ async fn race_recovery_worker() -> Result<()> {
         )
         .await
         .unwrap(),
-    );
+    )
+    .into();
     let registry = backend.process_registry();
     register_intent_target(registry.as_ref()).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))

@@ -160,10 +160,11 @@ impl SpawnWorld {
                 }
             })
             .build();
-        let mut host = crate::LawBackend::over_stores(stores.as_ref(), effect_host).host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+        let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), effect_host)
+            .host_config(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            );
         host.providers.provider_resolver =
             Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
         let faults = crate::testing::ProcessRegistryFaults::new(stores.process_registry());

@@ -61,7 +61,7 @@ fn assert_drop_survived(turn: &AssembledTurn, events: &[lash_trace::TraceEvent])
 }
 
 async fn runtime_with_foreign_replay(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     provider: TestProvider,
     plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     trace_path: &std::path::Path,
@@ -78,7 +78,7 @@ async fn runtime_with_foreign_replay(
 }
 
 async fn run(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     runtime: &mut LashRuntime,
     token: CancellationToken,
     turn_id: &TurnId,

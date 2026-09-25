@@ -40,7 +40,7 @@ pub(crate) async fn memory_artifact_store() -> lashlang::LashlangArtifacts {
             backend
         }
     };
-    lashlang::LashlangArtifacts::of_backend(&backend)
+    lashlang::LashlangArtifacts::of_backend(&backend.clone().into())
 }
 
 /// [`memory_backend`] for a synchronous law: the backend opens on a runtime
@@ -65,19 +65,19 @@ pub(crate) fn memory_backend_blocking() -> lash_sqlite_store::SqliteBackend {
 
 /// [`fresh_memory_artifact_store`] for a synchronous law.
 pub(crate) fn memory_artifact_store_blocking() -> lashlang::LashlangArtifacts {
-    lashlang::LashlangArtifacts::of_backend(&memory_backend_blocking())
+    lashlang::LashlangArtifacts::of_backend(&memory_backend_blocking().clone().into())
 }
 
 /// A fresh memory backend's Lashlang artifact store, isolated from every
 /// other law's.
 pub(crate) async fn fresh_memory_artifact_store() -> lashlang::LashlangArtifacts {
-    lashlang::LashlangArtifacts::of_backend(&memory_backend().await)
+    lashlang::LashlangArtifacts::of_backend(&memory_backend().await.into())
 }
 
 /// The ports of a fresh memory backend: the host a cell's effects journal
 /// on, its process-exec-env store and attachment port, and its clock.
 pub(crate) async fn memory_backend_ports() -> lash_core::testing::TestExecutionPorts {
-    lash_core::testing::TestExecutionPorts::of(&memory_backend().await)
+    lash_core::testing::TestExecutionPorts::of(&memory_backend().await.into())
 }
 
 /// A fresh memory backend's process registry, for a trigger router whose

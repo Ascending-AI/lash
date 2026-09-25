@@ -62,7 +62,7 @@ pub async fn a_host_layer_observes_its_group_childrens_effects<F, S>(
                 law_host.route_to(&seam);
                 let store = SeamStore::wrap(raw, seam.control.clone());
                 let mut runtime = Box::pin(try_build_runtime_over_host(
-                    stores.as_ref(),
+                    Arc::clone(&stores),
                     store,
                     seam.control.clone(),
                     law_host.host(),

@@ -23,7 +23,7 @@ pub(crate) async fn memory_backend() -> lash_sqlite_store::SqliteBackend {
 /// A fresh memory backend's Lashlang artifact store.
 pub(crate) async fn memory_artifact_store() -> LashlangArtifacts {
     LashlangArtifacts::new(lash_core::Backend::module_artifacts(
-        &memory_backend().await,
+        &memory_backend().await.into(),
     ))
 }
 
@@ -235,7 +235,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
             "signal-fixture-env",
         )))
     };
-    let registry = lash_core::Backend::process_registry(&memory_backend().await);
+    let registry = lash_core::Backend::from(memory_backend().await).process_registry();
     registry
         .register_process(registration())
         .await
@@ -265,7 +265,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
-    let effect_host = lash_core::Backend::effect_host(&backend);
+    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
     let scoped = lash_core::EffectHost::scoped_static(
         effect_host.as_ref(),
         lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
@@ -451,7 +451,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
-    let effect_host = lash_core::Backend::effect_host(&backend);
+    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
     let scoped = lash_core::EffectHost::scoped_static(
         effect_host.as_ref(),
         lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
@@ -478,7 +478,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
     let expected_catalog = Arc::clone(&catalog);
-    let registry = lash_core::Backend::process_registry(&backend);
+    let registry = lash_core::Backend::from(backend.clone()).process_registry();
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "batch-run")
         .bind_attempt(1);
     let process_events = durable_process_events(&registry, &registration, &authority).await;
@@ -1712,7 +1712,7 @@ process scan(root: str) -> str {
             input.process_identity(),
         ));
         let context = lash_core::testing::process_engine_run_context_for_validation(
-            &memory_backend().await,
+            &memory_backend().await.into(),
             registration,
             catalog,
             registry_available,

@@ -65,13 +65,14 @@ struct SummaryHost {
 impl SummaryBackend {
     /// A fresh backend over this backend's durable state, with the
     /// Lashlang artifact store that goes with it.
-    async fn backend(&self) -> Arc<dyn lash_core::Backend> {
+    async fn backend(&self) -> lash_core::Backend {
         match self {
             Self::Sqlite(root) => Arc::new(
                 lash_sqlite_store::SqliteBackend::open(root)
                     .await
                     .expect("open the SQLite backend"),
-            ),
+            )
+            .into(),
         }
     }
 
@@ -82,7 +83,7 @@ impl SummaryBackend {
         let provider = mock_provider();
         let provider_id = provider.kind().to_string();
         let backend = self.backend().await;
-        let (backend, faults): (Arc<dyn lash_core::Backend>, _) = match fault {
+        let (backend, faults): (lash_core::Backend, _) = match fault {
             Some((event_type, count)) => {
                 let faults = Arc::new(lash_core::EffectSummaryAppendFaults::new(
                     backend.process_registry(),
@@ -91,7 +92,9 @@ impl SummaryBackend {
                 ));
                 let registry = Arc::clone(&faults) as Arc<dyn lash_core::ProcessRegistry>;
                 (
-                    Arc::new(DecoratedBackend::over(backend).process_registry(move |_| registry)),
+                    DecoratedBackend::over(backend)
+                        .process_registry(move |_| registry)
+                        .into(),
                     Some(faults),
                 )
             }
@@ -103,32 +106,28 @@ impl SummaryBackend {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.as_ref(),
+            &backend,
         );
-        let core = LashCore::rlm_builder(
-            backend as Arc<dyn lash_core::Backend>,
-            crate::TurnBudget::Unbounded,
-            factory,
-        )
-        .session_spec(
-            crate::SessionSpec::new()
-                .provider_id(provider_id)
-                .turn_budget(crate::TurnBudget::Unbounded),
-        )
-        .provider(provider)
-        .model(mock_model_spec())
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
-        ))
-        .process_event_sink(Arc::new(sink.clone()))
-        .without_queued_work()
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            owner,
-            format!("{owner}:incarnation"),
-        ))
-        .expect("build effect-summary host");
+        let core = LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, factory)
+            .session_spec(
+                crate::SessionSpec::new()
+                    .provider_id(provider_id)
+                    .turn_budget(crate::TurnBudget::Unbounded),
+            )
+            .provider(provider)
+            .model(mock_model_spec())
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+            .plugin(Arc::new(
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            ))
+            .process_event_sink(Arc::new(sink.clone()))
+            .without_queued_work()
+            .build(lash_core::LeaseOwnerIdentity::opaque(
+                owner,
+                format!("{owner}:incarnation"),
+            ))
+            .expect("build effect-summary host");
         SummaryHost { core, sink, faults }
     }
 
@@ -217,8 +216,7 @@ async fn start_process(
     process_id: &ProcessId,
     program: lashlang::Program,
 ) {
-    let artifact =
-        lash_lashlang_runtime::LashlangArtifacts::of_backend(backend.backend().await.as_ref());
+    let artifact = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend.backend().await);
     let process =
         LinkedTestProcess::new_with_catalog(&artifact, program, "main", summary_catalog()).await;
     let mut start_request = process.start_request(process_id);

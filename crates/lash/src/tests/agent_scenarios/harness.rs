@@ -301,21 +301,24 @@ impl AgentScenarioSetup {
             Arc::clone(&prompt_captures),
         );
         let observed_writes = checkpoint_writes.clone();
-        let backend =
-            DecoratedBackend::over(memory_backend().await).session_store_factory(move |inner| {
+        let backend = DecoratedBackend::over(memory_backend().await.into()).session_store_factory(
+            move |inner| {
                 Arc::new(
                     lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
                         inner,
                         observed_writes,
                     ),
                 )
-            });
-        let factory = rlm_factory(&backend).with_lashlang_execution_sink(
-            Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
+            },
         );
-        let store_factory = lash_core::Backend::session_store_factory(&backend);
+        let factory =
+            rlm_factory(&backend.clone().into())
+                .with_lashlang_execution_sink(
+                    Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
+                );
+        let store_factory = lash_core::Backend::from(backend.clone()).session_store_factory();
         let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(
-            Arc::new(backend),
+            backend.into(),
             crate::TurnBudget::Unbounded,
             factory,
         ))

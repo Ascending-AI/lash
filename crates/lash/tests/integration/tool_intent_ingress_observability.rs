@@ -39,20 +39,21 @@ async fn test_core() -> lash::Result<lash::LashCore> {
             )
             .await?;
     }
-    let core = lash::LashCore::standard_builder(Arc::new(backend), lash::TurnBudget::Unbounded)
-        .provider(lash::provider::ProviderHandle::unconfigured())
-        .model(
-            lash::ModelSpec::builder("intent-ingress-observability-model")
-                .context_window_tokens(4_096)
-                .build()
-                .expect("valid model"),
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "intent-ingress-observability-worker",
-            "intent-ingress-observability-boot",
-        ))?;
+    let core =
+        lash::LashCore::standard_builder(Arc::new(backend).into(), lash::TurnBudget::Unbounded)
+            .provider(lash::provider::ProviderHandle::unconfigured())
+            .model(
+                lash::ModelSpec::builder("intent-ingress-observability-model")
+                    .context_window_tokens(4_096)
+                    .build()
+                    .expect("valid model"),
+            )
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "intent-ingress-observability-worker",
+                "intent-ingress-observability-boot",
+            ))?;
     let _session = core.session(SESSION).open().await?;
     Ok(core)
 }

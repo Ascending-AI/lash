@@ -205,7 +205,7 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
 /// of the store the turn committed to.
 pub(super) async fn worker_on_backend(
     engine: Arc<dyn crate::ProcessEngine>,
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
@@ -308,7 +308,7 @@ pub(super) async fn wait_for_terminal_count(
 }
 
 pub(super) async fn native_worker(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     lease_owner: LeaseOwnerIdentity,
 ) -> DurableProcessWorker {
     let watched = crate::watch_process_registry(backend.process_registry());
@@ -329,7 +329,7 @@ pub(super) async fn native_worker(
 /// builds and the shape that produced the "a call reports its own admission as
 /// `Busy`" defect.
 pub(super) async fn reentrant_worker(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     lease_owner: LeaseOwnerIdentity,
     run_handle: Arc<LateBoundProcessWork>,
 ) -> DurableProcessWorker {
@@ -356,7 +356,7 @@ pub(super) async fn reentrant_worker(
 /// environment published into the backend's process-exec-env store: a trigger
 /// delivery the worker starts loads that environment by the reference its
 /// subscription recorded.
-async fn host_config_with_fixture_env(backend: &Arc<dyn crate::Backend>) -> RuntimeHostConfig {
+async fn host_config_with_fixture_env(backend: &crate::Backend) -> RuntimeHostConfig {
     let config = test_host_config(backend).with_process_engine_registration(
         crate::ProcessEngineRegistration::accepting(Arc::new(crate::testing::FixtureProcessEngine)),
     );

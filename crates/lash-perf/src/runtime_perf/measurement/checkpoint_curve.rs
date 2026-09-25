@@ -195,7 +195,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             .admit_and_bind_session(&lash_core::SessionBinding::root(session_id.clone()))
             .await?;
         let mut fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
-            &artifacts,
+            &artifacts.clone().into(),
             point.component_count,
             point.transcript_bytes,
         )?;

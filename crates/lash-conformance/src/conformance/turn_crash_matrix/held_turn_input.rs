@@ -26,7 +26,6 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
     I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
-    let stores = stores.as_ref();
     let scenario = "held-turn-input-visibility";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = make(scenario);
@@ -42,7 +41,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     }
     .over(invocation.controller_handle());
     let runtime = Box::pin(build_runtime(
-        stores,
+        Arc::clone(&stores),
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),

@@ -871,7 +871,7 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
             .await
             .expect("open the file backend"),
     );
-    let core = crate::tests::standard_core_over(backend);
+    let core = crate::tests::standard_core_over(backend.into());
     let watched = core.process_registry();
     let process_id = ProcessId::from("l8-facade");
     let record = watched

@@ -1,6 +1,5 @@
 //! Process-observer intent settlement conformance.
 
-use super::*;
 use crate::{ProcessObserverRegistry as _, ProcessRegistrar as _};
 use lash_sansio::SessionId;
 
@@ -11,7 +10,7 @@ use lash_sansio::SessionId;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn fork_observer_intent_transient_failure(backend: Arc<dyn crate::Backend>) {
+pub async fn fork_observer_intent_transient_failure(backend: crate::Backend) {
     const SESSION_ID: &str = "fork-observer-transient-session";
     const PROCESS_ID: &str = "fork-observer-transient-process";
 

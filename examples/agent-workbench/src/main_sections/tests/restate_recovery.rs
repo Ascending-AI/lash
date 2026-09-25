@@ -2125,15 +2125,17 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     let stores = WorkbenchStores::open(&data_dir, database_url.as_deref())
         .await
         .expect("reopen recovery session catalog");
-    let driver = lash_restate::RestateBackend::new(
-        ingress_url,
-        lash_restate::RestateAuthorityId::new(
-            std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),
-        )
-        .expect("valid Restate authority id"),
+    let driver = lash_restate::RestateEngine::new(
         Arc::clone(&stores.stores),
-        // Only its turn-work driver is used; no core runs on it.
-        lash_restate::RestateQueuedWork::Disabled,
+        lash_restate::RestateConfig::new(
+            ingress_url,
+            lash_restate::RestateAuthorityId::new(
+                std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),
+            )
+            .expect("valid Restate authority id"),
+            // Only its turn-work driver is used; no core runs on it.
+            lash_restate::RestateQueuedWork::Disabled,
+        ),
     )
     .turn_work_driver();
     let receipt = driver

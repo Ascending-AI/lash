@@ -572,7 +572,7 @@ impl LashlangArtifacts {
 
     /// The typed view of `backend`'s store set's artifact port: the
     /// artifacts live in the storage that reopens the backend's sessions.
-    pub fn of_backend(backend: &dyn lash_core_execution::Backend) -> Self {
+    pub fn of_backend(backend: &lash_core_execution::Backend) -> Self {
         Self::new(backend.module_artifacts())
     }
 

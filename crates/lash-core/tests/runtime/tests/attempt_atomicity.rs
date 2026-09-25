@@ -46,7 +46,7 @@ struct ControllerOwnedTier {
 
 /// `backend`'s own controller for the matrix turn.
 fn matrix_turn_controller(
-    backend: &Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
 ) -> Arc<dyn lash_core::RuntimeEffectController> {
     lash_core::testing::runtime_helpers::backend_admitted_scope(
         backend,
@@ -57,13 +57,13 @@ fn matrix_turn_controller(
 }
 
 impl ControllerOwnedTier {
-    fn ordinal_addressed(backend: &Arc<dyn lash_core::Backend>) -> Self {
+    fn ordinal_addressed(backend: &lash_core::Backend) -> Self {
         Self {
             inner: matrix_turn_controller(backend),
         }
     }
 
-    fn key_addressed(backend: &Arc<dyn lash_core::Backend>) -> Self {
+    fn key_addressed(backend: &lash_core::Backend) -> Self {
         Self {
             inner: matrix_turn_controller(backend),
         }
@@ -182,7 +182,7 @@ struct Fixtures {
     /// runs over; held so its in-memory databases outlive every row.
     backend: lash_sqlite_store::SqliteBackend,
     /// The same backend, as the handle a host config and a tier take.
-    backend_handle: Arc<dyn lash_core::Backend>,
+    backend_handle: lash_core::Backend,
     host: Arc<lash_core::testing::MockSessionManager>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<dyn lash_core::TriggerStore>,
@@ -210,7 +210,7 @@ fn direct_mock_call() -> super::helpers::MockCall {
 
 async fn fixtures() -> Fixtures {
     let backend = crate::runtime::tests::sqlite_memory_backend().await;
-    let backend_handle: Arc<dyn lash_core::Backend> = Arc::new(backend.clone());
+    let backend_handle: lash_core::Backend = Arc::new(backend.clone()).into();
     let runtime = Box::pin(super::helpers::runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(lash_core::testing::EmptyToolProvider),
@@ -220,7 +220,7 @@ async fn fixtures() -> Fixtures {
         )),
     ))
     .await;
-    let registry = lash_core::Backend::process_registry(&backend);
+    let registry = lash_core::Backend::from(backend.clone()).process_registry();
     let host = Arc::new(
         lash_core::testing::MockSessionManager::default()
             .with_process_registry(Arc::clone(&registry))
@@ -305,7 +305,7 @@ async fn fixtures() -> Fixtures {
         )
         .await
         .expect("start live matrix process");
-    let trigger_store = lash_core::Backend::trigger_store(&backend);
+    let trigger_store = lash_core::Backend::from(backend.clone()).trigger_store();
     Fixtures {
         backend,
         backend_handle,
@@ -366,7 +366,7 @@ fn tool_context_with_provider<'run>(
         .expect("build attempt-atomicity plugin session");
     let processes = lash_core::testing::effect_backed_process_service(
         Arc::clone(&fixtures.registry),
-        lash_core::Backend::process_env_store(&fixtures.backend),
+        lash_core::Backend::from(fixtures.backend.clone()).process_env_store(),
     );
     let child_process_starts = Arc::clone(&fixtures.child_process_starts);
     let effect_controller = lash_core::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
@@ -1151,7 +1151,7 @@ struct OrdinalJournaledTier {
 }
 
 impl OrdinalJournaledTier {
-    fn recording(backend: &Arc<dyn lash_core::Backend>) -> Self {
+    fn recording(backend: &lash_core::Backend) -> Self {
         Self {
             inner: matrix_turn_controller(backend),
             journal: std::sync::Mutex::new(Vec::new()),

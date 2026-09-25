@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 async fn durable_core_without_advanced(
     provider: lash::provider::ProviderHandle,
@@ -10,9 +10,10 @@ async fn durable_core_without_advanced(
         .expect("valid model metadata");
 
     // One file backend supplies every port and the effect host.
-    let backend = lash_sqlite_store::SqliteBackend::open(data_dir)
+    let backend: lash::Backend = lash_sqlite_store::SqliteBackend::open(data_dir)
         .await
-        .expect("sqlite backend");
+        .expect("sqlite backend")
+        .into();
     // The RLM factory keeps its Lashlang artifacts in that same backend.
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -22,7 +23,7 @@ async fn durable_core_without_advanced(
             .build(),
         &backend,
     );
-    lash::LashCore::rlm_builder(Arc::new(backend), lash::TurnBudget::Unbounded, factory)
+    lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(model)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

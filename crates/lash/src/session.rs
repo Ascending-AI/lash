@@ -355,7 +355,7 @@ impl SessionBuilder {
                 lash_core::facade_support::SingleProviderResolver::new(provider),
             );
         }
-        refuse_foreign_backend_factories(self.core.backend.as_ref(), &self.plugin_factories)?;
+        refuse_foreign_backend_factories(&self.core.backend, &self.plugin_factories)?;
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),

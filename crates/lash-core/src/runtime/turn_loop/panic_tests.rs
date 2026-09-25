@@ -17,7 +17,7 @@ impl RuntimeTurnPhaseProbe for PanicBeforeCommit {
     fn end(&self, _phase: RuntimeTurnPhase) {}
 }
 
-async fn runtime(backend: &Arc<dyn crate::Backend>, store: Arc<RecordingStore>) -> LashRuntime {
+async fn runtime(backend: &crate::Backend, store: Arc<RecordingStore>) -> LashRuntime {
     TestRuntime::new(
         backend,
         mock_provider(vec![MockCall {

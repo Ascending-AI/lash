@@ -266,6 +266,10 @@ pub(crate) struct GatedStoreSet {
 }
 
 impl lash::durability::StoreSet for GatedStoreSet {
+    fn binding_identity(&self) -> &lash::StoreBindingId {
+        self.inner.binding_identity()
+    }
+
     fn clock(&self) -> Arc<dyn lash::runtime::Clock> {
         self.inner.clock()
     }

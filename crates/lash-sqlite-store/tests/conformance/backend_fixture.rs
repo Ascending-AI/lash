@@ -126,8 +126,8 @@ impl TestBackend {
         Arc::new(self.backend.stores().clone())
     }
 
-    pub(crate) fn as_backend(&self) -> Arc<dyn lash_core_execution::Backend> {
-        Arc::new(self.backend.clone())
+    pub(crate) fn as_backend(&self) -> lash_core_execution::Backend {
+        Arc::new(self.backend.clone()).into()
     }
 
     /// [`Self::open`] from synchronous fixture code.

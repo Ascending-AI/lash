@@ -53,15 +53,13 @@ impl lash_core::facade_support::ProcessToolVisibilityFilter for HideAllProcessTo
 
 /// A memory backend whose processes run in `NoopProcessWork`, wired over
 /// the backend's own registry: a test worker completes them by hand.
-async fn noop_process_work_backend() -> Arc<DecoratedBackend> {
-    Arc::new(
-        DecoratedBackend::over(memory_backend().await).process_work(|registry| {
-            lash_core::ProcessWorkWiring::new(
-                lash_core::facade_support::watch_process_registry(registry),
-                Arc::new(NoopProcessWork),
-            )
-        }),
-    )
+async fn noop_process_work_backend() -> DecoratedBackend {
+    DecoratedBackend::over(memory_backend().await.into()).process_work(|registry| {
+        lash_core::ProcessWorkWiring::new(
+            lash_core::facade_support::watch_process_registry(registry),
+            Arc::new(NoopProcessWork),
+        )
+    })
 }
 
 fn provider_session_spec(provider: &ProviderHandle) -> crate::SessionSpec {
@@ -167,7 +165,7 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
 #[tokio::test]
 async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -345,7 +343,7 @@ impl lash_core::facade_support::ContextCompactor for PromptAssertingCompactor {
 #[tokio::test]
 async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result<()> {
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(memory_backend().await, crate::TurnBudget::Unbounded)
+        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded)
             .instructions("core-layer-guidance-marker"),
     )
     .provider(mock_provider())
@@ -393,7 +391,7 @@ async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result
 #[tokio::test]
 async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -430,7 +428,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
 #[tokio::test]
 async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -484,7 +482,7 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
 #[tokio::test]
 async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -573,7 +571,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
     let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-        noop_process_work_backend().await,
+        noop_process_work_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .session_spec(session_spec)
@@ -913,7 +911,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     );
     let backend = memory_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -927,7 +925,8 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     let before = session.admin().state().persist_current().await?;
 
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")?;
-    let scoped_effect_controller = lash_core::Backend::effect_host(backend.as_ref())
+    let scoped_effect_controller = lash_core::Backend::from(backend.clone())
+        .effect_host()
         .scoped_static(lash_core::AdmittedScope::runtime_operation(
             "trigger:button-press-1",
         ))?
@@ -972,7 +971,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(checkpoint_gated_provider(entered_tx, release_rx))
@@ -1038,7 +1037,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .session_spec(session_spec)
@@ -1102,7 +1101,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .session_spec(session_spec)
@@ -1211,7 +1210,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
     let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-        noop_process_work_backend().await,
+        noop_process_work_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .session_spec(session_spec)
@@ -1277,7 +1276,7 @@ async fn observation_updates_after_completed_turn() -> Result<()> {
 #[tokio::test]
 async fn config_and_tool_mutations_publish_observation_immediately() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1321,7 +1320,7 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1365,7 +1364,7 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1402,8 +1401,8 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
 #[tokio::test]
 async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> {
     let sqlite_dir = tempfile::tempdir().expect("create managed-create SQLite directory");
-    let cases: Vec<(&str, Arc<dyn lash_core::Backend>)> = vec![
-        ("memory", memory_backend().await),
+    let cases: Vec<(&str, lash_core::Backend)> = vec![
+        ("memory", memory_backend().await.into()),
         (
             "file",
             Arc::new(
@@ -1412,7 +1411,8 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                 )
                 .await
                 .expect("open the file backend"),
-            ),
+            )
+            .into(),
         ),
     ];
 
@@ -1426,9 +1426,9 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                 Arc::new(NoopProcessWork),
             )
         });
-        let store_factory = lash_core::Backend::session_store_factory(&backend);
+        let store_factory = lash_core::Backend::from(backend.clone()).session_store_factory();
         let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-            Arc::new(backend),
+            backend.into(),
             crate::TurnBudget::Unbounded,
         ))
         .provider(mock_provider())
@@ -1522,7 +1522,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
 #[tokio::test]
 async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

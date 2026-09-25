@@ -9,7 +9,7 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .build()
         .into_handle();
     let core = backend_work_facets_with_budget(
-        LashCore::standard_builder(memory_backend().await, crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::Unbounded,
             crate::CommitBudgetLimit::bounded(CONFIGURED_ROW_LIMIT),

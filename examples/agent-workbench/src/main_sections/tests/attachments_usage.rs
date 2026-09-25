@@ -45,8 +45,12 @@ fn attachment_usage_gate_sqlite() {
 
         Box::pin(run_attachment_usage_gate(
             &data_dir,
-            GateBackend { backend: first },
-            GateBackend { backend: resumed },
+            GateBackend {
+                backend: first.into(),
+            },
+            GateBackend {
+                backend: resumed.into(),
+            },
         ))
         .await;
         std::fs::remove_dir_all(&data_dir).expect("remove SQLite gate data dir");
@@ -56,7 +60,7 @@ fn attachment_usage_gate_sqlite() {
 /// One handle on the gate's backend: the backend a core and its RLM
 /// factory's Lashlang artifacts run on.
 struct GateBackend {
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
 }
 
 async fn run_attachment_usage_gate(

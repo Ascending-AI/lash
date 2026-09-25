@@ -167,7 +167,7 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
             .expect("open the SQLite backend"),
     );
     let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -364,7 +364,7 @@ async fn cold_queued_child_process() -> Result<()> {
     .await
     .expect("open the SQLite backend");
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        Arc::new(backend),
+        Arc::new(backend).into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -618,7 +618,7 @@ async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Res
                 .expect("open the SQLite backend"),
         );
         let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-            backend.clone(),
+            backend.clone().into(),
             crate::TurnBudget::Unbounded,
         ))
         .provider(provider)
@@ -786,7 +786,7 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::new(StopQueuedTool))

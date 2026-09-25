@@ -818,11 +818,14 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
         RECOVERY_PROCESS_ENV_STORE.clone();
     // The worker reaches sessions through the catalog the test hands it, layered
     // onto a memory backend for every other port.
-    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a SQLite memory backend"),
-    ))
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(
+        Arc::new(
+            lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .expect("open a SQLite memory backend"),
+        )
+        .into(),
+    )
     .map_session_store_factory(|_| store_factory)
     .into_backend();
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(

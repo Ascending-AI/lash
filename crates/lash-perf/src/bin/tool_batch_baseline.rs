@@ -163,9 +163,7 @@ fn load_average() -> LoadAverage {
 /// The RLM bridge's plugin factory, spelled the way the conformance
 /// registrations spell it: `Promise.all` is the cell-bridge surface, so the
 /// factory does not advertise the process lifecycle.
-fn rlm_factory(
-    backend: &dyn lash_core::Backend,
-) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+fn rlm_factory(backend: &lash_core::Backend) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -181,7 +179,7 @@ fn rlm_factory(
 
 fn producers(
     names: &[String],
-    artifacts: &dyn lash_core::Backend,
+    artifacts: &lash_core::Backend,
 ) -> Vec<lash_conformance::ToolBatchProducer> {
     names
         .iter()
@@ -431,20 +429,22 @@ async fn restate_deployment(
     ingress_url: &str,
     authority: &lash_restate::RestateAuthorityId,
 ) -> anyhow::Result<(
-    Arc<lash_restate::RestateBackend>,
+    Arc<lash_restate::RestateEngine>,
     lash::durability::DurableProcessWorker,
 )> {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .map_err(|error| anyhow::anyhow!("open the probe's store set: {error}"))?;
-    let backend = Arc::new(lash_restate::RestateBackend::new(
-        ingress_url,
-        authority.clone(),
+    let backend = Arc::new(lash_restate::RestateEngine::new(
         Arc::new(stores) as Arc<dyn lash_core::StoreSet>,
-        lash_restate::RestateQueuedWork::Disabled,
+        lash_restate::RestateConfig::new(
+            ingress_url,
+            authority.clone(),
+            lash_restate::RestateQueuedWork::Disabled,
+        ),
     ));
     let core = lash::LashCore::standard_builder(
-        Arc::clone(&backend) as Arc<dyn lash_core::Backend>,
+        lash_core::Backend::new(backend.clone()),
         lash::TurnBudget::Unbounded,
     )
     .provider(
@@ -662,7 +662,7 @@ async fn main() -> anyhow::Result<()> {
     // The RLM producer's Lashlang artifacts live in a memory backend of their
     // own: the batch is measured over each lane's bare effect host.
     let artifacts = lash_sqlite_store::SqliteBackend::memory().await?;
-    let producers = producers(&args.producers, &artifacts);
+    let producers = producers(&args.producers, &artifacts.clone().into());
     match args.backend.as_str() {
         "sqlite" => run_sqlite(&args, &producers).await?,
         "restate" => run_restate(&args, &producers).await?,

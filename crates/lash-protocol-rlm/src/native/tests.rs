@@ -17,7 +17,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
-        &crate::testing::memory_backend_blocking(),
+        &crate::testing::memory_backend_blocking().clone().into(),
     )
     .with_process_lifecycle(false);
     let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
@@ -68,7 +68,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
                 .instruction_limit(crate::InstructionBound::instructions(1000))
                 .memory_limit(crate::MemoryBound::mebibytes(1))
                 .build(),
-            &crate::testing::memory_backend_blocking(),
+            &crate::testing::memory_backend_blocking().clone().into(),
         )
         .with_process_lifecycle(false);
         lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)])
@@ -666,7 +666,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
-        &crate::testing::memory_backend().await,
+        &crate::testing::memory_backend().await.into(),
     )
     .with_process_lifecycle(false);
     let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);

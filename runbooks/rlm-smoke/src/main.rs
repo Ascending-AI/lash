@@ -482,7 +482,7 @@ async fn main() -> Result<()> {
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.as_ref(),
+        &backend.clone().into(),
     );
     let trace_path = args.artifact_dir.join("trace.jsonl");
     let mut trace_context = lash::tracing::TraceContext {
@@ -492,7 +492,7 @@ async fn main() -> Result<()> {
     trace_context
         .metadata
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
-    let core = LashCore::rlm_builder(backend, lash::TurnBudget::bounded(12), protocol)
+    let core = LashCore::rlm_builder(backend.into(), lash::TurnBudget::bounded(12), protocol)
         .no_progress_budget(lash::NoProgressBudget::bounded(4))
         .without_queued_work()
         .plugins(lash::plugins::runtime_plugin_stack())

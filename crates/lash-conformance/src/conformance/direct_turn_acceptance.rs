@@ -46,7 +46,7 @@ pub(super) fn fixed_text_provider(text: &str) -> crate::ProviderHandle {
 
 pub(super) async fn acceptance_runtime(
     store: &Arc<dyn crate::RuntimePersistence>,
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     provider: crate::ProviderHandle,
     plugin_factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     lease_owner: crate::LeaseOwnerIdentity,
@@ -66,7 +66,7 @@ pub(super) async fn acceptance_runtime(
 pub(super) async fn acceptance_runtime_for_session(
     session_id: &str,
     store: &Arc<dyn crate::RuntimePersistence>,
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     provider: crate::ProviderHandle,
     plugin_factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     lease_owner: crate::LeaseOwnerIdentity,
@@ -90,14 +90,14 @@ pub(super) async fn acceptance_runtime_for_session(
 async fn acceptance_runtime_with_batching(
     session_id: &str,
     store: &Arc<dyn crate::RuntimePersistence>,
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     provider: crate::ProviderHandle,
     plugin_factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     lease_owner: crate::LeaseOwnerIdentity,
     batching: crate::QueuedWorkBatchingConfig,
 ) -> crate::LashRuntime {
     let mut host = crate::RuntimeHostConfig::new(
-        Arc::clone(backend),
+        backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         batching.clone(),
     );
@@ -155,7 +155,7 @@ pub(super) fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
 )]
 pub async fn direct_turn_accepts_before_driving(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-accept-before-drive"));
@@ -298,7 +298,7 @@ pub async fn direct_turn_accepts_before_driving(
 )]
 pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-orphaned-direct-turn"));
@@ -409,7 +409,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
 )]
 pub async fn direct_turn_acceptance_mints_no_idempotency_key(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let seen = Arc::new(AtomicUsize::new(0));
@@ -479,7 +479,7 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
 )]
 pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-busy-lane-refusal"));
@@ -608,7 +608,7 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
     prefix: &str,
     // The law settles through the store alone; the shared fixture's backend
     // is unused here.
-    _backend: Arc<dyn crate::Backend>,
+    _backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let mut state = crate::RuntimeSessionState {
@@ -930,20 +930,20 @@ pub(super) struct Journal {
     pub(super) controller: Arc<JournalLayer>,
     pub(super) effect_host: Arc<dyn crate::EffectHost>,
     /// `backend` with [`Self::effect_host`] in place of its own host.
-    pub(super) backend: Arc<dyn crate::Backend>,
+    pub(super) backend: crate::Backend,
     batching: crate::QueuedWorkBatchingConfig,
 }
 
 impl Journal {
     /// The journal layered over `backend`'s effect host.
-    pub(super) fn new(backend: &Arc<dyn crate::Backend>) -> Self {
+    pub(super) fn new(backend: &crate::Backend) -> Self {
         let controller = Arc::new(JournalLayer::default());
         let effect_host: Arc<dyn crate::EffectHost> =
             Arc::new(crate::testing::LayeredEffectHost::new(
                 backend.effect_host(),
                 Arc::clone(&controller) as Arc<dyn crate::testing::EffectLayer>,
             ));
-        let law_backend = crate::LawBackend::over(backend.as_ref())
+        let law_backend = crate::LawBackend::over(backend)
             .with_effect_host(Arc::clone(&effect_host))
             .into_backend();
         Self {
@@ -1303,7 +1303,7 @@ async fn assert_nothing_left_to_answer(
 )]
 pub async fn vacuum_then_redrive_replays_receipt_single_row(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-vacuum-redrive-single"));
@@ -1360,7 +1360,7 @@ pub async fn vacuum_then_redrive_replays_receipt_single_row(
 )]
 pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-vacuum-redrive-absorbed"));
@@ -1415,7 +1415,7 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
 )]
 pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-cancelled-vacuumed"));
@@ -1482,7 +1482,7 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
 )]
 pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-uncommitted-redrive"));
@@ -1553,7 +1553,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
 )]
 pub async fn drive_effect_refusal_is_journaled(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-refused-drive"));
@@ -1648,7 +1648,7 @@ impl crate::store::RuntimePersistenceDecorator for WithdrawBeforeClaim {
 )]
 pub async fn queued_direct_turn_input_is_answered_in_order_by_the_drain(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-queued-direct-turn"));
@@ -1798,7 +1798,7 @@ pub async fn queued_direct_turn_input_is_answered_in_order_by_the_drain(
 )]
 pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-redrive-after-drain"));
@@ -1885,7 +1885,7 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
 )]
 pub async fn accept_turn_input_redrive_after_store_commit_admits_one_row(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-acceptance-lost-outcome"));

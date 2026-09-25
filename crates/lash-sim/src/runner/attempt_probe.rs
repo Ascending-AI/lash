@@ -106,11 +106,11 @@ async fn probe_session(
     let collector = CheckpointWriteCollector::default();
     let engine = crate::backend::SimEngine::new(seed).await?;
     let store_factory: Arc<dyn SessionStoreFactory> =
-        lash::Backend::session_store_factory(engine.backend().as_ref());
-    let backend = Arc::new(
-        crate::backend::DecoratedBackend::over_engine(&engine).observing(collector.clone()),
-    );
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+        lash::Backend::session_store_factory(&engine.backend());
+    let backend: lash::Backend = crate::backend::DecoratedBackend::over_engine(&engine)
+        .observing(collector.clone())
+        .into();
+    let core = lash::LashCore::standard_builder(backend.clone(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

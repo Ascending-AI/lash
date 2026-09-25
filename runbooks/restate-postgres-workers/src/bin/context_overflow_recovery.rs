@@ -311,10 +311,10 @@ impl Harness {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.as_ref(),
+            &backend.as_ref().clone().into(),
         );
 
-        let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
+        let core = lash::LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, rlm)
             .provider(scripted_provider(script, Arc::clone(&provider_calls)))
             .model(
                 lash::ModelSpec::builder("context-overflow-recovery-mock")

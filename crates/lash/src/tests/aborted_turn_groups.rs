@@ -117,11 +117,11 @@ async fn an_aborted_turn_leaves_its_groups_live_for_the_redrive() -> Result<()> 
     let backend = memory_backend().await;
     let backend_handle = Arc::clone(&backend);
     let env_store = Arc::new(TimingOutEnvStore {
-        inner: lash_core::Backend::process_env_store(backend.as_ref()),
+        inner: lash_core::Backend::from(backend.clone()).process_env_store(),
         timing_out: std::sync::atomic::AtomicBool::new(true),
         failed_reads: AtomicUsize::new(0),
     });
-    let decorated = DecoratedBackend::over(backend).process_env_store({
+    let decorated = DecoratedBackend::over(backend.into()).process_env_store({
         let env_store = Arc::clone(&env_store);
         move |_| env_store as Arc<dyn lash_core::ProcessExecutionEnvStore>
     });
@@ -164,7 +164,7 @@ async fn an_aborted_turn_leaves_its_groups_live_for_the_redrive() -> Result<()> 
         .into_handle();
     let executions = Arc::new(AtomicUsize::new(0));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        Arc::new(decorated),
+        decorated.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -201,7 +201,8 @@ async fn an_aborted_turn_leaves_its_groups_live_for_the_redrive() -> Result<()> 
 
     // The turn's end closed nothing: the group its tool call formed is still
     // live under the turn's scope, not closing and not settled.
-    let closing = lash_core::Backend::effect_host(backend_handle.as_ref())
+    let closing = lash_core::Backend::from(backend_handle.clone())
+        .effect_host()
         .effect_group_closing()
         .expect("a journaling host exposes its closing seam");
     let groups = closing

@@ -441,20 +441,17 @@ impl EffectRecorder {
 
     /// A fresh SQLite memory backend whose effect host has this recorder
     /// layered over every controller it lends.
-    async fn backend(&self) -> Arc<DecoratedBackend> {
+    async fn backend(&self) -> DecoratedBackend {
         self.layered_over(memory_backend().await)
     }
 
     /// `backend`, with this recorder layered over every controller its
     /// effect host lends.
-    fn layered_over(
-        &self,
-        backend: Arc<lash_sqlite_store::SqliteBackend>,
-    ) -> Arc<DecoratedBackend> {
+    fn layered_over(&self, backend: Arc<lash_sqlite_store::SqliteBackend>) -> DecoratedBackend {
         let layer = Arc::new(self.clone());
-        Arc::new(DecoratedBackend::over(backend).effect_host(move |inner| {
+        DecoratedBackend::over(backend.into()).effect_host(move |inner| {
             Arc::new(lash_core::testing::LayeredEffectHost::new(inner, layer))
-        }))
+        })
     }
 }
 

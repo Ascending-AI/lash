@@ -16,18 +16,6 @@ pub enum EmbedError {
     /// Returned when no protocol plugin was configured.
     MissingProtocolPlugin,
     #[error(
-        "backend binding mismatch: the backend's binding identity is `{binding_identity}` but its effect host's turn-control binding is `{effect_host_binding}`; a backend's effect host must bind to the backend's own identity"
-    )]
-    /// Returned when a backend's effect host binds to an identity other than
-    /// the backend's own, so its durable records would name a different
-    /// substrate.
-    BackendBindingMismatch {
-        /// [`Backend::binding_identity`](lash_core::Backend::binding_identity).
-        binding_identity: String,
-        /// The effect host's `turn_control_binding_id()`.
-        effect_host_binding: String,
-    },
-    #[error(
         "plugin `{plugin_id}` keeps its state in backend `{plugin_backend}`, but this core runs on backend `{backend}`; build the plugin over the core's own backend"
     )]
     /// Returned when a plugin factory bound to one backend's stores
@@ -265,7 +253,6 @@ impl EmbedError {
                     | SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow { .. },
             }
             | Self::MissingProtocolPlugin
-            | Self::BackendBindingMismatch { .. }
             | Self::PluginBackendMismatch { .. }
             | Self::UnknownSession { .. }
             | Self::MissingModelSpec
@@ -322,7 +309,6 @@ impl EmbedError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::MissingProtocolPlugin
-            | Self::BackendBindingMismatch { .. }
             | Self::PluginBackendMismatch { .. }
             | Self::MissingModelSpec
             | Self::MissingTurnBudget
@@ -498,10 +484,6 @@ mod tests {
     fn wiring_errors_are_terminal_and_not_retryable() {
         for err in [
             EmbedError::MissingProtocolPlugin,
-            EmbedError::BackendBindingMismatch {
-                binding_identity: "backend".to_string(),
-                effect_host_binding: "other".to_string(),
-            },
             EmbedError::PluginBackendMismatch {
                 plugin_id: "plugin".to_string(),
                 plugin_backend: "other".to_string(),

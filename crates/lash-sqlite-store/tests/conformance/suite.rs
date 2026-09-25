@@ -2079,13 +2079,6 @@ lash_conformance::effect_controller_replay_mismatch_tests!({
     )
 });
 
-lash_conformance::backend_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let dynamic = Arc::new(lash_sqlite_store::SqliteBackend::clone(&backend))
-        as Arc<dyn lash_core_execution::Backend>;
-    (backend, dynamic)
-});
-
 lash_conformance::retention_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;

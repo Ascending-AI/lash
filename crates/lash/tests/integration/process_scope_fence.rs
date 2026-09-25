@@ -49,7 +49,7 @@ fn executor() -> RuntimeEffectLocalExecutor<'static> {
 }
 
 /// The facade core under test, over `backend`.
-fn core_over(backend: Arc<dyn lash::Backend>) -> LashCore {
+fn core_over(backend: lash::Backend) -> LashCore {
     let provider = lash_core::testing::TestProvider::builder()
         .complete(|_request| async {
             Ok(lash::provider::LlmResponse {
@@ -97,7 +97,7 @@ type ColdHost = Box<
 /// One substrate under test: its backend, effect host and process registry,
 /// plus the row observations the substrate exposes.
 struct Backend {
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
     host: Arc<dyn EffectHost>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
     fences: Option<FenceCounter>,
@@ -135,7 +135,7 @@ fn sqlite_backend(
     Backend {
         host: backend.effect_host(),
         registry: backend.process_registry(),
-        backend: Arc::clone(&backend) as Arc<dyn lash::Backend>,
+        backend: lash::Backend::new(backend.clone()),
         cold_host: Some(Box::new(move || {
             let backend = Arc::clone(&cold_backend);
             Box::pin(async move {
@@ -277,7 +277,7 @@ async fn prune_fences_only_what_the_registry_prunes(kind: Kind) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    let core = core_over(Arc::clone(&backend.backend));
+    let core = core_over(backend.backend.clone());
     let process_id = "retained-by-watermark";
     register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
@@ -356,7 +356,7 @@ async fn pruned_process_id_is_fenced_until_registered_again(kind: Kind) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    let core = core_over(Arc::clone(&backend.backend));
+    let core = core_over(backend.backend.clone());
     let process_id = "reused-by-host";
     register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
@@ -556,7 +556,7 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
         return;
     };
     let trigger_store = backend.backend.trigger_store();
-    let core = core_over(Arc::clone(&backend.backend));
+    let core = core_over(backend.backend.clone());
     let occurrence = lash_core::TriggerOccurrenceRequest::new(
         "ui.button.pressed",
         lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
@@ -751,7 +751,7 @@ async fn failed_registration_keeps_the_fence(kind: Kind) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    let core = core_over(Arc::clone(&backend.backend));
+    let core = core_over(backend.backend.clone());
     let process_id = "reused-but-insert-fails";
     register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
@@ -832,13 +832,13 @@ async fn registration_reinstates_every_bound_host(kind: Kind) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    reinstates_every_bound_host(Arc::clone(&backend.backend), backend.registry).await;
+    reinstates_every_bound_host(backend.backend.clone(), backend.registry).await;
 }
 
 /// A registration lifts the fence of every host bound to the registry,
 /// including one whose fence lives outside the registry's store.
 async fn reinstates_every_bound_host(
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
     registry: Arc<dyn lash_core::ProcessRegistry>,
 ) {
     let _core = core_over(backend);
@@ -975,7 +975,7 @@ async fn sqlite_registration_crash_cut_leaves_the_id_fenced_or_registered_never_
     let backend = backend(Kind::Sqlite).await.expect("SQLite backend");
     let registry_path = backend.sqlite_registry.clone().expect("registry file");
     let journal_path = backend.sqlite_journal.clone().expect("journal file");
-    let core = core_over(Arc::clone(&backend.backend));
+    let core = core_over(backend.backend.clone());
     let process_id = "crash-cut";
     let scope = ExecutionScope::process(process_id);
     let key = scope_key(&scope);
@@ -1128,7 +1128,7 @@ async fn sqlite_fence_committed_before_a_lost_journal_purge_refuses_cold_admissi
         .as_ref()
         .expect("SQLite backend")
         .session_store_factory();
-    let core = core_over(Arc::clone(&backend.backend));
+    let core = core_over(backend.backend.clone());
     // The catalog the sweep opens exists once a session has been created.
     let session = core
         .session("purge-lost-session")

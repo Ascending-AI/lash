@@ -353,7 +353,7 @@ async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
 }
 
 /// One real session commit against the store under test, through the facade a
-/// deployment runs: a core over `RestateBackend<PostgresStoreSet>` appends a
+/// deployment runs: a core over `RestateEngine` over a `PostgresStoreSet` appends a
 /// message node under the session's lease. PostgreSQL is storage only (ADR
 /// 0104) and the append journals no effect, so the harness runs no Restate
 /// server: an append that reached the engine would fail against the
@@ -372,7 +372,7 @@ async fn commit_one_append(
         UNREACHABLE_RESTATE_INGRESS,
         lash_restate::RestateAuthorityId::new("version-bump-recreation")?,
     );
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .model(
             lash::ModelSpec::builder("version-bump-mock")
                 .context_window_tokens(200_000)

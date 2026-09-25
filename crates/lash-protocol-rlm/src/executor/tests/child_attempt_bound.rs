@@ -114,7 +114,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
         let process_env_store = Arc::clone(&process_env_store);
         let surface = surface.clone();
         let session_policy = session_policy.clone();
-        let backend = Arc::clone(&backend);
+        let backend = backend.clone();
         async move {
             let effect_host = backend.effect_host();
             let processes: Arc<dyn lash_core::ProcessService> =
@@ -251,7 +251,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )

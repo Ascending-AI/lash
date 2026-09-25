@@ -565,7 +565,7 @@ fn advanced_builder_accepts_a_plugin_host(
     builder.plugin_host(plugin_host)
 }
 
-fn a_core_is_built_over_one_backend(backend: Arc<dyn lash::Backend>) -> lash::LashCoreBuilder {
+fn a_core_is_built_over_one_backend(backend: lash::Backend) -> lash::LashCoreBuilder {
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
 }
 

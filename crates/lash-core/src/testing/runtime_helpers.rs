@@ -77,7 +77,7 @@ pub fn host_admitted_scope(
 /// over `backend` runs on, so its tool-child routing and env store are the
 /// runtime's own.
 pub fn backend_admitted_scope(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     admitted: crate::AdmittedScope,
 ) -> crate::ScopedEffectController<'static> {
     backend
@@ -89,7 +89,7 @@ pub fn backend_admitted_scope(
 
 /// `backend_admitted_scope` for a turn scope.
 pub fn backend_turn_scope(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> crate::ScopedEffectController<'static> {
@@ -98,7 +98,7 @@ pub fn backend_turn_scope(
 
 /// `backend_admitted_scope` for a queued-work drain scope.
 pub fn backend_queued_scope(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     session_id: &SessionId,
     drain_id: &TurnId,
 ) -> crate::ScopedEffectController<'static> {
@@ -112,7 +112,7 @@ pub fn backend_queued_scope(
 /// registration mints (registration sequence 1), standing in for the worker's
 /// admission step.
 pub fn backend_process_scope(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     process_id: impl Into<ProcessId>,
 ) -> crate::ScopedEffectController<'static> {
     backend_admitted_scope(
@@ -284,7 +284,7 @@ pub use crate::testing::standard_test_policy;
 
 /// A host over `backend` whose provider resolver answers with an empty mock
 /// provider.
-pub fn test_host_config(backend: &Arc<dyn crate::Backend>) -> EmbeddedRuntimeHost {
+pub fn test_host_config(backend: &crate::Backend) -> EmbeddedRuntimeHost {
     let mut config = test_runtime_host_config(backend);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         mock_provider(Vec::new()).into_handle(),
@@ -293,7 +293,7 @@ pub fn test_host_config(backend: &Arc<dyn crate::Backend>) -> EmbeddedRuntimeHos
 }
 
 pub fn test_host_config_with_trace_path(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     path: PathBuf,
 ) -> EmbeddedRuntimeHost {
     let mut config = test_runtime_host_config(backend);
@@ -302,7 +302,7 @@ pub fn test_host_config_with_trace_path(
 }
 
 pub fn test_host_config_with_trace_path_and_stream_events(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     path: PathBuf,
 ) -> EmbeddedRuntimeHost {
     let mut config = test_runtime_host_config(backend);
@@ -389,7 +389,7 @@ pub async fn advance_session_head(
 /// A fresh root session store for `session_id` from `backend`'s catalog,
 /// under a [`RecordingStore`].
 pub async fn recording_session_store(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     session_id: impl Into<SessionId>,
 ) -> Arc<RecordingStore> {
     let store = backend
@@ -411,16 +411,16 @@ pub fn test_commit_budget() -> crate::CommitBudget {
 
 /// A host config over `backend` with the test commit budget and a batching
 /// bound of one.
-pub fn test_runtime_host_config(backend: &Arc<dyn crate::Backend>) -> RuntimeHostConfig {
+pub fn test_runtime_host_config(backend: &crate::Backend) -> RuntimeHostConfig {
     RuntimeHostConfig::new(
-        Arc::clone(backend),
+        backend.clone(),
         test_commit_budget(),
         crate::QueuedWorkBatchingConfig::new(1),
     )
 }
 
 pub fn test_runtime_host_config_with_provider(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     provider: crate::ProviderHandle,
 ) -> RuntimeHostConfig {
     let mut config = test_runtime_host_config(backend);
@@ -457,7 +457,7 @@ pub struct TestRuntime {
 impl TestRuntime {
     /// A runtime over `backend`: its host, and its process registry unless
     /// [`Self::without_process_registry`] drops it.
-    pub fn new(backend: &Arc<dyn crate::Backend>, transport: TestProvider) -> Self {
+    pub fn new(backend: &crate::Backend, transport: TestProvider) -> Self {
         Self {
             attachment_acceptance: Default::default(),
             plugins: crate::testing::test_standard_protocol_factories(),
@@ -617,7 +617,7 @@ impl TestRuntime {
 }
 
 pub async fn standard_runtime_with_transport(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     transport: TestProvider,
 ) -> LashRuntime {
     TestRuntime::new(backend, transport).build().await
@@ -679,7 +679,7 @@ impl crate::SessionPlugin for RuntimeTestPlugin {
 }
 
 pub async fn runtime_with_plugins(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
     transport: TestProvider,
 ) -> LashRuntime {
@@ -690,7 +690,7 @@ pub async fn runtime_with_plugins(
 }
 
 pub async fn runtime_with_plugins_and_tools(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
     tools: Arc<dyn crate::ToolProvider>,
     transport: TestProvider,
@@ -708,7 +708,7 @@ pub async fn runtime_with_plugins_and_tools_and_host(
     transport: TestProvider,
     host: EmbeddedRuntimeHost,
 ) -> LashRuntime {
-    let backend = Arc::clone(host.core.backend());
+    let backend = host.core.backend().clone();
     TestRuntime::new(&backend, transport)
         .plugins(plugins)
         .tools(tools)
@@ -724,7 +724,7 @@ pub async fn runtime_with_plugins_and_tools_and_host_and_store(
     host: EmbeddedRuntimeHost,
     store: Arc<dyn crate::RuntimePersistence>,
 ) -> LashRuntime {
-    let backend = Arc::clone(host.core.backend());
+    let backend = host.core.backend().clone();
     TestRuntime::new(&backend, transport)
         .plugins(plugins)
         .tools(tools)
@@ -903,7 +903,7 @@ pub async fn standard_runtime_with_transport_and_host(
     transport: TestProvider,
     host: EmbeddedRuntimeHost,
 ) -> LashRuntime {
-    let backend = Arc::clone(host.core.backend());
+    let backend = host.core.backend().clone();
     TestRuntime::new(&backend, transport)
         .host(host)
         .build()

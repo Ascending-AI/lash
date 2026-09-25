@@ -50,7 +50,7 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell(tier: &JournaledTi
             aggregate.trim_start_matches("Promise.").to_lowercase()
         );
         let theatre = Arc::new(OracleTheatre::default());
-        let backend = DecoratedBackend::over(tier.backend().await).effect_host(|inner| {
+        let backend = DecoratedBackend::over(tier.backend().await.into()).effect_host(|inner| {
             Arc::new(lash_core::testing::LayeredEffectHost::new(
                 inner,
                 Arc::new(SettlementFaultLayer {
@@ -58,11 +58,11 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell(tier: &JournaledTi
                 }),
             ))
         });
-        let registry = lash_core::Backend::process_registry(&backend);
+        let registry = lash_core::Backend::from(backend.clone()).process_registry();
         register_intent_target(registry.as_ref(), &session_id).await;
         let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
         let core = oracle_builder(
-            Arc::new(backend),
+            backend.into(),
             &session_id,
             vec![typescript_block(&format!(
                 r#"try {{

@@ -435,11 +435,12 @@ pub(crate) mod test_support {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.as_ref(),
+            &backend.clone().into(),
         );
-        let mut builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .tool_source_policy(tool_source_policy)
-            .provider(provider);
+        let mut builder =
+            LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, factory)
+                .tool_source_policy(tool_source_policy)
+                .provider(provider);
         if let Some(tools) = tools {
             builder = builder.tools(tools);
         }

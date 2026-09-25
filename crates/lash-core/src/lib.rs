@@ -640,7 +640,7 @@ pub use triggers::{
 pub(crate) mod facade_ops {}
 pub use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, Backend, BackendQueuedWork, DurabilityTier,
-    ModuleArtifactStore, StoreSet,
+    EffectEngine, ModuleArtifactStore, StoreBindingId, StoreSet,
 };
 pub use lash_core_execution::{
     DriverAction, DriverContextView, Effect, HostTurnProtocol, PreparedTurnMachine,

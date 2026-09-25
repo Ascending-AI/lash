@@ -1,10 +1,11 @@
-//! [`RestateBackend`]: the Restate engine host over one SQL store set
-//! (ADR 0102, D2).
+//! [`RestateEngine`]: the Restate effect engine over one SQL store set
+//! (ADR 0104, B2).
 //!
 //! Restate journals the effects and runs the background processes; the store
 //! set keeps the sessions, the process registry and every other persistence
-//! port. That pairing is one backend, not a mixture: the engine stores no
-//! sessions, and the store set opens no effect journal of its own.
+//! port. A [`Backend`](lash_core::Backend) over the engine is one substrate,
+//! not a mixture: the engine stores no sessions, and the store set opens no
+//! effect journal of its own.
 
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ use crate::process::{RestateProcessDeployment, RestateProcessServing};
 use crate::services::{LashServiceParts, bind_lash_services};
 use crate::turn::RestateTurnAttach;
 
-/// Who runs a [`RestateBackend`]'s queued session work: a required,
+/// Who runs a [`RestateEngine`]'s queued session work: a required,
 /// explicit choice with no default.
 ///
 /// There is no in-process choice. The runtime's in-process driver would claim
@@ -51,84 +52,86 @@ impl From<RestateQueuedWork> for BackendQueuedWork {
     }
 }
 
-/// The Restate engine host and Restate process work over one SQL
+/// How a [`RestateEngine`] reaches Restate and under which authority it
+/// journals.
+#[derive(Clone)]
+pub struct RestateConfig {
+    connection: RestateConnection,
+    authority: RestateAuthorityId,
+    queued_work: RestateQueuedWork,
+    process_event_sink: Option<Arc<dyn ProcessEventSink>>,
+}
+
+impl RestateConfig {
+    /// Reach Restate at `connection` under `authority`, with `queued_work`
+    /// running the store set's queued session work.
+    pub fn new(
+        connection: impl Into<RestateConnection>,
+        authority: RestateAuthorityId,
+        queued_work: RestateQueuedWork,
+    ) -> Self {
+        Self {
+            connection: connection.into(),
+            authority,
+            queued_work,
+            process_event_sink: None,
+        }
+    }
+
+    /// Install a host-facing [`ProcessEventSink`] on the process registry
+    /// decorator the Restate process work wraps. Each appended event is
+    /// pushed best-effort after its durable write.
+    pub fn with_process_event_sink(mut self, sink: Arc<dyn ProcessEventSink>) -> Self {
+        self.process_event_sink = Some(sink);
+        self
+    }
+}
+
+/// The Restate effect host and Restate process work over one SQL
 /// [`StoreSet`] (SQLite or PostgreSQL).
 ///
-/// Its binding identity is the Restate authority's, the one the effect host's
-/// turn-control binding and await-event keys derive from.
-///
-/// `S` is the store set's type. The backend hands out that store set's
-/// Lashlang artifact store, so an RLM host reads its artifacts from the
-/// substrate it journals beside.
-pub struct RestateBackend<S: ?Sized + StoreSet = dyn StoreSet> {
-    stores: Arc<S>,
+/// The store set names the storage ([`StoreSet::binding_identity`]); the
+/// Restate authority names the effect state, and the effect host's
+/// turn-control binding and await-event keys derive from it. Both are fixed
+/// here, when the engine is built over its store set.
+pub struct RestateEngine {
+    stores: Arc<dyn StoreSet>,
     connection: RestateConnection,
     effect_host: Arc<RestateEffectHost>,
     process: Arc<RestateProcessDeployment>,
     queued_work: BackendQueuedWork,
-    identity: Arc<str>,
 }
 
-impl<S: ?Sized + StoreSet> Clone for RestateBackend<S> {
-    fn clone(&self) -> Self {
-        Self {
-            stores: Arc::clone(&self.stores),
-            connection: self.connection.clone(),
-            effect_host: Arc::clone(&self.effect_host),
-            process: Arc::clone(&self.process),
-            queued_work: self.queued_work.clone(),
-            identity: Arc::clone(&self.identity),
-        }
-    }
-}
-
-impl<S: ?Sized + StoreSet> RestateBackend<S> {
-    /// The backend reaching Restate at `connection` under `authority_id`,
-    /// over `stores`, with `queued_work` running its queued session work.
-    pub fn new(
-        connection: impl Into<RestateConnection>,
-        authority_id: RestateAuthorityId,
-        stores: Arc<S>,
-        queued_work: RestateQueuedWork,
-    ) -> Self {
-        Self::with_process_event_sink(connection, authority_id, stores, queued_work, None)
-    }
-
-    /// Like [`new`](Self::new), but installs a host-facing
-    /// [`ProcessEventSink`] on the process registry decorator the Restate
-    /// process work wraps. Each appended event is pushed best-effort after
-    /// its durable write.
-    pub fn with_process_event_sink(
-        connection: impl Into<RestateConnection>,
-        authority_id: RestateAuthorityId,
-        stores: Arc<S>,
-        queued_work: RestateQueuedWork,
-        sink: Option<Arc<dyn ProcessEventSink>>,
-    ) -> Self {
-        let connection = connection.into();
+impl RestateEngine {
+    /// The engine over `stores`, configured by `config`.
+    pub fn new(stores: Arc<dyn StoreSet>, config: RestateConfig) -> Self {
+        let RestateConfig {
+            connection,
+            authority,
+            queued_work,
+            process_event_sink,
+        } = config;
         let effect_host = Arc::new(RestateEffectHost::new(
             connection.clone(),
-            authority_id.clone(),
+            authority.clone(),
         ));
         let process = Arc::new(RestateProcessDeployment::new_with_sink(
             connection.clone(),
-            authority_id,
+            authority,
             stores.process_registry(),
             stores.process_continuations(),
-            sink,
+            process_event_sink,
         ));
-        let identity = Arc::from(effect_host.turn_control_binding_id());
         Self {
             stores,
             connection,
             effect_host,
             process,
             queued_work: queued_work.into(),
-            identity,
         }
     }
 
-    /// The endpoint builder a deployment that serves this backend's work
+    /// The endpoint builder a deployment that serves this engine's work
     /// starts from, with every Restate service lash itself serves already
     /// bound: the durable-wait workflow and index, process attach, the
     /// process workflow over `processes` (a [`DurableProcessWorker`], or a
@@ -142,8 +145,8 @@ impl<S: ?Sized + StoreSet> RestateBackend<S> {
     ///
     /// Effect-group children route through the resolver registered on this
     /// backend's effect host — the runtime's tool-child host once a core over
-    /// this backend installs it — and a session-scope child checks its
-    /// session's state generation in this backend's session catalog.
+    /// this engine installs it — and a session-scope child checks its
+    /// session's state generation in this engine's session catalog.
     ///
     /// [`DurableProcessWorker`]: lash_core_worker::DurableProcessWorker
     pub fn endpoint_builder(
@@ -161,23 +164,23 @@ impl<S: ?Sized + StoreSet> RestateBackend<S> {
         )
     }
 
-    /// The Restate effect host every runtime of this backend runs on.
+    /// The Restate effect host every runtime of this engine runs on.
     pub fn effect_host(&self) -> Arc<RestateEffectHost> {
         Arc::clone(&self.effect_host)
     }
 
-    /// The Restate process work over this backend's registry: the port a
+    /// The Restate process work over this engine's registry: the port a
     /// host admits pending processes and awaits work items through.
     pub fn process_deployment(&self) -> &RestateProcessDeployment {
         &self.process
     }
 
-    /// The store set this backend journals its effects beside.
-    pub fn stores(&self) -> &Arc<S> {
+    /// The store set this engine journals its effects beside.
+    pub fn stores(&self) -> &Arc<dyn StoreSet> {
         &self.stores
     }
 
-    /// Exact-turn control over this backend's sessions, usable from a
+    /// Exact-turn control over this engine's sessions, usable from a
     /// process outside the turn's handler.
     pub fn turn_work_driver(&self) -> TurnWorkDriver {
         TurnWorkDriver::for_catalog(
@@ -192,47 +195,13 @@ impl<S: ?Sized + StoreSet> RestateBackend<S> {
     }
 }
 
-impl<S: ?Sized + StoreSet> lash_core::Backend for RestateBackend<S> {
-    fn binding_identity(&self) -> &str {
-        &self.identity
-    }
-
-    fn clock(&self) -> Arc<dyn lash_core::Clock> {
-        self.stores.clock()
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn lash_core::SessionStoreFactory> {
-        self.stores.session_store_factory()
+impl lash_core::EffectEngine for RestateEngine {
+    fn stores(&self) -> Arc<dyn StoreSet> {
+        Arc::clone(&self.stores)
     }
 
     fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
         self.effect_host()
-    }
-
-    fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
-        Arc::clone(self.process.process_work().registry())
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core::TriggerStore> {
-        self.stores.trigger_store()
-    }
-
-    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
-        self.stores.process_definition_registry()
-    }
-
-    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
-        self.stores.process_env_store()
-    }
-
-    fn attachment_store(&self) -> Arc<dyn lash_core::AttachmentStore> {
-        self.stores.attachment_store()
-    }
-
-    /// The store set this backend journals beside keeps its Lashlang module
-    /// artifacts.
-    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
-        self.stores.module_artifacts()
     }
 
     fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
@@ -244,11 +213,12 @@ impl<S: ?Sized + StoreSet> lash_core::Backend for RestateBackend<S> {
     }
 }
 
-impl<S: ?Sized + StoreSet> std::fmt::Debug for RestateBackend<S> {
+impl std::fmt::Debug for RestateEngine {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("RestateBackend")
-            .field("identity", &self.identity)
+            .debug_struct("RestateEngine")
+            .field("stores", self.stores.binding_identity())
+            .field("authority", &self.effect_host.turn_control_binding_id())
             .finish_non_exhaustive()
     }
 }

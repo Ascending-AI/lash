@@ -672,7 +672,7 @@ untouched by a failed attempt, so only the deadline ends the loop.
 
 ### The Restate upgrade, precisely
 
-Replacing the SQLite backend with a `RestateBackend` over the same SQLite
+Replacing the SQLite backend with a `RestateEngine` over the same SQLite
 store set is **half** the change, and it is worth being exact about which half:
 
 - **`bot/runtime.rs::build_core` — the drain.** The queued drain becomes a

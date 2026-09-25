@@ -32,9 +32,9 @@ fn restart_core(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.as_ref(),
+        &backend.clone().into(),
     );
-    LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(backend.into(), crate::TurnBudget::Unbounded, factory)
         .provider(queued_text_provider(cells))
         .model(mock_model_spec())
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))

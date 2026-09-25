@@ -25,14 +25,14 @@ const CONTRACT_SEED: u64 = 0x5eed_c047;
 /// The contract world: a sim engine and the backend its cores run on,
 /// observed when a checkpoint collector is installed.
 async fn contract_world()
--> Result<(crate::backend::SimEngine, Arc<dyn lash::Backend>), FixedScriptRunnerError> {
+-> Result<(crate::backend::SimEngine, lash::Backend), FixedScriptRunnerError> {
     let collector = CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| slot.borrow().clone());
     let engine = crate::backend::SimEngine::new(CONTRACT_SEED).await?;
     let mut backend = crate::backend::DecoratedBackend::over_engine(&engine);
     if let Some(collector) = collector {
         backend = backend.observing(collector);
     }
-    Ok((engine, Arc::new(backend)))
+    Ok((engine, backend.into()))
 }
 
 /// A turn build that submits `prompt` as text.
@@ -606,7 +606,7 @@ async fn facade_final_value_execution_inner(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.as_ref(),
+        &backend,
     );
     let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
@@ -904,7 +904,7 @@ async fn agent_process_contract_core_with_options(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.as_ref(),
+        &backend,
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
     let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)

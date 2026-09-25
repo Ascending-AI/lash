@@ -1353,7 +1353,8 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     let live_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
-    let live_factory = lash_core_execution::Backend::session_store_factory(&live_backend);
+    let live_factory =
+        lash_core_execution::Backend::from(live_backend.clone()).session_store_factory();
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("postgres-wrong-database-live-attachment"),

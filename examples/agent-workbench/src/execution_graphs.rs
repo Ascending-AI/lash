@@ -502,7 +502,7 @@ mod tests {
                 .expect("SQLite memory backend"),
         );
         let registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
-        let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+        let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
             .model(
                 lash::ModelSpec::builder("test-model")
                     .context_window_tokens(4096)

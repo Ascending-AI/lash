@@ -1,7 +1,7 @@
 use super::*;
 
 fn recording_factory(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
 ) -> crate::testing::runtime_helpers::RecordingSessionStoreFactory {
     crate::testing::runtime_helpers::RecordingSessionStoreFactory::over(
         backend.session_store_factory(),
@@ -10,9 +10,9 @@ fn recording_factory(
 
 /// `backend` with its session catalog recorded by `factory`.
 fn recording_backend(
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     factory: &crate::testing::runtime_helpers::RecordingSessionStoreFactory,
-) -> Arc<dyn crate::Backend> {
+) -> crate::Backend {
     let factory = factory.clone();
     crate::testing::runtime_helpers::LayeredBackend::over(backend)
         .map_session_store_factory(move |_| Arc::new(factory))
@@ -261,7 +261,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
@@ -519,7 +519,7 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(
         crate::RuntimeHostConfig::new(
-            std::sync::Arc::clone(&backend),
+            backend.clone(),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         )
@@ -782,7 +782,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
@@ -880,7 +880,7 @@ async fn spawned_child_runtime_does_not_outlive_the_process_run() {
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
@@ -974,7 +974,7 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
@@ -1067,7 +1067,7 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
@@ -1176,7 +1176,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
@@ -1332,7 +1332,7 @@ async fn cancelled_session_turn_reacquires_budget_one_permit() {
                     response: Ok(crate::LlmResponse::default()),
                 }]);
                 let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-                    std::sync::Arc::clone(&backend),
+                    backend.clone(),
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 ));

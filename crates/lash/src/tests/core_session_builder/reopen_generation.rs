@@ -6,7 +6,7 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
     let backend = memory_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
+        backend.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

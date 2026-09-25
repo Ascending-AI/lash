@@ -58,7 +58,7 @@ async fn ingress_core_over(
         )
         .await?;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(backend, effect_host, process_env_store),
+        ingress_backend(backend.into(), effect_host, process_env_store),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -72,10 +72,10 @@ async fn ingress_core_over(
 /// `backend`, with its effect host and process-env store replaced where
 /// the test names its own.
 fn ingress_backend(
-    backend: Arc<dyn lash_core::Backend>,
+    backend: lash_core::Backend,
     effect_host: Option<Arc<dyn lash_core::EffectHost>>,
     process_env_store: Option<Arc<dyn lash_core::ProcessExecutionEnvStore>>,
-) -> Arc<dyn lash_core::Backend> {
+) -> lash_core::Backend {
     let mut decorated = DecoratedBackend::over(backend);
     if let Some(effect_host) = effect_host {
         decorated = decorated.effect_host(move |_| effect_host);
@@ -83,7 +83,7 @@ fn ingress_backend(
     if let Some(process_env_store) = process_env_store {
         decorated = decorated.process_env_store(move |_| process_env_store);
     }
-    Arc::new(decorated)
+    decorated.into()
 }
 
 /// A second invocation over `first`'s durable backend with a fresh
@@ -92,7 +92,7 @@ fn ingress_backend(
 async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         ingress_backend(
-            Arc::clone(first.backend()),
+            first.backend().clone(),
             Some(Arc::new(KeyJournalController::default())),
             None,
         ),
@@ -168,7 +168,7 @@ async fn ingress_core_with_trigger_store(
             .await?;
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(backend, Some(effect_host), None),
+        ingress_backend(backend.into(), Some(effect_host), None),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1601,7 +1601,7 @@ async fn ingress_engine_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

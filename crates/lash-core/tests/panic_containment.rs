@@ -39,12 +39,13 @@ use lash_sansio::sync::MutexExt;
 use tokio_util::sync::CancellationToken;
 
 /// A fresh SQLite memory backend (ADR 0102).
-async fn memory_backend() -> Arc<dyn lash_core::Backend> {
+async fn memory_backend() -> lash_core::Backend {
     Arc::new(
         lash_sqlite_store::SqliteBackend::memory()
             .await
             .expect("open a SQLite memory backend"),
     )
+    .into()
 }
 
 static PANIC_MODE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -57,7 +58,7 @@ struct RecordingEffectController {
 
 /// A recorder over `backend`'s own controller for `turn_id` of `session_id`.
 fn recording_controller(
-    backend: &Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     session_id: &str,
     turn_id: &str,
 ) -> Arc<RecordingEffectController> {
@@ -695,7 +696,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
     ])
     .into_handle();
     let mut host = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
@@ -759,7 +760,7 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         panic_next: Arc::new(AtomicBool::new(true)),
     })));
     let mut host = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
@@ -835,7 +836,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
     );
     let quiet_provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let mut quiet_host = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
@@ -872,7 +873,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
     );
     let loud_provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let mut loud_host = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
@@ -918,7 +919,7 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
     lash_core::panic_containment::set_loud(true);
     let provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let mut host = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );

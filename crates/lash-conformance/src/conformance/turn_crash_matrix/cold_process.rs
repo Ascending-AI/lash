@@ -444,7 +444,6 @@ pub async fn cold_process_real_turn_driver(
     action: &str,
     external_effect_marker: Option<std::path::PathBuf>,
 ) {
-    let stores = stores.as_ref();
     let action = match action {
         "turn_provider_mid_stream" => ColdProcessTurnAction::ProviderInitialMidStream,
         "turn_provider_after_tool_mid_stream" => ColdProcessTurnAction::ProviderAfterToolMidStream,

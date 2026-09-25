@@ -1,4 +1,4 @@
-fn host(backend: std::sync::Arc<dyn lash::Backend>) {
+fn host(backend: lash::Backend) {
     let _host = lash::durability::RuntimeHostConfig::new(backend);
 }
 

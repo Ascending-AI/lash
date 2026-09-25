@@ -112,7 +112,7 @@ pub async fn dispatch_ports() -> DispatchPorts {
             crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
         ),
         attachment_store: std::sync::Arc::new(crate::SessionAttachmentStore::ephemeral(
-            crate::Backend::attachment_store(&backend),
+            crate::Backend::from(backend.clone()).attachment_store(),
         )),
     }
 }

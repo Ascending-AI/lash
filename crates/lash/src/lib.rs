@@ -130,10 +130,11 @@ pub use lash_core::{
     facade_support::WorkerSlotPermit, facade_support::WorkerSlotSupplier,
 };
 /// The one substrate a [`LashCore`] takes every persistence port and its
-/// effect host from (ADR 0102). [`LashCore::builder`] requires one:
-/// `lash::sqlite::SqliteBackend` (file or memory), the PostgreSQL
-/// backend, or the Restate backend.
-pub use lash_core::{Backend, BackendQueuedWork};
+/// effect host from: one [`EffectEngine`] over one store set (ADR 0104).
+/// [`LashCore::builder`] requires one: a `lash::restate::RestateEngine` over a
+/// SQLite or PostgreSQL store set, or `lash::sqlite::SqliteBackend` (file or
+/// memory) until FIG-3668 deletes the SQLite engine.
+pub use lash_core::{Backend, BackendQueuedWork, EffectEngine, StoreBindingId};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so

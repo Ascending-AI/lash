@@ -152,7 +152,8 @@ async fn durable_attachment_context(
         .create_store(&request)
         .await
         .expect("create the manifest store");
-    let backend: Arc<dyn crate::AttachmentStore> = crate::Backend::attachment_store(&backend);
+    let backend: Arc<dyn crate::AttachmentStore> =
+        crate::Backend::from(backend.clone()).attachment_store();
     let attachment_store = Arc::new(crate::SessionAttachmentStore::new(
         Arc::clone(&backend),
         Arc::new(crate::attachments::PersistenceManifestAdapter(Arc::clone(

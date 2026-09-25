@@ -16,7 +16,7 @@ use std::sync::Arc;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn session_store_factory_mid_stream_failure_evidence(
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     advance_commit_clock: impl FnOnce(),
 ) {
     let factory = backend.session_store_factory();
@@ -77,7 +77,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         .build()
         .into_handle();
     let effect_host = backend.effect_host();
-    let mut host = crate::LawBackend::over(backend.as_ref()).host_config(
+    let mut host = crate::LawBackend::over(&backend).host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );

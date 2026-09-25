@@ -424,7 +424,7 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
             )
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )

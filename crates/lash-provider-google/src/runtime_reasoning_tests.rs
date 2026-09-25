@@ -120,7 +120,7 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
             .await
             .expect("memory backend"),
     );
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(ProviderHandle::new(provider.into_components()))
         .model(
@@ -214,7 +214,7 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
             .await
             .expect("memory backend"),
     );
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(ProviderHandle::new(provider.into_components()))
         .model(

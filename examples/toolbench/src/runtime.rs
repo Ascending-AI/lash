@@ -363,7 +363,7 @@ async fn build_turn_core(
             .map_err(|error| anyhow::anyhow!("open a SQLite memory backend: {error}"))?,
     );
     let builder = match channel {
-        crate::ChannelSelection::Standard => LashCore::standard_builder(backend, budget),
+        crate::ChannelSelection::Standard => LashCore::standard_builder(backend.into(), budget),
         crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
             let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(if channel == crate::ChannelSelection::Cell {
@@ -380,8 +380,8 @@ async fn build_turn_core(
             config.lashlang_language_features.label_annotations = false;
             config.lashlang_abilities.sleep = false;
             config.continue_as_soft_warn_tokens = None;
-            let factory = lash::rlm::RlmProtocolPluginFactory::new(config, backend.as_ref());
-            LashCore::rlm_builder(backend, budget, factory)
+            let factory = lash::rlm::RlmProtocolPluginFactory::new(config, &backend.clone().into());
+            LashCore::rlm_builder(backend.into(), budget, factory)
         }
     };
     let shutdown_marker =

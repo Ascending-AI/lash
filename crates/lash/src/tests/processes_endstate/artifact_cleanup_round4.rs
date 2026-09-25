@@ -58,7 +58,7 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
         .await?;
 
     let core = prune_recovery_core(
-        backend.clone(),
+        backend.clone().into(),
         artifact_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
         Arc::clone(&engine),
     )?;

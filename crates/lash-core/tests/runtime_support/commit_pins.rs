@@ -92,7 +92,7 @@ pub(crate) async fn pinned_runtime(
     host: lash_core::facade_support::EmbeddedRuntimeHost,
     store: std::sync::Arc<dyn lash_core::RuntimePersistence>,
 ) -> lash_core::facade_support::LashRuntime {
-    let backend = std::sync::Arc::clone(host.core.backend());
+    let backend = host.core.backend().clone();
     lash_core::testing::runtime_helpers::TestRuntime::new(&backend, transport)
         .plugins(plugins)
         .tools(tools)

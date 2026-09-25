@@ -75,7 +75,7 @@ async fn seed_session_with_a_persisted_tool(
     let backend = memory_backend().await;
     let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
     let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -117,7 +117,7 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     let (backend, _) = seed_session_with_a_persisted_tool(&session_id).await?;
 
     let grantless_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -151,7 +151,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
 
     let counters = Arc::new(OpenLifecycleCounters::default());
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -195,7 +195,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     // The lease the refused open claimed was released: a following open takes
     // it. Tolerate here, because the point is the lease, not the policy.
     let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -215,7 +215,7 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     let (backend, _) = seed_session_with_a_persisted_tool(&session_id).await?;
 
     let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -266,7 +266,7 @@ async fn require_makes_a_queued_work_rebuild_a_terminal_failure() -> Result<()> 
     let (backend, factory) = seed_session_with_a_persisted_tool(&session_id).await?;
 
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

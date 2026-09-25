@@ -9,8 +9,8 @@
 
 use std::sync::Arc;
 
+use lash_core::Backend;
 use lash_core::sync::MutexExt as _;
-use lash_core::{Backend, SessionStoreFactory};
 
 use crate::runner::FixedScriptRunnerError;
 use crate::store::{CheckpointWriteCollector, ObservedSessionStoreFactory};
@@ -77,8 +77,8 @@ impl SimEngine {
 
     /// The backend a core runs on: the engine's own backend, with its
     /// Lashlang artifacts in the engine's store set.
-    pub fn backend(&self) -> Arc<DecoratedBackend> {
-        Arc::new(DecoratedBackend::over_engine(self))
+    pub fn backend(&self) -> Backend {
+        DecoratedBackend::over_engine(self).into()
     }
 
     /// Serve process segments with `core`'s durable worker, as a Restate
@@ -238,76 +238,37 @@ impl lash::TurnActivitySink for DiscardedTurnActivity {
 /// other exactly as the undecorated backend's do. The decorated backend
 /// keeps the inner backend's Lashlang artifacts.
 pub struct DecoratedBackend {
-    inner: Arc<dyn Backend>,
-    factory: Arc<dyn SessionStoreFactory>,
+    layered: lash_core::testing::runtime_helpers::LayeredBackend,
 }
 
 impl DecoratedBackend {
+    /// `inner`, undecorated.
+    pub fn over(inner: Backend) -> Self {
+        Self {
+            layered: lash_core::testing::runtime_helpers::LayeredBackend::over(inner),
+        }
+    }
+
     /// `engine`'s backend, undecorated: it reaches the server double only
     /// through its connection, so a core over it never keeps the server
     /// alive.
     pub fn over_engine(engine: &SimEngine) -> Self {
-        let inner = engine.restate.lash_backend();
-        Self {
-            factory: inner.session_store_factory(),
-            inner,
-        }
+        Self::over(engine.restate.lash_backend())
     }
 
     /// Observe the commits made through the session factory into
     /// `collector`.
-    pub fn observing(mut self, collector: CheckpointWriteCollector) -> Self {
-        self.factory = Arc::new(ObservedSessionStoreFactory::new(self.factory, collector));
-        self
+    pub fn observing(self, collector: CheckpointWriteCollector) -> Self {
+        Self {
+            layered: self.layered.map_session_store_factory(|factory| {
+                Arc::new(ObservedSessionStoreFactory::new(factory, collector))
+            }),
+        }
     }
 }
 
-impl Backend for DecoratedBackend {
-    fn binding_identity(&self) -> &str {
-        self.inner.binding_identity()
-    }
-
-    fn clock(&self) -> Arc<dyn lash_core::Clock> {
-        self.inner.clock()
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
-        Arc::clone(&self.factory)
-    }
-
-    fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
-        self.inner.effect_host()
-    }
-
-    fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
-        self.inner.process_registry()
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core::TriggerStore> {
-        self.inner.trigger_store()
-    }
-
-    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
-        self.inner.process_definition_registry()
-    }
-
-    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
-        self.inner.process_env_store()
-    }
-
-    fn attachment_store(&self) -> Arc<dyn lash_core::AttachmentStore> {
-        self.inner.attachment_store()
-    }
-
-    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
-        self.inner.module_artifacts()
-    }
-
-    fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
-        self.inner.process_work()
-    }
-
-    fn queued_work(&self) -> lash_core::BackendQueuedWork {
-        self.inner.queued_work()
+impl From<DecoratedBackend> for Backend {
+    fn from(backend: DecoratedBackend) -> Self {
+        backend.layered.into_backend()
     }
 }

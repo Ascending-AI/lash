@@ -13,7 +13,6 @@ use crate::rlm::{
 };
 use crate::testing::TestProvider;
 use futures_util::StreamExt as _;
-use lash_core::Backend;
 use lash_lashlang_runtime::ToolDefinitionBindingExt;
 
 /// Run the full cold-rebuild + worker-recovery conformance suite against
@@ -35,7 +34,7 @@ use lash_lashlang_runtime::ToolDefinitionBindingExt;
 pub async fn runtime_rebuild_and_worker_recovery<F, Fut>(make: F)
 where
     F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Arc<dyn lash_core::Backend>>,
+    Fut: std::future::Future<Output = lash_core::Backend>,
 {
     reopen_restores_trigger_registry_state(make().await).await;
     worker_runs_trigger_started_lashlang_process_after_restart(make().await).await;
@@ -267,7 +266,7 @@ fn rebuild_provider() -> crate::provider::ProviderHandle {
         .into_handle()
 }
 
-fn base_builder(backend: &Arc<dyn lash_core::Backend>) -> LashCoreBuilder {
+fn base_builder(backend: &lash_core::Backend) -> LashCoreBuilder {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         crate::rlm::RlmProtocolPluginConfig::builder()
             .channel(crate::rlm::RlmChannel::Cell)
@@ -275,10 +274,10 @@ fn base_builder(backend: &Arc<dyn lash_core::Backend>) -> LashCoreBuilder {
             .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(rebuild_abilities()),
-        backend.as_ref(),
+        backend,
     );
     LashCore::rlm_builder(
-        Arc::clone(backend) as Arc<dyn Backend>,
+        backend.clone(),
         crate::TurnBudget::Unbounded,
         factory,
     )
@@ -297,7 +296,7 @@ fn base_builder(backend: &Arc<dyn lash_core::Backend>) -> LashCoreBuilder {
 }
 
 /// The core under certification over `backend`.
-fn build_core(backend: &Arc<dyn lash_core::Backend>) -> LashCore {
+fn build_core(backend: &lash_core::Backend) -> LashCore {
     base_builder(backend)
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "lash-rebuild-conformance-worker",
@@ -464,7 +463,7 @@ async fn emit_first_clock_alarm(
 /// Differential baseline: a live reopen restores the trigger registry route
 /// installed through a normal turn — the same reconstruction the worker
 /// must use for out-of-turn process starts.
-async fn reopen_restores_trigger_registry_state(backend: Arc<dyn lash_core::Backend>) {
+async fn reopen_restores_trigger_registry_state(backend: lash_core::Backend) {
     let core = build_core(&backend);
     let registry = core.process_registry();
     open_mutate_and_restart(&core, None, &registry).await;
@@ -486,9 +485,7 @@ async fn reopen_restores_trigger_registry_state(backend: Arc<dyn lash_core::Back
     assert_eq!(report.started_process_ids().len(), 1);
 }
 
-async fn worker_runs_trigger_started_lashlang_process_after_restart(
-    backend: Arc<dyn lash_core::Backend>,
-) {
+async fn worker_runs_trigger_started_lashlang_process_after_restart(backend: lash_core::Backend) {
     let core = build_core(&backend);
     let registry = core.process_registry();
     open_mutate_and_restart(&core, None, &registry).await;
@@ -512,9 +509,7 @@ async fn worker_runs_trigger_started_lashlang_process_after_restart(
     await_success(&registry, &started_process_ids[0]).await;
 }
 
-async fn trigger_triggered_process_wake_provenance_survives_restart(
-    backend: Arc<dyn lash_core::Backend>,
-) {
+async fn trigger_triggered_process_wake_provenance_survives_restart(backend: lash_core::Backend) {
     let core = build_core(&backend);
     let registry = core.process_registry();
     open_mutate_and_restart_with_prompt(&core, "register rebuild button trigger", None, &registry)
@@ -724,9 +719,7 @@ async fn trigger_triggered_process_wake_provenance_survives_restart(
     );
 }
 
-async fn worker_recovers_tool_call_process_in_restarted_session(
-    backend: Arc<dyn lash_core::Backend>,
-) {
+async fn worker_recovers_tool_call_process_in_restarted_session(backend: lash_core::Backend) {
     let core = build_core(&backend);
     let registry = core.process_registry();
     let registration = worker_registration(
@@ -747,9 +740,7 @@ async fn worker_recovers_tool_call_process_in_restarted_session(
     await_success(&registry, &lash_core::ProcessId::from("proc-tool-call")).await;
 }
 
-async fn worker_recovers_session_turn_process_in_restarted_session(
-    backend: Arc<dyn lash_core::Backend>,
-) {
+async fn worker_recovers_session_turn_process_in_restarted_session(backend: lash_core::Backend) {
     let core = build_core(&backend);
     let registry = core.process_registry();
     let child_policy = lash_core::SessionPolicy {

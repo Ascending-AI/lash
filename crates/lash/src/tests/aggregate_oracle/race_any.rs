@@ -485,7 +485,7 @@ async fn a_turn_cancelled_while_parked_on_rank_n_ends_cancelled(
     register_intent_target(registry.as_ref(), session_id).await;
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let core = oracle_core(
-        backend,
+        backend.into(),
         session_id,
         vec![typescript_block(
             r#"try {

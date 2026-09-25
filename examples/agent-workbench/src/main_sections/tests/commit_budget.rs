@@ -22,7 +22,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
             .await
             .expect("SQLite memory backend"),
     );
-    let host = lash::durability::RuntimeHostConfig::new(backend, bounded, batching.clone());
+    let host = lash::durability::RuntimeHostConfig::new(backend.into(), bounded, batching.clone());
     assert_eq!(host.durability.commit_budget, bounded);
     assert_eq!(host.durability.queued_work_batching, batching);
     assert_eq!(batching.action_token_reserve(), 1);
@@ -40,7 +40,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
             .await
             .expect("SQLite memory backend"),
     );
-    let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let error = match lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
@@ -56,7 +56,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
             .await
             .expect("SQLite memory backend"),
     );
-    let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let error = match lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
@@ -73,7 +73,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
             .await
             .expect("SQLite memory backend"),
     );
-    let configured = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let configured = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())

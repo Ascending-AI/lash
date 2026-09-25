@@ -936,7 +936,7 @@ impl RestateProcessDeployment {
 
 /// How a Restate deployment serves lash processes: the worker that runs their
 /// segments and the policy that bounds each segment. A host hands it to
-/// [`RestateBackend::endpoint_builder`](crate::RestateBackend::endpoint_builder);
+/// [`RestateEngine::endpoint_builder`](crate::RestateEngine::endpoint_builder);
 /// a bare [`DurableProcessWorker`] or a [`RestateProcessWorkerSlot`] converts
 /// into one with the default policy.
 pub struct RestateProcessServing {

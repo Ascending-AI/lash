@@ -76,19 +76,19 @@ Lash's own Restate services — the durable-wait workflow and index, the
 `LashProcessWorkflow` background tasks run on, process attach, and the
 effect-group index, payload and dispatcher — are bound by lash, never by the
 host. A deployment that serves lash work starts its endpoint from
-`RestateBackend::endpoint_builder`, which binds every one of them, and binds
+`RestateEngine::endpoint_builder`, which binds every one of them, and binds
 only its own services beside them:
 
 ```rust,no_run
-use lash_restate::{RestateBackend, RestateProcessServing};
+use lash_restate::{RestateEngine, RestateProcessServing};
 use restate_sdk::prelude::*;
 
 fn endpoint(
-    backend: &RestateBackend,
-    // The process worker of the core built over `backend`.
+    engine: &RestateEngine,
+    // The process worker of the core built over `engine`.
     worker: lash_core::DurableProcessWorker,
 ) -> restate_sdk::endpoint::Endpoint {
-    backend
+    engine
         // A bare worker serves processes under the default segment policy;
         // `RestateProcessServing` sets an effect budget.
         .endpoint_builder(RestateProcessServing::new(worker))

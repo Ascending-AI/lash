@@ -78,7 +78,7 @@ async fn reasoning_visibility_core(expose_thinking: bool) -> lash::LashCore {
             .await
             .expect("memory backend"),
     );
-    lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(ProviderHandle::new(provider.into_components()))
         .model(
@@ -147,7 +147,7 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
             .await
             .expect("memory backend"),
     );
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(ProviderHandle::new(provider.into_components()))
         .model(

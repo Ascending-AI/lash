@@ -448,7 +448,7 @@ impl RuntimeSessionServices {
     reason = "test-support conformance fixture: a broken setup assumption aborts the test"
 )]
 pub async fn append_receipt_mixed_usage_envelope_conformance(
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let policy = crate::SessionPolicy {
@@ -769,7 +769,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     reason = "test-support conformance fixture: a broken setup assumption aborts the test"
 )]
 pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
     arm_and_wait: A,
 ) where

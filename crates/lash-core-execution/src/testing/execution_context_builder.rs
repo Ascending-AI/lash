@@ -43,7 +43,7 @@ pub struct TestExecutionPorts {
 
 impl TestExecutionPorts {
     /// Every port from one backend, on its clock.
-    pub fn of(backend: &dyn crate::Backend) -> Self {
+    pub fn of(backend: &crate::Backend) -> Self {
         Self::from(backend)
     }
 
@@ -64,13 +64,25 @@ impl TestExecutionPorts {
     }
 }
 
-impl<D: crate::Backend + ?Sized> From<&D> for TestExecutionPorts {
-    fn from(backend: &D) -> Self {
+impl From<&crate::Backend> for TestExecutionPorts {
+    fn from(backend: &crate::Backend) -> Self {
         Self {
             effect_host: backend.effect_host(),
             process_env_store: backend.process_env_store(),
             attachment_store: backend.attachment_store(),
             clock: backend.clock(),
+        }
+    }
+}
+
+impl<E: crate::EffectEngine> From<&E> for TestExecutionPorts {
+    fn from(engine: &E) -> Self {
+        let stores = engine.stores();
+        Self {
+            effect_host: engine.effect_host(),
+            process_env_store: stores.process_env_store(),
+            attachment_store: stores.attachment_store(),
+            clock: stores.clock(),
         }
     }
 }
@@ -200,7 +212,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
     }
 
     /// A builder over every port of `backend`.
-    pub fn for_backend(backend: &dyn crate::Backend) -> Self {
+    pub fn for_backend(backend: &crate::Backend) -> Self {
         Self::new(TestExecutionPorts::of(backend))
     }
 

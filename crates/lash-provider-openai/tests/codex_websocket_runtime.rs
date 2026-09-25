@@ -51,7 +51,7 @@ async fn websocket_core(provider: ProviderHandle) -> LashCore {
             .await
             .expect("memory backend"),
     );
-    LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
         .model(
@@ -177,7 +177,7 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
             .await
             .expect("memory backend"),
     );
-    let core = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let core = LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(websocket_provider(&server))
         .model(

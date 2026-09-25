@@ -258,19 +258,21 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // turns' effects, runs the background processes, whose appended events
     // reach the sink best-effort after their durable write, and hands each
     // queued turn to the workbench's queued-turn workflow.
-    let backend = Arc::new(lash_restate::RestateBackend::with_process_event_sink(
-        lash_restate::RestateConnection::with_client_and_config(
-            restate_ingress_url.clone(),
-            restate_http.clone(),
-            lash_restate::RestateConnectionConfig {
-                control_timeout_ms: 30_000,
-                attach_ceiling_ms: 6 * 60 * 60 * 1_000,
-            },
-        ),
-        restate_authority_id.clone(),
+    let backend = Arc::new(lash_restate::RestateEngine::new(
         Arc::clone(&stores.stores),
-        lash_restate::RestateQueuedWork::Engine(queued_work_port),
-        Some(Arc::clone(&process_event_sink)),
+        lash_restate::RestateConfig::new(
+            lash_restate::RestateConnection::with_client_and_config(
+                restate_ingress_url.clone(),
+                restate_http.clone(),
+                lash_restate::RestateConnectionConfig {
+                    control_timeout_ms: 30_000,
+                    attach_ceiling_ms: 6 * 60 * 60 * 1_000,
+                },
+            ),
+            restate_authority_id.clone(),
+            lash_restate::RestateQueuedWork::Engine(queued_work_port),
+        )
+        .with_process_event_sink(Arc::clone(&process_event_sink)),
     ));
     let attachment_store = stores.stores.attachment_store();
 
@@ -281,7 +283,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        backend.as_ref(),
+        &backend.clone().into(),
     )
     .with_deferred_tool_resolver(deferred_tools.resolver())
     .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));
@@ -299,7 +301,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .map_err(|error| anyhow!("invalid AGENT_WORKBENCH_OUTPUT_TOKEN_CAP: {error}"))?;
     let shutdown_provider = provider.clone();
     let builder = LashCore::rlm_builder(
-        Arc::clone(&backend) as Arc<dyn lash::Backend>,
+        lash::Backend::new(backend.clone()),
         lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS),
         factory,
     )

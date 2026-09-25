@@ -253,7 +253,7 @@ async fn drain_runtime(
 /// drain's effect host (its tool-child resolver already installed, so the
 /// drain's tool groups open there), its session catalog and its registry.
 fn world_backend(world: &DrainEndWorld) -> crate::LawBackend {
-    crate::LawBackend::over_stores(world.stores.as_ref(), Arc::clone(&world.effect_host))
+    crate::LawBackend::over_stores(Arc::clone(&world.stores), Arc::clone(&world.effect_host))
         .with_session_store_factory(Arc::clone(&world.session_factory))
         .with_process_registry(Arc::clone(&world.registry))
 }

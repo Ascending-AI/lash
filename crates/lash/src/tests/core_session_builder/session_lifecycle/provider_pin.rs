@@ -10,7 +10,7 @@ use super::*;
 async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()> {
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store.clone()).await,
+        backend_serving(store.clone()).await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -74,7 +74,7 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
 async fn related_session_open_records_the_provider_pin() -> Result<()> {
     let factory = Arc::new(RecordingStoreFactory::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_with_catalog(factory.clone()).await,
+        backend_with_catalog(factory.clone()).await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

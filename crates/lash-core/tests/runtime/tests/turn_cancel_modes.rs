@@ -128,7 +128,7 @@ struct ModeHarness {
 }
 
 async fn native_harness(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     tools: Arc<dyn lash_core::ToolProvider>,
     transport: TestProvider,
 ) -> ModeHarness {
@@ -785,7 +785,7 @@ fn retry_tool_provider(provider_calls: Arc<AtomicUsize>) -> TestProvider {
 }
 
 async fn sleeping_retry_harness(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     clock: Arc<HeldRetrySleepClock>,
     tool: RetryOnceTool,
     provider_calls: Arc<AtomicUsize>,

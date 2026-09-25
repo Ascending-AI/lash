@@ -51,7 +51,7 @@ async fn default_lease_timings_are_contractual_windows() {
         "a ttl below three renew intervals must be rejected"
     );
     let host = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );

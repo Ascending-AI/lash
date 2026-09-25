@@ -25,7 +25,7 @@ fn recovery_process_worker(
     backend: &Arc<lash_sqlite_store::SqliteBackend>,
     owner: lash_core::LeaseOwnerIdentity,
 ) -> lash_core_worker::DurableProcessWorker {
-    let backend: Arc<dyn lash_core::Backend> = backend.clone();
+    let backend: lash_core::Backend = backend.clone().into();
     let watched = lash_core::facade_support::watch_process_registry(backend.process_registry());
     lash_core_worker::DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
         Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
@@ -64,7 +64,7 @@ fn owner_bound_external_registration(id: &str) -> lash_core::ProcessRegistration
 async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> Result<()> {
     let backend = memory_backend().await;
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone().into())?;
 
     let drain_owner = recovery_local_owner("drain-host", "host-a", "drain-start");
     let worker = recovery_process_worker(&backend, drain_owner.clone());
@@ -196,7 +196,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
 async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end() -> Result<()> {
     let backend = memory_backend().await;
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone().into())?;
 
     // The sweep runs on host-a; the started owner is on host-b, so it is never
     // available for a claimant — a silent, foreign, expired holder.
@@ -326,7 +326,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
 async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
     let backend = memory_backend().await;
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
-    let core = process_test_core(backend.clone())?;
+    let core = process_test_core(backend.clone().into())?;
 
     let departed = "facade-caller-departed";
     let live = "facade-caller-live";

@@ -209,7 +209,7 @@ pub struct RlmCheckpointPerfFixture {
 impl RlmCheckpointPerfFixture {
     /// A fixture whose cells keep their Lashlang artifacts in `backend`.
     pub fn new(
-        backend: &dyn lash_core::Backend,
+        backend: &lash_core::Backend,
         binding_count: usize,
         payload_bytes: usize,
     ) -> Result<Self, SessionError> {

@@ -1553,13 +1553,13 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
         }]);
         let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
         let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
-        let backend = Arc::clone(&backend);
+        let backend = backend.clone();
         async move {
             TestRuntime::new(&backend, transport)
                 .tools(Arc::new(EmptyTools))
                 .host(lash_core::facade_support::EmbeddedRuntimeHost::new(
                     lash_core::facade_support::RuntimeHostConfig::new(
-                        std::sync::Arc::clone(&backend),
+                        backend.clone(),
                         lash_core::CommitBudget::bounded(1024 * 1024, 512),
                         lash_core::QueuedWorkBatchingConfig::new(1),
                     )
@@ -1730,7 +1730,7 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
         .build();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -1797,7 +1797,7 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
     let successor_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let successor_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let successor_config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -1891,7 +1891,7 @@ pub(super) async fn activated_successor_loses_head_cas_after_predecessor_publica
     let successor_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let successor_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let successor_config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -2042,7 +2042,7 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
         .build();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -2091,7 +2091,7 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
     let successor_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let successor_host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let successor_config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )

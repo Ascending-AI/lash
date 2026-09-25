@@ -96,7 +96,7 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
         })
         .build();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );

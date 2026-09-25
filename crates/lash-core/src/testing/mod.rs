@@ -93,8 +93,8 @@ pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteBackend 
 
 /// [`sqlite_memory_backend`] as the handle a host config takes.
 #[cfg(test)]
-pub(crate) async fn memory_backend() -> std::sync::Arc<dyn crate::Backend> {
-    std::sync::Arc::new(sqlite_memory_backend().await)
+pub(crate) async fn memory_backend() -> crate::Backend {
+    std::sync::Arc::new(sqlite_memory_backend().await).into()
 }
 
 /// A [`runtime_helpers::RecordingStore`] over a fresh, unbound store of a

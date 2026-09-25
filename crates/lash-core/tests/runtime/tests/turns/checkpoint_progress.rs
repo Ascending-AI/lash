@@ -1127,7 +1127,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
 }
 
 pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     store: Arc<RecordingStore>,
     controller: Arc<dyn lash_core::testing::EffectLayer>,
     turn_id: &TurnId,
@@ -1206,7 +1206,7 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
 }
 
 pub(super) async fn redrive_checkpoint_injected_turn(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     store: Arc<dyn lash_core::RuntimePersistence>,
     controller: Arc<dyn lash_core::testing::EffectLayer>,
     turn_id: &TurnId,

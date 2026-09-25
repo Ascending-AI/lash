@@ -66,7 +66,7 @@
 //! Lash only commits final session state through turn-commit idempotency.
 //!
 //! An endpoint that serves lash work starts from
-//! [`RestateBackend::endpoint_builder`], which binds every Restate service lash
+//! [`RestateEngine::endpoint_builder`], which binds every Restate service lash
 //! itself serves; the host binds only its own services on it. Among lash's are
 //! the durable-wait workflow, which owns exact-address promises and durable
 //! deadline timers for every [`ExecutionScope`](lash_core::ExecutionScope),
@@ -82,11 +82,11 @@
 //! unreachable from v4 resolutions, so it never self-terminates; an operator
 //! cancels it.
 
-mod backend;
 mod controller;
 mod durable_wait;
 mod effect_group;
 mod effect_host;
+mod engine;
 mod ingress;
 mod process;
 mod process_attach;
@@ -98,7 +98,6 @@ mod turn_handler;
 
 pub use restate_sdk;
 
-pub use backend::{RestateBackend, RestateQueuedWork};
 pub use controller::{
     EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
@@ -128,6 +127,7 @@ pub use effect_group::{
     EffectGroupSettlementTerminal, EffectGroupShape, EffectGroupWaitResolution,
 };
 pub use effect_host::RestateEffectHost;
+pub use engine::{RestateConfig, RestateEngine, RestateQueuedWork};
 pub use ingress::{
     DeploymentOpenInvocations, RestateAdminClient, RestateAuthorityId, RestateConnection,
     RestateConnectionConfig, RestateHttpError, RestateIngressClient, RestateInvocationId,
@@ -153,7 +153,7 @@ pub use controller::RestateControllerContext;
 pub use durable_wait::RestateTurnCancelRaceOutcome;
 
 // Lash's own Restate services. A deployment binds them only through
-// `RestateBackend::endpoint_builder`, so they are not a host contract; the
+// `RestateEngine::endpoint_builder`, so they are not a host contract; the
 // crate's tests drive them one at a time.
 #[cfg(test)]
 pub(crate) use durable_wait::{

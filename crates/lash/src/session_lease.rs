@@ -196,10 +196,12 @@ mod tests {
         let host_clock: Arc<dyn lash_core::Clock> =
             Arc::new(lash_core::testing::TestClock::new(host_now_ms));
         let backend = crate::tests::DecoratedBackend::over(
-            crate::tests::memory_backend_with_clock(store_clock).await,
+            crate::tests::memory_backend_with_clock(store_clock)
+                .await
+                .into(),
         )
         .runtime_clock(host_clock);
-        let factory = lash_core::Backend::session_store_factory(&backend);
+        let factory = lash_core::Backend::from(backend.clone()).session_store_factory();
         let request = lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
@@ -210,7 +212,7 @@ mod tests {
             .create_store(&request)
             .await
             .expect("create clock-domain fixture store");
-        let core = LashCore::standard_builder(Arc::new(backend), lash_core::TurnBudget::Unbounded)
+        let core = LashCore::standard_builder(backend.into(), lash_core::TurnBudget::Unbounded)
             .model(
                 lash_core::ModelSpec::builder("session-lease-clock-domain-model")
                     .context_window_tokens(4_096)

@@ -830,7 +830,7 @@ finish({ baton: baton });
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.as_ref(),
+        &backend,
     );
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -950,7 +950,7 @@ await control.continue_as({
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.as_ref(),
+        &backend,
     );
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -1030,7 +1030,7 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
     let engine = sim_engine().await;
     let backend = engine.backend();
     let factory: Arc<dyn lash_core::SessionStoreFactory> =
-        lash::Backend::session_store_factory(backend.as_ref());
+        lash::Backend::session_store_factory(&backend);
     let trace = Arc::new(RecordingTraceSink::default());
     let calls = Arc::new(AtomicUsize::new(0));
     let session_id = SessionId::from("logical-turn-withheld-trace");

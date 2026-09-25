@@ -10,36 +10,14 @@ use std::sync::Arc;
 
 /// See the module documentation.
 pub(crate) struct LawBackend {
-    binding_identity: String,
-    clock: Arc<dyn crate::Clock>,
-    session_store_factory: Arc<dyn crate::SessionStoreFactory>,
-    effect_host: Arc<dyn crate::EffectHost>,
-    process_registry: Arc<dyn crate::ProcessRegistry>,
-    trigger_store: Arc<dyn crate::TriggerStore>,
-    process_definitions: Arc<dyn crate::ProcessDefinitionRegistry>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    attachment_store: Arc<dyn crate::AttachmentStore>,
-    module_artifacts: Arc<dyn crate::ModuleArtifactStore>,
-    process_work: Option<crate::ProcessWorkWiring>,
-    queued_work: crate::BackendQueuedWork,
+    layered: crate::testing::runtime_helpers::LayeredBackend,
 }
 
 impl LawBackend {
     /// Every port of `backend`.
-    pub(crate) fn over(backend: &dyn crate::Backend) -> Self {
+    pub(crate) fn over(backend: &crate::Backend) -> Self {
         Self {
-            binding_identity: backend.binding_identity().to_string(),
-            clock: backend.clock(),
-            session_store_factory: backend.session_store_factory(),
-            effect_host: backend.effect_host(),
-            process_registry: backend.process_registry(),
-            trigger_store: backend.trigger_store(),
-            process_definitions: backend.process_definition_registry(),
-            process_env_store: backend.process_env_store(),
-            attachment_store: backend.attachment_store(),
-            module_artifacts: backend.module_artifacts(),
-            process_work: backend.process_work(),
-            queued_work: backend.queued_work(),
+            layered: crate::testing::runtime_helpers::LayeredBackend::over(backend.clone()),
         }
     }
 
@@ -48,33 +26,20 @@ impl LawBackend {
     /// the law supplies its own process work, so the backend runs no process
     /// or queued work of its own.
     pub(crate) fn over_stores(
-        stores: &dyn crate::StoreSet,
+        stores: Arc<dyn crate::StoreSet>,
         effect_host: Arc<dyn crate::EffectHost>,
     ) -> Self {
-        Self {
-            binding_identity: effect_host.turn_control_binding_id(),
-            clock: stores.clock(),
-            session_store_factory: stores.session_store_factory(),
+        Self::over(&crate::Backend::new(Arc::new(HostOverStores {
+            stores,
             effect_host,
-            process_registry: stores.process_registry(),
-            trigger_store: stores.trigger_store(),
-            process_definitions: stores.process_definition_registry(),
-            process_env_store: stores.process_env_store(),
-            attachment_store: stores.attachment_store(),
-            module_artifacts: stores.module_artifacts(),
-            process_work: None,
-            queued_work: crate::BackendQueuedWork::Disabled,
-        }
+        })))
     }
 
     /// The law's effect host in place of the backend's own: a testing layer
-    /// over it, or another handle on the same substrate. The binding is that
-    /// host's.
+    /// over it, or another handle on the same substrate.
     pub(crate) fn with_effect_host(self, effect_host: Arc<dyn crate::EffectHost>) -> Self {
         Self {
-            binding_identity: effect_host.turn_control_binding_id(),
-            effect_host,
-            ..self
+            layered: self.layered.map_effect_host(|_| effect_host),
         }
     }
 
@@ -84,8 +49,9 @@ impl LawBackend {
         session_store_factory: Arc<dyn crate::SessionStoreFactory>,
     ) -> Self {
         Self {
-            session_store_factory,
-            ..self
+            layered: self
+                .layered
+                .map_session_store_factory(|_| session_store_factory),
         }
     }
 
@@ -95,13 +61,12 @@ impl LawBackend {
         process_registry: Arc<dyn crate::ProcessRegistry>,
     ) -> Self {
         Self {
-            process_registry,
-            ..self
+            layered: self.layered.map_process_registry(|_| process_registry),
         }
     }
 
-    pub(crate) fn into_backend(self) -> Arc<dyn crate::Backend> {
-        Arc::new(self)
+    pub(crate) fn into_backend(self) -> crate::Backend {
+        self.layered.into_backend()
     }
 
     /// A runtime host config over this backend.
@@ -111,6 +76,31 @@ impl LawBackend {
         queued_work_batching: crate::QueuedWorkBatchingConfig,
     ) -> crate::RuntimeHostConfig {
         crate::RuntimeHostConfig::new(self.into_backend(), commit_budget, queued_work_batching)
+    }
+}
+
+/// An effect host over one store set, running no process or queued work of
+/// its own.
+struct HostOverStores {
+    stores: Arc<dyn crate::StoreSet>,
+    effect_host: Arc<dyn crate::EffectHost>,
+}
+
+impl crate::EffectEngine for HostOverStores {
+    fn stores(&self) -> Arc<dyn crate::StoreSet> {
+        Arc::clone(&self.stores)
+    }
+
+    fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
+        Arc::clone(&self.effect_host)
+    }
+
+    fn process_work(&self) -> Option<crate::ProcessWorkWiring> {
+        None
+    }
+
+    fn queued_work(&self) -> crate::BackendQueuedWork {
+        crate::BackendQueuedWork::Disabled
     }
 }
 
@@ -136,73 +126,25 @@ pub(crate) async fn law_session_store(
         .expect("create the law's session store on the backend under test")
 }
 
-impl crate::Backend for LawBackend {
-    fn binding_identity(&self) -> &str {
-        &self.binding_identity
-    }
-
-    fn clock(&self) -> Arc<dyn crate::Clock> {
-        Arc::clone(&self.clock)
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn crate::SessionStoreFactory> {
-        Arc::clone(&self.session_store_factory)
-    }
-
-    fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
-        Arc::clone(&self.effect_host)
-    }
-
-    fn process_registry(&self) -> Arc<dyn crate::ProcessRegistry> {
-        Arc::clone(&self.process_registry)
-    }
-
-    fn trigger_store(&self) -> Arc<dyn crate::TriggerStore> {
-        Arc::clone(&self.trigger_store)
-    }
-
-    fn process_definition_registry(&self) -> Arc<dyn crate::ProcessDefinitionRegistry> {
-        Arc::clone(&self.process_definitions)
-    }
-
-    fn process_env_store(&self) -> Arc<dyn crate::ProcessExecutionEnvStore> {
-        Arc::clone(&self.process_env_store)
-    }
-
-    fn attachment_store(&self) -> Arc<dyn crate::AttachmentStore> {
-        Arc::clone(&self.attachment_store)
-    }
-
-    fn module_artifacts(&self) -> Arc<dyn crate::ModuleArtifactStore> {
-        Arc::clone(&self.module_artifacts)
-    }
-
-    fn process_work(&self) -> Option<crate::ProcessWorkWiring> {
-        self.process_work.clone()
-    }
-
-    fn queued_work(&self) -> crate::BackendQueuedWork {
-        self.queued_work.clone()
-    }
-}
-
 /// A backend over `stores` whose effects journal on `effect_host`, for an
 /// embedder whose substrate is storage only: the law's runtime reaches every
 /// storage port of `stores`, drives its own queued work in process, and runs
 /// its effects on the host the embedder supplies.
 pub fn backend_over(
-    stores: &dyn crate::StoreSet,
+    stores: Arc<dyn crate::StoreSet>,
     effect_host: Arc<dyn crate::EffectHost>,
-) -> Arc<dyn crate::Backend> {
-    Arc::new(LawBackend {
-        queued_work: crate::BackendQueuedWork::InProcess,
-        ..LawBackend::over_stores(stores, effect_host)
-    })
+) -> crate::Backend {
+    LawBackend {
+        layered: LawBackend::over_stores(stores, effect_host)
+            .layered
+            .with_queued_work(crate::BackendQueuedWork::InProcess),
+    }
+    .into_backend()
 }
 
 /// [`backend_over`] with the recording double as its effect host: for a
 /// storage law that reaches a backend's storage ports and runs no effect.
-pub fn recording_backend_over(stores: &dyn crate::StoreSet) -> Arc<dyn crate::Backend> {
+pub fn recording_backend_over(stores: Arc<dyn crate::StoreSet>) -> crate::Backend {
     backend_over(stores, Arc::new(crate::RecordingEffectHost::default()))
 }
 
@@ -220,19 +162,22 @@ pub fn recording_backend_over(stores: &dyn crate::StoreSet) -> Arc<dyn crate::Ba
 /// reaches one fails loudly instead of certifying the wrong store.
 pub(crate) struct StoreLawBackend {
     effect_host: Arc<dyn crate::EffectHost>,
-    clock: Arc<dyn crate::Clock>,
+    stores: Arc<StoreLawStores>,
 }
 
 impl StoreLawBackend {
     pub(crate) fn new() -> Self {
         Self {
             effect_host: Arc::new(crate::RecordingEffectHost::default()),
-            clock: Arc::new(crate::facade_support::SystemClock),
+            stores: Arc::new(StoreLawStores {
+                binding: crate::StoreBindingId::new("conformance-store-law"),
+                clock: Arc::new(crate::facade_support::SystemClock),
+            }),
         }
     }
 
-    pub(crate) fn into_backend(self) -> Arc<dyn crate::Backend> {
-        Arc::new(self)
+    pub(crate) fn into_backend(self) -> crate::Backend {
+        crate::Backend::new(Arc::new(self))
     }
 
     /// A runtime host config over this backend.
@@ -243,15 +188,43 @@ impl StoreLawBackend {
     ) -> crate::RuntimeHostConfig {
         crate::RuntimeHostConfig::new(self.into_backend(), commit_budget, queued_work_batching)
     }
+}
 
+impl crate::EffectEngine for StoreLawBackend {
+    fn stores(&self) -> Arc<dyn crate::StoreSet> {
+        Arc::clone(&self.stores) as Arc<dyn crate::StoreSet>
+    }
+
+    fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
+        Arc::clone(&self.effect_host)
+    }
+
+    fn process_work(&self) -> Option<crate::ProcessWorkWiring> {
+        None
+    }
+
+    fn queued_work(&self) -> crate::BackendQueuedWork {
+        crate::BackendQueuedWork::Disabled
+    }
+}
+
+/// The store set of a store law's runtime: its attachment and
+/// process-exec-env ports refuse every write, and a port that would name a
+/// second substrate is refused outright.
+struct StoreLawStores {
+    binding: crate::StoreBindingId,
+    clock: Arc<dyn crate::Clock>,
+}
+
+impl StoreLawStores {
     fn no_second_substrate(port: &str) -> ! {
         panic!("a store law's runtime reaches no {port}: its substrate is the store it was handed")
     }
 }
 
-impl crate::Backend for StoreLawBackend {
-    fn binding_identity(&self) -> &str {
-        "conformance-recording-effect-host"
+impl crate::StoreSet for StoreLawStores {
+    fn binding_identity(&self) -> &crate::StoreBindingId {
+        &self.binding
     }
 
     fn clock(&self) -> Arc<dyn crate::Clock> {
@@ -262,12 +235,12 @@ impl crate::Backend for StoreLawBackend {
         Self::no_second_substrate("session catalog")
     }
 
-    fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
-        Arc::clone(&self.effect_host)
-    }
-
     fn process_registry(&self) -> Arc<dyn crate::ProcessRegistry> {
         Self::no_second_substrate("process registry")
+    }
+
+    fn process_continuations(&self) -> Arc<dyn crate::ProcessContinuationStore> {
+        Self::no_second_substrate("process continuation store")
     }
 
     fn trigger_store(&self) -> Arc<dyn crate::TriggerStore> {
@@ -288,13 +261,5 @@ impl crate::Backend for StoreLawBackend {
 
     fn module_artifacts(&self) -> Arc<dyn crate::ModuleArtifactStore> {
         Self::no_second_substrate("Lashlang artifact store")
-    }
-
-    fn process_work(&self) -> Option<crate::ProcessWorkWiring> {
-        None
-    }
-
-    fn queued_work(&self) -> crate::BackendQueuedWork {
-        crate::BackendQueuedWork::Disabled
     }
 }

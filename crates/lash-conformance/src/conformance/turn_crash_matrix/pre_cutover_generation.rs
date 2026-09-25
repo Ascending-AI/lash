@@ -83,7 +83,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
             let tool = tool.clone();
             Box::pin(async move {
                 let runtime = Box::pin(try_build_runtime_on_host(
-                    stores.as_ref(),
+                    Arc::clone(&stores),
                     store,
                     &seam,
                     host,
@@ -164,7 +164,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
             let refusals = refusals.clone();
             Box::pin(async move {
                 let refusal = match Box::pin(try_build_runtime_on_host(
-                    stores.as_ref(),
+                    Arc::clone(&stores),
                     store,
                     &seam,
                     host,
@@ -385,7 +385,7 @@ async fn refuse_claim<F, S>(
             let refusals = refusals.clone();
             Box::pin(async move {
                 let mut runtime = Box::pin(try_build_runtime_on_host(
-                    stores.as_ref(),
+                    Arc::clone(&stores),
                     store,
                     &seam,
                     host,

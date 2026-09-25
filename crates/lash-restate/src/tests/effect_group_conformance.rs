@@ -772,26 +772,27 @@ impl LiveConformanceHarness {
     /// runtime runs on.
     pub(super) fn backend_factory(
         &self,
-    ) -> impl Fn() -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Arc<dyn lash_core::Backend>> + Send>,
-    > + Send
+    ) -> impl Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = lash_core::Backend> + Send>>
+    + Send
     + Sync
     + 'static {
         let connection = self.connection.clone();
         move || {
             let connection = connection.clone();
             Box::pin(async move {
-                Arc::new(crate::RestateBackend::new(
-                    connection,
-                    crate::RestateAuthorityId::new("lash-conformance-backend-laws")
-                        .expect("valid authority"),
+                lash_core::Backend::new(Arc::new(crate::RestateEngine::new(
                     Arc::new(
                         lash_sqlite_store::SqliteStoreSet::memory()
                             .await
                             .expect("open the law's store set"),
                     ),
-                    crate::RestateQueuedWork::Disabled,
-                )) as Arc<dyn lash_core::Backend>
+                    crate::RestateConfig::new(
+                        connection,
+                        crate::RestateAuthorityId::new("lash-conformance-backend-laws")
+                            .expect("valid authority"),
+                        crate::RestateQueuedWork::Disabled,
+                    ),
+                )))
             })
         }
     }

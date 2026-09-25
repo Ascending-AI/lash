@@ -41,7 +41,7 @@ pub struct LashCore {
     pub(crate) policy: SessionPolicy,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     /// The one substrate every port and the effect host come from.
-    pub(crate) backend: Arc<dyn Backend>,
+    pub(crate) backend: Backend,
     /// The backend's session catalog.
     pub(crate) store_factory: Arc<dyn SessionStoreFactory>,
     /// The backend's process registry, as the core sees it (watched, and
@@ -109,10 +109,7 @@ impl LashCore {
     /// substrates, and there is no in-memory default. The zero-infra
     /// backend is `lash::sqlite::SqliteBackend::memory()` (feature
     /// `sqlite`).
-    pub fn builder(
-        backend: Arc<dyn Backend>,
-        turn_budget: lash_core::TurnBudget,
-    ) -> LashCoreBuilder {
+    pub fn builder(backend: Backend, turn_budget: lash_core::TurnBudget) -> LashCoreBuilder {
         LashCoreBuilder::new(backend, turn_budget)
     }
 
@@ -120,7 +117,7 @@ impl LashCore {
     /// with the standard protocol plugin and the default runtime plugin
     /// stack.
     pub fn standard_builder(
-        backend: Arc<dyn Backend>,
+        backend: Backend,
         turn_budget: lash_core::TurnBudget,
     ) -> LashCoreBuilder {
         LashCore::builder(backend, turn_budget)
@@ -131,7 +128,7 @@ impl LashCore {
     }
 
     /// The backend this core takes every port and its effect host from.
-    pub fn backend(&self) -> &Arc<dyn Backend> {
+    pub fn backend(&self) -> &Backend {
         &self.backend
     }
 
@@ -193,7 +190,7 @@ impl LashCore {
     /// other backend is refused when the core is built.
     #[cfg(feature = "rlm")]
     pub fn rlm_builder(
-        backend: Arc<dyn Backend>,
+        backend: Backend,
         turn_budget: lash_core::TurnBudget,
         factory: crate::rlm::RlmProtocolPluginFactory,
     ) -> LashCoreBuilder {
@@ -695,7 +692,7 @@ impl LashCore {
         extra_plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
     ) -> Result<DurableProcessWorkerConfig> {
         let extra_plugin_factories: Vec<_> = extra_plugin_factories.into_iter().collect();
-        refuse_foreign_backend_factories(self.backend.as_ref(), &extra_plugin_factories)?;
+        refuse_foreign_backend_factories(&self.backend, &extra_plugin_factories)?;
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
@@ -811,7 +808,7 @@ pub struct LashCoreBuilder {
     session_spec: SessionSpec,
     provider: Option<ProviderHandle>,
     /// The one substrate every persistence port and the effect host come from.
-    backend: Arc<dyn Backend>,
+    backend: Backend,
     commit_budget: Option<facade_support::CommitBudget>,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     max_attachment_bytes: Option<Option<u64>>,
@@ -845,7 +842,7 @@ pub struct LashCoreBuilder {
 }
 
 impl LashCoreBuilder {
-    fn new(backend: Arc<dyn Backend>, turn_budget: lash_core::TurnBudget) -> Self {
+    fn new(backend: Backend, turn_budget: lash_core::TurnBudget) -> Self {
         Self {
             protocol_factory: None,
             session_spec: SessionSpec::new().turn_budget(turn_budget),
@@ -1086,16 +1083,7 @@ impl LashCoreBuilder {
         };
         let policy = self.session_spec.resolve_against(&base_policy);
 
-        let backend = Arc::clone(&self.backend);
-        // The backend's one identity keys every binding it writes; an effect
-        // host bound elsewhere would stamp records naming another substrate.
-        let effect_host_binding = backend.effect_host().turn_control_binding_id();
-        if effect_host_binding != backend.binding_identity() {
-            return Err(EmbedError::BackendBindingMismatch {
-                binding_identity: backend.binding_identity().to_string(),
-                effect_host_binding,
-            });
-        }
+        let backend = self.backend.clone();
         let store_factory = backend.session_store_factory();
         let core = self.resolve_runtime_host_config()?;
         let process_observation_hub = Arc::new(
@@ -1149,7 +1137,7 @@ impl LashCoreBuilder {
             factories
         };
         refuse_foreign_backend_factories(
-            backend.as_ref(),
+            &backend,
             protocol_factory.iter().chain(plugin_factories.iter()),
         )?;
         let default_plugin_host = Arc::new(build_plugin_host(
@@ -1419,12 +1407,12 @@ impl LashCoreBuilder {
 /// ([`PluginFactory::bound_backend`]): its state would live in a substrate
 /// this core neither reopens nor sweeps (ADR 0102, D2).
 pub(crate) fn refuse_foreign_backend_factories<'a>(
-    backend: &dyn Backend,
+    backend: &Backend,
     factories: impl IntoIterator<Item = &'a Arc<dyn PluginFactory>>,
 ) -> Result<()> {
     for factory in factories {
         if let Some(bound) = factory.bound_backend()
-            && bound != backend.binding_identity()
+            && bound != backend.binding_identity().as_str()
         {
             return Err(EmbedError::PluginBackendMismatch {
                 plugin_id: factory.id().to_string(),

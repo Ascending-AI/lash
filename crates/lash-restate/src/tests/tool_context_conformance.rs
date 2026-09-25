@@ -145,7 +145,7 @@ impl ProductionToolCell {
                     .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                     .build(),
-                &artifact_backend,
+                &artifact_backend.clone().into(),
             )
             .with_process_lifecycle(false),
         );

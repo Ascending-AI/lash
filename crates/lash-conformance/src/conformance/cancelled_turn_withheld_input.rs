@@ -371,7 +371,7 @@ async fn withheld_cancel_case(
 )]
 pub async fn immediate_cancel_defers_withheld_inject_now_input(
     prefix: &str,
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let effect_host = backend.effect_host();

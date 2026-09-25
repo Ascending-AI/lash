@@ -224,7 +224,7 @@ pub async fn build_core(
             status.last_error.as_ref().map_or("none", |f| f.message())
         );
     }
-    let mut builder = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let mut builder = LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .provider(provider)
         // `session_spec` replaces the builder's whole spec, so it must precede
         // `model`, which writes into that same spec.

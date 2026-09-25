@@ -412,13 +412,16 @@ impl lash_core::testing::EffectLayer for TriggerEffectCapture {
 impl TriggerEffectCapture {
     /// A fresh memory backend with this capture layered over its effect
     /// host.
-    async fn backend(&self) -> Arc<dyn lash_core::Backend> {
+    async fn backend(&self) -> lash_core::Backend {
         let layer: Arc<dyn lash_core::testing::EffectLayer> = Arc::new(self.clone());
-        lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
-            lash_sqlite_store::SqliteBackend::memory()
-                .await
-                .expect("open a memory backend"),
-        ))
+        lash_core::testing::runtime_helpers::LayeredBackend::over(
+            Arc::new(
+                lash_sqlite_store::SqliteBackend::memory()
+                    .await
+                    .expect("open a memory backend"),
+            )
+            .into(),
+        )
         .map_effect_host(|host| Arc::new(lash_core::testing::LayeredEffectHost::new(host, layer)))
         .into_backend()
     }
@@ -1052,7 +1055,7 @@ async fn execute_trigger_process_with_originator(
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )

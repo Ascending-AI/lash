@@ -540,7 +540,7 @@ async fn run_worker(
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
-    let effect_host = lash_core::Backend::effect_host(&backend);
+    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
     let scoped = lash_core::EffectHost::scoped_static(
         effect_host.as_ref(),
         lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
@@ -564,7 +564,7 @@ async fn run_worker(
         .build();
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let registry = lash_core::Backend::process_registry(&backend);
+    let registry = lash_core::Backend::from(backend.clone()).process_registry();
     let authority =
         lash_core::ProcessExecutionWriteAuthority::invocation(process_id, run).bind_attempt(1);
     let process_events = durable_process_events(&registry, &registration, &authority).await;

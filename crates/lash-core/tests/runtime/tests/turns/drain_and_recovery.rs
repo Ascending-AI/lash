@@ -55,7 +55,7 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
         .build();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -219,7 +219,7 @@ pub(super) async fn cancellation_sealed_before_renewal_failure_remains_evidence_
         })
         .build();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -367,7 +367,7 @@ pub(super) async fn finish_turn_commit_uses_head_cas_after_advisory_lease_expiry
     }]);
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -424,7 +424,7 @@ pub(super) async fn prepared_checkpoint_continues_after_advisory_lease_expiry() 
     }]);
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )

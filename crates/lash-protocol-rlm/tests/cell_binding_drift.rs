@@ -15,7 +15,7 @@ use lash_core::EffectHost;
 /// bare effect host with no backend, so the artifacts get a memory backend of
 /// their own.
 fn rlm_factory(
-    artifacts: &dyn lash_core::Backend,
+    artifacts: &lash_core::Backend,
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -63,7 +63,7 @@ async fn journal_cut_fixture(
         Arc::clone(&host),
         stores,
         lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
-        vec![rlm_factory(&artifacts)],
+        vec![rlm_factory(&artifacts.clone().into())],
     )
 }
 
@@ -91,6 +91,6 @@ lash_conformance::model_call_drift_park_tests!({
         Arc::clone(&host),
         stores,
         lash_conformance::HostTurnRunner::shared(host),
-        vec![rlm_factory(&artifacts)],
+        vec![rlm_factory(&artifacts.clone().into())],
     )
 });

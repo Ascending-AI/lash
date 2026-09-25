@@ -4,7 +4,7 @@
 
 use super::*;
 
-fn builder(backend: Arc<dyn lash_core::Backend>) -> crate::core::LashCoreBuilder {
+fn builder(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
     LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
@@ -36,13 +36,13 @@ fn installed(core: &LashCore) -> lash_core::facade_support::ContextSourceInstall
 #[tokio::test]
 async fn a_backend_rebuilds_tool_children_under_one_live_core() -> Result<()> {
     use lash_core::facade_support::ContextSourceInstall;
-    let backend: Arc<dyn lash_core::Backend> = memory_backend().await;
-    let first = builder(Arc::clone(&backend)).build(crate::testing::runtime_lease_owner())?;
+    let backend: lash_core::Backend = memory_backend().await.into();
+    let first = builder(backend.clone()).build(crate::testing::runtime_lease_owner())?;
     assert_eq!(installed(&first), ContextSourceInstall::Sole);
     let session = first.session("holds-the-source").open().await?;
     assert!(session.binding.holds_tool_child_context_source());
 
-    let second = builder(Arc::clone(&backend)).build(crate::testing::runtime_lease_owner())?;
+    let second = builder(backend.clone()).build(crate::testing::runtime_lease_owner())?;
     assert_eq!(
         installed(&second),
         ContextSourceInstall::Ambiguous { live: 2 },
@@ -51,7 +51,7 @@ async fn a_backend_rebuilds_tool_children_under_one_live_core() -> Result<()> {
     drop(second);
 
     drop(first);
-    let third = builder(Arc::clone(&backend)).build(crate::testing::runtime_lease_owner())?;
+    let third = builder(backend.clone()).build(crate::testing::runtime_lease_owner())?;
     assert_eq!(
         installed(&third),
         ContextSourceInstall::Ambiguous { live: 2 },
@@ -60,7 +60,7 @@ async fn a_backend_rebuilds_tool_children_under_one_live_core() -> Result<()> {
     drop(third);
 
     drop(session);
-    let fourth = builder(Arc::clone(&backend)).build(crate::testing::runtime_lease_owner())?;
+    let fourth = builder(backend.clone()).build(crate::testing::runtime_lease_owner())?;
     assert_eq!(installed(&fourth), ContextSourceInstall::Sole);
     Ok(())
 }

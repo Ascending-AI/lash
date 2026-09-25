@@ -849,7 +849,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
-    let registry = lash_core::Backend::process_registry(&backend);
+    let registry = lash_core::Backend::from(backend.clone()).process_registry();
     registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
@@ -943,7 +943,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
     let mut runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             lash_core::facade_support::RuntimeHostConfig::new(
-                Arc::new(backend),
+                Arc::new(backend).into(),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),

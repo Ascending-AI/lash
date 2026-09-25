@@ -108,14 +108,14 @@ const main = async () => "ok";
 #[tokio::test]
 async fn trigger_fired_process_runs_under_session_contributed_event_type() {
     let backend = crate::testing::memory_backend().await;
-    let artifact_store = lashlang::LashlangArtifacts::of_backend(&backend);
+    let artifact_store = lashlang::LashlangArtifacts::of_backend(&backend.clone().into());
     let factory = Arc::new(crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
             .instruction_limit(crate::InstructionBound::instructions(1_000_000))
             .memory_limit(crate::MemoryBound::mebibytes(64))
             .build(),
-        &backend,
+        &backend.clone().into(),
     ));
     let plugin_host = PluginHost::new(vec![
         Arc::clone(&factory) as Arc<dyn lash_core::facade_support::PluginFactory>,
@@ -175,11 +175,12 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         args: serde_json::Map::new(),
     };
 
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(
+    let backend: lash_core::Backend = Arc::new(
         lash_sqlite_store::SqliteBackend::memory()
             .await
             .expect("open a memory backend"),
-    );
+    )
+    .into();
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
@@ -231,7 +232,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         ),
     );
     let runtime_host = RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         CommitBudget::bounded(1024 * 1024, 512),
         QueuedWorkBatchingConfig::new(1),
     )

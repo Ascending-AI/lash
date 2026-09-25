@@ -20,7 +20,7 @@ pub(super) struct GeneratedRuntimeWorld {
     engine: crate::backend::SimEngine,
     /// The engine's backend with its session factory under the commit
     /// observer; every runtime core of the world runs on it.
-    backend: Arc<crate::backend::DecoratedBackend>,
+    backend: lash::Backend,
     /// The engine's own session factory, underneath the commit observer, for
     /// reading the world back through a fresh handle once the run is over.
     reopen_factory: Arc<dyn SessionStoreFactory>,
@@ -139,20 +139,17 @@ impl GeneratedRuntimeWorld {
     fn over_engine(engine: crate::backend::SimEngine, serialize_provider_turns: bool) -> Self {
         let clock = SimClock::new();
         let durable_writes = CheckpointWriteCollector::default();
-        let reopen_factory = lash::Backend::session_store_factory(engine.backend().as_ref());
-        let backend = Arc::new(
-            crate::backend::DecoratedBackend::over_engine(&engine)
-                .observing(durable_writes.clone()),
-        );
+        let reopen_factory = lash::Backend::session_store_factory(&engine.backend());
+        let backend: lash::Backend = crate::backend::DecoratedBackend::over_engine(&engine)
+            .observing(durable_writes.clone())
+            .into();
         Self {
             clock,
             sessions: BTreeMap::new(),
             queued_inputs: BTreeMap::new(),
             backend_faults: GeneratedBackendFaultHarness::default(),
             provider_mutations: SimProviderMutationHarness::default(),
-            trigger_harness: SimTriggerHarness::over(lash::Backend::trigger_store(
-                backend.as_ref(),
-            )),
+            trigger_harness: SimTriggerHarness::over(backend.trigger_store()),
             runtime_boundaries: RuntimeBoundaryHarness::new(engine.clone()),
             engine,
             backend,
@@ -295,7 +292,7 @@ impl GeneratedRuntimeWorld {
         provider_schedule.declare_gates_to(self.engine.restate().server().outside_gates());
         let (core, transport, provider_kind) = runtime_core_for_scripts(
             scripts,
-            Arc::clone(&self.backend) as Arc<dyn lash::Backend>,
+            self.backend.clone(),
             Some(provider_schedule.clone()),
             // The generated harness owns provider execution through explicit
             // `Provider` boundaries. Each modeled success turn gets one scripted
@@ -957,7 +954,7 @@ impl GeneratedRuntimeWorld {
         let (provider_handle, model, _provider_kind) =
             runtime_provider_components(OPENAI_COMPATIBLE, &transport)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let backend = Arc::clone(&self.backend) as Arc<dyn lash::Backend>;
+        let backend = self.backend.clone();
         let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

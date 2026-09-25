@@ -123,7 +123,7 @@ mod tests {
             .create_store(&request)
             .await
             .expect("create real in-memory manifest store");
-        let attachment_backend = crate::Backend::attachment_store(&backend);
+        let attachment_backend = crate::Backend::from(backend.clone()).attachment_store();
         let attachment_store = Arc::new(crate::SessionAttachmentStore::new(
             Arc::clone(&attachment_backend) as Arc<dyn crate::AttachmentStore>,
             Arc::new(crate::attachments::PersistenceManifestAdapter(Arc::clone(

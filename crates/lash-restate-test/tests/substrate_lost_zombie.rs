@@ -59,7 +59,7 @@ fn build_core(restate: &RestateTestBackend) -> lash::LashCore {
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.as_ref(),
+        &backend,
     );
     lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

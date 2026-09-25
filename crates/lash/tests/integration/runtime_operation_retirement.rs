@@ -355,7 +355,7 @@ fn executor() -> RuntimeEffectLocalExecutor<'static> {
 
 /// A core over `backend`; the backend's catalog persists the
 /// session's receipts, which is what the reclaim sweep reads as its proof.
-fn core_over(backend: Arc<dyn lash::Backend>) -> LashCore {
+fn core_over(backend: lash::Backend) -> LashCore {
     let provider = lash_core::testing::TestProvider::builder()
         .complete(|_request| async {
             Ok(lash::provider::LlmResponse {
@@ -400,52 +400,20 @@ async fn sqlite_backend(
     )
 }
 
-/// One backend with its effect host replaced by a fault double over it,
-/// which keeps the inner host's binding.
+/// One backend's engine with its effect host replaced by a fault double
+/// over it.
 struct WithHost {
-    inner: Arc<dyn lash::Backend>,
+    inner: lash::Backend,
     host: Arc<dyn EffectHost>,
 }
 
-impl lash::Backend for WithHost {
-    fn binding_identity(&self) -> &str {
-        self.inner.binding_identity()
-    }
-
-    fn clock(&self) -> Arc<dyn lash::runtime::Clock> {
-        self.inner.clock()
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn lash::persistence::SessionStoreFactory> {
-        self.inner.session_store_factory()
+impl lash::EffectEngine for WithHost {
+    fn stores(&self) -> Arc<dyn lash::durability::StoreSet> {
+        self.inner.stores()
     }
 
     fn effect_host(&self) -> Arc<dyn EffectHost> {
         Arc::clone(&self.host)
-    }
-
-    fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
-        self.inner.process_registry()
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash::triggers::TriggerStore> {
-        self.inner.trigger_store()
-    }
-
-    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
-        self.inner.process_definition_registry()
-    }
-
-    fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessExecutionEnvStore> {
-        self.inner.process_env_store()
-    }
-
-    fn attachment_store(&self) -> Arc<dyn lash::persistence::AttachmentStore> {
-        self.inner.attachment_store()
-    }
-
-    fn module_artifacts(&self) -> Arc<dyn lash::persistence::ModuleArtifactStore> {
-        self.inner.module_artifacts()
     }
 
     fn process_work(&self) -> Option<lash::process::ProcessWorkWiring> {
@@ -481,7 +449,7 @@ async fn plugin_task_scopes_retire_after_their_receipt_and_leave_other_operation
         .to_string();
 
     let minted = Minted::default();
-    let core = core_over(backend.clone());
+    let core = core_over(backend.clone().into());
     let session = core
         .session("op-retirement")
         .plugin::<JournalPlugin>(JournalConfig {
@@ -580,7 +548,7 @@ async fn plugin_command_scopes_retire_after_their_receipt() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (backend, path) = sqlite_backend(dir.path()).await;
     let host: Arc<dyn EffectHost> = backend.effect_host();
-    let core = core_over(backend.clone());
+    let core = core_over(backend.clone().into());
     let session = core
         .session("command-retirement")
         .plugin::<JournalPlugin>(JournalConfig {
@@ -636,10 +604,13 @@ async fn plugin_task_retirement_failure_is_surfaced_after_durable_work() {
         inner: Arc::clone(&inner),
     });
     let minted = Minted::default();
-    let core = core_over(Arc::new(WithHost {
-        inner: backend,
-        host: Arc::clone(&host),
-    }));
+    let core = core_over(
+        Arc::new(WithHost {
+            inner: backend.into(),
+            host: Arc::clone(&host),
+        })
+        .into(),
+    );
     let session = core
         .session("retirement-failure")
         .plugin::<JournalPlugin>(JournalConfig {
@@ -828,7 +799,7 @@ impl Journal {
 /// The backend, its effect host, its journal and its session store factory
 /// for one reclaim-sweep backend.
 type SweepBackend = (
-    Arc<dyn lash::Backend>,
+    lash::Backend,
     Arc<dyn EffectHost>,
     Journal,
     Arc<dyn lash::persistence::SessionStoreFactory>,
@@ -850,7 +821,7 @@ async fn draining_task_is_retired_by_the_reclaim_sweep() {
         host.register_group_executors(Arc::new(DrainExecutors { gate: gate.clone() }))
             .expect("register group executors");
         let factory = backend.session_store_factory();
-        (backend, host, Journal::Sqlite(path), factory)
+        (backend.into(), host, Journal::Sqlite(path), factory)
     };
 
     // A runtime operation nobody recorded a receipt for: the sweep has no
@@ -871,7 +842,7 @@ async fn draining_task_is_retired_by_the_reclaim_sweep() {
         .key()
         .to_string();
 
-    let core = core_over(Arc::clone(&backend));
+    let core = core_over(backend.clone());
     let session = core
         .session(format!("{gate}-session"))
         .plugin::<JournalPlugin>(JournalConfig {
@@ -981,10 +952,10 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep() {
         let (backend, path) = sqlite_backend(dir.path()).await;
         let host = backend.effect_host();
         let factory = backend.session_store_factory();
-        (backend, host, Journal::Sqlite(path), factory)
+        (backend.into(), host, Journal::Sqlite(path), factory)
     };
     store_factory.bind_effect_host(&host);
-    let core = core_over(Arc::clone(&backend));
+    let core = core_over(backend.clone());
     let session_id = SessionId::from(format!("caller-sweep-{label}"));
     // The catalog the sweep reads receipts from exists once a session does.
     let session = core
@@ -1129,7 +1100,7 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant() {
         let (backend, effect_path) = sqlite_backend(dir.path()).await;
         let host = backend.effect_host();
         let factory = backend.session_store_factory();
-        (backend, host, Journal::Sqlite(effect_path), factory)
+        (backend.into(), host, Journal::Sqlite(effect_path), factory)
     };
     factory.bind_effect_host(&host);
 

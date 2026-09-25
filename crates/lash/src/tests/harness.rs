@@ -100,167 +100,100 @@ pub(crate) fn sqlite_turn_input_states(
 /// the decorated backend is still one substrate.
 #[derive(Clone)]
 pub(crate) struct DecoratedBackend {
-    inner: Arc<dyn lash_core::Backend>,
-    clock: Option<Arc<dyn lash_core::Clock>>,
-    session_store_factory: Option<Arc<dyn lash_core::SessionStoreFactory>>,
-    effect_host: Option<Arc<dyn lash_core::EffectHost>>,
-    /// The replacement host's binding, which the decorated backend answers
-    /// as its own identity so the two still agree.
-    effect_host_binding: Option<String>,
-    process_registry: Option<Arc<dyn lash_core::ProcessRegistry>>,
-    process_env_store: Option<Arc<dyn lash_core::ProcessExecutionEnvStore>>,
-    process_work: Option<lash_core::ProcessWorkWiring>,
-    module_artifacts: Option<Arc<dyn lash_core::ModuleArtifactStore>>,
+    layered: lash_core::testing::runtime_helpers::LayeredBackend,
 }
 
 impl DecoratedBackend {
-    pub(crate) fn over(inner: Arc<dyn lash_core::Backend>) -> Self {
+    pub(crate) fn over(inner: lash_core::Backend) -> Self {
         Self {
-            inner,
-            clock: None,
-            session_store_factory: None,
-            effect_host: None,
-            effect_host_binding: None,
-            process_registry: None,
-            process_env_store: None,
-            process_work: None,
-            module_artifacts: None,
+            layered: lash_core::testing::runtime_helpers::LayeredBackend::over(inner),
         }
     }
 
     /// Decorate the inner backend's Lashlang artifact store.
     #[cfg(feature = "rlm")]
     pub(crate) fn module_artifacts(
-        mut self,
+        self,
         decorate: impl FnOnce(
             Arc<dyn lash_core::ModuleArtifactStore>,
         ) -> Arc<dyn lash_core::ModuleArtifactStore>,
     ) -> Self {
-        self.module_artifacts = Some(decorate(self.inner.module_artifacts()));
-        self
+        Self {
+            layered: self.layered.map_module_artifacts(decorate),
+        }
     }
 
     /// Run the runtime on `clock` while the stores keep the inner
     /// backend's: the two clock domains a PostgreSQL backend has, where
     /// lease timestamps come from the database.
-    pub(crate) fn runtime_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
-        self.clock = Some(clock);
-        self
+    pub(crate) fn runtime_clock(self, clock: Arc<dyn lash_core::Clock>) -> Self {
+        Self {
+            layered: self.layered.with_clock(clock),
+        }
     }
 
     pub(crate) fn session_store_factory(
-        mut self,
+        self,
         decorate: impl FnOnce(
             Arc<dyn lash_core::SessionStoreFactory>,
         ) -> Arc<dyn lash_core::SessionStoreFactory>,
     ) -> Self {
-        self.session_store_factory = Some(decorate(self.inner.session_store_factory()));
-        self
+        Self {
+            layered: self.layered.map_session_store_factory(decorate),
+        }
     }
 
     pub(crate) fn effect_host(
-        mut self,
+        self,
         decorate: impl FnOnce(Arc<dyn lash_core::EffectHost>) -> Arc<dyn lash_core::EffectHost>,
     ) -> Self {
-        let host = decorate(self.inner.effect_host());
-        self.effect_host_binding = Some(host.turn_control_binding_id());
-        self.effect_host = Some(host);
-        self
+        Self {
+            layered: self.layered.map_effect_host(decorate),
+        }
     }
 
     pub(crate) fn process_registry(
-        mut self,
+        self,
         decorate: impl FnOnce(
             Arc<dyn lash_core::ProcessRegistry>,
         ) -> Arc<dyn lash_core::ProcessRegistry>,
     ) -> Self {
-        self.process_registry = Some(decorate(self.inner.process_registry()));
-        self
+        Self {
+            layered: self.layered.map_process_registry(decorate),
+        }
     }
 
     pub(crate) fn process_env_store(
-        mut self,
+        self,
         decorate: impl FnOnce(
             Arc<dyn lash_core::ProcessExecutionEnvStore>,
         ) -> Arc<dyn lash_core::ProcessExecutionEnvStore>,
     ) -> Self {
-        self.process_env_store = Some(decorate(self.inner.process_env_store()));
-        self
+        Self {
+            layered: self.layered.map_process_env_store(decorate),
+        }
     }
 
     /// Drive this backend's processes through `wire`, which receives the
     /// (possibly decorated) registry the wiring must be built over.
     pub(crate) fn process_work(
-        mut self,
+        self,
         wire: impl FnOnce(Arc<dyn lash_core::ProcessRegistry>) -> lash_core::ProcessWorkWiring,
     ) -> Self {
-        let registry = lash_core::Backend::process_registry(&self);
-        self.process_work = Some(wire(registry));
-        self
+        Self {
+            layered: self.layered.wire_process_work(wire),
+        }
+    }
+
+    /// The decorated backend.
+    pub(crate) fn into_backend(self) -> lash_core::Backend {
+        self.layered.into_backend()
     }
 }
 
-impl lash_core::Backend for DecoratedBackend {
-    fn binding_identity(&self) -> &str {
-        self.effect_host_binding
-            .as_deref()
-            .unwrap_or_else(|| self.inner.binding_identity())
-    }
-
-    fn clock(&self) -> Arc<dyn lash_core::Clock> {
-        self.clock.clone().unwrap_or_else(|| self.inner.clock())
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn lash_core::SessionStoreFactory> {
-        self.session_store_factory
-            .clone()
-            .unwrap_or_else(|| self.inner.session_store_factory())
-    }
-
-    fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
-        self.effect_host
-            .clone()
-            .unwrap_or_else(|| self.inner.effect_host())
-    }
-
-    fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
-        self.process_registry
-            .clone()
-            .unwrap_or_else(|| self.inner.process_registry())
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core::TriggerStore> {
-        self.inner.trigger_store()
-    }
-
-    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
-        self.inner.process_definition_registry()
-    }
-
-    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
-        self.process_env_store
-            .clone()
-            .unwrap_or_else(|| self.inner.process_env_store())
-    }
-
-    fn attachment_store(&self) -> Arc<dyn lash_core::AttachmentStore> {
-        self.inner.attachment_store()
-    }
-
-    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
-        self.module_artifacts
-            .clone()
-            .unwrap_or_else(|| self.inner.module_artifacts())
-    }
-
-    fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
-        self.process_work
-            .clone()
-            .or_else(|| self.inner.process_work())
-    }
-
-    fn queued_work(&self) -> lash_core::BackendQueuedWork {
-        self.inner.queued_work()
+impl From<DecoratedBackend> for lash_core::Backend {
+    fn from(decorated: DecoratedBackend) -> Self {
+        decorated.into_backend()
     }
 }
 

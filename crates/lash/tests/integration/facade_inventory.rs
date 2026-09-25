@@ -259,8 +259,8 @@ mod s3_inventory {
 
 #[cfg(feature = "restate")]
 mod restate_inventory {
-    use lash::restate::RestateBackend as _;
     use lash::restate::RestateEffectHost as _;
+    use lash::restate::RestateEngine as _;
 }
 
 #[cfg(feature = "openai")]

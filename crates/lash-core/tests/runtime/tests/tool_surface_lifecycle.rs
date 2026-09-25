@@ -118,7 +118,7 @@ fn dynamic_plugin_host(
 }
 
 fn runtime_environment(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     plugin_host: Arc<lash_core::facade_support::PluginHost>,
 ) -> lash_core::facade_support::RuntimeEnvironment {
     lash_core::facade_support::RuntimeEnvironment::builder(test_host_config(backend).core)
@@ -2068,7 +2068,7 @@ fn process_engine_registration_rejects_a_kind_mismatch() {
 /// Shared fixture: a runtime whose only process engine is
 /// [`PayloadGatedEngine`], plus the registry the started rows land in.
 async fn payload_gated_engine_runtime(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     session_id: &SessionId,
 ) -> (Arc<dyn lash_core::ProcessRegistry>, LashRuntime) {
     let registry = backend.process_registry();
@@ -2104,7 +2104,7 @@ async fn payload_gated_engine_runtime(
 }
 
 fn payload_gated_scope(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     session_id: &SessionId,
 ) -> lash_core::ProcessOpScope<'static> {
     lash_core::ProcessOpScope::new(backend_turn_scope(

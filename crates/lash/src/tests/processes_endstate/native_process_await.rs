@@ -11,7 +11,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let sink = CollectingProcessEventSink::default();
-    let core = process_test_core_with_sink(backend.clone(), Arc::new(sink.clone()))?;
+    let core = process_test_core_with_sink(backend.clone().into(), Arc::new(sink.clone()))?;
     let process = LinkedTestProcess::new(
         &artifact_store,
         // process main() signals { ready: any } {
