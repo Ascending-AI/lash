@@ -373,6 +373,18 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
          `turn_parks`, which the digest already reads; owned by the turn_park_feed laws L1-L6 \
          in lash-conformance",
     ),
+    (
+        "process_park_clock",
+        "the process park feed's sequence row: a store-wide singleton counter, not session \
+         state; it carries no session id and is shared by every case in the one database this \
+         suite runs against; owned by the process_park_feed laws in lash-conformance",
+    ),
+    (
+        "process_park_events",
+        "the process park feed's durable ledger: process-lifecycle surface this fixture does not \
+         drive, and every feed append rides inside the transaction that changes the park on \
+         `processes`; owned by the process_park_feed laws in lash-conformance",
+    ),
     ("await_event_meta", AWAIT_EVENT),
     ("await_event_waits", AWAIT_EVENT),
     ("await_event_revoked_sessions", AWAIT_EVENT),
