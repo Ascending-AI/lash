@@ -19,7 +19,6 @@ set -euo pipefail
 #   lash-perf/src/runtime_perf/measurement/live_replay.rs:231.
 # - Engine-owned pacing: lash-restate/src/process/workflow.rs:426.
 # - Store-local retry: lash-postgres-store/src/postgres/attachments.rs:108,
-#   lash-postgres-store/src/bin/postgres-await-event-helper.rs:84,
 #   lash-sqlite-store/src/bin/sqlite-await-event-helper.rs:85.
 # - Other deliberately out-of-scope sites: lash/src/session.rs:983;
 #   lash-provider-openai/src/codex/ws_testing.rs:286,468;

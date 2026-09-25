@@ -54,8 +54,6 @@ fn disable_missing_trigger() -> lashlang::Expr {
 enum SummaryBackend {
     /// The root of a SQLite file backend.
     Sqlite(std::path::PathBuf),
-    /// A database URL, and the directory attachments live in.
-    Postgres(String, std::path::PathBuf),
 }
 
 struct SummaryHost {
@@ -67,27 +65,13 @@ struct SummaryHost {
 impl SummaryBackend {
     /// A fresh backend over this backend's durable state, with the
     /// Lashlang artifact store that goes with it.
-    async fn backend(
-        &self,
-        owner: &str,
-    ) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend> {
+    async fn backend(&self) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend> {
         match self {
             Self::Sqlite(root) => Arc::new(
                 lash_sqlite_store::SqliteBackend::open(root)
                     .await
                     .expect("open the SQLite backend"),
             ),
-            Self::Postgres(url, attachments) => {
-                let storage = lash_postgres_store::PostgresStorage::connect(url)
-                    .await
-                    .expect("connect PostgreSQL storage");
-                Arc::new(lash_postgres_store::PostgresBackend::new(
-                    &storage,
-                    Arc::new(crate::persistence::FileAttachmentStore::new(
-                        attachments.join(owner),
-                    )),
-                ))
-            }
         }
     }
 
@@ -97,7 +81,7 @@ impl SummaryBackend {
         let sink = CollectingProcessEventSink::default();
         let provider = mock_provider();
         let provider_id = provider.kind().to_string();
-        let backend = self.backend(owner).await;
+        let backend = self.backend().await;
         let (backend, faults): (Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>, _) =
             match fault {
                 Some((event_type, count)) => {
@@ -176,21 +160,6 @@ impl SummaryBackend {
                     .collect::<std::result::Result<BTreeMap<_, _>, _>>()
                     .expect("read replay rows")
             }
-            Self::Postgres(url, _) => {
-                let storage = lash_postgres_store::PostgresStorage::connect(url)
-                    .await
-                    .expect("connect PostgreSQL storage");
-                sqlx::query_as::<_, (String, String)>(
-                    "SELECT replay_key, outcome_json FROM lash_runtime_effect_replay \
-                     WHERE scope_id LIKE $1 AND status = 'completed'",
-                )
-                .bind(pattern)
-                .fetch_all(storage.pool())
-                .await
-                .expect("read PostgreSQL replay rows")
-                .into_iter()
-                .collect()
-            }
         }
     }
 }
@@ -253,10 +222,7 @@ async fn start_process(
     process_id: &ProcessId,
     program: lashlang::Program,
 ) {
-    let artifact = backend
-        .backend("effect-summary-linker")
-        .await
-        .lashlang_artifact_store();
+    let artifact = backend.backend().await.lashlang_artifact_store();
     let process =
         LinkedTestProcess::new_with_catalog(artifact.as_ref(), program, "main", summary_catalog())
             .await;
@@ -693,64 +659,6 @@ async fn sqlite_crash_between_replay_row_and_summary_append_redrives_once() -> R
     for batch_first in [false, true] {
         let temp = tempfile::tempdir().expect("crash-window tempdir");
         let backend = SummaryBackend::Sqlite(temp.path().to_path_buf());
-        assert_crash_window_recovers_once(&backend, batch_first).await;
-    }
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_crash_between_replay_row_and_summary_append_redrives_once() -> Result<()> {
-    use sqlx::Connection as _;
-
-    let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(url) if !url.is_empty() => url,
-        _ if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") => {
-            panic!("LASH_POSTGRES_DATABASE_URL is required")
-        }
-        _ => {
-            eprintln!("skipping PostgreSQL effect-summary crash window: database URL is not set");
-            return Ok(());
-        }
-    };
-    let mut lock = sqlx::PgConnection::connect(&database_url)
-        .await
-        .expect("connect PostgreSQL test advisory lock");
-    sqlx::query("SELECT pg_advisory_lock($1)")
-        .bind(0x4c41_5348_5f50_4754_i64)
-        .execute(&mut lock)
-        .await
-        .expect("acquire PostgreSQL test advisory lock");
-    let storage = lash_postgres_store::PostgresStorage::connect(&database_url).await?;
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT tablename FROM pg_tables
-         WHERE schemaname = 'public'
-           AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_await_event_meta')
-         ORDER BY tablename",
-    )
-    .fetch_all(storage.pool())
-    .await
-    .expect("list PostgreSQL tables");
-    sqlx::query(&format!(
-        "TRUNCATE {} RESTART IDENTITY CASCADE",
-        tables.join(", ")
-    ))
-    .execute(storage.pool())
-    .await
-    .expect("reset PostgreSQL tables");
-    sqlx::query(
-        "INSERT INTO lash_process_change_clock (singleton, current_seq)
-         VALUES (TRUE, 0)
-         ON CONFLICT (singleton) DO UPDATE SET current_seq = 0",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("reset PostgreSQL process change clock");
-    drop(storage);
-
-    let attachments = tempfile::tempdir().expect("PostgreSQL attachment tempdir");
-    let backend = SummaryBackend::Postgres(database_url, attachments.path().to_path_buf());
-    for batch_first in [false, true] {
         assert_crash_window_recovers_once(&backend, batch_first).await;
     }
     Ok(())

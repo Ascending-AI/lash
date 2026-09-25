@@ -217,8 +217,8 @@ case "${suite}" in
     fi
     ;;
 
-  # Package-wide by design: tests/attempt_atomicity.rs is part of this gate, so
-  # narrowing to the conformance binary would silently drop attempt atomicity.
+  # Package-wide by design: the integration and schema binaries are part of
+  # this gate, so narrowing to the conformance binary would silently drop them.
   # The suites self-serialize on a per-process guard, and two processes on one
   # database would truncate each other's tables. Cargo runs the binaries one at
   # a time against the one database. Bazel runs the sharded binaries' shards

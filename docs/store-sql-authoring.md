@@ -16,8 +16,8 @@ The worked example is the effect and wait families (FIG-3380):
 
 | | shared | SQLite | PostgreSQL |
 |---|---|---|---|
-| effect | `crates/lash-store-sql/src/effect{,/replay,/group,/scope_retirement}.rs` | `crates/lash-sqlite-store/src/{effect_replay,scope_fence}.rs` | `crates/lash-postgres-store/src/postgres/effect_replay.rs` |
-| wait | `crates/lash-store-sql/src/wait/{waits,meta,revoked_sessions}.rs` | `crates/lash-sqlite-store/src/await_event.rs` | `crates/lash-postgres-store/src/await_event.rs` |
+| effect | `crates/lash-store-sql/src/effect{,/replay,/group,/scope_retirement}.rs` | `crates/lash-sqlite-store/src/{effect_replay,scope_fence}.rs` | none: PostgreSQL journals no effects (ADR 0104) |
+| wait | `crates/lash-store-sql/src/wait/{waits,meta,revoked_sessions}.rs` | `crates/lash-sqlite-store/src/await_event.rs` | none: PostgreSQL journals no effects (ADR 0104) |
 
 ## 1. Inventory the family first
 
@@ -232,7 +232,8 @@ indexes to those tests.
 
 ## 4. Write each backend's dialect-only set
 
-Same macro, same family prefix, in the backend's table module:
+Same macro, same family prefix, in the backend's table module (the example is
+illustrative; PostgreSQL's effect family left with its engine, FIG-3667):
 
 ```rust
 lash_store_sql::statements! {
@@ -509,8 +510,8 @@ a statement that does not render fails there in one second, and in the
 PostgreSQL suite as a poisoned `LazyLock` behind thirty other failures.
 
 `pg-store` is the PostgreSQL conformance run. The suite is package-wide by
-design — narrowing it to the conformance binary would silently drop
-`tests/attempt_atomicity.rs` — so there is no separate `conformance` suite to
+design — narrowing it to the conformance binary would silently drop the
+integration and schema binaries — so there is no separate `conformance` suite to
 ask for, and asking for one fails with `unknown store suite`.
 
 The conformance and cross-backend suites are the oracle for "no behaviour

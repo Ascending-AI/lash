@@ -88,6 +88,19 @@ const fn expected_foreign_key(
     }
 }
 
+/// A key only SQLite's effect journal declares: PostgreSQL is storage only and
+/// holds no effect journal (ADR 0104).
+const fn sqlite_only_foreign_key(
+    sqlite_databases: &'static [SqliteConstraintDatabase],
+    sqlite: RenderedForeignKey,
+) -> ExpectedForeignKey {
+    ExpectedForeignKey {
+        sqlite_databases,
+        sqlite: Some(sqlite),
+        postgres: None,
+    }
+}
+
 const fn postgres_only_foreign_key(postgres: RenderedForeignKey) -> ExpectedForeignKey {
     ExpectedForeignKey {
         sqlite_databases: &[],
@@ -376,7 +389,7 @@ pub const EXPECTED_FOREIGN_KEYS: &[ExpectedForeignKey] = &[
         false,
         false,
     )),
-    expected_foreign_key(
+    sqlite_only_foreign_key(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered_foreign_key(
             "runtime_effect_replay",
@@ -387,31 +400,13 @@ pub const EXPECTED_FOREIGN_KEYS: &[ExpectedForeignKey] = &[
             true,
             true,
         ),
-        rendered_foreign_key(
-            "lash_runtime_effect_replay",
-            &["group_key"],
-            "lash_runtime_effect_group",
-            &["group_key"],
-            "no action",
-            true,
-            true,
-        ),
     ),
-    expected_foreign_key(
+    sqlite_only_foreign_key(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered_foreign_key(
             "runtime_effect_group_child",
             &["group_key"],
             "runtime_effect_group",
-            &["group_key"],
-            "no action",
-            true,
-            true,
-        ),
-        rendered_foreign_key(
-            "lash_runtime_effect_group_child",
-            &["group_key"],
-            "lash_runtime_effect_group",
             &["group_key"],
             "no action",
             true,

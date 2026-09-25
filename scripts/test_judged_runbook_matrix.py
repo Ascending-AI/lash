@@ -13,8 +13,6 @@ SPEC.loader.exec_module(MATRIX)
 
 
 SELF_CONTAINED_OPERATOR_RUNBOOKS = {
-    "graceful-drain": ("03-observed.jsonl",),
-    "request-abandon": ("03-observed.jsonl",),
     "session-lease-triage": (
         "01-facade-read-tests.log",
         "02-provider-hang.jsonl",
@@ -160,7 +158,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             if policy["emits"]
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 36)
+        self.assertEqual(expected, 34)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is
@@ -181,11 +179,11 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         # assertion that only reads the shipped file cannot pass vacuously.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
-        config["no_rlm_session_only"]["request-abandon"]["model"] = config[
+        config["no_rlm_session_only"]["workbench-valid-empty-completion"]["model"] = config[
             "tiers"
         ]["frontier"][0]
         self.assertNotEqual(MATRIX.tier_violations(config), [])
-        config["no_rlm_session_only"]["request-abandon"]["tier"] = "platinum"
+        config["no_rlm_session_only"]["workbench-valid-empty-completion"]["tier"] = "platinum"
         self.assertNotEqual(MATRIX.tier_violations(config), [])
 
     def test_every_non_emitting_row_names_something_that_exists(self) -> None:
@@ -324,7 +322,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         # guard that only reads the shipped tree can stay green after its own
         # checks stop detecting the regression it exists to prevent.
         runbooks = self.operator_runbooks()
-        runbooks["request-abandon"] += "\nRead docs/operations.html before scoring.\n"
+        runbooks["session-lease-triage"] += "\nRead docs/operations.html before scoring.\n"
         runbooks["version-bump-recreation"] = runbooks[
             "version-bump-recreation"
         ].replace("04-health.jsonl", "health-artifact")

@@ -180,7 +180,6 @@ services:
       LASH_E2E_COMPLETED_WORKFLOW_MANIFEST: "${LASH_E2E_COMPLETED_WORKFLOW_MANIFEST_CONTAINER:-}"
     volumes:
       - ${LASH_E2E_BIN_DIR:?run via `just restate-postgres-workers-e2e`}/lash-e2e-runner:/usr/local/bin/lash-e2e-runner:ro
-      - ${LASH_E2E_BIN_DIR:?run via `just restate-postgres-workers-e2e`}/lash-e2e-frame-crash:/usr/local/bin/lash-e2e-frame-crash:ro
       - ${LASH_E2E_BIN_DIR:?run via `just restate-postgres-workers-e2e`}/lash-e2e-await-event-helper:/usr/local/bin/lash-e2e-await-event-helper:ro
       - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
       - trace-output:/e2e-traces

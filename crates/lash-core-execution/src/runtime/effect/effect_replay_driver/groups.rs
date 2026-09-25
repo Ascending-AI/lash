@@ -3,7 +3,7 @@
 //! Layer 1 gave the substrates the *journal shape* of a group — a group row
 //! carrying the counter, a `group_key` and `settlement_seq` on each child, and
 //! the N1/N2/N3 rules that keep rank a fact. What it did not give them was a
-//! **host**: on sqlite and postgres the three contract methods
+//! **host**: on the SQL row stores the three contract methods
 //! (`open_effect_group`, `await_next_settlement`, `close_effect_group`) still
 //! inherited the fail-closed defaults they carried until FIG-2266, so no
 //! production group row was ever written and no child ever carried a

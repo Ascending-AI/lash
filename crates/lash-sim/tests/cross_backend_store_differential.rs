@@ -2094,13 +2094,15 @@ async fn runners_for_case_with_clock(
         .await
         .expect("open the SQLite lifecycle backend"),
     );
-    let postgres_lifecycle: Arc<dyn lash::Backend> = Arc::new(
-        lash_postgres_store::PostgresBackend::with_options_and_clock(
+    // PostgreSQL is storage only (ADR 0104): the lifecycle runs over its
+    // store set, and the delete and admission it drives journal no effect.
+    let postgres_lifecycle: Arc<dyn lash::Backend> = lash_conformance::recording_backend_over(
+        &lash_postgres_store::PostgresStoreSet::with_clock(
             postgres,
             Arc::new(lash::persistence::FileAttachmentStore::new(
                 sqlite_case_root.join("postgres-attachments"),
             )),
-            lash_postgres_store::PostgresBackendOptions::default(),
+            lash_core::WakeDeliveryConfig::default(),
             Arc::clone(&clock),
         ),
     );

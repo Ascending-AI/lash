@@ -13,10 +13,10 @@ use std::process::Command;
 use std::sync::Arc;
 
 use lash_core_execution::{
-    EffectHost, ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence,
-    SessionStoreFactory, TriggerStore,
+    ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence, SessionStoreFactory,
+    TriggerStore,
 };
-use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
+use lash_postgres_store::PostgresStorage;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 
@@ -168,6 +168,9 @@ const GENERATION_PARK_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const SEQUENCE_IDENTITY_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-124-1d0b41349/postgres-expected.json",
 ];
+const PG_ENGINE_CUT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-125-2ee4a034b/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -281,11 +284,6 @@ async fn postgres_durable_fixture_expectations_match_what_this_build_writes_when
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
         .expect("provision Postgres write-shape schema");
-    install_fixed_await_event_secret(&storage).await;
-    storage.pool().close().await;
-    let storage = PostgresStorage::connect(&fixture_database_url)
-        .await
-        .expect("reopen Postgres write-shape schema with fixed await-event secret");
     let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
     let written_now = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
@@ -312,7 +310,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 131);
+    assert_eq!(PostgresStorage::schema_version(), 132);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -339,11 +337,6 @@ async fn regenerate_postgres_durable_fixture() {
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
         .expect("provision Postgres durable-fixture schema");
-    install_fixed_await_event_secret(&storage).await;
-    storage.pool().close().await;
-    let storage = PostgresStorage::connect(&fixture_database_url)
-        .await
-        .expect("reopen Postgres fixture with fixed await-event secret");
     let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
     let expected = Box::pin(fixture::seed(&handles)).await;
     normalize_server_authoritative_fixture_rows(&storage).await;
@@ -435,14 +428,21 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("recreate the usage-delta table from the authoritative DDL");
-    sqlx::query("DROP TABLE IF EXISTS lash_effect_scope_retirements")
-        .execute(&pool)
-        .await
-        .expect("discard the pre-cleanup-evidence effect-scope retirement table");
-    sqlx::raw_sql(schema_table_ddl("lash_effect_scope_retirements"))
-        .execute(&pool)
-        .await
-        .expect("recreate the effect-scope retirement fence from the authoritative DDL");
+    // PostgreSQL is storage only (ADR 0104): the effect journal, its
+    // await-event promises and its scope fences left the catalog.
+    sqlx::raw_sql(
+        "DROP TABLE IF EXISTS lash_runtime_effect_replay CASCADE;
+         DROP TABLE IF EXISTS lash_runtime_effect_group_child CASCADE;
+         DROP TABLE IF EXISTS lash_runtime_effect_group CASCADE;
+         DROP TABLE IF EXISTS lash_await_event_meta CASCADE;
+         DROP TABLE IF EXISTS lash_await_event_waits CASCADE;
+         DROP TABLE IF EXISTS lash_await_event_revoked_sessions CASCADE;
+         DROP TABLE IF EXISTS lash_effect_scope_retirements CASCADE;
+         DROP TABLE IF EXISTS lash_turn_cancel_closure_participants CASCADE;",
+    )
+    .execute(&pool)
+    .await
+    .expect("discard the effect-engine tables");
     sqlx::query("DROP TABLE lash_attachment_condemnations")
         .execute(&pool)
         .await
@@ -544,120 +544,6 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("create the affected-input child table from the authoritative DDL");
-    // The effect-group arbitration columns and guards land on the catalog as a
-    // delta rather than a rebuild: the refusal fixture's membership rows are
-    // evidence the refresh must keep.
-    sqlx::raw_sql(
-        "ALTER TABLE lash_runtime_effect_group
-             ADD COLUMN IF NOT EXISTS next_commit_seq BIGINT NOT NULL DEFAULT 0,
-             ADD COLUMN IF NOT EXISTS lifecycle JSONB NOT NULL DEFAULT '{\"type\":\"live\"}';
-         ALTER TABLE lash_runtime_effect_group
-             DROP CONSTRAINT IF EXISTS ck_runtime_effect_group_lifecycle;
-         ALTER TABLE lash_runtime_effect_group
-             ADD CONSTRAINT ck_runtime_effect_group_lifecycle CHECK (
-                 lifecycle->>'type' IN ('live', 'closing', 'settled')
-             );
-         DO $$
-         BEGIN
-             IF EXISTS (
-                 SELECT 1 FROM information_schema.columns
-                 WHERE table_schema = current_schema()
-                   AND table_name = 'lash_runtime_effect_group'
-                   AND column_name = 'children'
-             ) THEN
-                 ALTER TABLE lash_runtime_effect_group
-                     RENAME COLUMN children TO expected_children;
-             END IF;
-             IF EXISTS (
-                 SELECT 1 FROM information_schema.columns
-                 WHERE table_schema = current_schema()
-                   AND table_name = 'lash_runtime_effect_group_child'
-                   AND column_name = 'request_version'
-             ) THEN
-                 ALTER TABLE lash_runtime_effect_group_child
-                     RENAME COLUMN request_version TO command_version;
-             END IF;
-         END $$;
-         ALTER TABLE lash_runtime_effect_group_child
-             DROP COLUMN IF EXISTS decision,
-             DROP COLUMN IF EXISTS commit_seq,
-             DROP COLUMN IF EXISTS decided_at_ms,
-             DROP COLUMN IF EXISTS drained_at_ms;
-         DROP INDEX IF EXISTS uq_lash_runtime_effect_group_child_commit_seq;
-         ALTER TABLE lash_runtime_effect_replay
-             ADD COLUMN IF NOT EXISTS commit_state TEXT NOT NULL DEFAULT 'pending',
-             ADD COLUMN IF NOT EXISTS commit_seq BIGINT,
-             ADD COLUMN IF NOT EXISTS drain_input TEXT;
-         ALTER TABLE lash_runtime_effect_replay
-             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_commit_state;
-         ALTER TABLE lash_runtime_effect_replay
-             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_commit_seq;
-         ALTER TABLE lash_runtime_effect_replay
-             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_drain_input;
-         ALTER TABLE lash_runtime_effect_replay
-             ADD CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (
-                 commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')
-             ),
-             ADD CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK (
-                 commit_seq IS NULL OR commit_state IN ('committed', 'drained')
-             ),
-             ADD CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (
-                 drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))
-             );
-         DROP INDEX IF EXISTS idx_lash_runtime_effect_replay_group_unsettled;
-         CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_commit_seq
-             ON lash_runtime_effect_replay(group_key, commit_seq)
-             WHERE commit_seq IS NOT NULL;
-         CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_group_child_replay_key
-             ON lash_runtime_effect_group_child(group_key, replay_key);",
-    )
-    .execute(&pool)
-    .await
-    .expect("refresh refusal fixture with the component-113 explicit-observer catalog");
-    // The component-115 effect-replay constraints land on the catalog as a
-    // delta too: the same NOT VALID + VALIDATE pair the historical 114→115
-    // migration ran before the queued-admission cutover.
-    // The drops keep the delta idempotent — a dump refreshed by a build that
-    // already carried the constraints re-adds them rather than erroring.
-    sqlx::raw_sql(
-        "ALTER TABLE lash_runtime_effect_replay
-             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_outcome_json,
-             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_error_json,
-             DROP CONSTRAINT IF EXISTS ck_runtime_effect_replay_settlement_seq,
-             DROP CONSTRAINT IF EXISTS fk_runtime_effect_replay_group;
-         ALTER TABLE lash_runtime_effect_group_child
-             DROP CONSTRAINT IF EXISTS fk_runtime_effect_group_child_group;
-         ALTER TABLE lash_runtime_effect_replay
-             ADD CONSTRAINT ck_runtime_effect_replay_outcome_json CHECK (
-                 (status = 'completed' AND outcome_json IS NOT NULL)
-                 OR (status <> 'completed' AND outcome_json IS NULL)
-             ) NOT VALID,
-             ADD CONSTRAINT ck_runtime_effect_replay_error_json CHECK (
-                 (status = 'failed' AND error_json IS NOT NULL)
-                 OR (status <> 'failed' AND error_json IS NULL)
-             ) NOT VALID,
-             ADD CONSTRAINT ck_runtime_effect_replay_settlement_seq CHECK (
-                 (settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided')))
-                 OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))
-             ) NOT VALID,
-             ADD CONSTRAINT fk_runtime_effect_replay_group
-                 FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key)
-                 DEFERRABLE INITIALLY DEFERRED NOT VALID;
-         ALTER TABLE lash_runtime_effect_replay
-             VALIDATE CONSTRAINT ck_runtime_effect_replay_outcome_json,
-             VALIDATE CONSTRAINT ck_runtime_effect_replay_error_json,
-             VALIDATE CONSTRAINT ck_runtime_effect_replay_settlement_seq,
-             VALIDATE CONSTRAINT fk_runtime_effect_replay_group;
-         ALTER TABLE lash_runtime_effect_group_child
-             ADD CONSTRAINT fk_runtime_effect_group_child_group
-                 FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key)
-                 DEFERRABLE INITIALLY DEFERRED NOT VALID;
-         ALTER TABLE lash_runtime_effect_group_child
-             VALIDATE CONSTRAINT fk_runtime_effect_group_child_group;",
-    )
-    .execute(&pool)
-    .await
-    .expect("refresh refusal fixture with the component-115 effect-replay constraints");
     // The trigger subscription table cut over to the lifecycle column shape
     // with no migration, so the refusal fixture discards its pre-cutover rows
     // and takes the current catalog.
@@ -685,9 +571,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // Component 120 (FIG-3589) adds the nullable turn binding pair. The
     // refusal fixture's pending input is unclaimed, so it is unbound.
     add_prior_fixture_turn_binding_column(&pool).await;
-    // Component 121 (FIG-3586) gives the effect journal's key columns `C`
-    // collation and adds the parked-turn table.
-    add_prior_fixture_replay_key_collation_and_parks(&pool).await;
+    // Component 121 (FIG-3586) adds the parked-turn table.
+    add_prior_fixture_turn_parks(&pool).await;
     // Component 127 (FIG-3540) adds the session ingress, empty in the
     // refusal fixture, and the drive epoch on the session metadata row.
     sqlx::query("DROP TABLE IF EXISTS lash_session_ingress")
@@ -839,22 +724,8 @@ async fn add_prior_fixture_turn_binding_column(pool: &sqlx::PgPool) {
     .expect("add the component-120 turn binding to the refusal fixture catalog");
 }
 
-// Author-time refresh only: the component-121 key collation and parked-turn
-// table.
-async fn add_prior_fixture_replay_key_collation_and_parks(pool: &sqlx::PgPool) {
-    sqlx::raw_sql(
-        "ALTER TABLE lash_runtime_effect_group
-             ALTER COLUMN group_key TYPE TEXT COLLATE \"C\";
-         ALTER TABLE lash_runtime_effect_group_child
-             ALTER COLUMN group_key TYPE TEXT COLLATE \"C\",
-             ALTER COLUMN replay_key TYPE TEXT COLLATE \"C\";
-         ALTER TABLE lash_runtime_effect_replay
-             ALTER COLUMN replay_key TYPE TEXT COLLATE \"C\",
-             ALTER COLUMN group_key TYPE TEXT COLLATE \"C\";",
-    )
-    .execute(pool)
-    .await
-    .expect("give the refusal fixture's journal key columns the component-121 collation");
+// Author-time refresh only: the component-121 parked-turn table.
+async fn add_prior_fixture_turn_parks(pool: &sqlx::PgPool) {
     sqlx::raw_sql(schema_table_ddl("lash_turn_parks"))
         .execute(pool)
         .await
@@ -1231,11 +1102,6 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
             .with_incarnation_for_testing("durable-read-trigger-incarnation"),
     );
-    let effects = Arc::new(PostgresEffectHost::with_options_and_clock(
-        storage,
-        PostgresEffectReplayOptions::default(),
-        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-    ));
     let session_factory = Arc::new(
         storage
             .session_store_factory()
@@ -1252,7 +1118,8 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
         continuations: processes as Arc<dyn ProcessContinuationStore>,
         process_envs: process_envs as Arc<dyn ProcessExecutionEnvStore>,
         triggers: triggers as Arc<dyn TriggerStore>,
-        effects: effects as Arc<dyn EffectHost>,
+        // PostgreSQL is storage only: its effects journal on Restate (ADR 0104).
+        effects: None,
     }
 }
 
@@ -1304,14 +1171,6 @@ async fn drop_fixture_schema(database_url: &str) {
     pool.close().await;
 }
 
-async fn install_fixed_await_event_secret(storage: &PostgresStorage) {
-    sqlx::query("UPDATE lash_await_event_meta SET signing_secret = $1 WHERE singleton = TRUE")
-        .bind(fixture::FIXTURE_AWAIT_EVENT_SIGNING_SECRET.to_vec())
-        .execute(storage.pool())
-        .await
-        .expect("install deterministic Postgres await-event signing secret");
-}
-
 async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) {
     let lease = fixture::expected_process_lease();
     sqlx::query(
@@ -1338,14 +1197,6 @@ async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) 
     .execute(storage.pool())
     .await
     .expect("normalize server-authoritative fixture session lease");
-    sqlx::query(
-        "UPDATE lash_runtime_effect_replay
-         SET created_at_ms = $1, updated_at_ms = $1",
-    )
-    .bind(fixture::FIXTURE_WRITE_MS as i64)
-    .execute(storage.pool())
-    .await
-    .expect("normalize server-authoritative fixture effect timestamps");
     // The release stamp records `clock_timestamp()` on the server, so it is
     // server-authoritative in exactly the sense this function exists for:
     // without the rewrite every regeneration would emit a different dump.

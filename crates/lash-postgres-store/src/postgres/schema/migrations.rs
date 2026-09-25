@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// These declarations retain the component-130 endpoint: the five
+/// These declarations retain the component-131 endpoint: the five
 /// effect-replay constraints component 115 installed, the durable queued-run
 /// admission component 116 adds, the runtime-commit receipt version component
 /// 117 stamps, the NOT NULL `submitted_ingress_json` and
@@ -28,59 +28,12 @@ use super::*;
 /// 129 (FIG-3585) drops two runtime-error codes and moves no relation, and
 /// component 130 (FIG-3682) adds the `admission_base_checkpoint_ref` column
 /// of `lash_session_meta`, and component 131 (FIG-3735) extends the turn-park
-/// reason vocabulary and moves no relation. No arm targets 130 or 131: the
-/// current build refuses every predecessor.
+/// reason vocabulary and moves no relation, and component 132 (FIG-3667)
+/// drops the effect-engine tables. No arm targets 131 or 132: the current
+/// build refuses every predecessor.
 /// Source-shape
 /// declarations remain keyed to this build's catalog for precise older-store
 /// fixture construction.
-const ARBITRATION_GUARDS: &[DeclaredGuard] = &[
-    DeclaredGuard {
-        table: "lash_runtime_effect_replay",
-        columns: &["group_key", "commit_seq"],
-        predicate: Some("commit_seq is not null"),
-    },
-    DeclaredGuard {
-        table: "lash_runtime_effect_group_child",
-        columns: &["group_key", "replay_key"],
-        predicate: None,
-    },
-];
-
-/// The same five constraints as bare names, for `introduced_constraints`: the
-/// divergence probe resolves them through `pg_constraint`, which a constraint
-/// name alone addresses.
-const EFFECT_REPLAY_CONSTRAINT_NAMES: &[&str] = &[
-    "ck_runtime_effect_replay_outcome_json",
-    "ck_runtime_effect_replay_error_json",
-    "ck_runtime_effect_replay_settlement_seq",
-    "fk_runtime_effect_replay_group",
-    "fk_runtime_effect_group_child_group",
-];
-
-/// The two foreign keys component 115 adds, at the structural granularity the
-/// shape diff reports them — the declaration `matches_source_shape` tolerates
-/// on the arm's source and nothing else.
-const REPLAY_GROUP_FOREIGN_KEY: DeclaredForeignKey = DeclaredForeignKey {
-    table: "lash_runtime_effect_replay",
-    columns: &["group_key"],
-    parent_table: "lash_runtime_effect_group",
-    parent_columns: &["group_key"],
-    on_delete: ForeignKeyAction::NoAction,
-    deferrable: true,
-    initially_deferred: true,
-};
-const GROUP_CHILD_GROUP_FOREIGN_KEY: DeclaredForeignKey = DeclaredForeignKey {
-    table: "lash_runtime_effect_group_child",
-    columns: &["group_key"],
-    parent_table: "lash_runtime_effect_group",
-    parent_columns: &["group_key"],
-    on_delete: ForeignKeyAction::NoAction,
-    deferrable: true,
-    initially_deferred: true,
-};
-const EFFECT_REPLAY_FOREIGN_KEYS: &[DeclaredForeignKey] =
-    &[REPLAY_GROUP_FOREIGN_KEY, GROUP_CHILD_GROUP_FOREIGN_KEY];
-
 pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
@@ -88,11 +41,10 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         // The lists are keyed to the floor, not to one generation: a relation,
         // column, or constraint introduced after 105 belongs here too, so the
         // fixture rebuilds the published component-101 catalog by removing them.
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
-            "lash_runtime_effect_group_child",
             "lash_session_ingress",
             "lash_turn_cancel_affected_inputs",
             "lash_turn_park_clock",
@@ -107,27 +59,18 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
             ("lash_parent_end_plans", "parent_payload"),
-            ("lash_runtime_effect_group", "next_commit_seq"),
-            ("lash_runtime_effect_group", "lifecycle"),
-            ("lash_runtime_effect_group", "expected_children"),
-            ("lash_runtime_effect_replay", "commit_state"),
-            ("lash_runtime_effect_replay", "commit_seq"),
-            ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
-        source_missing_guards: ARBITRATION_GUARDS,
-        source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         // Every post-floor relation the rebuild must account for: the
         // component-102 table the floor arm's range introduces and the
         // commit-order unique component 110 adds to the pre-floor replay
         // table, which no table drop covers.
-        introduced_relations: &[
-            "lash_turn_cancel_affected_inputs",
-            "uq_lash_runtime_effect_replay_commit_seq",
-        ],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_relations: &["lash_turn_cancel_affected_inputs"],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 102 to 105 moved no shape the endpoint models beyond what the
@@ -136,11 +79,10 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
-            "lash_runtime_effect_group_child",
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
@@ -154,20 +96,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
             ("lash_parent_end_plans", "parent_payload"),
-            ("lash_runtime_effect_group", "next_commit_seq"),
-            ("lash_runtime_effect_group", "lifecycle"),
-            ("lash_runtime_effect_group", "expected_children"),
-            ("lash_runtime_effect_replay", "commit_state"),
-            ("lash_runtime_effect_replay", "commit_seq"),
-            ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
-        source_missing_guards: ARBITRATION_GUARDS,
-        source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 103 to 105: 104 added only CHECK constraints (unmodeled) and
@@ -175,11 +111,10 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
-            "lash_runtime_effect_group_child",
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
@@ -193,31 +128,24 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
             ("lash_parent_end_plans", "parent_payload"),
-            ("lash_runtime_effect_group", "next_commit_seq"),
-            ("lash_runtime_effect_group", "lifecycle"),
-            ("lash_runtime_effect_group", "expected_children"),
-            ("lash_runtime_effect_replay", "commit_state"),
-            ("lash_runtime_effect_replay", "commit_seq"),
-            ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
-        source_missing_guards: ARBITRATION_GUARDS,
-        source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 104 to 107: 105 added the owner columns, which this catalog
     // models, so a component-104 catalog lacks exactly those columns.
     SchemaMigration {
         from: 104,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
-            "lash_runtime_effect_group_child",
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
@@ -231,20 +159,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
             ("lash_parent_end_plans", "parent_payload"),
-            ("lash_runtime_effect_group", "next_commit_seq"),
-            ("lash_runtime_effect_group", "lifecycle"),
-            ("lash_runtime_effect_group", "expected_children"),
-            ("lash_runtime_effect_replay", "commit_state"),
-            ("lash_runtime_effect_replay", "commit_seq"),
-            ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
-        source_missing_guards: ARBITRATION_GUARDS,
-        source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 105 to 107: 106 moved no relational DDL, so a component-105
@@ -252,11 +174,10 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // parent payload, and the arbitration state alone.
     SchemaMigration {
         from: 105,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
-            "lash_runtime_effect_group_child",
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
@@ -268,20 +189,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
-            ("lash_runtime_effect_group", "next_commit_seq"),
-            ("lash_runtime_effect_group", "lifecycle"),
-            ("lash_runtime_effect_group", "expected_children"),
-            ("lash_runtime_effect_replay", "commit_state"),
-            ("lash_runtime_effect_replay", "commit_seq"),
-            ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
-        source_missing_guards: ARBITRATION_GUARDS,
-        source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     // The retained membership's introduction. Component 106 was the
@@ -291,11 +206,10 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // to its siblings.
     SchemaMigration {
         from: 106,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
-            "lash_runtime_effect_group_child",
             "lash_session_ingress",
             "lash_turn_park_clock",
             "lash_turn_park_events",
@@ -307,22 +221,16 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
-            ("lash_runtime_effect_group", "next_commit_seq"),
-            ("lash_runtime_effect_group", "lifecycle"),
-            ("lash_runtime_effect_group", "expected_children"),
-            ("lash_runtime_effect_replay", "commit_state"),
-            ("lash_runtime_effect_replay", "commit_seq"),
-            ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
-        source_missing_guards: ARBITRATION_GUARDS,
-        source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         // The relation the membership generation creates, which the divergence
         // refusal over a component-106 catalog enumerates by name.
-        introduced_relations: &["lash_runtime_effect_group_child"],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // A component-107 catalog carries the membership table but none of what
@@ -332,7 +240,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // 108 added no relational DDL of its own.
     SchemaMigration {
         from: 107,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -347,21 +255,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
-            ("lash_runtime_effect_group", "next_commit_seq"),
-            ("lash_runtime_effect_group", "lifecycle"),
-            ("lash_runtime_effect_group", "expected_children"),
-            ("lash_runtime_effect_replay", "commit_state"),
-            ("lash_runtime_effect_replay", "commit_seq"),
-            ("lash_runtime_effect_replay", "drain_input"),
-            ("lash_runtime_effect_group_child", "command_version"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
-        source_missing_guards: ARBITRATION_GUARDS,
-        source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     // A component-108 catalog adds only the journaled `exec_code` outcome
@@ -369,7 +270,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // guards a component-107 catalog does against this build.
     SchemaMigration {
         from: 108,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -384,28 +285,18 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
-            ("lash_runtime_effect_group", "next_commit_seq"),
-            ("lash_runtime_effect_group", "lifecycle"),
-            ("lash_runtime_effect_group", "expected_children"),
-            ("lash_runtime_effect_replay", "commit_state"),
-            ("lash_runtime_effect_replay", "commit_seq"),
-            ("lash_runtime_effect_replay", "drain_input"),
-            ("lash_runtime_effect_group_child", "command_version"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
-        source_missing_guards: ARBITRATION_GUARDS,
-        source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         // The relations the arbitration generation creates, which the
         // divergence refusal over a component-108 catalog enumerates by name:
         // indexes are relations too, and these two are what the generation
         // adds that a component-108 catalog can already be carrying.
-        introduced_relations: &[
-            "uq_lash_runtime_effect_replay_commit_seq",
-            "uq_lash_runtime_effect_group_child_replay_key",
-        ],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // A component-109 catalog predates the ADR 0099 §§4–5 arbitration state
@@ -416,7 +307,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // columns and guards plus the five effect-replay constraints.
     SchemaMigration {
         from: 109,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -430,26 +321,16 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
             ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
-            ("lash_runtime_effect_group", "next_commit_seq"),
-            ("lash_runtime_effect_group", "lifecycle"),
-            ("lash_runtime_effect_group", "expected_children"),
-            ("lash_runtime_effect_replay", "commit_state"),
-            ("lash_runtime_effect_replay", "commit_seq"),
-            ("lash_runtime_effect_replay", "drain_input"),
-            ("lash_runtime_effect_group_child", "command_version"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
-        source_missing_guards: ARBITRATION_GUARDS,
-        source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
         // The relations the arbitration generation creates, which the
         // divergence refusal over a component-109 catalog enumerates by name.
-        introduced_relations: &[
-            "uq_lash_runtime_effect_replay_commit_seq",
-            "uq_lash_runtime_effect_group_child_replay_key",
-        ],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_relations: &[],
+        introduced_constraints: &[],
         statements: &[],
     },
     // Components 110 through 113 share the endpoint's relational shape minus
@@ -457,7 +338,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // All are refused at the queued-run cutover.
     SchemaMigration {
         from: 110,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -476,14 +357,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
-        source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
         from: 111,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -502,14 +383,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
-        source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
         from: 112,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -528,14 +409,14 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
-        source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     SchemaMigration {
         from: 113,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -554,9 +435,9 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
-        source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     // Component 114 lacked the five effect-replay constraints installed at
@@ -564,7 +445,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // current component-117 cutover offers no executable migration.
     SchemaMigration {
         from: 114,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -583,9 +464,9 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
-        source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
+        source_missing_foreign_keys: &[],
         introduced_relations: &[],
-        introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        introduced_constraints: &[],
         statements: &[],
     },
     // A component-115 catalog predates the queued-run cutover wholesale: it
@@ -594,7 +475,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // foreign key ride the table drops, so only the relations are enumerated.
     SchemaMigration {
         from: 115,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -629,7 +510,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 116,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -656,7 +537,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // could be claiming.
     SchemaMigration {
         from: 117,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -684,7 +565,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // claiming.
     SchemaMigration {
         from: 118,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -709,7 +590,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // rewound stamp could be claiming.
     SchemaMigration {
         from: 119,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -734,7 +615,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // a rewound stamp could be claiming.
     SchemaMigration {
         from: 120,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -760,7 +641,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 121,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -788,7 +669,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 122,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -817,7 +698,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // could be claiming.
     SchemaMigration {
         from: 123,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -848,7 +729,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // claiming.
     SchemaMigration {
         from: 124,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -872,7 +753,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 125,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -900,7 +781,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 126,
-        to: 130,
+        to: 131,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -928,7 +809,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 127,
-        to: 130,
+        to: 131,
         source_missing_tables: &["lash_turn_park_clock", "lash_turn_park_events"],
         source_missing_columns: &[
             ("lash_turn_parks", "park_id"),
@@ -951,7 +832,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // claiming.
     SchemaMigration {
         from: 128,
-        to: 130,
+        to: 131,
         source_missing_tables: &[],
         source_missing_columns: &[("lash_session_meta", "admission_base_checkpoint_ref")],
         source_missing_guards: &[],
@@ -960,16 +841,31 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_constraints: &[],
         statements: &[],
     },
-    // The immediate predecessor of the retained endpoint 130. A
-    // component-129 catalog lacks the admission-base column component 130
-    // (FIG-3682) adds; component 131 (FIG-3735) moves persisted vocabulary
-    // only, so the row is a refusal boundary that introduces nothing a
-    // rewound stamp could be claiming.
+    // A predecessor of the retained endpoint 131. A component-129 catalog
+    // lacks the admission-base column component 130 (FIG-3682) adds; the row
+    // is a refusal boundary that introduces nothing a rewound stamp could be
+    // claiming.
     SchemaMigration {
         from: 129,
-        to: 130,
+        to: 131,
         source_missing_tables: &[],
         source_missing_columns: &[("lash_session_meta", "admission_base_checkpoint_ref")],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
+        introduced_relations: &[],
+        introduced_constraints: &[],
+        statements: &[],
+    },
+    // The immediate predecessor of the retained endpoint 131. Component 131
+    // (FIG-3735) moved persisted vocabulary only, so a component-130 catalog
+    // lacks nothing; component 132 (FIG-3667) is destructive, so the row is a
+    // refusal boundary that introduces nothing a rewound stamp could be
+    // claiming.
+    SchemaMigration {
+        from: 130,
+        to: 131,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
         introduced_relations: &[],

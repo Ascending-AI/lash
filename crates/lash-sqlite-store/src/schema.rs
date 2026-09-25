@@ -915,7 +915,11 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// reissue the freed maximum rowid the way `session_ingress` already could
 /// not. A pre-91 database still declares the reusable rowid columns and is
 /// rejected at open and recreated; it is not migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 91;
+/// Bumped to 92 for FIG-3667: the `postgres_effect_replay_*`,
+/// `postgres_await_event_*` and `postgres_effect_journal_retirement` codes
+/// leave the durable runtime-error vocabulary. No relation changes; a pre-92
+/// database is rejected at open and recreated; it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 92;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

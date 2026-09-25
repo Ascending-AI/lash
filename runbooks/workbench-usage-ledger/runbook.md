@@ -61,14 +61,9 @@ repair rather than looping restarts.
 ## Working material
 
 - First run `just agent-workbench-attachment-usage-gate <gate-port>` on **its own port**,
-  never the browser stack's: the gate derives its managed Postgres port and its container
-  names from the port it is given and holds the worktree gate while it runs. Its deterministic
-  provider reports fixed non-zero usage, the gate reconciles one `llm_call_completed`
-  record, reconstructs the core, and executes against both SQLite and Postgres
-  session-store backends on a managed database inside the worktree block. Its
-  Postgres offset is `+0..+9` from `LASH_E2E_PORT_BASE`, which is derived by
-  `scripts/worktree-gate-env.sh`, selected by the last decimal digit of `<port>`
-  (`3042` selects `LASH_E2E_PORT_BASE + 2`).
+  never the browser stack's. Its deterministic provider reports fixed non-zero usage, the
+  gate reconciles one `llm_call_completed` record, reconstructs the core, and executes
+  against the SQLite session-store backend.
 - Boot with a fresh directory:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
   (the `just agent-workbench <port>` recipe is the same command, but it does not export
@@ -156,7 +151,7 @@ confirm the workbench and its managed services are gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Deterministic companion | fixed-usage SQLite + Postgres gate exits zero | | command log |
+| Deterministic companion | fixed-usage SQLite gate exits zero | | command log |
 | Settled turn | one committed pair and at least one completed LLM call | | `01-*`, `02-llm-calls.json` |
 | Report arithmetic | totals equal row sum and dominate selected call sum | | `02-reconciliation.json` |
 | Non-zero usage | call/report input and output are positive where calls occurred | | state + trace JSON |

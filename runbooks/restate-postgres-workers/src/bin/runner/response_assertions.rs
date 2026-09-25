@@ -330,11 +330,7 @@ pub(super) fn assert_frame_switch_crash_response(response: &TurnResponse) -> Res
                 == Some("seed:e2e-frame-switch-crash")
             && value.get("follow_on").and_then(Value::as_bool) == Some(true)
             && value
-                .get("recovered_after_commit_exit")
-                .and_then(Value::as_bool)
-                == Some(true)
-            && value
-                .get("mid_follow_on_recovered")
+                .get("recovered_before_switch_commit")
                 .and_then(Value::as_bool)
                 == Some(true)
             && value.get("queue_empty").and_then(Value::as_bool) == Some(true)

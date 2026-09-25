@@ -2,8 +2,8 @@
 //!
 //! [`group_drain`](crate::runtime::effect::group_drain) states the contract and
 //! the three guards; this module is the one implementation of it, written over
-//! [`EffectReplayRowStore`] so sqlite and postgres are held to the same laws
-//! by the same code rather than by two copies.
+//! [`EffectReplayRowStore`], so every row store is held to the same laws by
+//! the same code rather than by copies.
 //!
 //! # Why a pass reads the journal twice
 //!

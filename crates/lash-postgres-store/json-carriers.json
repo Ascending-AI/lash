@@ -39,10 +39,6 @@
     "verdict": "deliberately-excluded",
     "reason": "TurnCancelClosureAuthorization is an exact operation record covered by the reject-and-recreate component-87 boundary; it is validated structurally and against indexed session, turn, binding, fence, scope, keys, and intent before use."
   },
-  "lash_turn_cancel_closure_participants.scope_json": {
-    "verdict": "enroll-now",
-    "reason": "ExecutionScope is the typed promise-owner retirement identity and must participate in the PostgreSQL component shape gate."
-  },
   "lash_turn_cancel_affected_inputs.input_json": {
     "reason": "TurnCancelAffectedInput stores the same TurnInput payload lash_pending_turn_inputs.input_json carries; it inherits that deliberately-excluded verdict.",
     "verdict": "deliberately-excluded"
@@ -78,34 +74,6 @@
   "lash_tool_intent_submissions.submission_json": {
     "verdict": "deliberately-excluded",
     "reason": "ToolIntentSubmissionRecord is component-51 process-protocol state coupled to indexed identity, kind, and payload-hash columns; enroll it with the complete process carrier family."
-  },
-  "lash_runtime_effect_group_child.envelope_json": {
-    "verdict": "not-serialized-struct",
-    "reason": "The PostgreSQL backend stores and returns the controller-owned opaque canonical envelope JSON string without deserializing a Rust struct; the runtime decodes it, exactly as it does lash_runtime_effect_replay.envelope_json."
-  },
-  "lash_runtime_effect_replay.envelope_json": {
-    "verdict": "not-serialized-struct",
-    "reason": "The PostgreSQL backend stores and returns the controller-owned opaque JSON string without deserializing a Rust struct."
-  },
-  "lash_runtime_effect_replay.outcome_json": {
-    "verdict": "not-serialized-struct",
-    "reason": "The PostgreSQL backend stores and returns the controller-owned opaque terminal JSON string without typed deserialization."
-  },
-  "lash_runtime_effect_replay.error_json": {
-    "verdict": "not-serialized-struct",
-    "reason": "The PostgreSQL backend stores and returns the controller-owned opaque terminal JSON string without typed deserialization."
-  },
-  "lash_await_event_waits.scope_json": {
-    "verdict": "deliberately-excluded",
-    "reason": "Await scope identity is encoded and compared by the shared await-event coordinator; enroll the whole keyed-promise protocol together."
-  },
-  "lash_await_event_waits.wait_json": {
-    "verdict": "deliberately-excluded",
-    "reason": "Await wait identity is encoded and compared by the shared await-event coordinator; enroll the whole keyed-promise protocol together."
-  },
-  "lash_await_event_waits.terminal_json": {
-    "verdict": "deliberately-excluded",
-    "reason": "Await terminal values are controller-owned Resolution JSON; enroll them with scope and wait as one keyed-promise protocol."
   },
   "lash_trigger_subscriptions.record_json": {
     "verdict": "deliberately-excluded",

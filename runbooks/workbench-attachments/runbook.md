@@ -69,7 +69,7 @@ cross-surface identity, not the quality of the model's image description.
    `<data-dir>/attachments/` directory as a prior store layout, while Postgres still wires
    `FileAttachmentStore` under `<data-dir>/attachments`. The deterministic companion gate
    reopens the backend's attachment store and separately runs the usage restart assertion
-   against both session-store backends.
+   against the SQLite session-store backend.
 6. **The transcript image is the attachment contract.** The matching user row must contain
    exactly one `a.message-attachment[data-attachment-id]` wrapping exactly one `<img>` whose
    `src` equals the link's `href`; the id on the link and the URL on both must agree with the
@@ -81,13 +81,9 @@ cross-surface identity, not the quality of the model's image description.
 ## Working material
 
 - First run `just agent-workbench-attachment-usage-gate <gate-port>` on **its own port**,
-  not the browser stack's: the gate derives its managed Postgres port and its container
-  names from the port it is given and holds the worktree gate while it runs, so sharing one
-  number serialises the row and invites a container-name collision. It is model-free and
-  asserts upload → reference → persist → retrieve, non-zero internally consistent usage,
-  JSONL `llm_call_completed` agreement, and exact usage after reconstruction. Its managed
-  Postgres stays inside the worktree block at offset `+0..+9`, selected by the last decimal
-  digit of `<port>` (`3042` selects `+2`); its container name also derives from `<port>`.
+  not the browser stack's. It is model-free and asserts upload → reference → persist →
+  retrieve, non-zero internally consistent usage, JSONL `llm_call_completed` agreement, and
+  exact usage after reconstruction on the SQLite session-store backend.
 - Boot the browser scenario with a fresh directory:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
   (the `just agent-workbench <port>` recipe is the same command, but it does not export
@@ -200,7 +196,7 @@ confirm the workbench and its managed services are gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Deterministic companion | SQLite + Postgres gate command exits zero | | command log |
+| Deterministic companion | SQLite gate command exits zero | | command log |
 | Rendered upload | attached filename is visible before send | | `01-attached.png`, upload JSON |
 | Byte fidelity | source and pre-restart retrieval hashes/lengths agree | | source, `01-before-restart.png` |
 | Turn reference | `/api/turn` carries the upload id; correlated upload/request/wire traces carry matching reference and content facts | | request capture, `02-upload-trace.json`, `02-provider-request.json`, `02-provider-wire.json` |

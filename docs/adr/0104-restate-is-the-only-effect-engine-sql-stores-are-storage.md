@@ -6,7 +6,9 @@ Accepted 2026-09-24 (FIG-3669). It records Sam's ruling on FIG-3664, including
 the hard constraint that the effect interface stays engine-neutral. **Not yet
 implemented**: FIG-3665 through FIG-3668, FIG-3670, FIG-3585, FIG-3600 and the
 B2 backend-construction cutover build it, in the order under *Order*. Nothing below describes current behaviour unless it says
-so.
+so. Implemented so far: step 2 (FIG-3585) and step 3 (FIG-3667): the
+PostgreSQL engine is deleted, `PostgresBackend` with it, and a PostgreSQL
+deployment runs `RestateBackend<PostgresStoreSet>`.
 
 Supersedes [ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md); see
 "What 0104 kept" at the end of that ADR. Amends every ADR that specifies

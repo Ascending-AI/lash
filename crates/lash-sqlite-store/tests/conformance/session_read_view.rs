@@ -4,6 +4,12 @@ use super::SUBSTRATE;
 use crate::backend_fixture::TestBackend;
 
 lash_conformance::session_read_view_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory();
+    (backend, factory)
+});
+
+lash_conformance::session_failure_evidence_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(
         1_800_000_000_000,
     ));
@@ -12,7 +18,6 @@ lash_conformance::session_read_view_tests!({
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
     .await;
-    let factory = backend.session_store_factory();
     let law_backend = backend.as_backend();
-    (backend, law_backend, factory, move || clock.advance(1))
+    (backend, law_backend, move || clock.advance(1))
 });

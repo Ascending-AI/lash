@@ -66,8 +66,7 @@ use lash_core_execution::{
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessIncarnation, ProcessLease,
     ProcessLeaseCompletion, ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport,
     ProcessRecord, ProcessRef, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
-    ProcessStarted, QueuedWorkStore, RuntimeEffectControllerError, RuntimeError,
-    RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+    ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
     SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory,
@@ -520,12 +519,25 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // whose redrive the session-state generation gate refused, which an older
 // build cannot decode. No relation changes; component-130 catalogs are
 // rejected and recreated.
-const SCHEMA_VERSION: i32 = 131;
+// Version 132 (FIG-3667) deletes the PostgreSQL effect engine: the eight
+// engine tables (`lash_runtime_effect_group`, `lash_runtime_effect_group_child`,
+// `lash_runtime_effect_replay`, `lash_await_event_meta`,
+// `lash_await_event_waits`, `lash_await_event_revoked_sessions`,
+// `lash_effect_scope_retirements`, `lash_turn_cancel_closure_participants`)
+// and the await-event signing-secret seed leave the catalog, and the
+// `postgres_effect_replay_*`, `postgres_await_event_*` and
+// `postgres_effect_journal_retirement` runtime-error codes leave the durable
+// vocabulary. Component-131 catalogs are rejected and recreated: tear down
+// the whole lash schema (or recreate the database) before the new build
+// opens it.
+const SCHEMA_VERSION: i32 = 132;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
     pool: PgPool,
-    await_event_signing_secret: Arc<[u8]>,
+    /// The catalog this storage opened: `<database>.<schema>`, the identity a
+    /// session catalog registers under with its turn-cancel-closure owner.
+    catalog_id: Arc<str>,
 }
 
 type BoundArtifactStores = (
@@ -541,7 +553,7 @@ pub struct PostgresSessionStoreFactory {
     #[cfg(feature = "testing")]
     fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
-    await_event_signing_secret: Arc<[u8]>,
+    catalog_id: Arc<str>,
     process_registry_shared: bool,
     clock: Arc<dyn lash_core_execution::Clock>,
     turn_cancel_closure_owner:
@@ -710,10 +722,10 @@ impl PostgresStorage {
             .connect(database_url)
             .await
             .map_err(store_sqlx_error)?;
-        let await_event_signing_secret = ensure_schema(&pool, schema_open_options(&config)).await?;
+        let catalog_id = ensure_schema(&pool, schema_open_options(&config)).await?;
         Ok(Self {
             pool,
-            await_event_signing_secret: await_event_signing_secret.into(),
+            catalog_id: catalog_id.into(),
         })
     }
 
@@ -743,10 +755,10 @@ impl PostgresStorage {
         pool: PgPool,
         config: PostgresStoreConfig,
     ) -> Result<Self, StoreError> {
-        let await_event_signing_secret = ensure_schema(&pool, schema_open_options(&config)).await?;
+        let catalog_id = ensure_schema(&pool, schema_open_options(&config)).await?;
         Ok(Self {
             pool,
-            await_event_signing_secret: await_event_signing_secret.into(),
+            catalog_id: catalog_id.into(),
         })
     }
 
@@ -755,8 +767,8 @@ impl PostgresStorage {
     ///
     /// This testing-only seam exists so the performance harness can subtract the
     /// structural catalog gate from an otherwise identical open. It still checks
-    /// the unconditional component-version boundary and the signing-secret data
-    /// precondition; only structural verification is skipped.
+    /// the unconditional component-version boundary; only structural
+    /// verification is skipped.
     #[cfg(feature = "testing")]
     pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
         let found_version: Option<i32> =
@@ -768,30 +780,12 @@ impl PostgresStorage {
         if found_version != Some(SCHEMA_VERSION) {
             return Err(version_mismatch_error(found_version, None));
         }
-        let signing_secret: Option<Vec<u8>> = sqlx::query_scalar(
-            crate::await_event::wait_sql()
-                .meta_postgres
-                .select_signing_secret
-                .sql(),
-        )
-        .fetch_optional(&pool)
-        .await
-        .map_err(store_sqlx_error)?;
-        let signing_secret = signing_secret.ok_or_else(|| {
-            StoreError::Backend(
-                "Postgres await-event signing secret row is missing from pre-verified pool"
-                    .to_string(),
-            )
-        })?;
-        if signing_secret.len() != AWAIT_EVENT_SIGNING_SECRET_BYTES {
-            return Err(StoreError::Backend(format!(
-                "Postgres await-event signing secret has {} bytes, expected {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
-                signing_secret.len()
-            )));
-        }
+        let catalog_id = crate::schema::read_catalog_id(&pool)
+            .await
+            .map_err(store_sqlx_error)?;
         Ok(Self {
             pool,
-            await_event_signing_secret: signing_secret.into(),
+            catalog_id: catalog_id.into(),
         })
     }
 
@@ -998,7 +992,7 @@ impl PostgresStorage {
         warn_postgres_process_registry_not_wired(path);
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
-            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
+            catalog_id: Arc::clone(&self.catalog_id),
             process_registry_shared: false,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
@@ -1018,7 +1012,7 @@ impl PostgresStorage {
     ) -> PostgresSessionStoreFactory {
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
-            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
+            catalog_id: Arc::clone(&self.catalog_id),
             process_registry_shared: true,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
@@ -1100,17 +1094,6 @@ impl PostgresStorage {
             #[cfg(feature = "lashlang")]
             publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
-    }
-
-    pub fn effect_host(&self) -> PostgresEffectHost {
-        PostgresEffectHost::new(self)
-    }
-
-    pub fn runtime_effect_controller(
-        &self,
-        scope: ExecutionScope,
-    ) -> PostgresRuntimeEffectController {
-        PostgresRuntimeEffectController::new(self, scope)
     }
 }
 
@@ -1202,8 +1185,6 @@ macro_rules! pg_sim_fault {
 #[path = "postgres/fault_injection.rs"]
 mod fault_injection;
 
-mod await_event;
-
 #[path = "postgres/artifact_store.rs"]
 mod artifact_store;
 #[path = "postgres/attachments.rs"]
@@ -1214,8 +1195,6 @@ mod backend;
 mod blobs;
 #[path = "postgres/connection_sql.rs"]
 mod connection_sql;
-#[path = "postgres/effect_replay.rs"]
-mod effect_replay;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;
 #[path = "postgres/pending_turn_inputs.rs"]
@@ -1277,23 +1256,19 @@ mod turn_ingress;
 #[path = "postgres/turn_input_settlement.rs"]
 mod turn_input_settlement;
 
-pub use backend::{PostgresBackend, PostgresBackendOptions, PostgresStoreSet};
-pub use effect_replay::{
-    PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
-};
+pub use backend::PostgresStoreSet;
 pub use lash_core_execution::store_backend_support::required_constraints::{
     RequiredConstraintFinding, RequiredConstraintReport,
 };
 pub use preflight::PostgresStorePreflight;
 pub use process_definitions::PostgresProcessDefinitionRegistry;
-use schema_shape::{
-    AWAIT_EVENT_SIGNING_SECRET_BYTES, ComponentVersion, SchemaShape, read_component_version,
-    read_search_path, resolve_installation, verify_schema_migration_source_shape,
-    verify_schema_shape,
-};
 pub use schema_shape::{
     ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,
     SchemaProvisioning, SchemaReport, UniqueGuard,
+};
+use schema_shape::{
+    ComponentVersion, SchemaShape, read_component_version, read_search_path, resolve_installation,
+    verify_schema_migration_source_shape, verify_schema_shape,
 };
 use {
     pending_turn_inputs::*, process_helpers::*, queued_work::*, runtime_persistence::*, schema::*,
@@ -1316,8 +1291,6 @@ mod graph_integrity_tests;
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
 mod postgres_test_support;
-#[cfg(test)]
-mod rendered_sql_pin_tests;
 
 #[cfg(test)]
 mod tests;

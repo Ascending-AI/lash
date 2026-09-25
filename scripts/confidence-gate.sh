@@ -363,8 +363,6 @@ build_conformance_helpers() {
   fi
   cargo build -p lash-internal-sqlite-store --locked --features testing \
     --example sqlite-await-event-helper "${target_args[@]}"
-  cargo build -p lash-internal-postgres-store --locked --features testing \
-    --example postgres-await-event-helper "${target_args[@]}"
 }
 
 gate_postgres_image="postgres:16-alpine"
@@ -507,7 +505,6 @@ declare -A confidence_artifact_paths=(
   [sqlite_substrate_faults]="sim/sqlite-substrate-faults/sqlite-faults.json"
   [env_gated_lanes]="sim/env-gated-lanes.json"
   [full_lane_prerequisites]="sim/full-lane-prerequisites.json"
-  [postgres_effect_history_status]="sim/postgres-effect-history-status.json"
   [restate_postgres_workers_e2e]="sim/restate-postgres-workers-e2e.json"
   [backend_contention]="sim/backend-contention/backend-contention.json"
   [postgres_current_contention]="sim/postgres-current/status.json"
@@ -545,35 +542,35 @@ confidence_schedule_table=(
   "fast:fault-matrix|provider|fault-matrix|transport properties and provider failure evidence|"
   "fast:fault-matrix|store|fault-matrix|SQLite backend fault-matrix conformance|"
   "fast:sim-unit-perf-guards|sim|sim-unit-perf-guards|simulation unit/oracle and performance-guard identity suites|"
-  "fast:sim-generated|sim|sim-generated|generated deterministic simulation lane|sim_summary,provider_transport_exclusions,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,restate_postgres_workers_e2e"
+  "fast:sim-generated|sim|sim-generated|generated deterministic simulation lane|sim_summary,provider_transport_exclusions,env_gated_lanes,full_lane_prerequisites,restate_postgres_workers_e2e"
   "fast:minimizer-fixtures|sim|minimizer-fixtures|simulation minimizer fixtures|failing_minimizer_fixtures"
   "fast:summary|all|summary|validate all unscoped fast shard summaries|"
   "sim-search|sim|sim-search|deterministic simulation search shard at full budgets|"
-  "default|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_current_contention,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "default|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
-  "default|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "default|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "default|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "default|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "default|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary,sim_search_run,provider_transport_exclusions,failing_minimizer_fixtures,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "broad|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
+  "default|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_current_contention,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "default|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
+  "default|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "default|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "default|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "default|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "default|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary,sim_search_run,provider_transport_exclusions,failing_minimizer_fixtures,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "broad|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|store|postgres-conformance|bounded Postgres conformance and dynamic backend differential|postgres_conformance"
-  "broad|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
-  "broad|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "broad|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "broad|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "broad|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "broad|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary,sim_search_run,provider_transport_exclusions,failing_minimizer_fixtures,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
+  "broad|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
+  "broad|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "broad|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "broad|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "broad|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "broad|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary,sim_search_run,provider_transport_exclusions,failing_minimizer_fixtures,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|all|model-replay|model replay evidence|model_replay_evidence"
-  "full|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
+  "full|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|store|postgres-conformance|full Postgres conformance and dynamic backend differential|postgres_conformance"
-  "full|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
+  "full|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
   "full|process|restate-workers|Restate/Postgres/S3 worker e2e|restate_postgres_workers_e2e"
-  "full|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "full|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "full|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "full|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "full|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary,sim_search_run,provider_transport_exclusions,failing_minimizer_fixtures,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
+  "full|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "full|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "full|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "full|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
+  "full|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary,sim_search_run,provider_transport_exclusions,failing_minimizer_fixtures,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|all|model-replay|model replay evidence|model_replay_evidence"
 )
 
@@ -1630,7 +1627,6 @@ write_sim_lane_declarations() {
   "backend_contention": "$(scheduled_artifact_path backend_contention "$(schedule_lane_fallback_reason)")",
   "model_replay_evidence": "$(scheduled_artifact_path model_replay_evidence "$(schedule_lane_fallback_reason)")",
   "postgres_backend_conformance": "${postgres_status}",
-  "postgres_native_effect_history_replay": "native_postgres_runtime_effect_controller",
   "postgres_env": "LASH_POSTGRES_DATABASE_URL"
 }
 EOF
@@ -1702,37 +1698,7 @@ write_full_lane_prerequisites() {
   "true_full_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full",
   "bounded_broad_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_BROAD_SIM_SEEDS=2 LASH_BROAD_SIM_MAX_BOUNDARIES=128 LASH_MUTATION_JOBS=2 LASH_MUTATION_TIMEOUT_SECONDS=300 scripts/confidence-gate.sh broad",
   "bootstrap_true_full_command": "LASH_CONFIDENCE_BOOTSTRAP=1 LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full",
-  "postgres_env": "LASH_POSTGRES_DATABASE_URL",
-  "postgres_native_effect_history_replay": {
-    "status": "native_postgres_runtime_effect_controller",
-    "controller": "lash_postgres_store::PostgresRuntimeEffectController",
-    "smallest_required_api_change": "none"
-  }
-}
-EOF
-}
-
-write_postgres_effect_history_status() {
-  mkdir -p "${out_dir}/sim"
-  cat >"${out_dir}/sim/postgres-effect-history-status.json" <<EOF
-{
-  "schema": "lash.confidence.postgres-effect-history-status.v1",
-  "lane": "${lane}",
-  "status": "native",
-  "native_postgres_effect_history_replay": "claimed",
-  "controller": "lash_postgres_store::PostgresRuntimeEffectController",
-  "store_table": "lash_runtime_effect_replay",
-  "semantics": [
-    "scope_id plus replay_key primary key",
-    "stable envelope hash conflict rejection",
-    "lease owner and token fenced finalize",
-    "completed and failed outcome replay",
-    "sleep due_at_ms preservation"
-  ],
-  "evidence": [
-    "lash-postgres-store env-gated RuntimeEffectController conformance"
-  ],
-  "smallest_required_api_change": "none"
+  "postgres_env": "LASH_POSTGRES_DATABASE_URL"
 }
 EOF
 }
@@ -2870,8 +2836,6 @@ write_confidence_summary() {
   "model_replay_evidence": "$(scheduled_existing_artifact_path model_replay_evidence not_run)",
   "restate_postgres_workers_e2e": "$(scheduled_existing_artifact_path restate_postgres_workers_e2e not_written)",
   "provider_transport_exclusions": "$(scheduled_existing_artifact_path provider_transport_exclusions not_written)",
-  "postgres_native_effect_history_replay": "native_postgres_runtime_effect_controller",
-  "postgres_effect_history_status": "$(scheduled_existing_artifact_path postgres_effect_history_status not_written)",
   "artifact_contract": {
     "schema": "lash.confidence.summary-artifact-contract.v1",
     "full_lane": {
@@ -3004,12 +2968,11 @@ if errors:
 PY
 }
 
-# The four lane declaration artifacts every lane that reaches the simulation
-# evidence writes. One list, so a fifth cannot be added to one caller only.
+# The three lane declaration artifacts every lane that reaches the simulation
+# evidence writes. One list, so a fourth cannot be added to one caller only.
 write_sim_lane_evidence() {
   write_sim_lane_declarations
   write_full_lane_prerequisites
-  write_postgres_effect_history_status
   write_restate_postgres_workers_e2e_lane_status
 }
 

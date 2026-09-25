@@ -17,7 +17,6 @@ pub(super) fn benchmark_stream_profile_for_request(
         scenario,
         RuntimePerfScenario::RlmSubagentSpawn
             | RuntimePerfScenario::DurableAgentChildTurnSqlite
-            | RuntimePerfScenario::DurableAgentChildTurnPostgres
             | RuntimePerfScenario::RlmObliqueStackMix
             | RuntimePerfScenario::DeepTurnComposition
     ) || scenario.is_high_traffic())
@@ -86,8 +85,7 @@ finish({ len: result.value });"#,
             }
         }
         RuntimePerfScenario::StandardToolCalls
-        | RuntimePerfScenario::DurableStandardToolTurnSqlite
-        | RuntimePerfScenario::DurableStandardToolTurnPostgres => {
+        | RuntimePerfScenario::DurableStandardToolTurnSqlite => {
             if request_has_tool_result(request) {
                 text_profile("runtime perf benchmark ok")
             } else {
@@ -285,9 +283,7 @@ finish("runtime perf benchmark ok");"#,
             );
             text_profile(text)
         }
-        RuntimePerfScenario::RlmToolCalls
-        | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
-        | RuntimePerfScenario::DurableRlmCheckpointTurnPostgres => {
+        RuntimePerfScenario::RlmToolCalls | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite => {
             let text = typescript_block(
                 r#"
 const first = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 });
@@ -407,8 +403,7 @@ finish("runtime perf benchmark ok");"#
             text_profile(text)
         }
         RuntimePerfScenario::RlmSubagentSpawn
-        | RuntimePerfScenario::DurableAgentChildTurnSqlite
-        | RuntimePerfScenario::DurableAgentChildTurnPostgres => {
+        | RuntimePerfScenario::DurableAgentChildTurnSqlite => {
             let text = typescript_block(
                 r#"
 const spawnChild = async () => {

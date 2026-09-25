@@ -18,7 +18,7 @@
 //! * `recreate` — perform the recreation bump (drop every `lash_*` object, then
 //!   open), and record that nothing seeded survived it.
 //! * `health` — verify the three durable surfaces on the recreated store, reusing
-//!   the pre-bump session ids: a session opens and a turn commits, a background
+//!   the pre-bump session ids: a session opens and a commit lands, a background
 //!   process takes a wake through the queued-work rail and reaches a terminal,
 //!   and a trigger fires and starts its target process.
 //!
@@ -27,7 +27,6 @@
 
 use lash::ProcessId;
 use lash::SessionId;
-use lash::TurnId;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -60,31 +59,27 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// run.
 const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// The tables component 101 lacks: the cancellation affected-input child table
-/// component 102 installed (FIG-3263), the queued-run tables, the effect-group
-/// child table, the session ingress component 127 installs (FIG-3540), and
-/// the park-feed clock and event tables component 128 installs (FIG-3659).
-const POST_FLOOR_TABLES: [&str; 7] = [
+/// component 102 installed (FIG-3263), the queued-run tables, the session
+/// ingress component 127 installs (FIG-3540), and the park-feed clock and
+/// event tables component 128 installs (FIG-3659).
+const POST_FLOOR_TABLES: [&str; 6] = [
     "lash_queued_run_members",
     "lash_queued_runs",
-    "lash_runtime_effect_group_child",
     "lash_session_ingress",
     "lash_turn_cancel_affected_inputs",
     "lash_turn_park_clock",
     "lash_turn_park_events",
 ];
-/// The post-floor indexes the fixture must drop by name: the child table's own
-/// guards drop with it, and component 102 added no index over a table the floor
-/// already had. Component 110's commit-order unique lands on the replay table,
-/// which predates the floor, so it drops by name (FIG-3409).
-const POST_FLOOR_INDEXES: [&str; 1] = ["uq_lash_runtime_effect_replay_commit_seq"];
+/// The post-floor indexes the fixture must drop by name: a post-floor table's
+/// own guards drop with it, and no post-floor index sits on a table the floor
+/// already had.
+const POST_FLOOR_INDEXES: [&str; 0] = [];
 /// The columns absent from component 101: the trigger mutation-receipt owner
 /// columns component 105 installed (FIG-1956) — the receipts table itself
 /// predates the floor, so its post-floor columns drop by name — the typed
-/// parent payload component 109 installed (FIG-3418) and the effect-group
-/// arbitration state component 110 installs (FIG-3409): the commit-order
-/// counter and lifecycle on the group, the renamed arity expectation, and the
-/// commit protocol columns on the replay row.
-const POST_FLOOR_COLUMNS: [(&str, &str); 17] = [
+/// parent payload component 109 installed (FIG-3418), and the columns later
+/// components added to pre-floor tables.
+const POST_FLOOR_COLUMNS: [(&str, &str); 11] = [
     ("lash_pending_turn_inputs", "submitted_ingress_json"),
     ("lash_pending_turn_inputs", "claim_bound_turn_id"),
     ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
@@ -92,56 +87,26 @@ const POST_FLOOR_COLUMNS: [(&str, &str); 17] = [
     ("lash_trigger_mutation_receipts", "owner_kind"),
     ("lash_trigger_mutation_receipts", "owner_id"),
     ("lash_parent_end_plans", "parent_payload"),
-    ("lash_runtime_effect_group", "next_commit_seq"),
-    ("lash_runtime_effect_group", "lifecycle"),
-    ("lash_runtime_effect_group", "expected_children"),
-    ("lash_runtime_effect_replay", "commit_state"),
-    ("lash_runtime_effect_replay", "commit_seq"),
-    ("lash_runtime_effect_replay", "drain_input"),
     ("lash_process_segment_handovers", "started_json"),
     ("lash_session_meta", "drive_epoch"),
     ("lash_session_meta", "drive_admission_id"),
     ("lash_session_meta", "admission_base_checkpoint_ref"),
 ];
 /// The named constraints absent from component 101 on tables that survive the
-/// table drops — component 114's effect-replay additions (FIG-1947), which sit
-/// on the pre-floor replay table. The membership table's own foreign key drops
-/// with it, so only the replay table's four land here. They must drop before
-/// `POST_FLOOR_COLUMNS`: `DROP COLUMN commit_state` cannot proceed while the
-/// rank-pairing CHECK still names the column.
-const POST_FLOOR_CONSTRAINTS: [(&str, &str); 4] = [
-    (
-        "lash_runtime_effect_replay",
-        "ck_runtime_effect_replay_outcome_json",
-    ),
-    (
-        "lash_runtime_effect_replay",
-        "ck_runtime_effect_replay_error_json",
-    ),
-    (
-        "lash_runtime_effect_replay",
-        "ck_runtime_effect_replay_settlement_seq",
-    ),
-    (
-        "lash_runtime_effect_replay",
-        "fk_runtime_effect_replay_group",
-    ),
-];
+/// table drops: none.
+const POST_FLOOR_CONSTRAINTS: [(&str, &str); 0] = [];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 2] = [
-    "lash_turn_cancel_affected_inputs",
-    "uq_lash_runtime_effect_replay_commit_seq",
-];
+const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
 /// What the newest generation alone introduced — the `introduced_relations`
 /// and `introduced_constraints` of the migration out of the immediate
 /// predecessor version. The divergent fixture records that predecessor over
 /// the *current* catalog, so these are exactly the artifacts its refusal must
 /// enumerate.
 ///
-/// The retained 129 -> 130 generation introduced no relation or constraint
-/// the refusal would name. Component 131 (FIG-3735) is destructive: no
-/// 130 → 131 arm exists, so the component-130 stamp over the current catalog
+/// The retained 130 -> 131 generation introduced no relation or constraint
+/// the refusal would name. Component 132 (FIG-3667) is destructive: no
+/// 131 → 132 arm exists, so the component-131 stamp over the current catalog
 /// is refused for having no applicable migration and names no artifacts.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A destructive generation has no migration arm, so a predecessor stamp over
@@ -155,7 +120,9 @@ const SESSION_IDS: [&str; 2] = ["version-bump-live-alpha", "version-bump-live-be
 const PROCESS_ID: &str = "version-bump-live-process";
 const WAKE_EVENT_TYPE: &str = "runbook.wake";
 const TRIGGER_SOURCE_TYPE: &str = "runbook.button.pressed";
-const TURN_PROMPT: &str = "commit one turn";
+/// Nothing listens here: the harness runs no Restate server, and nothing it
+/// does is an effect.
+const UNREACHABLE_RESTATE_INGRESS: &str = "http://127.0.0.1:9";
 
 /// Prose that only the divergence refusal carries
 /// (`schema_migration_divergence_error`).
@@ -382,52 +349,27 @@ async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
     Ok(())
 }
 
-/// One real turn against the store under test: the provider is deterministic, the commit is
-/// not.
-async fn commit_one_turn(
+/// One real session commit against the store under test, through the facade a
+/// deployment runs: a core over `RestateBackend<PostgresStoreSet>` appends a
+/// message node under the session's lease. PostgreSQL is storage only (ADR
+/// 0104) and the append journals no effect, so the harness runs no Restate
+/// server: an append that reached the engine would fail against the
+/// unreachable ingress instead of passing.
+async fn commit_one_append(
     storage: &PostgresStorage,
     session_id: &SessionId,
     tag: &str,
 ) -> Result<String> {
-    let attachments = tempfile::tempdir().context("attachment dir for version-bump turn")?;
-    // A cell the session cannot execute never reaches a terminal state, so the
-    // scripted reply is a real cell of the language the session runs.
-    let scripted = lash_restate_postgres_workers_e2e::scripted_finish_cell("\"ok\"");
-    let provider =
-        lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
-            .kind("version-bump-recreation")
-            .complete(move |_request| {
-                let text = scripted.clone();
-                async move {
-                    Ok(lash::provider::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::Text {
-                            text: text.to_string(),
-                            response_meta: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..lash::provider::LlmResponse::default()
-                    })
-                }
-            })
-            .build()
-            .into_handle();
-    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+    let attachments = tempfile::tempdir().context("attachment dir for version-bump append")?;
+    let backend = lash_restate_postgres_workers_e2e::e2e_backend(
         storage,
         Arc::new(lash::persistence::FileAttachmentStore::new(
             attachments.path().to_path_buf(),
         )),
-    ));
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build(),
-        backend.as_ref(),
+        UNREACHABLE_RESTATE_INGRESS,
+        lash_restate::RestateAuthorityId::new("version-bump-recreation")?,
     );
-    let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .provider(provider)
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .model(
             lash::ModelSpec::builder("version-bump-mock")
                 .context_window_tokens(200_000)
@@ -443,29 +385,25 @@ async fn commit_one_turn(
             uuid::Uuid::new_v4().to_string(),
         ))
         .context("build version-bump core")?;
-
-    let session = {
-        core.session(session_id)
-            .open()
-            .await
-            .with_context(|| format!("open session `{session_id}`"))?
-    };
-    let turn_id = TurnId::from(format!("version-bump-{tag}-{session_id}"));
-    let output = session
-        .turn(lash::TurnInput::text(TURN_PROMPT))
-        .turn_id(turn_id.clone())
-        .run()
+    let session = core
+        .session(session_id)
+        .open()
         .await
-        .with_context(|| format!("run turn on session `{session_id}`"))?;
-    anyhow::ensure!(
-        output.final_value() == Some(&json!("ok")),
-        "turn on `{session_id}` did not finish with the scripted value: {:?}",
-        output.final_value()
-    );
-    Ok(turn_id.to_string())
+        .with_context(|| format!("open session `{session_id}`"))?;
+    let append_id = format!("version-bump-{tag}-{session_id}");
+    session
+        .admin()
+        .state()
+        .append_messages(vec![lash_core::PluginMessage::text(
+            lash_core::MessageRole::User,
+            append_id.clone(),
+        )])
+        .await
+        .with_context(|| format!("append a message on session `{session_id}`"))?;
+    Ok(append_id)
 }
 
-/// Durable evidence that a turn landed: the session head advanced past its
+/// Durable evidence that a commit landed: the session head advanced past its
 /// created revision and the committed graph carries nodes.
 async fn committed_session_facts(pool: &PgPool, session_id: &SessionId) -> Result<(i64, i64)> {
     let head_revision: i64 =
@@ -606,9 +544,9 @@ async fn seed(database_url: &str) -> Result<()> {
     let expected_version = recorded_version(&pool).await?;
 
     create_sessions(&storage).await?;
-    let mut turn_ids = Vec::new();
+    let mut append_ids = Vec::new();
     for session_id in SESSION_IDS {
-        turn_ids.push(commit_one_turn(&storage, &SessionId::from(session_id), "seed").await?);
+        append_ids.push(commit_one_append(&storage, &SessionId::from(session_id), "seed").await?);
     }
     let mut committed_sessions = 0;
     let mut committed_nodes = 0;
@@ -685,7 +623,7 @@ async fn seed(database_url: &str) -> Result<()> {
         "trigger_occurrence_id": trigger_report.occurrence_id,
         "trigger_reservations": trigger_report.reservations,
         "trigger_process_ids": [trigger_report.process_id],
-        "turn_ids": turn_ids,
+        "append_ids": append_ids,
         "committed_sessions": committed_sessions,
         "committed_nodes": committed_nodes,
         "pending_wake_sequence": pending_wake.sequence,
@@ -999,12 +937,12 @@ async fn health(database_url: &str) -> Result<()> {
     let recorded = recorded_version(&pool).await?;
 
     // Gate 1: the same session ids a live deployment used open on the recreated
-    // store, and a turn commits.
+    // store, and a session commit lands.
     create_sessions(&storage).await?;
     let mut committed_sessions = 0;
     let mut committed_nodes = 0;
     for session_id in SESSION_IDS {
-        commit_one_turn(&storage, &SessionId::from(session_id), "health").await?;
+        commit_one_append(&storage, &SessionId::from(session_id), "health").await?;
         let (head_revision, nodes) =
             committed_session_facts(&pool, &SessionId::from(session_id)).await?;
         if head_revision > 0 && nodes > 0 {
@@ -1012,7 +950,7 @@ async fn health(database_url: &str) -> Result<()> {
         }
         committed_nodes += nodes;
     }
-    let session_turn_committed = committed_sessions == SESSION_IDS.len();
+    let session_committed = committed_sessions == SESSION_IDS.len();
 
     // Gate 2: a background process registers, its wake reaches the target
     // session through the queued-work rail, and the process reaches a terminal.
@@ -1086,7 +1024,7 @@ async fn health(database_url: &str) -> Result<()> {
         "checkpoint": "verified_recreated_deployment",
         "recorded_version": recorded,
         "session_ids_reused": SESSION_IDS,
-        "session_turn_committed": session_turn_committed,
+        "session_committed": session_committed,
         "committed_sessions": committed_sessions,
         "committed_nodes": committed_nodes,
         "process_ran_to_terminal": process_ran_to_terminal,
@@ -1103,7 +1041,7 @@ async fn health(database_url: &str) -> Result<()> {
     // Keep the harness honest: the phase fails loudly rather than reporting a
     // false gate.
     anyhow::ensure!(
-        session_turn_committed && process_ran_to_terminal && trigger_fired,
+        session_committed && process_ran_to_terminal && trigger_fired,
         "post-bump verification did not pass every gate"
     );
     Ok(())

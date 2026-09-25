@@ -10,11 +10,9 @@
 # turn wall time, leaf window, peak in-flight concurrency, journal rows, and
 # the load the rep ran under.
 #
-# The three legs:
+# The two legs:
 #
 #   * `sqlite`   — runs in-process on a throwaway database file.
-#   * `postgres` — wrapped in `scripts/ci/with-service.sh pg16`, so the lane
-#                  measures the same image and credentials CI measures.
 #   * `restate`  — starts `restatedev/restate` in a throwaway container on
 #                  ephemeral loopback ports, serves the probe endpoint from
 #                  the bin, registers the deployment, and counts the
@@ -35,7 +33,7 @@
 #
 # Options:
 #   --archive-root DIR    evidence root (or LASH_PERF_BASELINE_ROOT); required
-#   --backends LIST       comma list of sqlite,postgres,restate (default: all)
+#   --backends LIST       comma list of sqlite,restate (default: all)
 #   --widths LIST         batch widths (default: 2,8,50)
 #   --reps N              repetitions per cell (default: 5)
 #   --producers LIST      comma list of standard,rlm (default: both)
@@ -60,7 +58,7 @@ die() {
 }
 
 archive_root="${LASH_PERF_BASELINE_ROOT:-}"
-backends="sqlite,postgres,restate"
+backends="sqlite,restate"
 widths="2,8,50"
 reps=5
 producers="standard,rlm"
@@ -154,14 +152,6 @@ run_sqlite() {
     --producers "$producers" --out "$out" --db-path "$scratch/sqlite-backend"
 }
 
-run_postgres() {
-  local out="$destination/postgres.jsonl"
-  commands+=("scripts/ci/with-service.sh pg16 -- $bin --backend postgres --widths $widths --reps $reps --producers $producers --out $out")
-  bash scripts/ci/with-service.sh pg16 -- \
-    "$bin" --backend postgres --widths "$widths" --reps "$reps" \
-    --producers "$producers" --out "$out"
-}
-
 wait_for_port() {
   local port="$1" what="$2" deadline=$((SECONDS + 60))
   until (echo >"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; do
@@ -209,7 +199,6 @@ IFS=',' read -ra backend_list <<<"$backends"
 for backend in "${backend_list[@]}"; do
   case "$backend" in
     sqlite) run_sqlite ;;
-    postgres) run_postgres ;;
     restate) run_restate ;;
     *) die "unknown backend $backend" ;;
   esac

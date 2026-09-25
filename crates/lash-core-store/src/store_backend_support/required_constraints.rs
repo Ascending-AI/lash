@@ -592,134 +592,84 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
             "owner_kind IN ('session', 'host', 'platform')",
         ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_replay",
             "ck_runtime_effect_replay_status",
             "status IN ('in_progress', 'completed', 'failed')",
         ),
-        rendered(
-            "lash_runtime_effect_replay",
-            "ck_runtime_effect_replay_status",
-            "status IN ('in_progress', 'completed', 'failed')",
-        ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_group",
             "ck_runtime_effect_group_wake",
             "wake IN ('first', 'first_success', 'all')",
         ),
-        rendered(
-            "lash_runtime_effect_group",
-            "ck_runtime_effect_group_wake",
-            "wake IN ('first', 'first_success', 'all')",
-        ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_group",
             "ck_runtime_effect_group_loser_disposition",
             "loser_disposition IN ('run_to_completion', 'cancel')",
         ),
-        rendered(
-            "lash_runtime_effect_group",
-            "ck_runtime_effect_group_loser_disposition",
-            "loser_disposition IN ('run_to_completion', 'cancel')",
-        ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_replay",
             "ck_runtime_effect_replay_commit_state",
             "commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')",
         ),
-        rendered(
-            "lash_runtime_effect_replay",
-            "ck_runtime_effect_replay_commit_state",
-            "commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')",
-        ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_replay",
             "ck_runtime_effect_replay_commit_seq",
             "(commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)",
         ),
-        rendered(
-            "lash_runtime_effect_replay",
-            "ck_runtime_effect_replay_commit_seq",
-            "(commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)",
-        ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_replay",
             "ck_runtime_effect_replay_drain_input",
             "drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))",
         ),
-        rendered(
-            "lash_runtime_effect_replay",
-            "ck_runtime_effect_replay_drain_input",
-            "drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))",
-        ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_replay",
             "ck_runtime_effect_replay_outcome_json",
             "(status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)",
         ),
-        rendered(
-            "lash_runtime_effect_replay",
-            "ck_runtime_effect_replay_outcome_json",
-            "(status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)",
-        ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_replay",
             "ck_runtime_effect_replay_error_json",
             "(status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)",
         ),
-        rendered(
-            "lash_runtime_effect_replay",
-            "ck_runtime_effect_replay_error_json",
-            "(status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)",
-        ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_replay",
             "ck_runtime_effect_replay_settlement_seq",
             "(settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))",
         ),
-        rendered(
-            "lash_runtime_effect_replay",
-            "ck_runtime_effect_replay_settlement_seq",
-            "(settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))",
-        ),
     ),
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_group",
             "ck_runtime_effect_group_lifecycle",
             "json_extract(lifecycle, '$.type') IN ('live', 'closing', 'settled')",
-        ),
-        rendered(
-            "lash_runtime_effect_group",
-            "ck_runtime_effect_group_lifecycle",
-            "lifecycle->>'type' IN ('live', 'closing', 'settled')",
         ),
     ),
     expected_constraint(
@@ -901,17 +851,12 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     ),
     // `await_event_meta` is carried by the await-event fragment into the
     // effect-replay database, whose inspection must find the check.
-    expected_constraint(
+    sqlite_only_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "await_event_meta",
             "ck_await_event_meta_singleton",
             "singleton = 1",
-        ),
-        rendered(
-            "lash_await_event_meta",
-            "ck_await_event_meta_singleton",
-            "singleton",
         ),
     ),
     // Postgres stores these flags as native BOOLEAN, so the integer-domain

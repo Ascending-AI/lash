@@ -114,10 +114,10 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
 
     def test_an_unnamed_sql_literal_inside_an_owner_module_is_refused(self) -> None:
         self.tree.substitute(
-            "crates/lash-postgres-store/src/postgres/effect_replay.rs",
-            "fn hex_digest(bytes: &[u8]) -> String {",
-            'const STRAY: &str = "DELETE FROM lash_runtime_effect_group WHERE group_key = $9";\n\n'
-            "fn hex_digest(bytes: &[u8]) -> String {",
+            "crates/lash-postgres-store/src/postgres/session_sql.rs",
+            "pub(crate) fn session_sql() -> &'static SessionSql {",
+            'const STRAY: &str = "DELETE FROM lash_runtime_turn_commits WHERE turn_id = $9";\n\n'
+            "pub(crate) fn session_sql() -> &'static SessionSql {",
         )
         self.assert_refused("is not one of this module's declared statements")
 
@@ -144,13 +144,13 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
 
     def test_an_operation_present_in_one_backend_only_and_unmanifested_is_refused(self) -> None:
         self.tree.substitute(
-            "crates/lash-postgres-store/src/await_event.rs",
-            '        cancel_session_promises = "UPDATE await_event_waits',
+            "crates/lash-postgres-store/src/postgres/session_sql.rs",
+            '        delete_retained = "DELETE FROM runtime_turn_commits AS receipt',
             "        /// A PostgreSQL-only operation nobody declared.\n"
-            '        expire_stale = "DELETE FROM await_event_waits WHERE created_at_ms < ?1";\n\n'
-            '        cancel_session_promises = "UPDATE await_event_waits',
+            '        expire_stale = "DELETE FROM runtime_turn_commits WHERE committed_at_ms < ?1";\n\n'
+            '        delete_retained = "DELETE FROM runtime_turn_commits AS receipt',
         )
-        self.assert_refused("await_event_wait.expire_stale")
+        self.assert_refused("turn_commit.expire_stale")
 
     def test_a_manifest_entry_naming_a_backend_that_does_not_declare_it_is_refused(self) -> None:
         self.tree.substitute(
@@ -163,7 +163,7 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
 
     def test_a_manifest_entry_without_a_reason_is_refused(self) -> None:
         text = self.tree.read("crates/lash-store-sql/dialect-only.toml")
-        marker = 'statement = "effect_replay.renew_lease"'
+        marker = 'statement = "attachment_blob.delete_by_id"'
         start = text.index(marker)
         reason_start = text.index("reason =", start)
         reason_end = text.index("\n", reason_start)
@@ -175,7 +175,7 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
 
     def test_a_manifest_entry_without_a_kind_is_refused(self) -> None:
         text = self.tree.read("crates/lash-store-sql/dialect-only.toml")
-        marker = 'statement = "effect_replay.renew_lease"'
+        marker = 'statement = "attachment_blob.delete_by_id"'
         start = text.index(marker)
         kind_start = text.index("kind =", start)
         kind_end = text.index("\n", kind_start)

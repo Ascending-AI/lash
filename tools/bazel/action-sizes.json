@@ -349,13 +349,6 @@
     "peak_bytes": 1837649920,
     "samples": 2297
   },
-  "lash-internal-postgres-store/postgres_await_event_helper": {
-    "cpu_count": 2,
-    "memory_kb": 2097152,
-    "p95_cores": 1.51,
-    "peak_bytes": 1180745728,
-    "samples": 186
-  },
   "lash-internal-postgres-store/preflight_durable_walk": {
     "cpu_count": 2,
     "memory_kb": 1572864,
@@ -776,13 +769,6 @@
     "peak_bytes": 1365065728,
     "samples": 75
   },
-  "lash-restate-postgres-workers-e2e/lash_e2e_frame_crash": {
-    "cpu_count": 2,
-    "memory_kb": 2621440,
-    "p95_cores": 1.98,
-    "peak_bytes": 1581776896,
-    "samples": 73
-  },
   "lash-restate-postgres-workers-e2e/lash_e2e_mock_provider": {
     "cpu_count": 2,
     "memory_kb": 2097152,
@@ -796,13 +782,6 @@
     "p95_cores": 1.53,
     "peak_bytes": 868937728,
     "samples": 69
-  },
-  "lash-restate-postgres-workers-e2e/lash_e2e_process_operator_flow": {
-    "cpu_count": 2,
-    "memory_kb": 2621440,
-    "p95_cores": 1.43,
-    "peak_bytes": 1688776704,
-    "samples": 695
   },
   "lash-restate-postgres-workers-e2e/lash_e2e_runner": {
     "cpu_count": 2,

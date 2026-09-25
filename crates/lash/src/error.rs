@@ -171,7 +171,7 @@ impl EmbedError {
     /// with a replay hash conflict
     /// ([`SqliteEffectReplayHashConflict`](lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict)
     /// or
-    /// [`PostgresEffectReplayHashConflict`](lash_core::RuntimeErrorCode::PostgresEffectReplayHashConflict)),
+    /// [`EffectReplayDivergence`](lash_core::RuntimeErrorCode::EffectReplayDivergence)),
     /// and the input stays bound: cancel it by this receipt.
     ///
     /// The binding is fenced by the aborted turn's claim. If the live fault was

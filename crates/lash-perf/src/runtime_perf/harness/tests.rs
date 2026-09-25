@@ -85,23 +85,11 @@ async fn scenario_wiring_drives_the_benchmark_plugin_list_in_order() {
             vec![TOOLS, "subagents"],
         ),
         (
-            RuntimePerfScenario::DurableAgentChildTurnPostgres,
-            vec![TOOLS, "subagents"],
-        ),
-        (
             RuntimePerfScenario::HighTrafficLoadSqlite,
             vec![TOOLS, "subagents", "runtime_perf_workbench_trigger"],
         ),
         (
-            RuntimePerfScenario::HighTrafficLoadPostgres,
-            vec![TOOLS, "subagents", "runtime_perf_workbench_trigger"],
-        ),
-        (
             RuntimePerfScenario::HighTrafficKneeSqlite,
-            vec![TOOLS, "subagents", "runtime_perf_workbench_trigger"],
-        ),
-        (
-            RuntimePerfScenario::HighTrafficKneePostgres,
             vec![TOOLS, "subagents", "runtime_perf_workbench_trigger"],
         ),
     ];

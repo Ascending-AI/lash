@@ -410,7 +410,6 @@ run_s3_conformance() {
 #
 #   scripts/ci-stack-budget.sh, scripts/confidence-gate.sh fast shards,
 #   scripts/profile_runtime.py, scripts/profile_lashlang.py,
-#   scripts/graceful-drain-e2e.sh, scripts/request-abandon-e2e.sh,
 #   cargo clippy -p slack-clone --features e2e, the Postgres 14/18 majors,
 #   the browser E2E leg, and the package feature checks
 #     Breadth this gate trades for wall-clock. Each resolves a feature graph

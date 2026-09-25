@@ -462,31 +462,6 @@ async fn an_unexpected_column_on_a_lash_table_is_rejected() {
     .await;
 }
 
-/// The await-event signing secret is a data precondition rather than a shape, so
-/// `SchemaCheck::WarnOnly` cannot relax it: without the row there is no secret to
-/// authenticate promises with.
-#[tokio::test]
-async fn a_missing_signing_secret_is_fatal_in_every_mode() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping signing-secret precondition: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    scratch.apply("DELETE FROM lash_await_event_meta").await;
-    for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
-        let error = scratch
-            .open_host_provisioned(check)
-            .await
-            .err()
-            .unwrap_or_else(|| panic!("{check:?} must not open without a signing secret"));
-        assert!(
-            error.to_string().contains("lash_await_event_meta"),
-            "the error must name the table carrying the secret: {error}"
-        );
-    }
-    scratch.cleanup().await;
-}
-
 /// A version stamp naming another generation short-circuits the structural diff:
 /// the database is a different schema generation, so a per-column diff of it would
 /// be noise rather than a diagnosis. The report carries the version finding alone.
@@ -1082,10 +1057,10 @@ async fn component_115_is_refused_at_queued_run_cutover() {
     scratch.cleanup().await;
 }
 
-/// Component 114 is older than the queued-run cutover. The current build
-/// refuses it even when it carries some later effect constraints.
+/// Component 114 is older than the queued-run cutover, so the current build
+/// refuses it.
 #[tokio::test]
-async fn component_114_with_later_constraints_is_refused() {
+async fn component_114_is_refused() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping component-114 divergence refusal: database URL is not set");
         return;
@@ -1093,12 +1068,7 @@ async fn component_114_with_later_constraints_is_refused() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "ALTER TABLE lash_runtime_effect_replay
-                 DROP CONSTRAINT ck_runtime_effect_replay_error_json,
-                 DROP CONSTRAINT ck_runtime_effect_replay_settlement_seq;
-             ALTER TABLE lash_runtime_effect_group_child
-                 DROP CONSTRAINT fk_runtime_effect_group_child_group;
-             UPDATE lash_schema_versions
+            "UPDATE lash_schema_versions
                 SET version = 114
               WHERE component = 'lash-postgres-store'",
         )
@@ -1158,8 +1128,6 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
              ALTER TABLE lash_trigger_subscriptions
                  DROP CONSTRAINT ck_trigger_subscriptions_lifecycle,
                  DROP CONSTRAINT ck_trigger_subscriptions_lifecycle_deleted_at;
-             ALTER TABLE lash_runtime_effect_replay
-                 DROP CONSTRAINT ck_runtime_effect_replay_status;
              UPDATE lash_schema_versions
                 SET version = 65
               WHERE component = 'lash-postgres-store'",
@@ -1220,7 +1188,6 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
         "ck_tool_intent_submissions_kind",
         "ck_trigger_subscriptions_lifecycle",
         "ck_trigger_subscriptions_lifecycle_deleted_at",
-        "ck_runtime_effect_replay_status",
     ])
     .fetch_one(&scratch.pool)
     .await
@@ -1275,44 +1242,9 @@ async fn a_seed_row_under_the_wrong_key_is_rejected() {
     .await;
 }
 
-/// A signing secret seeded at the wrong width used to be an open-time backend
-/// error only, so a host gating its migration CI on the report got a green run and
-/// a red production open. It is a report finding now, while open keeps rejecting
-/// it — and `verify_schema_for` reaches it without needing the open that fails.
-#[tokio::test]
-async fn a_wrong_width_signing_secret_is_a_finding_and_still_fatal_at_open() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping signing-secret width check: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    scratch
-        .apply("UPDATE lash_await_event_meta SET signing_secret = '\\x0102'::bytea")
-        .await;
-    let report = PostgresStorage::verify_schema_for(&scratch.pool)
-        .await
-        .expect("verify the short-secret database");
-    assert!(
-        report.findings.iter().any(|finding| matches!(
-            finding,
-            SchemaFinding::InvalidSeedRow { table, detail }
-                if table == "lash_await_event_meta" && detail.contains("2 bytes")
-        )),
-        "the report must carry the secret width: {:?}",
-        report.findings
-    );
-    let error = scratch
-        .open_host_provisioned(SchemaCheck::Enforce)
-        .await
-        .err()
-        .expect("a short signing secret must not open");
-    assert!(error.to_string().contains("expected 32"), "{error}");
-    scratch.cleanup().await;
-}
-
 /// `verify_schema_for` has to work on the databases it exists for: ones too broken
-/// to open at all. Removing the signing-secret table makes every open fail, in
-/// every mode, and the structured report is the only diagnosis available.
+/// to open. Dropping a table makes the enforcing open fail, and the structured
+/// report is the only diagnosis available.
 #[tokio::test]
 async fn verify_schema_for_describes_a_database_that_cannot_be_opened() {
     let Some(database_url) = database_url() else {
@@ -1320,19 +1252,20 @@ async fn verify_schema_for_describes_a_database_that_cannot_be_opened() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    scratch.apply("DROP TABLE lash_await_event_meta").await;
-    for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
-        assert!(
-            scratch.open_host_provisioned(check).await.is_err(),
-            "{check:?} must not open a database with no signing-secret table"
-        );
-    }
+    scratch.apply("DROP TABLE lash_process_observers").await;
+    assert!(
+        scratch
+            .open_host_provisioned(SchemaCheck::Enforce)
+            .await
+            .is_err(),
+        "Enforce must not open a database with a missing table"
+    );
     let report = PostgresStorage::verify_schema_for(&scratch.pool)
         .await
         .expect("verify_schema_for must not need a successful open");
     assert!(report.findings.iter().any(|finding| matches!(
         finding,
-        SchemaFinding::MissingTable { table } if table == "lash_await_event_meta"
+        SchemaFinding::MissingTable { table } if table == "lash_process_observers"
     )));
     assert!(
         report.to_string().contains("MISSING TABLES"),
@@ -1355,13 +1288,14 @@ async fn a_seed_table_with_mistyped_columns_reports_instead_of_aborting() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "DROP TABLE lash_await_event_meta;
-             CREATE TABLE lash_await_event_meta (
+            "DROP TABLE lash_process_change_clock;
+             CREATE TABLE lash_process_change_clock (
                  singleton TEXT PRIMARY KEY,
-                 signing_secret BYTEA NOT NULL
+                 current_seq BIGINT NOT NULL,
+                 tombstone_compaction_horizon BIGINT NOT NULL DEFAULT 0
              );
-             INSERT INTO lash_await_event_meta (singleton, signing_secret)
-             VALUES ('t', decode('0102', 'hex'));",
+             INSERT INTO lash_process_change_clock (singleton, current_seq)
+             VALUES ('t', 0);",
         )
         .await;
     let report = PostgresStorage::verify_schema_for(&scratch.pool)
@@ -1371,7 +1305,7 @@ async fn a_seed_table_with_mistyped_columns_reports_instead_of_aborting() {
         report.findings.iter().any(|finding| matches!(
             finding,
             SchemaFinding::ColumnMismatch { table, expected, found }
-                if table == "lash_await_event_meta"
+                if table == "lash_process_change_clock"
                     && expected.name == "singleton"
                     && found.sql_type == "text"
         )),
@@ -1683,68 +1617,6 @@ async fn the_schema_gate_emits_its_decision_basis() {
     );
 
     scratch.cleanup().await;
-}
-
-/// The signing secret is read after the structural verdict, so its two failures are
-/// their own outcomes — and they are reachable exactly where they matter: under
-/// `WarnOnly`, which relaxes the seed *findings* but cannot conjure a key to
-/// authenticate promises with. Recording an admission before that read would let such
-/// a database log an admit and then refuse the open, and decision evidence that
-/// contradicts what happened is worse than none.
-#[tokio::test]
-async fn a_rejected_signing_secret_emits_its_own_decision() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping signing-secret decision evidence: database URL is not set");
-        return;
-    };
-    let capture = installed_capture();
-
-    for (mutation, outcome) in [
-        (
-            "UPDATE lash_await_event_meta SET signing_secret = decode('0102', 'hex')",
-            "denied_seed_secret_width",
-        ),
-        (
-            "DELETE FROM lash_await_event_meta",
-            "denied_seed_secret_missing",
-        ),
-    ] {
-        let scratch = ScratchSchema::provision(&database_url).await;
-        scratch.apply(mutation).await;
-
-        // Under Enforce the report already names the bad row, so the shape gate is
-        // what denies — with its own evidence.
-        assert!(
-            scratch
-                .open_host_provisioned(SchemaCheck::Enforce)
-                .await
-                .is_err()
-        );
-        assert_evidence(capture, &scratch.name, "denied_shape", &["SEED ROWS=1"]);
-
-        // Under WarnOnly the finding is relaxed and the secret read is what refuses.
-        assert!(
-            scratch
-                .open_host_provisioned(SchemaCheck::WarnOnly)
-                .await
-                .is_err()
-        );
-        assert_evidence(
-            capture,
-            &scratch.name,
-            outcome,
-            &["schema_check=WarnOnly", "SEED ROWS=1"],
-        );
-        assert!(
-            capture
-                .events_for(&scratch.name)
-                .iter()
-                .all(|event| !event.contains("outcome=allowed")),
-            "no open succeeded, so nothing may have logged an admission: {:?}",
-            capture.events_for(&scratch.name)
-        );
-        scratch.cleanup().await;
-    }
 }
 
 /// Asserts one captured decision carries the named outcome plus the inputs the gate

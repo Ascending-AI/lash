@@ -38,15 +38,6 @@ const PROCESS_REGISTRY_LIFECYCLE_SOURCE: &str =
 const PROCESS_REGISTRY_LEASES_SOURCE: &str =
     include_str!("../src/postgres/process_registry/leases.rs");
 const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
-// The lease atoms live in the `effect_replay/row_store.rs` split and the
-// write-side helpers it calls live in `effect_replay/decode.rs`; the module
-// root only re-exports them, so the fence reads the files that hold the
-// bodies.
-const EFFECT_REPLAY_SOURCE: &str = concat!(
-    include_str!("../src/postgres/effect_replay/row_store.rs"),
-    "\n",
-    include_str!("../src/postgres/effect_replay/decode.rs"),
-);
 const CONNECTION_SQL_SOURCE: &str = include_str!("../src/postgres/connection_sql.rs");
 
 fn unique_id(prefix: &str) -> String {
@@ -273,51 +264,10 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn validate_process_execution_authority_tx(",
             "async fn process_lease_now_epoch_ms_tx(",
         ),
-        // Effect-replay leases fence exactly-once execution across hosts, so
-        // the persistence adapter's claim/finalize/renew atoms read the server
-        // clock like every other lease path. The shared `StoreEffectReplayDriver`
-        // carries a wall clock for sleeps only; if it ever reached these atoms,
-        // this fence is what fails.
-        (
-            EFFECT_REPLAY_SOURCE,
-            "async fn claim(",
-            "async fn finalize(",
-        ),
-        (
-            EFFECT_REPLAY_SOURCE,
-            "async fn finalize(",
-            "async fn renew(",
-        ),
-        (
-            EFFECT_REPLAY_SOURCE,
-            "async fn renew(",
-            "async fn retire_journal(",
-        ),
-        (
-            EFFECT_REPLAY_SOURCE,
-            "async fn claim_in_transaction(",
-            "async fn select_effect_row_for_update(",
-        ),
-        // The two atoms that actually persist lease stamps. They bind values the
-        // covered `claim` region minted, so covering only the readers would let a
-        // client-clock read slip into the write side.
-        (
-            EFFECT_REPLAY_SOURCE,
-            "async fn insert_claimed_row(",
-            "async fn take_over_expired_lease(",
-        ),
-        (
-            EFFECT_REPLAY_SOURCE,
-            "async fn take_over_expired_lease(",
-            "fn stored_group_settlement(",
-        ),
     ];
 
     // Every way this crate can read a host wall clock. `current_epoch_ms()` is
-    // the crate's own helper; the other two are the ways around it, and one of
-    // them (`SystemClock`) is now constructed in `effect_replay.rs` to give the
-    // shared driver its sleep clock, so it is one identifier away from these
-    // regions rather than one module away.
+    // the crate's own helper; the other two are the ways around it.
     const CLIENT_CLOCK_READS: [&str; 3] =
         ["current_epoch_ms()", "SystemTime::now()", "SystemClock"];
 

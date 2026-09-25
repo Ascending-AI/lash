@@ -84,24 +84,6 @@ lash_rust_binary(
 )
 
 lash_rust_binary(
-    name = "lash-e2e-frame-crash__bin",
-    crate_features = [],
-    crate_name = "lash_e2e_frame_crash",
-    crate_root = "src/bin/frame_crash.rs",
-    declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
-    extra_compile_data = [],
-    include_dev_deps = False,
-    library = ":restate-postgres-workers",
-    library_crate_name = "lash_restate_postgres_workers_e2e",
-    manifest_dir = "runbooks/restate-postgres-workers",
-    package_name = "lash-restate-postgres-workers-e2e",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0",
-)
-
-lash_rust_binary(
     name = "lash-e2e-mock-provider__bin",
     crate_features = [],
     crate_name = "lash_e2e_mock_provider",
@@ -148,39 +130,6 @@ lash_rust_binary(
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
     rustc_env = {},
-    tags = [],
-    version = "0.0.0",
-)
-
-lash_rust_binary(
-    name = "lash-e2e-process-operator-flow__bin",
-    crate_features = [],
-    crate_name = "lash_e2e_process_operator_flow",
-    crate_root = "src/bin/process_operator_flow.rs",
-    declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
-    extra_compile_data = [],
-    include_dev_deps = False,
-    library = ":restate-postgres-workers",
-    library_crate_name = "lash_restate_postgres_workers_e2e",
-    manifest_dir = "runbooks/restate-postgres-workers",
-    package_name = "lash-restate-postgres-workers-e2e",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0",
-)
-
-lash_rust_unit_test(
-    name = "lash-e2e-process-operator-flow__bin__unit_test",
-    crate_features = [],
-    crate_name = "lash_e2e_process_operator_flow",
-    crate_root = "src/bin/process_operator_flow.rs",
-    declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "1", "test.memory_kb": "1048576"},
-    library = ":restate-postgres-workers",
-    library_crate_name = "lash_restate_postgres_workers_e2e",
-    manifest_dir = "runbooks/restate-postgres-workers",
-    package_name = "lash-restate-postgres-workers-e2e",
     tags = [],
     version = "0.0.0",
 )
@@ -281,7 +230,6 @@ lash_batch_test(
     memory_kb = 1048576,
     tests = [
         ":lash-e2e-mock-provider__bin__unit_test",
-        ":lash-e2e-process-operator-flow__bin__unit_test",
         ":lash-e2e-runner__bin__unit_test",
         ":restate-postgres-workers__unit_test",
     ],

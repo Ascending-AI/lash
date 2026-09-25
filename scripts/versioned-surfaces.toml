@@ -102,8 +102,6 @@ must_cover = [
   "CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions",
   "CREATE TABLE IF NOT EXISTS lash_trigger_occurrences",
   "CREATE TABLE IF NOT EXISTS lash_trigger_deliveries",
-  "CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay",
-  "CREATE TABLE IF NOT EXISTS lash_await_event_waits",
   "CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts",
 ]
 

@@ -179,6 +179,16 @@ impl crate::Backend for LawBackend {
     }
 }
 
+/// A backend over `stores` whose effect host is the recording double: for an
+/// embedder's storage law that reaches a backend's storage ports and runs no
+/// effect, over a substrate that is storage only.
+pub fn recording_backend_over(stores: &dyn crate::StoreSet) -> Arc<dyn crate::Backend> {
+    Arc::new(LawBackend::over_stores(
+        stores,
+        Arc::new(crate::RecordingEffectHost::default()),
+    ))
+}
+
 /// The backend of a store law's runtime: a law over one session store that
 /// builds a runtime only to reach the store through its facade (append, park,
 /// rematerialize) and runs no effect, writes no attachment and publishes no

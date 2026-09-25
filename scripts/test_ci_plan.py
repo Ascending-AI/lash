@@ -235,13 +235,13 @@ class ClassifyTests(unittest.TestCase):
         """
         for path, expected in (
             ("crates/lash-postgres-store/src/lib.rs", "true"),
-            ("crates/lash-s3-store/src/lib.rs", "true"),
+            ("crates/lash-s3-store/src/lib.rs", "false"),
             ("crates/lash-core-store/src/lib.rs", "true"),
             ("crates/lash-conformance/src/lib.rs", "true"),
             ("crates/lash-sqlite-store/migrations/0001_init/up.sql", "true"),
             ("crates/lash-core/src/lib.rs", "true"),
             ("crates/lash-core-execution/src/lib.rs", "true"),
-            ("crates/lash/src/lib.rs", "true"),
+            ("crates/lash/src/lib.rs", "false"),
             ("fixtures/durable-read/v1/manifest.json", "true"),
             ("crates/lash-sim/src/lib.rs", "false"),
             ("crates/lash-perf/src/lib.rs", "false"),

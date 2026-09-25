@@ -151,10 +151,7 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
     // and its writer-vocabulary law, so it is counted and skipped here rather
     // than silently swept into the process-status expectation.
     const VOCABULARY_SITE: &str = "CONSTRAINT ck_processes_status CHECK (";
-    const FOREIGN_VOCABULARY_SITES: &[&str] = &[
-        "CONSTRAINT ck_runtime_effect_replay_status CHECK (",
-        "CONSTRAINT ck_queued_runs_status CHECK (",
-    ];
+    const FOREIGN_VOCABULARY_SITES: &[&str] = &["CONSTRAINT ck_queued_runs_status CHECK ("];
     let sources = [
         (
             "process_registry.rs",
@@ -236,8 +233,8 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
     assert_eq!(
         foreign_sites,
         FOREIGN_VOCABULARY_SITES.len(),
-        "expected exactly the effect replay and queued-run vocabulary literals, \
-         which the lash-sim congruence registry owns"
+        "expected exactly the queued-run vocabulary literal, which the lash-sim \
+         congruence registry owns"
     );
     assert_eq!(
         vocabulary_sites, 1,

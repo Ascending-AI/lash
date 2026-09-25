@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 168,
+  "cargo_target_count": 165,
   "feature_lane_units": [
     {
       "features": [
@@ -7214,12 +7214,6 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_cb93add0",
-      "package": "lash-internal-lashlang-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
       "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_f0b92908",
       "package": "lash-internal-lashlang-runtime"
     },
@@ -7941,14 +7935,6 @@
       "package": "lash-internal-plugin-process-controls"
     },
     {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_ce53ba0c",
-      "package": "lash-internal-plugin-process-controls"
-    },
-    {
       "features": [],
       "kind": "unit-test",
       "label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test__fv_feb5501f",
@@ -8297,7 +8283,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:conformance__test__fv_d076ccb6",
+      "label": "//crates/lash-postgres-store:conformance__test__fv_c8dd7cb3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8307,7 +8293,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_d076ccb6",
+      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_c8dd7cb3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8317,7 +8303,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_d076ccb6",
+      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_c8dd7cb3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8327,7 +8313,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:integration__test__fv_d076ccb6",
+      "label": "//crates/lash-postgres-store:integration__test__fv_c8dd7cb3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8569,7 +8555,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_d076ccb6",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_c8dd7cb3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8579,7 +8565,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_d076ccb6",
+      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_c8dd7cb3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8589,7 +8575,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_d076ccb6",
+      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_c8dd7cb3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8599,7 +8585,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_d076ccb6",
+      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_c8dd7cb3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8609,7 +8595,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_drift__test__fv_d076ccb6",
+      "label": "//crates/lash-postgres-store:schema_drift__test__fv_c8dd7cb3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8769,14 +8755,6 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_64581751",
-      "package": "lash-internal-protocol-rlm"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_73f80f06",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -10670,15 +10648,6 @@
     },
     {
       "features": [
-        "core-conversions",
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-remote-protocol:lash-remote-protocol__fv_34a13f38",
-      "package": "lash-internal-remote-protocol"
-    },
-    {
-      "features": [
         "default"
       ],
       "kind": "lib",
@@ -10980,12 +10949,6 @@
       "kind": "lib",
       "label": "//crates/lash-restate:lash-restate__fv_af4869c4",
       "package": "lash-internal-restate"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-rlm-types:lash-rlm-types",
-      "package": "lash-internal-rlm-types"
     },
     {
       "features": [],
@@ -13212,12 +13175,6 @@
       "package": "lash-internal-subagents"
     },
     {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-subagents:lash-subagents__fv_f4bbbe5c",
-      "package": "lash-internal-subagents"
-    },
-    {
       "features": [
         "default"
       ],
@@ -14790,12 +14747,6 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-typescript:lash-typescript__fv_9e0256a6",
-      "package": "lash-internal-typescript"
-    },
-    {
-      "features": [],
-      "kind": "lib",
       "label": "//crates/lash-typescript:lash-typescript__fv_b3dee7ca",
       "package": "lash-internal-typescript"
     },
@@ -15169,15 +15120,6 @@
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_82aab50a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_838be96d",
       "package": "lash-runtime"
     },
     {
@@ -16941,7 +16883,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 227,
+  "generated_label_count": 223,
   "packages": [
     {
       "declared_features": [
@@ -17668,7 +17610,6 @@
         "rusqlite",
         "serde",
         "serde_json",
-        "sqlx",
         "stats_alloc",
         "tempfile",
         "tokio",
@@ -17894,18 +17835,11 @@
         "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-core-execution",
-        "lash-internal-core-worker",
         "lash-internal-lashlang",
-        "lash-internal-lashlang-runtime",
-        "lash-internal-plugin-process-controls",
         "lash-internal-postgres-store",
-        "lash-internal-protocol-rlm",
-        "lash-internal-protocol-standard",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "lash-internal-store-sql",
-        "lash-internal-subagents",
-        "lash-runtime",
         "rmp-serde",
         "rusqlite",
         "schemars",
@@ -17915,7 +17849,6 @@
         "sqlx",
         "tempfile",
         "tokio",
-        "tokio-util",
         "tracing",
         "tracing-subscriber",
         "uuid"
@@ -17940,16 +17873,6 @@
           "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "kind": "unit-test",
           "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test",
-          "tags": [
-            "cargo-service-gate",
-            "manual"
-          ]
-        },
-        {
-          "cargo": "postgres-await-event-helper",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
-          "kind": "example",
-          "label": "//crates/lash-postgres-store:postgres-await-event-helper__example",
           "tags": [
             "cargo-service-gate",
             "manual"
@@ -19387,7 +19310,6 @@
         "serde",
         "serde_bytes",
         "serde_json",
-        "sqlx",
         "tempfile",
         "thiserror",
         "tokio",
@@ -20081,12 +20003,6 @@
           "tags": []
         },
         {
-          "cargo": "lash-e2e-frame-crash",
-          "kind": "bin",
-          "label": "//runbooks/restate-postgres-workers:lash-e2e-frame-crash__bin",
-          "tags": []
-        },
-        {
           "cargo": "lash-e2e-mock-provider",
           "kind": "bin",
           "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin",
@@ -20102,18 +20018,6 @@
           "cargo": "lash-e2e-process-operations-worker",
           "kind": "bin",
           "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operations-worker__bin",
-          "tags": []
-        },
-        {
-          "cargo": "lash-e2e-process-operator-flow",
-          "kind": "bin",
-          "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operator-flow__bin",
-          "tags": []
-        },
-        {
-          "cargo": "lash-e2e-process-operator-flow",
-          "kind": "bin-unit-test",
-          "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operator-flow__bin__unit_test",
           "tags": []
         },
         {
@@ -20151,7 +20055,6 @@
         "label": "//runbooks/restate-postgres-workers:test_batch",
         "members": [
           "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test",
-          "//runbooks/restate-postgres-workers:lash-e2e-process-operator-flow__bin__unit_test",
           "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
           "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test"
         ]

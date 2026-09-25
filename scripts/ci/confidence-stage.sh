@@ -20,7 +20,6 @@ case "$LASH_CONFIDENCE_STAGE" in
     write_provider_transport_exclusion_evidence
     write_sim_lane_declarations
     write_full_lane_prerequisites
-    write_postgres_effect_history_status
     write_restate_postgres_workers_e2e_lane_status
     ;;
   generated) run_sim_generated_lane ;;

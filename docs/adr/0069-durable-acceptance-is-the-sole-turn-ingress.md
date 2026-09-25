@@ -440,7 +440,7 @@ shape. Its rules:
 The redrive has one precondition the binding does not remove: the aborted turn's
 journal was recorded against the session head it ran on. Once a later turn
 commits, the redrive can no longer replay that journal: its acceptance fails
-with `SqliteEffectReplayHashConflict` or `PostgresEffectReplayHashConflict`, and
+with `SqliteEffectReplayHashConflict` or `EffectReplayDivergence`, and
 the row stays bound. The host must then cancel the input by the receipt. A typed
 refusal for this case, and a bound on how long a bound row may wait, are left to
 a follow-up.

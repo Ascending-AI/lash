@@ -190,34 +190,6 @@ impl RuntimeErrorCode {
             Self::LlmProvider => Terminal,
             // a plugin refusal over the same inputs.
             Self::Plugin => Terminal,
-            // the journal row is corrupt; a redrive reads the same row.
-            Self::PostgresEffectReplayCorruptRow => Terminal,
-            // the journal row does not decode; a redrive reads the same row.
-            Self::PostgresEffectReplayDecode => Terminal,
-            // the same value fails to encode again.
-            Self::PostgresEffectReplayEncode => Terminal,
-            // the live run diverged from its journal; a redrive diverges the same way.
-            Self::PostgresEffectReplayHashConflict => Parked,
-            // the effect carries no replay key; wiring, not the attempt.
-            Self::PostgresEffectReplayKeyMissing => Terminal,
-            // the journal row lease was lost to another owner.
-            Self::PostgresEffectReplayLeaseLost => Redrivable,
-            // strict replay found no journal row; a redrive finds none either.
-            Self::PostgresEffectReplayMissing => Terminal,
-            // journal store I/O failed.
-            Self::PostgresEffectReplayStore => Redrivable,
-            // the await-event row does not decode.
-            Self::PostgresAwaitEventDecode => Terminal,
-            // the same value fails to encode again.
-            Self::PostgresAwaitEventEncode => Terminal,
-            // the process-local notifier failed; a restart repairs it.
-            Self::PostgresAwaitEventNotify => Redrivable,
-            // signing the same key fails the same way.
-            Self::PostgresAwaitEventSign => Terminal,
-            // await-event store I/O failed.
-            Self::PostgresAwaitEventStore => Retryable,
-            // journal retirement store I/O failed; the identical retirement is safe to retry.
-            Self::PostgresEffectJournalRetirement => Retryable,
             // the selected queued work cannot be admitted; the same selection is refused again.
             Self::QueuedWork => Terminal,
             // one queued row alone exceeds the window; the same row exceeds it again.

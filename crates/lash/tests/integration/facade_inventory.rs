@@ -247,9 +247,7 @@ mod sqlite_inventory {
 mod postgres_inventory {
     use lash::postgres::PostgresSessionStoreFactory as _;
     use lash::postgres::PostgresStorage as _;
-    use lash::postgres::{
-        PostgresBackend as _, PostgresBackendOptions as _, PostgresStoreSet as _,
-    };
+    use lash::postgres::PostgresStoreSet as _;
 }
 
 #[cfg(feature = "s3")]

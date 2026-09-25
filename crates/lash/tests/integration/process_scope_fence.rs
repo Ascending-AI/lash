@@ -111,12 +111,10 @@ struct Backend {
     /// The SQLite effect journal, for the two-file layout witnesses.
     sqlite_journal: Option<std::path::PathBuf>,
     _dir: tempfile::TempDir,
-    _postgres: Option<lash_postgres_store::PostgresStorage>,
 }
 
 enum Kind {
     Sqlite,
-    Postgres,
 }
 
 /// A SQLite substrate: fences counted in both its registry and
@@ -165,7 +163,6 @@ fn sqlite_backend(
             })
         })),
         _dir: dir,
-        _postgres: None,
     }
 }
 
@@ -183,64 +180,6 @@ async fn backend(kind: Kind) -> Option<Backend> {
                     .join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name()),
             );
             sqlite_backend(backend, dir, Some(files))
-        }
-        Kind::Postgres => {
-            let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-                assert!(
-                    std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
-                    "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-                );
-                eprintln!(
-                    "skipping Postgres process fence test: LASH_POSTGRES_DATABASE_URL is not set"
-                );
-                return None;
-            };
-            let admin = sqlx::PgPool::connect(&url).await.expect("connect postgres");
-            let name = format!("process_fence_{}", uuid::Uuid::new_v4().simple());
-            sqlx::query(&format!("CREATE DATABASE {name}"))
-                .execute(&admin)
-                .await
-                .expect("create a private database");
-            admin.close().await;
-            let (base, _) = url.rsplit_once('/').expect("database url has a path");
-            let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
-                .await
-                .expect("connect the private database");
-            let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
-                &storage,
-                Arc::new(lash::persistence::FileAttachmentStore::new(
-                    dir.path().join("attachments"),
-                )),
-            ));
-            let pool = storage.pool().clone();
-            let cold_storage = storage.clone();
-            Backend {
-                host: backend.effect_host(),
-                registry: backend.process_registry(),
-                backend,
-                cold_host: Some(Box::new(move || {
-                    let storage = cold_storage.clone();
-                    Box::pin(async move { Arc::new(storage.effect_host()) as Arc<dyn EffectHost> })
-                })),
-                sqlite: None,
-                sqlite_registry: None,
-                sqlite_journal: None,
-                fences: Some(Box::new(move |scope_id: &str| {
-                    let pool = pool.clone();
-                    let scope_id = scope_id.to_string();
-                    Box::pin(async move {
-                        sqlx::query_scalar(
-                            "SELECT COUNT(*) FROM lash_effect_scope_retirements WHERE scope_id = $1",
-                        )
-                        .bind(scope_id)
-                        .fetch_one(&pool)
-                        .await
-                        .expect("count fences")
-                    })
-                })),
-                _dir: dir,
-                _postgres: Some(storage),
-            }
         }
     })
 }
@@ -517,18 +456,8 @@ async fn sqlite_prune_fences_only_what_the_registry_prunes() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_prune_fences_only_what_the_registry_prunes() {
-    prune_fences_only_what_the_registry_prunes(Kind::Postgres).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_pruned_process_id_is_fenced_until_registered_again() {
     pruned_process_id_is_fenced_until_registered_again(Kind::Sqlite).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_pruned_process_id_is_fenced_until_registered_again() {
-    pruned_process_id_is_fenced_until_registered_again(Kind::Postgres).await;
 }
 
 /// Every registrant that ends in the registry insert.
@@ -836,31 +765,13 @@ async fn failed_registration_keeps_the_fence(kind: Kind) {
 
     // Fail the registry insert itself, after the fence delete in the same
     // transaction has run.
-    if let Some(registry_path) = &backend.sqlite_registry {
-        rusqlite::Connection::open(registry_path)
-            .expect("open the registry")
-            .execute_batch(
-                "CREATE TRIGGER injected_start BEFORE INSERT ON processes BEGIN \
-                 SELECT RAISE(ABORT, 'injected registration failure'); END;",
-            )
-            .expect("install the trigger");
-    } else {
-        let pool = backend
-            ._postgres
-            .as_ref()
-            .expect("postgres backend")
-            .pool()
-            .clone();
-        sqlx::raw_sql(
-            "CREATE FUNCTION injected_fail_start() RETURNS trigger LANGUAGE plpgsql AS $$ \
-             BEGIN RAISE EXCEPTION 'injected registration failure'; END $$; \
-             CREATE TRIGGER injected_start BEFORE INSERT ON lash_processes \
-             FOR EACH ROW EXECUTE FUNCTION injected_fail_start();",
+    rusqlite::Connection::open(backend.sqlite_registry.as_ref().expect("registry file"))
+        .expect("open the registry")
+        .execute_batch(
+            "CREATE TRIGGER injected_start BEFORE INSERT ON processes BEGIN \
+         SELECT RAISE(ABORT, 'injected registration failure'); END;",
         )
-        .execute(&pool)
-        .await
         .expect("install the trigger");
-    }
     let start_scope = backend
         .host
         .scoped_static(lash_core::AdmittedScope::runtime_operation("failing-start"))
@@ -976,11 +887,6 @@ registration_path_tests! {
     sqlite_session_start_lifts_the_fence => (Sqlite, SessionStart),
     sqlite_trigger_delivery_lifts_the_fence => (Sqlite, TriggerRouter),
     sqlite_tool_intent_ingress_lifts_the_fence => (Sqlite, ToolIntentIngress),
-    postgres_direct_registration_lifts_the_fence => (Postgres, DirectRegistry),
-    postgres_core_start_lifts_the_fence => (Postgres, CoreStart),
-    postgres_session_start_lifts_the_fence => (Postgres, SessionStart),
-    postgres_trigger_delivery_lifts_the_fence => (Postgres, TriggerRouter),
-    postgres_tool_intent_ingress_lifts_the_fence => (Postgres, ToolIntentIngress),
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -989,18 +895,8 @@ async fn sqlite_failed_registration_keeps_the_fence() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_failed_registration_keeps_the_fence() {
-    failed_registration_keeps_the_fence(Kind::Postgres).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_registration_reinstates_every_bound_host() {
     registration_reinstates_every_bound_host(Kind::Sqlite).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_registration_reinstates_every_bound_host() {
-    registration_reinstates_every_bound_host(Kind::Postgres).await;
 }
 
 fn sqlite_fence_rows(path: impl AsRef<std::path::Path>, scope_id: &str) -> i64 {

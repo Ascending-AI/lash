@@ -26,14 +26,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lash_restate_postgres_workers_e2e::{
-    DEFAULT_SESSION_ID, DirectDurableWaitAwaitRequest, DirectDurableWaitAwaitResponse,
-    DirectDurableWaitResolveRequest, DirectDurableWaitResolveResponse, EXPECTED_ASYNC_TEXT,
-    EXPECTED_DURABLE_INPUT_TEXT, EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT,
-    EXPECTED_FRAME_SWITCH_TEXT, EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT,
-    HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core,
-    default_session_originator_id, e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env,
-    record_terminal_result, record_turn_activity, record_worker_event, required_env,
-    s3_store_from_env, turn_session_id,
+    BUTTON_SOURCE_TYPE, DEFAULT_SESSION_ID, DirectDurableWaitAwaitRequest,
+    DirectDurableWaitAwaitResponse, DirectDurableWaitResolveRequest,
+    DirectDurableWaitResolveResponse, EXPECTED_ASYNC_TEXT, EXPECTED_DURABLE_INPUT_TEXT,
+    EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
+    EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, FRAME_CRASH_SESSION_ID,
+    HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core, claim_crash_exit,
+    crash_exit_taken, default_session_originator_id, e2e_tokio_thread_stack_bytes,
+    ensure_e2e_schema, env, record_terminal_result, record_turn_activity, record_worker_event,
+    required_env, s3_store_from_env, turn_session_id,
 };
 
 fn terminal_error(err: impl Display) -> TerminalError {
@@ -160,6 +161,16 @@ impl AppState {
         }
         if request.scenario == TurnScenario::FrameSwitchCancel {
             return Box::pin(self.frame_switch_cancel(&controller, &core, request))
+                .await
+                .map(Json);
+        }
+        if request.scenario == TurnScenario::FrameSwitchCrash {
+            return Box::pin(self.frame_switch_crash(&controller, &core, request))
+                .await
+                .map(Json);
+        }
+        if request.scenario == TurnScenario::TriggerEmit {
+            return Box::pin(self.emit_button_trigger(&controller, &core, request))
                 .await
                 .map(Json);
         }
@@ -411,6 +422,145 @@ impl AppState {
         .await
     }
 
+    /// The frame-switch turn killed before its switch commits and recovered by
+    /// Restate redelivery: the worker exits once, as the switched turn enters
+    /// its effect loop, and the redelivered invocation replays what the
+    /// journal holds and runs on, so the provider sees each physical turn
+    /// once. The kill after the switch commits is parked on FIG-3788: a
+    /// queued frame-switch drain redriven after its commit diverges from its
+    /// Restate journal.
+    async fn frame_switch_crash(
+        &self,
+        controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+        core: &lash::LashCore,
+        request: TurnRequest,
+    ) -> HandlerResult<TurnResponse> {
+        let session = core
+            .session(FRAME_CRASH_SESSION_ID)
+            .open()
+            .await
+            .map_err(turn_error)?;
+        session
+            .durable()
+            .enqueue(TurnInput::text(format!(
+                "Run crash-recovered frame switch. workflow_id={} frame_switch_crash_start=true",
+                request.workflow_id
+            )))
+            .id(format!("{}:original", request.workflow_id))
+            .send()
+            .await
+            .map_err(turn_error)?;
+        let pool = self.storage.pool().clone();
+        let marker = format!("{}:before-switch-commit", request.workflow_id);
+        let exit_before_commit = request.fail_once
+            && !crash_exit_taken(&pool, &marker)
+                .await
+                .map_err(terminal_error)?;
+        session
+            .set_turn_phase_probe(Arc::new(FrameCrashProbe {
+                pool: pool.clone(),
+                workflow_id: request.workflow_id.clone(),
+                worker_id: self.worker_id.clone(),
+                marker: marker.clone(),
+                armed: exit_before_commit,
+            }))
+            .await;
+        let recovered = session
+            .queued_turn()
+            .drain_id(format!("{}:drain", request.workflow_id))
+            .run_with_effects(controller)
+            .await
+            .map_err(turn_error)?
+            .ran()
+            .ok_or_else(|| terminal_error("crash-recovered frame switch did not run"))?;
+        let value = recovered
+            .final_value()
+            .cloned()
+            .ok_or_else(|| terminal_error("recovered follow-on produced no final value"))?;
+        let queue_empty = session
+            .durable()
+            .queued_work()
+            .await
+            .map_err(terminal_error)?
+            .is_empty();
+        let inputs_empty = session
+            .durable()
+            .pending_turn_inputs()
+            .await
+            .map_err(terminal_error)?
+            .is_empty();
+        let recovered_before_switch_commit = crash_exit_taken(&pool, &marker)
+            .await
+            .map_err(terminal_error)?;
+        self.finish_response(
+            &request,
+            json!({
+                "final": EXPECTED_FRAME_SWITCH_TEXT,
+                "seed_visible": value.get("seed_visible").cloned().unwrap_or_default(),
+                "follow_on": value.get("follow_on").cloned().unwrap_or_default(),
+                "recovered_before_switch_commit": recovered_before_switch_commit,
+                "queue_empty": queue_empty,
+                "inputs_empty": inputs_empty,
+            }),
+            0,
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// The runner's button press, emitted inside this handler so the
+    /// emission journals on Restate: the deployment's effect host refuses an
+    /// effect outside a handler.
+    async fn emit_button_trigger(
+        &self,
+        controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+        core: &lash::LashCore,
+        request: TurnRequest,
+    ) -> HandlerResult<TurnResponse> {
+        let scoped = controller
+            .scoped_effect_controller(lash_core::AdmittedScope::runtime_operation(
+                request.workflow_id.clone(),
+            ))
+            .map_err(terminal_error)?;
+        let source_key =
+            lash::triggers::empty_trigger_source_key(BUTTON_SOURCE_TYPE).map_err(terminal_error)?;
+        let report = core
+            .triggers()
+            .emit(
+                lash::triggers::TriggerOccurrenceRequest::new(
+                    BUTTON_SOURCE_TYPE,
+                    source_key,
+                    json!({
+                        "button": "Red",
+                        "message": "pressed from runner",
+                        "pressed_at": "2026-06-08T12:00:00Z"
+                    }),
+                    "e2e-button-red-1",
+                )
+                .with_source(json!({"runner": true})),
+                scoped,
+            )
+            .await
+            .map_err(turn_error)?;
+        let started = report
+            .started_process_ids()
+            .first()
+            .cloned()
+            .ok_or_else(|| terminal_error("trigger occurrence did not start a process"))?;
+        self.finish_response(
+            &request,
+            json!({
+                "final": "trigger-emitted",
+                "started_process_id": started,
+            }),
+            0,
+            None,
+            false,
+        )
+        .await
+    }
+
     async fn frame_switch_cancel(
         &self,
         controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
@@ -529,7 +679,9 @@ impl AppState {
                 TurnScenario::FrameSwitchQueued | TurnScenario::FrameSwitchPrepared => {
                     EXPECTED_FRAME_SWITCH_TEXT
                 }
+                TurnScenario::FrameSwitchCrash => EXPECTED_FRAME_SWITCH_TEXT,
                 TurnScenario::FrameSwitchCancel => EXPECTED_FRAME_SWITCH_CANCEL_TEXT,
+                TurnScenario::TriggerEmit => "trigger-emitted",
                 TurnScenario::TurnControlHold | TurnScenario::TurnControlSleep => {
                     "turn-control-cancelled"
                 }
@@ -747,8 +899,16 @@ fn prompt_for_request(request: &TurnRequest) -> String {
             "Run the prepared frame-switch scenario. workflow_id={} frame_switch_prepared_start=true",
             request.workflow_id
         ),
+        TurnScenario::FrameSwitchCrash => format!(
+            "Run crash-recovered frame switch. workflow_id={} frame_switch_crash_start=true",
+            request.workflow_id
+        ),
         TurnScenario::FrameSwitchCancel => format!(
             "Run the cancellation frame-switch scenario. workflow_id={} frame_switch_cancel_start=true",
+            request.workflow_id
+        ),
+        TurnScenario::TriggerEmit => format!(
+            "Emit the runner's button press. workflow_id={}",
             request.workflow_id
         ),
         TurnScenario::TurnControlHold => format!(
@@ -764,6 +924,43 @@ fn prompt_for_request(request: &TurnRequest) -> String {
             request.workflow_id
         ),
     }
+}
+
+/// Exits the worker once, as the switched turn enters its effect loop: the
+/// first effect loop of the invocation, before any commit. A redelivered
+/// invocation finds the exit taken and runs through.
+struct FrameCrashProbe {
+    pool: sqlx::PgPool,
+    workflow_id: String,
+    worker_id: String,
+    marker: String,
+    armed: bool,
+}
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for FrameCrashProbe {
+    fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
+        if !self.armed || phase != lash_core::runtime::RuntimeTurnPhase::EffectLoop {
+            return;
+        }
+        let claimed = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(claim_crash_exit(
+                &self.pool,
+                &self.marker,
+                &self.workflow_id,
+                &self.worker_id,
+            ))
+        });
+        if claimed {
+            tracing::warn!(
+                worker_id = %self.worker_id,
+                marker = %self.marker,
+                "intentional E2E frame-switch crash exit"
+            );
+            std::process::exit(76);
+        }
+    }
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 }
 
 async fn open_e2e_session(core: &lash::LashCore) -> HandlerResult<lash::LashSession> {

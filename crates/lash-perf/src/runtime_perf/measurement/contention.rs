@@ -988,18 +988,10 @@ async fn run_durable_contention_worker(
 /// worker targets `chat_turns` completions. Wall-clock throughput and latency
 /// are quiet-box witnesses only. Tests assert emitted structure and counters,
 /// never latency thresholds.
-#[expect(
-    clippy::expect_used,
-    reason = "the caller provisions the SQLite root exactly once for this scenario and passes Some, which the message states"
-)]
 pub(crate) async fn run_once_durable_queued_work_contention(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
     workers: usize,
-    // Resolved by the one caller, like the checkpoint-curve and high-traffic
-    // harnesses beside it: this function used to carry a fourth copy of the
-    // availability preamble.
-    database_url: Option<&str>,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let workers = workers.max(1);
     let target_completions = workers
@@ -1008,26 +1000,11 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
     let total_before_alloc = allocator_stats();
-    let sqlite_root = (!scenario.uses_postgres())
-        .then(|| make_temp_bench_dir(&format!("lash-runtime-perf-{}", scenario.name())))
-        .transpose()?;
-    let postgres_namespace = match database_url {
-        Some(url) => Some(lash_postgres_store::testing::IsolatedDatabase::create(url).await),
-        None => None,
-    };
+    let sqlite_root = make_temp_bench_dir(&format!("lash-runtime-perf-{}", scenario.name()))?;
 
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
-    let mut runtime = match postgres_namespace.as_ref() {
-        Some(namespace) => build_runtime_with_postgres_store(scenario, namespace.url()).await?,
-        None => {
-            build_runtime_with_sqlite_store(
-                scenario,
-                sqlite_root.as_ref().expect("SQLite root").clone(),
-            )
-            .await?
-        }
-    };
+    let mut runtime = build_runtime_with_sqlite_store(scenario, sqlite_root.clone()).await?;
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
     let after_build_memory = process_memory_sample();
@@ -1086,11 +1063,6 @@ pub(crate) async fn run_once_durable_queued_work_contention(
 
     let run_before_alloc = allocator_stats();
     let run_started = Instant::now();
-    let pool_wait_collector = if scenario.uses_postgres() {
-        Some(lash_core::perf_witness::Collector::install()?)
-    } else {
-        None
-    };
     let counters = Arc::new(DurableContentionCounters::default());
     let samples = Arc::new(DurableContentionSamples::default());
     let mut tasks = tokio::task::JoinSet::new();
@@ -1109,11 +1081,6 @@ pub(crate) async fn run_once_durable_queued_work_contention(
         result.map_err(anyhow::Error::from)??;
     }
     let run_turn_ms = elapsed_ms(run_started);
-    if let Some(collector) = pool_wait_collector.as_ref() {
-        let witness: lash_core::perf_witness::Snapshot = collector.snapshot();
-        store_metrics.record_pool_checkout_waits(witness.pool_checkout_wait_nanos);
-    }
-    drop(pool_wait_collector);
     let run_turn_alloc = alloc_delta(run_before_alloc, allocator_stats());
     let after_turn_memory = process_memory_sample();
     store
@@ -1136,7 +1103,6 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let claim_summary = crate::perf_support::metrics::percentile_summary(claim_wait_ms.clone());
     let service_summary = crate::perf_support::metrics::percentile_summary(service_ms.clone());
     let pool_wait_ms = store_metrics.pool_checkout_wait_samples_ms();
-    let pool_wait_summary = crate::perf_support::metrics::percentile_summary(pool_wait_ms.clone());
     let completed = counters
         .completions
         .load(std::sync::atomic::Ordering::Relaxed);
@@ -1175,7 +1141,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
         "durable_contention.commit_admission_queue_depth".to_string(),
         commit_admission_queue_depth.clone(),
     )]);
-    let mut extra_counters = BTreeMap::from([
+    let extra_counters = BTreeMap::from([
         ("durable_contention.workers".to_string(), workers as u64),
         (
             "durable_contention.seeded_batches".to_string(),
@@ -1276,22 +1242,9 @@ pub(crate) async fn run_once_durable_queued_work_contention(
                 .copied()
                 .fold(0.0, f64::max) as u64,
         ),
-        (
-            "durable_contention.pool_wait_observable".to_string(),
-            u64::from(scenario.uses_postgres()),
-        ),
+        ("durable_contention.pool_wait_observable".to_string(), 0),
         ("durable_contention.remaining_batches".to_string(), 0),
     ]);
-    if scenario.uses_postgres() {
-        extra_counters.insert(
-            "durable_contention.pool_wait_p50_micros".to_string(),
-            millis_to_micros(pool_wait_summary.p50),
-        );
-        extra_counters.insert(
-            "durable_contention.pool_wait_p95_micros".to_string(),
-            millis_to_micros(pool_wait_summary.p95),
-        );
-    }
     let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
     let turn = RuntimePerfTurnResult {
         turn_index: 0,
@@ -1317,10 +1270,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
 
     drop(store);
     drop(runtime);
-    if let Some(root) = sqlite_root {
-        let _ = std::fs::remove_dir_all(root);
-    }
-    drop(postgres_namespace);
+    let _ = std::fs::remove_dir_all(&sqlite_root);
 
     Ok(RuntimePerfRunResult {
         scenario: scenario.name().to_string(),

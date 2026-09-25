@@ -52,8 +52,7 @@ deterministic_only = { emits = false, referent = "runbook" }
 provider-runtime-feedback = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "runtime_feedback_ workspace nextest companion; live outgoing retry request remains judged" }
 agent-service-branching = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 context-overflow-recovery = { tier = "deterministic", model = "scripted-provider" }
-graceful-drain = { tier = "deterministic", model = "scripted-provider" }
-process-operations = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the `just process-operations-e2e` companion, the FIG-1292 preflight, and Phases 0-8; only the five FIG-1293 tool rows call a provider" }
+process-operations = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the `just process-operations-e2e` companion, the FIG-1292 preflight, and Phases 0-7; only the five FIG-1293 tool rows call a provider" }
 rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 session-lease-triage = { tier = "deterministic", model = "scripted-provider" }
 tictactoe-full-game = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
@@ -95,7 +94,6 @@ typescript-codemode-parity = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 # survives the retirement of the second dialect: `typescript` on a row is a
 # claim that a session was opened and pinned, and these rows cannot make it.
 [no_rlm_session_only]
-request-abandon = { tier = "deterministic", model = "scripted-provider" }
 workbench-valid-empty-completion = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider" }

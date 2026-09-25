@@ -89,43 +89,6 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_manifest (
 
 
 --
--- Name: lash_await_event_meta; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_await_event_meta (
-    singleton boolean DEFAULT true NOT NULL,
-    signing_secret bytea NOT NULL,
-    CONSTRAINT lash_await_event_meta_singleton_check CHECK (singleton)
-);
-
-
---
--- Name: lash_await_event_revoked_sessions; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_await_event_revoked_sessions (
-    session_id text NOT NULL,
-    revoked_at_ms bigint NOT NULL
-);
-
-
---
--- Name: lash_await_event_waits; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_await_event_waits (
-    key_id text NOT NULL,
-    scope_json text NOT NULL,
-    wait_json text NOT NULL,
-    session_id text,
-    turn_control boolean NOT NULL,
-    terminal_json text,
-    created_at_ms bigint NOT NULL,
-    resolved_at_ms bigint
-);
-
-
---
 -- Name: lash_blobs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -156,17 +119,6 @@ CREATE TABLE lash_durable_read_fixture.lash_deleted_sessions (
     head_revision bigint,
     relation_kind text,
     parent_session_id text
-);
-
-
---
--- Name: lash_effect_scope_retirements; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_effect_scope_retirements (
-    scope_id text NOT NULL,
-    retired_at_ms bigint NOT NULL,
-    artifact_cleanup_completed boolean DEFAULT false NOT NULL
 );
 
 
@@ -546,73 +498,6 @@ CREATE TABLE lash_durable_read_fixture.lash_release_stamp (
 
 
 --
--- Name: lash_runtime_effect_group; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group (
-    group_key text NOT NULL COLLATE pg_catalog."C",
-    scope_id text NOT NULL,
-    session_id text,
-    wake text NOT NULL,
-    loser_disposition text NOT NULL,
-    expected_children bigint NOT NULL,
-    next_seq bigint DEFAULT 0 NOT NULL,
-    created_at_ms bigint NOT NULL,
-    next_commit_seq bigint DEFAULT 0 NOT NULL,
-    lifecycle jsonb DEFAULT '{"type": "live"}'::jsonb NOT NULL,
-    CONSTRAINT ck_runtime_effect_group_lifecycle CHECK (((lifecycle ->> 'type'::text) = ANY (ARRAY['live'::text, 'closing'::text, 'settled'::text])))
-);
-
-
---
--- Name: lash_runtime_effect_group_child; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group_child (
-    group_key text NOT NULL COLLATE pg_catalog."C",
-    "position" bigint NOT NULL,
-    replay_key text NOT NULL COLLATE pg_catalog."C",
-    envelope_json text NOT NULL,
-    command_version bigint NOT NULL,
-    created_at_ms bigint NOT NULL
-);
-
-
---
--- Name: lash_runtime_effect_replay; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_replay (
-    scope_id text NOT NULL,
-    session_id text,
-    replay_key text NOT NULL COLLATE pg_catalog."C",
-    envelope_hash text NOT NULL,
-    envelope_json text NOT NULL,
-    status text NOT NULL,
-    outcome_json text,
-    error_json text,
-    lease_owner_id text,
-    lease_token text,
-    lease_expires_at_ms bigint DEFAULT 0 NOT NULL,
-    due_at_ms bigint,
-    group_key text COLLATE pg_catalog."C",
-    settlement_seq bigint,
-    created_at_ms bigint NOT NULL,
-    updated_at_ms bigint NOT NULL,
-    commit_state text DEFAULT 'pending'::text NOT NULL,
-    commit_seq bigint,
-    drain_input text,
-    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK (((commit_seq IS NULL) OR (commit_state = ANY (ARRAY['committed'::text, 'drained'::text])))),
-    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK ((commit_state = ANY (ARRAY['pending'::text, 'committed'::text, 'drained'::text, 'cancel_decided'::text]))),
-    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (((drain_input IS NULL) OR ((group_key IS NOT NULL) AND (commit_state = ANY (ARRAY['committed'::text, 'drained'::text]))))),
-    CONSTRAINT ck_runtime_effect_replay_error_json CHECK ((((status = 'failed'::text) AND (error_json IS NOT NULL)) OR ((status <> 'failed'::text) AND (error_json IS NULL)))),
-    CONSTRAINT ck_runtime_effect_replay_outcome_json CHECK ((((status = 'completed'::text) AND (outcome_json IS NOT NULL)) OR ((status <> 'completed'::text) AND (outcome_json IS NULL)))),
-    CONSTRAINT ck_runtime_effect_replay_settlement_seq CHECK ((((settlement_seq IS NULL) AND (NOT (commit_state = ANY (ARRAY['drained'::text, 'cancel_decided'::text])))) OR ((settlement_seq IS NOT NULL) AND (commit_state = ANY (ARRAY['drained'::text, 'cancel_decided'::text]))))),
-    CONSTRAINT ck_runtime_effect_replay_status CHECK ((status = ANY (ARRAY['in_progress'::text, 'completed'::text, 'failed'::text])))
-);
-
-
---
 -- Name: lash_runtime_turn_commits; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -890,17 +775,6 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_closure_authorizations (
 
 
 --
--- Name: lash_turn_cancel_closure_participants; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_closure_participants (
-    scope_id text NOT NULL,
-    participant_id text NOT NULL,
-    scope_json text NOT NULL
-);
-
-
---
 -- Name: lash_turn_cancel_requests; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1101,27 +975,6 @@ INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-
 
 
 --
--- Data for Name: lash_await_event_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-INSERT INTO lash_durable_read_fixture.lash_await_event_meta VALUES (true, '\x8888888888888888888888888888888888888888888888888888888888888888');
-
-
---
--- Data for Name: lash_await_event_revoked_sessions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-INSERT INTO lash_durable_read_fixture.lash_await_event_revoked_sessions VALUES ('durable-read-revoked-session', 1700000000000);
-
-
---
--- Data for Name: lash_await_event_waits; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-INSERT INTO lash_durable_read_fixture.lash_await_event_waits VALUES ('await-event:v3:sha256:3fc7a6553351ed965cb2ec4fd441a5e0c2029abe8e4ffeead899dd453bf6d771', '{"type":"turn","session_id":"durable-read-fixture","turn_id":"durable-read-turn"}', '{"type":"tool_completion","tool_call_id":"durable-read-tool-call"}', 'durable-read-fixture', false, '{"status":"ok","payload":{"fixture":"resolved"}}', 1700000000000, 1700000000000);
-
-
---
 -- Data for Name: lash_blobs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1153,12 +1006,6 @@ INSERT INTO lash_durable_read_fixture.lash_checkpoint_blob_refs VALUES ('0b89f04
 --
 
 INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-read-deleted-session', 1700000000000, NULL, 0, 'root', NULL);
-
-
---
--- Data for Name: lash_effect_scope_retirements; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
 
 
 --
@@ -1298,25 +1145,6 @@ INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-de
 
 
 --
--- Data for Name: lash_runtime_effect_group; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-
-
---
--- Data for Name: lash_runtime_effect_group_child; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-
-
---
--- Data for Name: lash_runtime_effect_replay; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"version":2,"kind":"turn","session_id":"durable-read-fixture","execution_id":"durable-read-effect-turn"}', 'durable-read-fixture', 'durable-read-exec-replay', '0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1', '{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\",\"turn_index\":7,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"durable-read-exec-effect\",\"kind\":\"exec_code\"},\"replay\":{\"key\":\"durable-read-exec-replay\"}},\"command\":{\"type\":\"exec_code\",\"language\":\"fixture\",\"code\":\"return 887\"}}","hash":"0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1"}', 'completed', '{"type":"exec_code","result":{"Ok":{"observations":[{"text":"durable read effect","projection":{"truncated":false,"original_chars":0,"projected_chars":0,"original_lines":0,"projected_lines":0,"limit":0,"limit_mode":"","max_lines":0}}],"tool_calls":[],"executed_calls":[],"printed_images":[],"error":null,"duration_ms":887,"terminal_finish":{"fixture":887}}}}', NULL, NULL, NULL, 0, NULL, NULL, NULL, 1700000000000, 1700000000000, 'pending', NULL, NULL);
-
-
---
 -- Data for Name: lash_runtime_turn_commits; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1329,7 +1157,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 131);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 132);
 
 
 --
@@ -1406,12 +1234,6 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_occurrences VALUES ('trigger:
 
 --
 -- Data for Name: lash_turn_cancel_closure_authorizations; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-
-
---
--- Data for Name: lash_turn_cancel_closure_participants; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1533,30 +1355,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_attachment_manifest
 
 
 --
--- Name: lash_await_event_meta lash_await_event_meta_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_await_event_meta
-    ADD CONSTRAINT lash_await_event_meta_pkey PRIMARY KEY (singleton);
-
-
---
--- Name: lash_await_event_revoked_sessions lash_await_event_revoked_sessions_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_await_event_revoked_sessions
-    ADD CONSTRAINT lash_await_event_revoked_sessions_pkey PRIMARY KEY (session_id);
-
-
---
--- Name: lash_await_event_waits lash_await_event_waits_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_await_event_waits
-    ADD CONSTRAINT lash_await_event_waits_pkey PRIMARY KEY (key_id);
-
-
---
 -- Name: lash_blobs lash_blobs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1578,14 +1376,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_deleted_sessions
     ADD CONSTRAINT lash_deleted_sessions_pkey PRIMARY KEY (session_id);
-
-
---
--- Name: lash_effect_scope_retirements lash_effect_scope_retirements_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_effect_scope_retirements
-    ADD CONSTRAINT lash_effect_scope_retirements_pkey PRIMARY KEY (scope_id);
 
 
 --
@@ -1821,30 +1611,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_release_stamp
 
 
 --
--- Name: lash_runtime_effect_group_child lash_runtime_effect_group_child_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_effect_group_child
-    ADD CONSTRAINT lash_runtime_effect_group_child_pkey PRIMARY KEY (group_key, "position");
-
-
---
--- Name: lash_runtime_effect_group lash_runtime_effect_group_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_effect_group
-    ADD CONSTRAINT lash_runtime_effect_group_pkey PRIMARY KEY (group_key);
-
-
---
--- Name: lash_runtime_effect_replay lash_runtime_effect_replay_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_effect_replay
-    ADD CONSTRAINT lash_runtime_effect_replay_pkey PRIMARY KEY (scope_id, replay_key);
-
-
---
 -- Name: lash_runtime_turn_commits lash_runtime_turn_commits_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2005,14 +1771,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_closure_authorizatio
 
 
 --
--- Name: lash_turn_cancel_closure_participants lash_turn_cancel_closure_participants_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_closure_participants
-    ADD CONSTRAINT lash_turn_cancel_closure_participants_pkey PRIMARY KEY (scope_id, participant_id);
-
-
---
 -- Name: lash_turn_cancel_requests lash_turn_cancel_requests_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2118,13 +1876,6 @@ CREATE INDEX idx_lash_attachment_manifest_uncommitted ON lash_durable_read_fixtu
 --
 
 CREATE INDEX idx_lash_attachment_manifest_written ON lash_durable_read_fixture.lash_attachment_manifest USING btree (attachment_id, written_at_ms);
-
-
---
--- Name: idx_lash_await_event_waits_session; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_await_event_waits_session ON lash_durable_read_fixture.lash_await_event_waits USING btree (session_id);
 
 
 --
@@ -2310,34 +2061,6 @@ CREATE INDEX idx_lash_queued_work_session_command_order ON lash_durable_read_fix
 
 
 --
--- Name: idx_lash_runtime_effect_group_scope; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_runtime_effect_group_scope ON lash_durable_read_fixture.lash_runtime_effect_group USING btree (scope_id);
-
-
---
--- Name: idx_lash_runtime_effect_group_session; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_runtime_effect_group_session ON lash_durable_read_fixture.lash_runtime_effect_group USING btree (session_id);
-
-
---
--- Name: idx_lash_runtime_effect_replay_lease; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_runtime_effect_replay_lease ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (status, lease_expires_at_ms);
-
-
---
--- Name: idx_lash_runtime_effect_replay_session; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_runtime_effect_replay_session ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (session_id);
-
-
---
 -- Name: idx_lash_session_ingress_addressed; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2461,43 +2184,6 @@ CREATE INDEX idx_lash_wake_deliveries_pending ON lash_durable_read_fixture.lash_
 --
 
 CREATE UNIQUE INDEX lash_queued_runs_pending ON lash_durable_read_fixture.lash_queued_runs USING btree (session_id) WHERE (status = 'pending'::text);
-
-
---
--- Name: uq_lash_runtime_effect_group_child_replay_key; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE UNIQUE INDEX uq_lash_runtime_effect_group_child_replay_key ON lash_durable_read_fixture.lash_runtime_effect_group_child USING btree (group_key, replay_key);
-
-
---
--- Name: uq_lash_runtime_effect_replay_commit_seq; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE UNIQUE INDEX uq_lash_runtime_effect_replay_commit_seq ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (group_key, commit_seq) WHERE (commit_seq IS NOT NULL);
-
-
---
--- Name: uq_lash_runtime_effect_replay_group_seq; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE UNIQUE INDEX uq_lash_runtime_effect_replay_group_seq ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (group_key, settlement_seq) WHERE ((group_key IS NOT NULL) AND (settlement_seq IS NOT NULL));
-
-
---
--- Name: lash_runtime_effect_group_child fk_runtime_effect_group_child_group; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_effect_group_child
-    ADD CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES lash_durable_read_fixture.lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED;
-
-
---
--- Name: lash_runtime_effect_replay fk_runtime_effect_replay_group; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_effect_replay
-    ADD CONSTRAINT fk_runtime_effect_replay_group FOREIGN KEY (group_key) REFERENCES lash_durable_read_fixture.lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED;
 
 
 --

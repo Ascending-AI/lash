@@ -124,14 +124,6 @@ ticket = "FIG-3736"
 reason = "seven of the eight closure cuts recover; a crash inside the store write that applies the input effects and consumes the authorization leaves it committed but unjournaled, and the redrive, reading the committed state, diverges from its journal"
 
 [[deferred]]
-file = "crates/lash-postgres-store/tests/conformance/effect_host.rs"
-claimant = "conformance::effect_host"
-suite = "effect_group_close_race_tests"
-recipe = "parked"
-ticket = "FIG-3667"
-reason = "flakes Contended on the Postgres effect engine; the engine is deleted by FIG-3667"
-
-[[deferred]]
 file = "crates/lash-sqlite-store/tests/conformance/suite.rs"
 claimant = "conformance::suite"
 suite = "turn_crash_level_1_tests"
@@ -146,11 +138,3 @@ suite = "turn_crash_level_1_tests"
 recipe = "parked"
 ticket = "FIG-3668"
 reason = "the level-one matrix crashes in process, and the journaled SQLite engine's crashed attempt keeps renewing its effect lease; the native host it ran on is deleted, and the SIGKILL matrix covers this engine"
-
-[[deferred]]
-file = "crates/lash-postgres-store/tests/conformance/turn_crash.rs"
-claimant = "conformance::turn_crash"
-suite = "turn_crash_level_1_tests"
-recipe = "parked"
-ticket = "FIG-3667"
-reason = "the level-one matrix crashes in process, and the journaled PostgreSQL engine's crashed attempt keeps renewing its effect lease; the native host it ran on is deleted, and the SIGKILL matrix covers this engine"

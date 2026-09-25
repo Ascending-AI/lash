@@ -18,18 +18,9 @@ kill, fence, or terminalize work.
 LASH_SESSION_LEASE_ARTIFACT_DIR=<fresh-dir> just session-lease-triage-e2e
 ```
 
-The companion owns no container and no host port, so it never serializes against another
-worktree's assigned PostgreSQL service. It runs every phase on SQLite always, and on
-PostgreSQL as well when `LASH_POSTGRES_DATABASE_URL` names one. Nothing in this runbook
-provisions that database. Get one from the repository's service helper, which starts the
-container, exports the URL, and tears it down again:
-
-```sh
-scripts/ci/with-service.sh pg16 -- bash -c 'just session-lease-triage-e2e'
-```
-
-A run with the variable unset is a SQLite-only run and reports `backends: sqlite`; a judged
-run covers both. Session ids carry a
+The companion owns no container and no host port. It runs every phase on SQLite and reports
+`backends: sqlite`. PostgreSQL is storage only (ADR 0104): its session lease runs under Restate
+in the workers E2E until FIG-3600 replaces session leases. Session ids carry a
 per-run suffix (a session id is single-use, ADR 0049), so a shared database needs no
 truncation and repeated runs never collide. It emits
 `session-lease-triage e2e passed: scenarios=4` only after every phase assertion holds on

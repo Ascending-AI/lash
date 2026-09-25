@@ -12,9 +12,8 @@ use sqlx::{PgConnection, Row};
 
 use super::payload_shape::registered_payload_shapes;
 use super::{
-    ANCHOR_TABLE, AWAIT_EVENT_SIGNING_SECRET_BYTES, ColumnShape, ColumnValueSource,
-    ForeignKeyAction, ForeignKeyShape, SEED_ROWS, SchemaFinding, SchemaReport, SchemaShape,
-    TableShape, UniqueGuard,
+    ANCHOR_TABLE, ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SEED_ROWS,
+    SchemaFinding, SchemaReport, SchemaShape, TableShape, UniqueGuard,
 };
 use crate::{SCHEMA_COMPONENT, SCHEMA_VERSION, StoreError, store_sqlx_error};
 
@@ -645,40 +644,5 @@ async fn read_seed_row_findings(
         }
     }
 
-    // The secret's width is a precondition open enforces, so the report has to
-    // carry it too: a host gating its migration CI on `verify_schema` would
-    // otherwise pass a database whose secret it seeded at the wrong width and
-    // fail at the production open instead.
-    if let Some(meta_oid) = resolved.get("lash_await_event_meta").map(|table| table.oid)
-        && found.tables.contains_key("lash_await_event_meta")
-        && probe_columns_match_expected(
-            connection,
-            meta_oid,
-            expected,
-            "lash_await_event_meta",
-            &["singleton", "signing_secret"],
-        )
-        .await?
-    {
-        let secret: Option<Vec<u8>> = sqlx::query_scalar(&format!(
-            "SELECT signing_secret FROM {}.lash_await_event_meta WHERE singleton = TRUE",
-            installation.quoted_namespace
-        ))
-        .fetch_optional(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
-        if let Some(secret) = secret
-            && secret.len() != AWAIT_EVENT_SIGNING_SECRET_BYTES
-        {
-            findings.push(SchemaFinding::InvalidSeedRow {
-                table: "lash_await_event_meta".to_string(),
-                detail: format!(
-                    "await-event signing secret has {} bytes, expected \
-                     {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
-                    secret.len()
-                ),
-            });
-        }
-    }
     Ok(findings)
 }

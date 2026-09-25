@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 131.
+-- lash-postgres-store schema, component version 132.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -649,157 +649,6 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
 CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
     ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index);
 
--- One row per open effect group. `next_seq` is the group's settlement counter:
--- a discharging child bumps it inside its own transaction, which is the only
--- allocator that cannot lose an update the way `MAX(settlement_seq) + 1`
--- can under concurrent discharge. `next_commit_seq` is the §4 twin: the
--- final-commit counter a winning final record bumps at the linearization
--- point (ADR 0099). `expected_children` is the write-time arity the opener
--- declared; actual cardinality is COUNT of membership rows. `lifecycle` is
--- the enum-per-phase column — live today; closing/settled are FIG-3410's
--- writes on this column, not new columns.
--- Replay and group keys use byte order on every host locale (FIG-3586): a
--- lashlang run reads its key namespace as one range bounded by a sentinel
--- that must sort after every ordinal, and a locale collation that ignores
--- punctuation would move it.
-CREATE TABLE IF NOT EXISTS lash_runtime_effect_group (
-    group_key TEXT COLLATE "C" PRIMARY KEY,
-    scope_id TEXT NOT NULL,
-    session_id TEXT,
-    wake TEXT NOT NULL,
-    loser_disposition TEXT NOT NULL,
-    expected_children BIGINT NOT NULL,
-    next_seq BIGINT NOT NULL DEFAULT 0,
-    next_commit_seq BIGINT NOT NULL DEFAULT 0,
-    lifecycle JSONB NOT NULL DEFAULT '{"type":"live"}',
-    created_at_ms BIGINT NOT NULL,
-    CONSTRAINT ck_runtime_effect_group_wake CHECK (wake IN ('first', 'first_success', 'all')),
-    CONSTRAINT ck_runtime_effect_group_loser_disposition CHECK (loser_disposition IN ('run_to_completion', 'cancel')),
-    CONSTRAINT ck_runtime_effect_group_lifecycle CHECK (lifecycle->>'type' IN ('live', 'closing', 'settled'))
-);
-CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_session
-    ON lash_runtime_effect_group(session_id);
-CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_scope
-    ON lash_runtime_effect_group(scope_id);
-
--- One row per accepted child of a group, carrying the request that
--- reconstructs it (ADR 0099 section 3). Retained input only: the section 4/5
--- arbitration state lives on the replay row as commit_state/commit_seq,
--- because the CAS that decides a child runs under the replay row's lock and
--- must not reach a second row to win. `command_version` is the command
--- encoding the retained envelope was minted under, checked at decode.
--- Written with the group row in one transaction, children first
--- (ADR 0065 N2), so a recorded group always has discoverable complete input.
--- No scope_id: the group row owns that fact.
-CREATE TABLE IF NOT EXISTS lash_runtime_effect_group_child (
-    group_key        TEXT COLLATE "C" NOT NULL,
-    position         BIGINT NOT NULL,
-    replay_key       TEXT COLLATE "C" NOT NULL,
-    envelope_json    TEXT NOT NULL,
-    command_version  BIGINT NOT NULL,
-    created_at_ms    BIGINT NOT NULL,
-    -- Membership rows are written before their group row inside the open
-    -- transaction (ADR 0065 N2), so the reference must settle at commit, not
-    -- at the statement.
-    CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,
-    PRIMARY KEY (group_key, position)
-);
--- Reopens, drains and the unsettled-children join all reach a membership row
--- by (group_key, replay_key), which the position primary key does not serve.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_group_child_replay_key
-    ON lash_runtime_effect_group_child(group_key, replay_key);
-
-CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
-    scope_id TEXT NOT NULL,
-    session_id TEXT,
-    replay_key TEXT COLLATE "C" NOT NULL,
-    envelope_hash TEXT NOT NULL,
-    envelope_json TEXT NOT NULL,
-    status TEXT NOT NULL,
-    outcome_json TEXT,
-    error_json TEXT,
-    lease_owner_id TEXT,
-    lease_token TEXT,
-    lease_expires_at_ms BIGINT NOT NULL DEFAULT 0,
-    due_at_ms BIGINT,
-    group_key TEXT COLLATE "C",
-    settlement_seq BIGINT,
-    commit_state TEXT NOT NULL DEFAULT 'pending',
-    commit_seq BIGINT,
-    drain_input TEXT,
-    created_at_ms BIGINT NOT NULL,
-    updated_at_ms BIGINT NOT NULL,
-    CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
-    CONSTRAINT ck_runtime_effect_replay_commit_state CHECK (commit_state IN ('pending', 'committed', 'drained', 'cancel_decided')),
-    CONSTRAINT ck_runtime_effect_replay_commit_seq CHECK ((commit_seq IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))) AND (group_key IS NULL OR NOT (commit_state IN ('committed', 'drained')) OR commit_seq IS NOT NULL)),
-    CONSTRAINT ck_runtime_effect_replay_drain_input CHECK (drain_input IS NULL OR (group_key IS NOT NULL AND commit_state IN ('committed', 'drained'))),
-    CONSTRAINT ck_runtime_effect_replay_outcome_json CHECK ((status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)),
-    CONSTRAINT ck_runtime_effect_replay_error_json CHECK ((status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)),
-    CONSTRAINT ck_runtime_effect_replay_settlement_seq CHECK ((settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))),
-    CONSTRAINT fk_runtime_effect_replay_group FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,
-    PRIMARY KEY (scope_id, replay_key)
-);
-CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_lease
-    ON lash_runtime_effect_replay(status, lease_expires_at_ms);
-CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_session
-    ON lash_runtime_effect_replay(session_id);
--- Settlement ranks are read by position, so a group must never record the same
--- sequence twice; the partial index leaves ungrouped and unsettled children
--- (both NULL-bearing) entirely unconstrained.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_group_seq
-    ON lash_runtime_effect_replay(group_key, settlement_seq)
-    WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
--- One commit position per child, per group: the §4 linearization point's
--- backstop, the same role the settlement-seq unique index plays for ranks.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_commit_seq
-    ON lash_runtime_effect_replay(group_key, commit_seq)
-    WHERE commit_seq IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS lash_await_event_meta (
-    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
-    signing_secret BYTEA NOT NULL,
-    CONSTRAINT ck_await_event_meta_singleton CHECK (singleton)
-);
-
-CREATE TABLE IF NOT EXISTS lash_await_event_waits (
-    key_id TEXT PRIMARY KEY,
-    scope_json TEXT NOT NULL,
-    wait_json TEXT NOT NULL,
-    session_id TEXT,
-    turn_control BOOLEAN NOT NULL,
-    terminal_json TEXT,
-    created_at_ms BIGINT NOT NULL,
-    resolved_at_ms BIGINT
-);
-CREATE INDEX IF NOT EXISTS idx_lash_await_event_waits_session
-    ON lash_await_event_waits(session_id);
-
--- Permanent by design: session ids cannot be reused, so revocation
--- evidence must remain after every retention-pruning pass.
-CREATE TABLE IF NOT EXISTS lash_await_event_revoked_sessions (
-    session_id TEXT PRIMARY KEY,
-    revoked_at_ms BIGINT NOT NULL
-);
-
--- Permanent by design: process and runtime-operation ids are single-use, so a
--- retired scope's fence must outlive every retention pass and every restart.
--- Keyed by the scope's journal identity, the same key its effect rows carry.
-CREATE TABLE IF NOT EXISTS lash_effect_scope_retirements (
-    scope_id TEXT PRIMARY KEY,
-    retired_at_ms BIGINT NOT NULL,
-    artifact_cleanup_completed BOOLEAN NOT NULL DEFAULT FALSE
-);
-
--- A bound session catalog registers before admitting cancellation work and
--- releases only after it has durably retired the physical scope. The effect
--- owner refuses irreversible retirement while any catalog still participates.
-CREATE TABLE IF NOT EXISTS lash_turn_cancel_closure_participants (
-    scope_id TEXT NOT NULL,
-    participant_id TEXT NOT NULL,
-    scope_json TEXT NOT NULL,
-    PRIMARY KEY (scope_id, participant_id)
-);
-
 CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions (
     subscription_id TEXT PRIMARY KEY,
     owner_scope TEXT NOT NULL,
@@ -927,12 +776,10 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
     CONSTRAINT ck_release_stamp_singleton CHECK (singleton)
 );
 
--- Seed rows. Every open mode requires all three: the component version stamp,
--- the transactional process-change clock row, and the store-resident
--- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
--- from the server's strong RNG, so the 32-byte secret needs no extension.
+-- Seed rows. Every open mode requires them: the component version stamp and
+-- the transactional clock rows.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 131)
+VALUES ('lash-postgres-store', 132)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (
@@ -943,15 +790,4 @@ ON CONFLICT (singleton) DO NOTHING;
 INSERT INTO lash_turn_park_clock (
     singleton, current_seq, compaction_horizon
 ) VALUES (TRUE, 0, 0)
-ON CONFLICT (singleton) DO NOTHING;
-
-INSERT INTO lash_await_event_meta (singleton, signing_secret)
-VALUES (
-    TRUE,
-    decode(
-        replace(gen_random_uuid()::text, '-', '')
-            || replace(gen_random_uuid()::text, '-', ''),
-        'hex'
-    )
-)
 ON CONFLICT (singleton) DO NOTHING;

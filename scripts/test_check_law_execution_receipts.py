@@ -557,7 +557,6 @@ class RealTreeTests(unittest.TestCase):
         for label, claimant in (
             ("//crates/lash-sqlite-store:conformance__test", "conformance::suite"),
             ("//crates/lash-sqlite-store:conformance_memory__test", "conformance_memory::suite"),
-            ("//crates/lash-postgres-store:conformance__test", "conformance"),
         ):
             invocations = [
                 invocation
@@ -642,7 +641,7 @@ class RealTreeTests(unittest.TestCase):
         errors: list[str] = []
         manifest_set = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
-        self.assertEqual(len(manifest_set), 17)
+        self.assertEqual(len(manifest_set), 15)
         self.assertIn(
             (
                 "crates/lash-restate/src/tests/conformance_and_poison.rs",

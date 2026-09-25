@@ -6,7 +6,7 @@ cd "$repo"
 if [ -n "${LASH_E2E_PREBUILT_BIN_DIR:-}" ]; then
   LASH_E2E_BIN_DIR="$(cd "$LASH_E2E_PREBUILT_BIN_DIR" && pwd)"
   export LASH_E2E_BIN_DIR
-  for binary in lash-e2e-worker lash-e2e-mock-provider lash-e2e-runner lash-e2e-frame-crash lash-e2e-await-event-helper; do
+  for binary in lash-e2e-worker lash-e2e-mock-provider lash-e2e-runner lash-e2e-await-event-helper; do
     if [ ! -x "$LASH_E2E_BIN_DIR/$binary" ]; then
       echo "Missing executable prebuilt worker: $LASH_E2E_BIN_DIR/$binary" >&2
       exit 1
@@ -155,9 +155,11 @@ if [ "${LASH_E2E_WAKE_RCA_ONLY:-0}" = "1" ] \
 fi
 
 # The cold-process await-event vectors each wait for Restate to report a
-# genuinely suspended invocation before killing their helper. Leave enough
-# budget for those gates plus the existing engine-restart setup.
-deadline=$((SECONDS + 480))
+# genuinely suspended invocation before killing their helper, and the
+# frame-switch crash waits out the killed worker's session lease before
+# Restate's redelivery can admit. Leave enough budget for those gates plus
+# the existing engine-restart setup.
+deadline=$((SECONDS + 600))
 until signal_ready="$(
   "${compose[@]}" exec -T postgres \
     psql -U lash -d lash -Atqc \

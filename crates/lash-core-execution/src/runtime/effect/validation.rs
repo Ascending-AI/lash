@@ -42,13 +42,13 @@ const ERROR_SUMMARY_PATH_LIMIT: usize = 8;
 /// reconstructs from the command this build builds, and a redrive surfaces
 /// `ReplayMismatch` deep in the effect driver — a drift report, not the
 /// reject-and-recreate refusal the durable contract promises. Advancing the
-/// SQLite effect generation (`lash-sqlite-store`'s `EFFECT_SCHEMA_VERSION`) and
-/// the PostgreSQL component (`lash-postgres-store`'s `SCHEMA_VERSION`) refuses
-/// the whole journal at open instead, with a typed message naming the drain.
+/// SQLite effect generation (`lash-sqlite-store`'s `EFFECT_SCHEMA_VERSION`)
+/// refuses the whole journal at open instead, with a typed message naming the
+/// drain.
 ///
 /// So: any change that moves the serialized bytes of a `RuntimeEffectCommand`
-/// variant advances both store generations in the same change, and leaves this
-/// domain alone. Both generations are refusal-only for this class — a resolved
+/// variant advances the effect generation in the same change, and leaves this
+/// domain alone. The generation is refusal-only for this class — a resolved
 /// duration cannot be turned back into the deadline the guest asked for, so
 /// there is no migration arm to write.
 #[derive(Clone, Debug, Serialize, Deserialize)]

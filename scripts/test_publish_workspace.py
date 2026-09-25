@@ -464,7 +464,6 @@ class PublishWorkspaceTest(unittest.TestCase):
         self.assertIn("core-conversions", remote["features"])
 
         for extension_name in (
-            "lash-internal-postgres-store",
             "lash-internal-provider-openai",
             "lash-internal-restate",
         ):

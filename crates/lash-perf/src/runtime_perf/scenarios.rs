@@ -109,23 +109,17 @@ pub(crate) enum RuntimePerfScenario {
     IngressClaimProjection,
     StoreHardeningHotPaths,
     DurableStandardToolTurnSqlite,
-    DurableStandardToolTurnPostgres,
     DurableRlmCheckpointTurnSqlite,
-    DurableRlmCheckpointTurnPostgres,
     DurableAgentChildTurnSqlite,
-    DurableAgentChildTurnPostgres,
     DurableCheckpointCurveSqlite,
     DurableCheckpointCurvePostgres,
     DurableQueuedWorkContentionSqlite,
-    DurableQueuedWorkContentionPostgres,
     WriterContention2Workers,
     WriterContention8Workers,
     AsyncProcessSettlement2Children,
     AsyncProcessSettlement8Children,
     HighTrafficLoadSqlite,
-    HighTrafficLoadPostgres,
     HighTrafficKneeSqlite,
-    HighTrafficKneePostgres,
     ResidentGraphAppendCurve,
 }
 
@@ -341,24 +335,18 @@ macro_rules! runtime_perf_metadata {
 
 impl RuntimePerfScenario {
     #[cfg(test)]
-    pub(crate) const DURABLE_REPRESENTATIVE_TURNS: [Self; 14] = [
+    pub(crate) const DURABLE_REPRESENTATIVE_TURNS: [Self; 8] = [
         Self::DurableStandardToolTurnSqlite,
-        Self::DurableStandardToolTurnPostgres,
         Self::DurableRlmCheckpointTurnSqlite,
-        Self::DurableRlmCheckpointTurnPostgres,
         Self::DurableAgentChildTurnSqlite,
-        Self::DurableAgentChildTurnPostgres,
         Self::DurableCheckpointCurveSqlite,
         Self::DurableCheckpointCurvePostgres,
         Self::DurableQueuedWorkContentionSqlite,
-        Self::DurableQueuedWorkContentionPostgres,
         Self::HighTrafficLoadSqlite,
-        Self::HighTrafficLoadPostgres,
         Self::HighTrafficKneeSqlite,
-        Self::HighTrafficKneePostgres,
     ];
 
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 59] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 53] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -678,15 +666,6 @@ impl RuntimePerfScenario {
             false
         ),
         runtime_perf_metadata!(
-            DurableStandardToolTurnPostgres,
-            "durable_standard_tool_turn_postgres",
-            Standard,
-            RuntimeScenario,
-            "Measures a complete Standard tool turn through the runtime against the decorated PostgreSQL persistence boundary.",
-            Durable,
-            false
-        ),
-        runtime_perf_metadata!(
             DurableRlmCheckpointTurnSqlite,
             "durable_rlm_checkpoint_turn_sqlite",
             Rlm,
@@ -696,30 +675,11 @@ impl RuntimePerfScenario {
             false
         ),
         runtime_perf_metadata!(
-            DurableRlmCheckpointTurnPostgres,
-            "durable_rlm_checkpoint_turn_postgres",
-            Rlm,
-            RuntimeScenario,
-            "Measures a complete RLM checkpoint-producing turn through the runtime against the decorated PostgreSQL persistence boundary.",
-            Durable,
-            false
-        ),
-        runtime_perf_metadata!(
             DurableAgentChildTurnSqlite,
             "durable_agent_child_turn_sqlite",
             Rlm,
             RuntimeScenario,
             "Measures a complete parent and child agent turn through the runtime against the decorated SQLite persistence boundary.",
-            Durable,
-            wiring { subagents_plugin = true },
-            false
-        ),
-        runtime_perf_metadata!(
-            DurableAgentChildTurnPostgres,
-            "durable_agent_child_turn_postgres",
-            Rlm,
-            RuntimeScenario,
-            "Measures a complete parent and child agent turn through the runtime against the decorated PostgreSQL persistence boundary.",
             Durable,
             wiring { subagents_plugin = true },
             false
@@ -750,17 +710,6 @@ impl RuntimePerfScenario {
             Standard,
             RuntimeScenario,
             "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared SQLite backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
-            Durable,
-            QueuedWorkContention,
-            wiring { queued_work = false, session_store_handle = true },
-            false
-        ),
-        runtime_perf_metadata!(
-            DurableQueuedWorkContentionPostgres,
-            "durable_queued_work_contention_postgres",
-            Standard,
-            RuntimeScenario,
-            "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared PostgreSQL backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
             Durable,
             QueuedWorkContention,
             wiring { queued_work = false, session_store_handle = true },
@@ -812,33 +761,11 @@ impl RuntimePerfScenario {
             false
         ),
         runtime_perf_metadata!(
-            HighTrafficLoadPostgres,
-            "high_traffic_load_postgres",
-            Rlm,
-            RuntimeScenario,
-            "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared PostgreSQL persistence.",
-            Durable,
-            HighTraffic,
-            wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
-            false
-        ),
-        runtime_perf_metadata!(
             HighTrafficKneeSqlite,
             "high_traffic_knee_sqlite",
             Rlm,
             RuntimeScenario,
             "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
-            Durable,
-            HighTraffic,
-            wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
-            false
-        ),
-        runtime_perf_metadata!(
-            HighTrafficKneePostgres,
-            "high_traffic_knee_postgres",
-            Rlm,
-            RuntimeScenario,
-            "Searches mixed-session saturation steps below protocol and facade ownership against an isolated PostgreSQL database per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
             Durable,
             HighTraffic,
             wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
@@ -853,7 +780,7 @@ impl RuntimePerfScenario {
             false
         ),
     ];
-    pub(crate) const KNOWN: [Self; 59] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 53] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; RUNTIME_PERF_DEFAULT_COUNT] =
@@ -902,41 +829,23 @@ impl RuntimePerfScenario {
     }
 
     pub(crate) fn uses_postgres(self) -> bool {
-        matches!(
-            self,
-            Self::DurableStandardToolTurnPostgres
-                | Self::DurableRlmCheckpointTurnPostgres
-                | Self::DurableAgentChildTurnPostgres
-                | Self::DurableCheckpointCurvePostgres
-                | Self::DurableQueuedWorkContentionPostgres
-                | Self::HighTrafficLoadPostgres
-                | Self::HighTrafficKneePostgres
-        )
+        matches!(self, Self::DurableCheckpointCurvePostgres)
     }
 
     pub(crate) fn is_high_traffic(self) -> bool {
         matches!(
             self,
-            Self::HighTrafficLoadSqlite
-                | Self::HighTrafficLoadPostgres
-                | Self::HighTrafficKneeSqlite
-                | Self::HighTrafficKneePostgres
+            Self::HighTrafficLoadSqlite | Self::HighTrafficKneeSqlite
         )
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn is_queued_work_contention(self) -> bool {
-        matches!(
-            self,
-            Self::DurableQueuedWorkContentionSqlite | Self::DurableQueuedWorkContentionPostgres
-        )
+        matches!(self, Self::DurableQueuedWorkContentionSqlite)
     }
 
     pub(crate) fn is_high_traffic_knee(self) -> bool {
-        matches!(
-            self,
-            Self::HighTrafficKneeSqlite | Self::HighTrafficKneePostgres
-        )
+        matches!(self, Self::HighTrafficKneeSqlite)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -948,8 +857,8 @@ impl RuntimePerfScenario {
         match self {
             // The durable SQLite turns run on every host that can open a
             // scratch database, so their allocation ceilings are measurable
-            // and pinned like any ephemeral scenario. The PostgreSQL mirrors
-            // stay unbudgeted: their numbers cannot be produced off CI, and a
+            // and pinned like any ephemeral scenario. The PostgreSQL curve
+            // stays unbudgeted: its numbers cannot be produced off CI, and a
             // ceiling nobody can measure locally is a rerun generator.
             Self::DurableStandardToolTurnSqlite
             | Self::DurableRlmCheckpointTurnSqlite
@@ -999,7 +908,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 59] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 53] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -1054,12 +963,6 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 59] {
         RuntimePerfScenario::METADATA[50].scenario,
         RuntimePerfScenario::METADATA[51].scenario,
         RuntimePerfScenario::METADATA[52].scenario,
-        RuntimePerfScenario::METADATA[53].scenario,
-        RuntimePerfScenario::METADATA[54].scenario,
-        RuntimePerfScenario::METADATA[55].scenario,
-        RuntimePerfScenario::METADATA[56].scenario,
-        RuntimePerfScenario::METADATA[57].scenario,
-        RuntimePerfScenario::METADATA[58].scenario,
     ]
 }
 

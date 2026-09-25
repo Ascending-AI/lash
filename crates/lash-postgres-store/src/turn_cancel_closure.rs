@@ -1,5 +1,28 @@
 use crate::{SessionId, StoreError, store_sqlx_error};
 
+/// Advisory-lock namespace for session-free scopes, disjoint from every
+/// session-keyed namespace so a process or runtime-operation scope never
+/// contends with a session whose id happens to hash alike.
+const SCOPE_LOCK_NAMESPACE: i64 = 563;
+
+/// Serialize a session-free scope's closure authorization, its closure
+/// commit, and its retirement against each other.
+pub(crate) async fn lock_scope(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    scope_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text_seeded
+            .sql(),
+    )
+    .bind(scope_id)
+    .bind(SCOPE_LOCK_NAMESPACE)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 pub(crate) async fn retire_scope(
     pool: &sqlx::PgPool,
     scope: &lash_core_execution::ExecutionScope,
@@ -10,7 +33,7 @@ pub(crate) async fn retire_scope(
         .key()
         .to_string();
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
-    crate::await_event::lock_scope(&mut tx, &scope_id)
+    lock_scope(&mut tx, &scope_id)
         .await
         .map_err(store_sqlx_error)?;
     let rows: Vec<(String, String)> = sqlx::query_as(

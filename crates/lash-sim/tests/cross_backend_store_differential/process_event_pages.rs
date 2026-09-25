@@ -207,11 +207,11 @@ pub(super) async fn compare_bounded_process_event_pages(
             ),
         ))
     };
-    let sqlite_record = sqlite
+    sqlite
         .register_process(effect_registration())
         .await
         .expect("register SQLite effect process");
-    let postgres_record = postgres_registry
+    postgres_registry
         .register_process(effect_registration())
         .await
         .expect("register PostgreSQL effect process");
@@ -229,12 +229,6 @@ pub(super) async fn compare_bounded_process_event_pages(
         .expect("claim PostgreSQL effect lease")
         .acquired()
         .expect("PostgreSQL effect lease available");
-    let sqlite_effect =
-        lash_sqlite_store::SqliteEffectHost::open(&sqlite_root.join("effect-pages.db"))
-            .await
-            .expect("open SQLite effect replay host");
-    let postgres_effect = postgres.effect_host();
-    let effect_scope = lash_core::ExecutionScope::process(effect_id.as_str());
     // Ten occurrences of one node: the writer records the first
     // `PROCESS_EFFECT_OCCURRENCE_CAP` one by one and counts the rest, by
     // class, in one omission record.
@@ -242,6 +236,15 @@ pub(super) async fn compare_bounded_process_event_pages(
     for occurrence in 1..=10 {
         let replay_key = format!("fixture-effect:{occurrence}");
         let is_failure = occurrence == 7 || occurrence == 9;
+        let class = if is_failure {
+            lash_core::ProcessEffectOutcomeClass::Failure
+        } else {
+            lash_core::ProcessEffectOutcomeClass::Success
+        };
+        if !lash_core::ProcessEffectSummaryOccurrence::is_within_cap(occurrence) {
+            omitted.record(class);
+            continue;
+        }
         let outcome = lash_core::ProcessEffectSummaryOccurrence::new(
             "repeated-node",
             occurrence,
@@ -250,132 +253,39 @@ pub(super) async fn compare_bounded_process_event_pages(
             } else {
                 "now"
             },
-            if is_failure {
-                lash_core::ProcessEffectOutcomeClass::Failure
-            } else {
-                lash_core::ProcessEffectOutcomeClass::Success
-            },
+            class,
             is_failure.then(|| {
                 lash_core::TriggerOperationError::Invalid {
                     message: "fixture refusal".to_string(),
                 }
                 .failure_code()
             }),
-            replay_key.clone(),
+            replay_key,
         );
-        let envelope = lash_core::RuntimeEffectEnvelope::new(
-            lash_core::RuntimeEffectInvocation::new(
-                lash_core::EffectAddress::new(effect_scope.clone(), replay_key.clone())
-                    .expect("effect address"),
-                lash_core::RuntimeAttribution::none(),
-                replay_key,
-            ),
-            if is_failure {
-                lash_core::RuntimeEffectCommand::Trigger {
-                    command: Box::new(lash_core::TriggerCommand::Prune {
-                        owner_scope: lash_core::TriggerOwnerScope::host("effect-differential")
-                            .expect("trigger owner scope"),
-                        actor: lash_core::ProcessOriginator::host(),
-                        subscription_keys: vec!["missing".to_string()],
-                    }),
-                }
-            } else {
-                lash_core::RuntimeEffectCommand::LanguageRuntimeValue {
-                    operation: "now".to_string(),
-                }
-            },
-        );
-        for (registry, host, process_ref, lease) in [
-            (
-                &sqlite as &dyn lash_core::ProcessRegistry,
-                &sqlite_effect as &dyn lash_core::EffectHost,
-                lash_core::ProcessRef::from_record(&sqlite_record),
-                &sqlite_lease,
-            ),
+        for (registry, lease) in [
+            (&sqlite as &dyn lash_core::ProcessRegistry, &sqlite_lease),
             (
                 &postgres_registry as &dyn lash_core::ProcessRegistry,
-                &postgres_effect as &dyn lash_core::EffectHost,
-                lash_core::ProcessRef::from_record(&postgres_record),
                 &postgres_lease,
             ),
         ] {
-            let controller = host
-                .scoped(lash_core::AdmittedScope::process(process_ref))
-                .expect("admit process effect scope");
-            let recorded = controller
-                .controller()
-                .execute_effect(
-                    envelope.clone(),
-                    lash_core::RuntimeEffectLocalExecutor::testing(move |_| async move {
-                        Ok(if is_failure {
-                            lash_core::RuntimeEffectOutcome::Trigger {
-                                result: Box::new(Err(lash_core::TriggerOperationError::Invalid {
-                                    message: "fixture refusal".to_string(),
-                                })),
-                            }
-                        } else {
-                            lash_core::RuntimeEffectOutcome::LanguageRuntimeValue {
-                                value: serde_json::json!(occurrence),
-                            }
-                        })
-                    }),
+            let inserted = registry
+                .append_event_with_authority(
+                    &effect_id,
+                    outcome.append_request(),
+                    &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
                 )
                 .await
-                .expect("journal actual effect replay row");
-            assert_eq!(
-                matches!(recorded, lash_core::RuntimeEffectOutcome::Trigger { .. }),
-                is_failure
-            );
-            if occurrence == 1 {
-                assert!(
-                    registry
-                        .full_event_window(&effect_id, 0)
-                        .await
-                        .expect("read after effect journal, before process append")
-                        .is_empty(),
-                    "an effect replay row alone must not invent a process-summary event"
-                );
-            }
-            if lash_core::ProcessEffectSummaryOccurrence::is_within_cap(occurrence) {
-                let inserted = registry
-                    .append_event_with_authority(
-                        &effect_id,
-                        outcome.append_request(),
-                        &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
-                    )
-                    .await
-                    .expect("append journaled outcome under execution authority");
-                let replayed = registry
-                    .append_event_with_authority(
-                        &effect_id,
-                        outcome.append_request(),
-                        &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
-                    )
-                    .await
-                    .expect("recover lost append acknowledgement");
-                assert_eq!(inserted.event.sequence, replayed.event.sequence);
-            }
-            let replay = controller
-                .controller()
-                .execute_effect(
-                    envelope.clone(),
-                    lash_core::RuntimeEffectLocalExecutor::testing(|_| async {
-                        panic!("a replay row must bypass the local executor")
-                    }),
+                .expect("append the effect outcome under execution authority");
+            let replayed = registry
+                .append_event_with_authority(
+                    &effect_id,
+                    outcome.append_request(),
+                    &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
                 )
                 .await
-                .expect("replay recorded effect without re-execution");
-            assert_eq!(
-                serde_json::to_value(replay).expect("encode replayed effect"),
-                serde_json::to_value(recorded).expect("encode recorded effect")
-            );
-        }
-        if !lash_core::ProcessEffectSummaryOccurrence::is_within_cap(occurrence) {
-            omitted.record(if is_failure {
-                lash_core::ProcessEffectOutcomeClass::Failure
-            } else {
-                lash_core::ProcessEffectOutcomeClass::Success
-            });
+                .expect("recover lost append acknowledgement");
+            assert_eq!(inserted.event.sequence, replayed.event.sequence);
         }
     }
     let omissions = lash_core::ProcessEffectOmissions::new(std::collections::BTreeMap::from([(
@@ -429,24 +339,6 @@ pub(super) async fn compare_bounded_process_event_pages(
         node.occurrences[6].outcome_class,
         lash_core::ProcessEffectOutcomeClass::Failure
     );
-    let sqlite_replay = rusqlite::Connection::open(sqlite_root.join("effect-pages.db"))
-        .expect("open SQLite effect replay rows");
-    let sqlite_replay_count: i64 = sqlite_replay
-        .query_row(
-            "SELECT COUNT(*) FROM runtime_effect_replay WHERE scope_id LIKE ?1 AND status = 'completed'",
-            [format!("%{}%", effect_id.as_str())],
-            |row| row.get(0),
-        )
-        .expect("count SQLite completed replay rows");
-    let postgres_replay_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_runtime_effect_replay WHERE scope_id LIKE $1 AND status = 'completed'",
-    )
-    .bind(format!("%{}%", effect_id.as_str()))
-    .fetch_one(postgres.pool())
-    .await
-    .expect("count PostgreSQL completed replay rows");
-    assert_eq!((sqlite_replay_count, postgres_replay_count), (10, 10));
-
     sqlx::query("DELETE FROM lash_processes WHERE process_id = $1")
         .bind(process_id.as_str())
         .execute(postgres.pool())

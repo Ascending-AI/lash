@@ -609,19 +609,5 @@ async fn the_ddl_artifact_is_idempotent() {
         .expect("reapply the schema artifact");
     let second = read_scratch_shape(&mut connection, &scratch).await;
     assert_eq!(first, second, "reapplying schema.sql must change nothing");
-    let secret: Vec<u8> = sqlx::query_scalar(
-        crate::await_event::wait_sql()
-            .meta_postgres
-            .select_signing_secret
-            .sql(),
-    )
-    .fetch_one(&mut connection)
-    .await
-    .expect("read the seeded signing secret");
-    assert_eq!(
-        secret.len(),
-        32,
-        "the artifact's seed statement must produce a 32-byte await-event signing secret"
-    );
     drop_scratch_schema(connection, &scratch).await;
 }
