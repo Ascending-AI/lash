@@ -39,7 +39,7 @@ lash_conformance::turn_crash_direct_acceptance_tests!({ turn_crash_runner_fixtur
 // its next command: Restate reports a journal mismatch and retries the
 // invocation instead of ending it.
 lash_conformance::turn_crash_generation_redrive_tests!(
-    #[ignore = "parked: a refused redrive diverges from the crashed execution's journal (FIG-3672)"]
+    #[ignore = "parked: a refused redrive diverges from the crashed execution's journal (FIG-3735)"]
     {
         turn_crash_runner_fixture().await
     }
@@ -50,7 +50,7 @@ lash_conformance::turn_crash_generation_redrive_tests!(
 // write committed but unjournaled, and the redrive, reading the committed
 // state, takes a path the journal does not hold.
 lash_conformance::turn_crash_cancel_closure_tests!(
-    #[ignore = "parked: a crash inside the closure's store write diverges the redrive from its journal (FIG-3672)"]
+    #[ignore = "parked: a crash inside the closure's store write diverges the redrive from its journal (FIG-3736)"]
     {
         turn_crash_runner_fixture().await
     }
