@@ -416,6 +416,58 @@ async fn exhausting_the_handler_retry_policy_pauses_the_invocation_until_resumed
 }
 
 #[tokio::test]
+async fn a_purged_workflow_run_starts_over_under_its_key_with_an_empty_journal() {
+    let tag = "purge-me";
+    let server = server(ServerConfig::default().time(TimeMode::Manual)).await;
+    let (_, body) = post(
+        &server,
+        &format!("Flow/{tag}/run/send"),
+        &format!("\"{tag}\""),
+    )
+    .await;
+    let first: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let id = first["invocationId"].as_str().unwrap().to_owned();
+    server.settle().await;
+    assert_eq!(counter(tag).load(Ordering::SeqCst), 1);
+    assert_eq!(
+        server.purge(&id),
+        Some(false),
+        "a running invocation is not purged"
+    );
+    assert_eq!(server.kill(&id), Some(true));
+    assert_eq!(server.purge(&id), Some(true));
+    assert!(
+        server.invocations().iter().all(|view| view.id != id),
+        "a purged invocation is gone"
+    );
+    assert_eq!(server.purge(&id), None, "a purged id names nothing");
+
+    let (status, body) = post(
+        &server,
+        &format!("Flow/{tag}/run/send"),
+        &format!("\"{tag}\""),
+    )
+    .await;
+    assert_eq!(status, 202, "{body}");
+    let second: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(
+        body.contains("\"Accepted\""),
+        "the key's run was forgotten: {body}"
+    );
+    assert_eq!(
+        second["invocationId"].as_str(),
+        Some(id.as_str()),
+        "a workflow's id derives from its key"
+    );
+    server.settle().await;
+    assert_eq!(
+        counter(tag).load(Ordering::SeqCst),
+        2,
+        "the fresh run replays nothing: its effect runs again"
+    );
+}
+
+#[tokio::test]
 async fn cancelling_a_suspended_workflow_ends_it_as_cancelled() {
     let tag = "cancel-me";
     let server = server(ServerConfig::default().time(TimeMode::Manual)).await;

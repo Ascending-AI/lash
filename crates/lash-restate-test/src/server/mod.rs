@@ -666,6 +666,16 @@ impl RestateTestServer {
         Some(state.kill(&self.shared, key) != ControlResult::AlreadyCompleted)
     }
 
+    /// Purge a completed `invocation` as the admin API does: its journal, its
+    /// id and, for a workflow run, its key's state and promises are gone, and
+    /// the next submission of that workflow key starts over with an empty
+    /// journal. `Some(false)` when the invocation has not completed.
+    pub fn purge(&self, invocation: &str) -> Option<bool> {
+        let mut state = self.shared.lock();
+        let key = state.lookup(invocation)?;
+        Some(state.purge(key))
+    }
+
     /// Resume a paused `invocation` as the admin API does.
     pub fn resume(&self, invocation: &str) -> Option<bool> {
         let mut state = self.shared.lock();
@@ -679,12 +689,15 @@ impl RestateTestServer {
         self.shared.lock().stats.clone()
     }
 
+    /// Every retained invocation: a purged one is gone.
     pub fn invocations(&self) -> Vec<InvocationView> {
-        self.shared
-            .lock()
+        let state = self.shared.lock();
+        state
             .invocations
             .iter()
-            .map(|invocation| InvocationView {
+            .enumerate()
+            .filter(|(index, _)| state.is_retained(InvKey(*index)))
+            .map(|(_, invocation)| InvocationView {
                 id: invocation.id.as_str().to_owned(),
                 target: invocation.target.display(),
                 status: invocation.status.name(),
@@ -744,7 +757,13 @@ impl RestateTestServer {
     /// interleaved.
     pub fn journal_digest(&self) -> u64 {
         let state = self.shared.lock();
-        let mut invocations: Vec<_> = state.invocations.iter().collect();
+        let mut invocations: Vec<_> = state
+            .invocations
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| state.is_retained(InvKey(*index)))
+            .map(|(_, invocation)| invocation)
+            .collect();
         invocations.sort_by(|left, right| left.id.cmp(&right.id));
         let mut digest = FNV_OFFSET;
         for invocation in invocations {

@@ -350,6 +350,24 @@ lash_conformance::migrated_tools_redrive_tests!(
     }
 );
 
+// FIG-3547's segment re-drive law on the live endpoint: the segments run in
+// the endpoint's `LashProcessWorkflow`, a crash is a failed attempt Restate
+// delivers again, and a lost substrate is the invocation killed and purged
+// through the admin API, then submitted afresh.
+lash_conformance::segment_redrive_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        // Restate state outlives a run: each run names its own processes.
+        let prefix: &'static str =
+            Box::leak(format!("restate-segment-redrive-{}", harness.run_nonce()).into_boxed_str());
+        let stores = harness.law_stores();
+        let runner = harness.turn_runner();
+        (harness, prefix, stores, runner)
+    }
+);
+
 // FIG-3682's admitted-head law on the live endpoint: the turn runs in a probe
 // handler, crashes after its commit, and Restate redelivers it; the redrive
 // replays the invocation's journal against a head that already holds the

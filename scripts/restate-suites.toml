@@ -44,6 +44,9 @@ redelivery_laws = [
   # The turn crashes after its tool result's presentation; Restate redelivers
   # it, and the redrive parks on the diverged presentation (FIG-3697).
   "tests::conformance_and_poison::a_diverged_tool_presentation_parks_the_turn",
+  # Each process segment crashes around an effect; Restate delivers it again
+  # over its journal (FIG-3547).
+  "tests::conformance_and_poison::segment_redrive_never_reexecutes_a_recorded_effect",
 ]
 
 [suites.effect-group.replay]

@@ -161,6 +161,7 @@ mod live_turn_probe;
 mod process_effect_summary;
 mod process_tool_replay;
 mod replay_corpus;
+mod segment_redrive_on_the_double;
 mod tool_context_conformance;
 mod trigger_intent_cutover;
 mod turn_cancel_modes;

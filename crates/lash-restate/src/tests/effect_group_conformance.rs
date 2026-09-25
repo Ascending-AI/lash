@@ -96,9 +96,17 @@ impl RestateProcessRunner for ToolChildProcessRunner {
 #[derive(Default)]
 pub(super) struct LawProcessRunner {
     installed: Mutex<Option<crate::RestateCoreProcessRunner>>,
+    /// The processes whose segments a law serves with its own body
+    /// ([`ServedSegments`](super::live_turn_probe::ServedSegments)); they win
+    /// over the installed worker.
+    segments: super::live_turn_probe::ServedSegments,
 }
 
 impl LawProcessRunner {
+    pub(super) fn segments(&self) -> &super::live_turn_probe::ServedSegments {
+        &self.segments
+    }
+
     pub(super) fn install(&self, worker: lash_core_worker::DurableProcessWorker) {
         *self
             .installed
@@ -130,6 +138,12 @@ impl RestateProcessRunner for LawProcessRunner {
         handover: Option<lash_core::SegmentHandover>,
         cancellation: CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, lash_core::PluginError> {
+        if self.segments.serves(&registration.id) {
+            return self
+                .segments
+                .run(&registration.id, scoped_effect_controller)
+                .await;
+        }
         match self.installed() {
             Some(runner) => {
                 Box::pin(runner.run_process_segment(
@@ -361,15 +375,103 @@ impl HarnessServer {
     }
 }
 
-/// The harness's admin face: where it modifies retained service state.
+/// The harness's admin face: where it modifies retained service state and
+/// controls invocations.
 #[derive(Clone)]
-enum HarnessAdmin {
+pub(super) enum HarnessAdmin {
     Live {
         admin_url: String,
     },
     InProcess {
         server: lash_restate_test::RestateTestServer,
     },
+}
+
+impl HarnessAdmin {
+    /// Kills the open invocation of workflow `service`'s `run` handler under
+    /// `key`, as an operator does, and returns its id.
+    pub(super) async fn kill_workflow_run(&self, service: &str, key: &str) -> String {
+        match self {
+            Self::InProcess { server } => {
+                let target = format!("{service}/{key}/run");
+                let open = server
+                    .invocations()
+                    .into_iter()
+                    .find(|view| view.target == target && view.status != "completed")
+                    .unwrap_or_else(|| panic!("an open invocation of `{target}`"));
+                assert_eq!(
+                    server.kill(&open.id),
+                    Some(true),
+                    "kill the open invocation of `{target}`"
+                );
+                open.id
+            }
+            Self::Live { admin_url } => {
+                let admin =
+                    crate::RestateAdminClient::new(RestateConnection::new(admin_url.clone()));
+                let open = admin
+                    .workflow_invocation_status(service, key, "run")
+                    .await
+                    .unwrap_or_else(|error| panic!("find the run of `{service}/{key}`: {error}"))
+                    .unwrap_or_else(|| panic!("an invocation of `{service}/{key}/run`"));
+                admin
+                    .kill_invocation_for_test_cleanup(&crate::RestateInvocationId::new(
+                        open.id.clone(),
+                    ))
+                    .await
+                    .unwrap_or_else(|error| panic!("kill `{}`: {error}", open.id));
+                open.id
+            }
+        }
+    }
+
+    /// Purges the completed invocation `id` as the retention sweep does: its
+    /// journal is gone, and its workflow key starts over.
+    pub(super) async fn purge_invocation(&self, id: &str) {
+        match self {
+            Self::InProcess { server } => {
+                // A kill completes the invocation on its own schedule: purge
+                // once it has.
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+                loop {
+                    match server.purge(id) {
+                        Some(true) => return,
+                        Some(false) if tokio::time::Instant::now() < deadline => {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                        other => panic!("purge `{id}`: {other:?}"),
+                    }
+                }
+            }
+            Self::Live { admin_url } => {
+                let client = reqwest::Client::builder()
+                    .http2_prior_knowledge()
+                    .build()
+                    .expect("build Restate admin client");
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+                loop {
+                    let response = client
+                        .patch(format!(
+                            "{}/invocations/{id}/purge",
+                            admin_url.trim_end_matches('/')
+                        ))
+                        .send()
+                        .await
+                        .unwrap_or_else(|error| panic!("purge `{id}`: {error}"));
+                    let status = response.status();
+                    if status.is_success() {
+                        return;
+                    }
+                    let body = response.text().await.unwrap_or_default();
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "purge `{id}`: {status} {body}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
+        }
+    }
 }
 
 pub(super) struct LiveConformanceHarness {
@@ -597,6 +699,7 @@ impl LiveConformanceHarness {
     pub(super) fn turn_runner(&self) -> Arc<dyn lash_conformance::ConformanceTurnRunner> {
         super::live_turn_probe::LiveTurnRunner::shared(
             self.connection.clone(),
+            self.admin.clone(),
             Arc::clone(&self.process_runner),
         )
     }

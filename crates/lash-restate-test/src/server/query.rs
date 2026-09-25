@@ -19,7 +19,9 @@ pub(super) fn run(state: &State, sql: &str) -> Result<Vec<Value>, String> {
     let mut rows: Vec<Map<String, Value>> = state
         .invocations
         .iter()
-        .map(|invocation| row(state, invocation))
+        .enumerate()
+        .filter(|(index, _)| state.is_retained(super::model::InvKey(*index)))
+        .map(|(_, invocation)| row(state, invocation))
         .filter(|row| query.filter.as_ref().is_none_or(|filter| filter.eval(row)))
         .collect();
     if let Some((column, descending)) = &query.order_by {
