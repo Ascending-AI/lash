@@ -137,6 +137,56 @@ impl SessionStoreFactory for GrowthFactory {
     }
 }
 
+#[async_trait::async_trait]
+impl lash_core::store::ControlIntentStore for GrowthFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, StoreError> {
+        use lash_core::store::ControlIntentStore as _;
+        self.inner.begin_session_close(session_id, at_ms).await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: lash_core::store::ControlIntentId,
+    ) -> std::result::Result<lash_core::store::IntentApplication, StoreError> {
+        use lash_core::store::ControlIntentStore as _;
+        self.inner.claim_intent_application(id).await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: lash_core::store::ControlIntentId,
+        at_ms: u64,
+    ) -> std::result::Result<(), StoreError> {
+        use lash_core::store::ControlIntentStore as _;
+        self.inner.acknowledge_intent(id, at_ms).await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: lash_core::store::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> std::result::Result<lash_core::store::ControlIntent, StoreError> {
+        use lash_core::store::ControlIntentStore as _;
+        self.inner
+            .record_intent_failure(id, error, retryable, at_ms)
+            .await
+    }
+
+    async fn load_intent(
+        &self,
+        id: lash_core::store::ControlIntentId,
+    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, StoreError> {
+        use lash_core::store::ControlIntentStore as _;
+        self.inner.load_intent(id).await
+    }
+}
+
 #[async_trait]
 impl AttachmentRootSet for GrowthFactory {
     async fn live_attachment_refs(

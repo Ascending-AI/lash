@@ -495,6 +495,51 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
+impl crate::store::ControlIntentStore for ObservedSessionStoreFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> std::result::Result<Option<crate::store::ControlIntent>, StoreError> {
+        self.inner.begin_session_close(session_id, at_ms).await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: crate::store::ControlIntentId,
+    ) -> std::result::Result<crate::store::IntentApplication, StoreError> {
+        self.inner.claim_intent_application(id).await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: crate::store::ControlIntentId,
+        at_ms: u64,
+    ) -> std::result::Result<(), StoreError> {
+        self.inner.acknowledge_intent(id, at_ms).await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: crate::store::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> std::result::Result<crate::store::ControlIntent, StoreError> {
+        self.inner
+            .record_intent_failure(id, error, retryable, at_ms)
+            .await
+    }
+
+    async fn load_intent(
+        &self,
+        id: crate::store::ControlIntentId,
+    ) -> std::result::Result<Option<crate::store::ControlIntent>, StoreError> {
+        self.inner.load_intent(id).await
+    }
+}
+
+#[async_trait::async_trait]
 // The compile error should direct wrappers to implement the capability, not
 // suggest replacing their factory with this concrete implementation.
 #[diagnostic::do_not_recommend]

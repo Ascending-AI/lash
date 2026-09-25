@@ -402,7 +402,9 @@ impl TurnActivitySink for NoopTurnActivitySink {
 }
 
 #[async_trait::async_trait]
-pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
+pub trait SessionStoreFactory:
+    crate::AttachmentRootSet + crate::store::ControlIntentStore + Send + Sync
+{
     /// Bind the effect host whose scope fences and journal rows
     /// [`reclaim_retained_evidence`](Self::reclaim_retained_evidence) reads
     /// and retires. The facade binds the host its backend supplies. Where

@@ -33,9 +33,11 @@
 //! [`drive_root_scope`]: crate::engine::drive_root_scope
 
 mod admission;
+mod control;
 mod reconcile;
 mod root;
 
+pub use control::apply_control_intent;
 pub use reconcile::{ReconcileReport, reconcile_drive_request, reconcile_session_work};
 
 use std::sync::Arc;
