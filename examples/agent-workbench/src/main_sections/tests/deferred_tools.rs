@@ -1,4 +1,5 @@
 use super::*;
+use lash::rlm::RlmSendBuilderExt;
 
 fn deferred_tools_test_core(
     data_dir: &std::path::Path,
@@ -83,12 +84,12 @@ finish(result.digest);
             .await
             .expect("open deferred round-trip session");
         let output = session
-            .turn(lash::TurnInput::text(
+            .send(lash::TurnInput::text(
                 "Find the checksum utility, then checksum restart proof.",
             ))
             .require_finish()
             .expect("require deferred finish")
-            .run()
+            .output()
             .await
             .expect("deferred search and call round trip");
         assert_eq!(
@@ -163,10 +164,10 @@ finish("typed link failures observed");
             .open()
             .await
             .expect("open deferred link-error session")
-            .turn(lash::TurnInput::text("Exercise deferred link failures."))
+            .send(lash::TurnInput::text("Exercise deferred link failures."))
             .require_finish()
             .expect("require link-error finish")
-            .run()
+            .output()
             .await
             .expect("recover after typed link errors");
         assert_eq!(

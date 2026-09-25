@@ -1,5 +1,6 @@
 use super::*;
 use lash::SessionId;
+use lash::rlm::RlmSendBuilderExt;
 
 #[tokio::test]
 async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
@@ -20,11 +21,11 @@ async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
         .expect("open provider failure session");
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
-        .turn(lash::TurnInput::text("fail through the provider"))
-        .turn_id("provider-failure-turn")
+        .send(lash::TurnInput::text("fail through the provider"))
+        .id("provider-failure-turn")
         .require_finish()
         .expect("require finish")
-        .stream_to(&ChannelTurnEvents {
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
         .await

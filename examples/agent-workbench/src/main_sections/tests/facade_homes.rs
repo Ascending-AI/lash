@@ -1,5 +1,6 @@
 use super::*;
 use lash::SessionId;
+use lash::rlm::RlmSendBuilderExt;
 
 #[test]
 fn host_model_capability_validates_reasoning_effort_selections() {
@@ -222,10 +223,10 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
             .await
             .expect("open context transform session");
         session
-            .turn(lash::TurnInput::text("shape my context"))
+            .send(lash::TurnInput::text("shape my context"))
             .require_finish()
             .expect("require finish")
-            .run()
+            .output()
             .await
             .expect("run the context transform turn");
 

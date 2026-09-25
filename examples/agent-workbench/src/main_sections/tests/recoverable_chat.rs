@@ -2,6 +2,7 @@ use super::*;
 use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
+use lash::rlm::RlmSendBuilderExt;
 
 pub(crate) async fn recoverable_chat_test_state(
     data_dir: &std::path::Path,
@@ -1686,11 +1687,11 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
     );
     let switch_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let switch_output = session
-        .turn(lash::TurnInput::text(switch_prompt))
-        .turn_id(switch_turn_id)
+        .send(lash::TurnInput::text(switch_prompt))
+        .id(switch_turn_id)
         .require_finish()
         .expect("require follow-frame finish")
-        .stream_to(&ChannelTurnEvents {
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&switch_turn_state),
         })
         .await
@@ -2346,11 +2347,11 @@ async fn workbench_settled_turn_cancels_preserve_execution_done() {
 
     for turn_id in ["settled-turn-a", "settled-turn-b"] {
         session
-            .turn(lash::TurnInput::text(format!("complete {turn_id}")))
-            .turn_id(turn_id)
+            .send(lash::TurnInput::text(format!("complete {turn_id}")))
+            .id(turn_id)
             .require_finish()
             .expect("require finish")
-            .run()
+            .output()
             .await
             .expect("complete turn before stale cancel");
         state.publish_turn_done(&session_id, &TurnId::from(turn_id));
@@ -2396,11 +2397,11 @@ async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output
         .expect("open real turn session");
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
-        .turn(lash::TurnInput::text("produce one stable answer"))
-        .turn_id("stable-turn")
+        .send(lash::TurnInput::text("produce one stable answer"))
+        .id("stable-turn")
         .require_finish()
         .expect("require finish")
-        .stream_to(&ChannelTurnEvents {
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
         .await

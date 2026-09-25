@@ -1,5 +1,6 @@
 use super::*;
 use lash::TurnId;
+use lash::rlm::RlmSendBuilderExt;
 
 const ATTACHMENT_USAGE_GATE_PNG_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
@@ -193,11 +194,11 @@ async fn run_attachment_usage_gate(
         .await
         .expect("open gate session");
     let output = session
-        .turn(input)
-        .turn_id(turn_id)
+        .send(input)
+        .id(turn_id)
         .require_finish()
         .expect("require deterministic finish")
-        .run()
+        .output()
         .await
         .expect("run deterministic attachment turn");
     assert_eq!(output.final_value(), Some(&json!("attachment accounted")));
