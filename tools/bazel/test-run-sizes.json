@@ -56,7 +56,7 @@
     "samples": 4
   },
   "//crates/lash-core-execution:test_batch": {
-    "cpu_count": 2,
+    "cpu_count": 5,
     "memory_kb": 1048576,
     "p95_cores": 1.91,
     "peak_bytes": 38465536,
@@ -336,8 +336,8 @@
     "samples": 3
   },
   "//crates/lash-protocol-rlm:test_batch": {
-    "cpu_count": 2,
-    "memory_kb": 1048576,
+    "cpu_count": 3,
+    "memory_kb": 1572864,
     "p95_cores": 1.48,
     "peak_bytes": 287657984,
     "samples": 17
@@ -750,7 +750,7 @@
   },
   "//crates/lash-sqlite-store:test_batch": {
     "cpu_count": 4,
-    "memory_kb": 1048576,
+    "memory_kb": 1572864,
     "p95_cores": 3.99,
     "peak_bytes": 157982720,
     "samples": 18

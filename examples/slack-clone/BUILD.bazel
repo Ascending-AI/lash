@@ -219,7 +219,7 @@ lash_rust_feature_test(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin__fv_e01027d1",
@@ -250,7 +250,7 @@ lash_rust_feature_test(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin__fv_e1d4fabc",
@@ -279,7 +279,7 @@ lash_rust_feature_test(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin__fv_e9ad9b1c",
@@ -436,7 +436,7 @@ lash_rust_feature_test(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "3", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "3", "memory_kb": "2097152", "test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -828,7 +828,7 @@ lash_rust_feature_test(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         "//:workspace_test_scripts",
@@ -855,7 +855,7 @@ lash_rust_feature_test(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         "//:workspace_test_scripts",
@@ -880,7 +880,7 @@ lash_rust_feature_test(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         "//:workspace_test_scripts",

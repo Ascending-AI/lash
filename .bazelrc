@@ -71,7 +71,7 @@ common --experimental_repository_downloader_retries=5
 # and Bazel applies those to the TestRunner spawn only, while the plain keys
 # size the compile. Runs are measured per Bazel label on the pool
 # (`tools/bazel/test-run-sizes.json`, rebuilt by `action_sizes_from_log.py
-# --test-runs`); an unmeasured run asks for four cores and 4 GiB. The
+# --test-runs`); an unmeasured run asks for two cores and 1 GiB. The
 # timing-sensitive lash-perf and lash-sim suites keep four cores whatever they
 # measure: at one core CI run 34950810111 failed
 # `//crates/lash-perf:lash-perf__unit_test` on a phase assertion and timed out

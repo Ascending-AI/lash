@@ -87,7 +87,7 @@ lash_batch_test(
     name = "test_batch",
     cpu_count = 2,
     jobs = 2,
-    memory_kb = 2097152,
+    memory_kb = 1048576,
     tests = [
         ":codex_websocket_runtime__test",
         ":lash-provider-openai__unit_test",

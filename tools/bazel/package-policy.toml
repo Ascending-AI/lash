@@ -373,7 +373,7 @@ env = { LASH_WORKBENCH_TEST_NODE = "$(rootpath @workbench_node_linux_x64//:bin/n
 
 # A test run's request comes from its measured row in test-run-sizes.json.
 # These are the per-package exceptions, keyed `package/crate` like the rows of
-# action-sizes.json.
+# action-sizes.json, plus per-label pins in `[test_runs.pinned]` below.
 [test_runs]
 # Timing-sensitive suites keep four cores whatever they measure. Below that the
 # harness's and the runtime's own threads contend and time-sensitive cases fail
@@ -394,9 +394,23 @@ contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
 # cgroup at four test threads: 7612 MiB peak, 2.6 cores over 37 s.
 "lash-internal-typescript/integration" = { cpu_count = 4, memory_kb = 12058624 }
 # The full Test262 selection spreads its programs over every core it gets;
-# measured 2026-09-24 at 165 s of one core in total, 37 s for the slowest test.
-"lash-internal-typescript/test262_full" = { cpu_count = 8, memory_kb = 4194304 }
+# measured 2026-09-24 at 165 s of one core in total, 37 s for the slowest
+# test, with a 0.7 GiB peak -- 1.5 GiB keeps the margin the sizing rule asks.
+"lash-internal-typescript/test262_full" = { cpu_count = 8, memory_kb = 1572864 }
 "lash-runtime/lash" = { cpu_count = 8, memory_kb = 4194304 }
+
+# Requests pinned per Bazel label, for runs and batches whose size is policy
+# rather than a measured row: too few samples for the table to price them, or
+# a batch the member sum would oversize. A `__fv_` feature-variant label
+# inherits its base label's pin, as it does a measured row.
+[test_runs.pinned]
+# The pool has never priced this batch (unmeasured); the member sum of two
+# unmeasured runs would still oversize it.
+"//crates/lash-restate-test:test_batch" = { cpu_count = 2, memory_kb = 1048576 }
+"//crates/lash-typescript:test_batch" = { cpu_count = 4, memory_kb = 1048576 }
+# Measured under the row threshold (0.2 cores, 30 MiB): the drift census loads
+# the session corpora read-only and finishes inside one core.
+"//crates/lash-protocol-rlm:cell_binding_drift__test" = { cpu_count = 1, memory_kb = 1048576 }
 
 # --- Service jobs --------------------------------------------------------------
 

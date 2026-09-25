@@ -349,12 +349,12 @@ class TestRunRequestTest(unittest.TestCase):
     """A test run is sized through the `test` exec group, apart from its compile."""
 
     def test_an_unmeasured_test_keeps_the_request_it_had(self) -> None:
-        self.assertEqual(generator.UNMEASURED_TEST_RUN, {"cpu_count": 4, "memory_kb": 4194304})
+        self.assertEqual(generator.UNMEASURED_TEST_RUN, {"cpu_count": 2, "memory_kb": 1048576})
         self.assertEqual(
             generator.exec_properties(
                 "no-such-package", "no_such_crate", "test", "//no/such:test"
             ),
-            {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+            {"test.cpu_count": "2", "test.memory_kb": "1048576"},
         )
         # An unmeasured run of a large suite keeps its larger request.
         self.assertEqual(
@@ -374,6 +374,45 @@ class TestRunRequestTest(unittest.TestCase):
         self.assertEqual(
             properties["cpu_count"],
             str(generator.ACTION_SIZES["lash-internal-core/lash_core"]["cpu_count"]),
+        )
+
+    def test_a_feature_variant_inherits_its_base_labels_row(self) -> None:
+        # A `__fv_` variant is the same binary under another resolution; the
+        # pool rarely prices the variant's own label, so it must not fall back
+        # to the unmeasured default.
+        label = "//crates/lash-core:lash-core__unit_test"
+        row = generator.TEST_RUN_SIZES[label]
+        variant = generator.test_run_request(
+            "lash-internal-core", "lash_core", f"{label}__fv_0123abcd"
+        )
+        self.assertEqual(
+            variant, {"cpu_count": row["cpu_count"], "memory_kb": row["memory_kb"]}
+        )
+        # A variant with its own measured row still uses it.
+        own = next(label for label in generator.TEST_RUN_SIZES if "__fv_" in label)
+        self.assertEqual(
+            generator.test_run_request("lash-internal-core", "lash_core", own),
+            {
+                "cpu_count": generator.TEST_RUN_SIZES[own]["cpu_count"],
+                "memory_kb": generator.TEST_RUN_SIZES[own]["memory_kb"],
+            },
+        )
+
+    def test_a_pinned_label_asks_for_its_pin(self) -> None:
+        label = "//crates/lash-protocol-rlm:cell_binding_drift__test"
+        pin = generator.PINNED_TEST_RUNS[label]
+        self.assertEqual(
+            generator.test_run_request(
+                "lash-internal-protocol-rlm", "cell_binding_drift", label
+            ),
+            dict(pin),
+        )
+        # The pin reaches the feature variant through the base label.
+        self.assertEqual(
+            generator.test_run_request(
+                "lash-internal-protocol-rlm", "cell_binding_drift", f"{label}__fv_0123abcd"
+            ),
+            dict(pin),
         )
 
     def test_timing_sensitive_suites_keep_four_cores(self) -> None:
@@ -406,9 +445,16 @@ class TestRunRequestTest(unittest.TestCase):
             with self.subTest(label=label):
                 cpu = int(properties["test.cpu_count"])
                 memory_kb = int(properties["test.memory_kb"])
-                if label in generator.TEST_RUN_SIZES:
-                    self.assertEqual(memory_kb, generator.TEST_RUN_SIZES[label]["memory_kb"])
-                    self.assertGreaterEqual(cpu, generator.TEST_RUN_SIZES[label]["cpu_count"])
+                # A `__fv_` variant is sized by its base label's row or pin.
+                base = label.split("__fv_", 1)[0]
+                row = generator.TEST_RUN_SIZES.get(label) or generator.TEST_RUN_SIZES.get(base)
+                pin = generator.PINNED_TEST_RUNS.get(label) or generator.PINNED_TEST_RUNS.get(base)
+                if row is not None:
+                    self.assertEqual(memory_kb, row["memory_kb"])
+                    self.assertGreaterEqual(cpu, row["cpu_count"])
+                elif pin is not None:
+                    self.assertEqual(memory_kb, pin["memory_kb"])
+                    self.assertGreaterEqual(cpu, pin["cpu_count"])
                 else:
                     self.assertGreaterEqual(cpu, generator.UNMEASURED_TEST_RUN["cpu_count"])
                 if package in ("crates/lash-perf", "crates/lash-sim"):
@@ -433,7 +479,7 @@ class BatchBudgetTest(unittest.TestCase):
                 self.assertFalse(generator.batchable_run(*key.split("/")))
         self.assertTrue(generator.batchable_run("no-such-package", "no_such_crate"))
 
-    def test_the_budget_is_the_two_largest_members_side_by_side(self) -> None:
+    def test_an_unmeasured_batch_reserves_its_two_largest_members(self) -> None:
         self.assertEqual(generator.BATCH_JOBS, 2)
         requests = [
             {"cpu_count": 1, "memory_kb": 1048576},
@@ -441,19 +487,60 @@ class BatchBudgetTest(unittest.TestCase):
             {"cpu_count": 2, "memory_kb": 2097152},
         ]
         self.assertEqual(
-            generator.batch_budget("//no/such:test_batch", requests),
+            generator.batch_budget("no-such-package", "//no/such:test_batch", requests),
             {"cpu_count": 5, "memory_kb": 3145728},
         )
 
-    def test_a_measured_batch_never_reserves_less_than_it_used(self) -> None:
+    def test_a_measured_batch_reserves_its_row_regardless_of_members(self) -> None:
+        # The member sum used to let one unmeasured member inflate a batch the
+        # pool had already priced; the measured row now wins outright.
         label = "//crates/lash-core:test_batch"
         measured = generator.TEST_RUN_SIZES[label]
-        small = [{"cpu_count": 1, "memory_kb": 1048576}] * 3
-        budget = generator.batch_budget(label, small)
-        self.assertEqual(budget["cpu_count"], max(2, measured["cpu_count"]))
-        self.assertEqual(budget["memory_kb"], max(2097152, measured["memory_kb"]))
+        for requests in (
+            [{"cpu_count": 1, "memory_kb": 1048576}] * 3,
+            [{"cpu_count": 8, "memory_kb": 4194304}] * 3,
+        ):
+            with self.subTest(requests=requests):
+                self.assertEqual(
+                    generator.batch_budget("lash-internal-core", label, requests),
+                    {
+                        "cpu_count": measured["cpu_count"],
+                        "memory_kb": measured["memory_kb"],
+                    },
+                )
 
-    def test_every_generated_batch_reserves_its_jobs(self) -> None:
+    def test_the_contention_floor_counts_once_per_batch(self) -> None:
+        # lash-sim's batch measured at one core: the floor lifts the batch to
+        # four, not two floored members to eight.
+        label = "//crates/lash-perf:test_batch"
+        measured = generator.TEST_RUN_SIZES[label]
+        self.assertLess(measured["cpu_count"], generator.CONTENTION_FLOOR["cpu_count"])
+        self.assertEqual(
+            generator.batch_budget("lash-perf", label, []),
+            {
+                "cpu_count": generator.CONTENTION_FLOOR["cpu_count"],
+                "memory_kb": measured["memory_kb"],
+            },
+        )
+        # The unfloored member requests the callers pass keep the floor out of
+        # the member sum of an unmeasured batch, too.
+        members = [{"cpu_count": 1, "memory_kb": 1048576}] * 2
+        self.assertEqual(
+            generator.batch_budget("lash-sim", "//no/such:test_batch", members),
+            {"cpu_count": 4, "memory_kb": 2097152},
+        )
+
+    def test_a_pinned_batch_reserves_its_pin(self) -> None:
+        for package, label in (
+            ("lash-internal-restate-test", "//crates/lash-restate-test:test_batch"),
+            ("lash-internal-typescript", "//crates/lash-typescript:test_batch"),
+        ):
+            with self.subTest(label=label):
+                pin = generator.PINNED_TEST_RUNS[label]
+                members = [{"cpu_count": 2, "memory_kb": 1048576}] * 4
+                self.assertEqual(generator.batch_budget(package, label, members), dict(pin))
+
+    def test_every_generated_batch_reserves_its_budget(self) -> None:
         seen = 0
         for path, block in generated_blocks():
             if not block.startswith(("lash_batch_test(", 'load("//tools/bazel:test_batch.bzl"')):
@@ -465,8 +552,18 @@ class BatchBudgetTest(unittest.TestCase):
                 self.assertIn(f"    jobs = {generator.BATCH_JOBS},\n", block)
                 cpu = int(re.search(r"    cpu_count = (\d+),", block).group(1))
                 memory_kb = int(re.search(r"    memory_kb = (\d+),", block).group(1))
-                self.assertGreaterEqual(cpu, generator.BATCH_JOBS)
-                self.assertGreaterEqual(memory_kb, generator.BATCH_JOBS * 1048576)
+                package = path.parent.relative_to(ROOT).as_posix()
+                label = f"//{package}:test_batch"
+                row = generator.TEST_RUN_SIZES.get(label) or generator.PINNED_TEST_RUNS.get(label)
+                if row is not None:
+                    # A priced batch reserves its row or pin, lifted only by
+                    # the contention floor.
+                    self.assertGreaterEqual(cpu, row["cpu_count"])
+                    self.assertEqual(memory_kb, row["memory_kb"])
+                else:
+                    # An unpriced batch still sums two members at once.
+                    self.assertGreaterEqual(cpu, generator.BATCH_JOBS)
+                    self.assertGreaterEqual(memory_kb, generator.BATCH_JOBS * 1048576)
         self.assertGreater(seen, 0)
 
     def test_the_rule_reserves_what_it_is_given_and_runs_jobs_at_once(self) -> None:
@@ -508,7 +605,9 @@ class TableValidationTest(unittest.TestCase):
         saved = set(generator.EMITTED_TEST_LABELS)
         try:
             generator.EMITTED_TEST_LABELS.clear()
-            generator.EMITTED_TEST_LABELS.update(generator.TEST_RUN_SIZES)
+            generator.EMITTED_TEST_LABELS.update(
+                set(generator.TEST_RUN_SIZES) | set(generator.PINNED_TEST_RUNS)
+            )
             generator.validate_test_run_sizes()
             generator.EMITTED_TEST_LABELS.discard(next(iter(generator.TEST_RUN_SIZES)))
             with self.assertRaises(SystemExit):

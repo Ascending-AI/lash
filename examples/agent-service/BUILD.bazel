@@ -159,7 +159,7 @@ lash_rust_feature_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -184,7 +184,7 @@ lash_rust_feature_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -210,7 +210,7 @@ lash_rust_feature_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":agent-service__fv_25c97c0e",
@@ -239,7 +239,7 @@ lash_rust_feature_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":agent-service__fv_c37b7586",
