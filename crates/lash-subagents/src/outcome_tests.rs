@@ -14,10 +14,10 @@ async fn registry_result(
     prune: bool,
     output_schema: Option<&Value>,
 ) -> Result<Value, String> {
-    let backend = lash_sqlite_store::SqliteBackend::memory()
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .expect("open a SQLite memory backend");
-    let registry = lash_core::Backend::process_registry(&backend);
+        .expect("open a SQLite memory store set");
+    let registry = lash_core::StoreSet::process_registry(&stores);
     let process_id = "subagent-outcome";
     registry
         .register_process(lash_core::ProcessRegistration::new(
