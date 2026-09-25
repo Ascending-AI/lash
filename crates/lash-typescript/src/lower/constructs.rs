@@ -1423,7 +1423,7 @@ pub(super) fn global_this_member_name<'a>(
     }
 }
 
-fn js_subtract(left: LashExpr, right: LashExpr) -> LashExpr {
+pub(super) fn js_subtract(left: LashExpr, right: LashExpr) -> LashExpr {
     LashExpr::JavaScriptBinary {
         left: Box::new(left),
         op: JavaScriptBinaryOp::Subtract,
