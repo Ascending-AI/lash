@@ -107,6 +107,24 @@ pub trait EffectHost: AwaitEventResolver {
         )
     }
 
+    /// A group child's controller that an engine handler built over its own
+    /// invocation context, routed through this host's stack: whatever wraps
+    /// the controllers this host lends ([`scoped`](Self::scoped),
+    /// [`scoped_for_group_child`](Self::scoped_for_group_child)) wraps this
+    /// one too, for as long as the handler's borrow lives.
+    ///
+    /// A handler-driven engine (Restate) mints a group child's controller
+    /// from the child invocation's own context, never from this host, so
+    /// without this step the child's effects would bypass every layer its
+    /// opener's effects cross. The default is the controller unchanged: a
+    /// host that wraps nothing has nothing to add.
+    fn route_handler_child_controller<'run>(
+        &self,
+        controller: ScopedEffectController<'run>,
+    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        Ok(controller)
+    }
+
     /// The durable closing/finalization seam over this host's group journal
     /// (ADR 0099 §7, FIG-3410): the recorded `closing` fact a `close` writes
     /// and the four-step cursor a finalizer advances.

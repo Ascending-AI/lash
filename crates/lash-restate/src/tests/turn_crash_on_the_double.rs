@@ -1,7 +1,10 @@
-//! The turn crash laws that run their turns on a turn runner, on the
-//! in-process server double (FIG-3667's Restate coverage): the FIG-3571
-//! generation-refusal pair, the direct-acceptance crash after its store
-//! commit, and the turn-cancel closure across a crash at each of its cuts.
+//! The turn crash laws on the in-process server double, every one running its
+//! turns on the endpoint's turn runner: the golden-trace drift check, the
+//! level-one crash matrix, the FIG-3524 error-return sweep and the
+//! after-commit redrive (FIG-3547, the FIG-3561 port), the host-layer law
+//! over group children, the FIG-3571 generation-refusal pair, the
+//! direct-acceptance crash after its store commit, and the turn-cancel
+//! closure across a crash at each of its cuts.
 
 use std::sync::Arc;
 
@@ -28,6 +31,72 @@ async fn turn_crash_runner_fixture() -> (
     let make = harness.law_persistence();
     (harness, stores, make, host, runner)
 }
+
+lash_conformance::turn_crash_trace_tests!({ turn_crash_runner_fixture().await });
+
+lash_conformance::turn_crash_error_return_tests!({ turn_crash_runner_fixture().await });
+
+/// Why the crash points from the turn-cancel closure's store write onward
+/// cannot recover yet: that write settles the run, and the redrive returns
+/// the settled run's receipt from the store without the commands the crashed
+/// execution journaled, so Restate reports a journal mismatch (570) and
+/// retries the invocation until it pauses. The first is also FIG-3736's cut.
+const SETTLED_RUN_REDRIVE: &str = "the redrive returns the settled run from the store, not its \
+    journaled commands: journal mismatch (570)";
+
+/// The level-one crash points whose recovery hits the parked Restate defect
+/// the after-commit redrive leg below is parked on (FIG-3748).
+const PARKED_LEVEL_ONE_POINTS: &[lash_conformance::ParkedTurnCrashPoint] = &[
+    lash_conformance::ParkedTurnCrashPoint {
+        point: r#"{"operation":{"seam":"store","operation":{"kind":"apply_turn_cancel_effects_and_consume"}},"placement":"inside_call"}"#,
+        ticket: "FIG-3748",
+        reason: SETTLED_RUN_REDRIVE,
+    },
+    lash_conformance::ParkedTurnCrashPoint {
+        point: r#"{"operation":{"seam":"store","operation":{"kind":"pending_queued_run"}},"placement":"boundary"}"#,
+        ticket: "FIG-3748",
+        reason: SETTLED_RUN_REDRIVE,
+    },
+    lash_conformance::ParkedTurnCrashPoint {
+        point: r#"{"operation":{"seam":"store","operation":{"kind":"commit_final_head","settles_queue":false,"settles_turn_input":false,"releases_lease":false}},"placement":"boundary"}"#,
+        ticket: "FIG-3748",
+        reason: SETTLED_RUN_REDRIVE,
+    },
+    lash_conformance::ParkedTurnCrashPoint {
+        point: r#"{"operation":{"seam":"store","operation":{"kind":"commit_final_head","settles_queue":false,"settles_turn_input":false,"releases_lease":false}},"placement":"inside_call"}"#,
+        ticket: "FIG-3748",
+        reason: SETTLED_RUN_REDRIVE,
+    },
+    lash_conformance::ParkedTurnCrashPoint {
+        point: r#"{"operation":{"seam":"store","operation":{"kind":"release_session_execution_lease"}},"placement":"boundary"}"#,
+        ticket: "FIG-3748",
+        reason: SETTLED_RUN_REDRIVE,
+    },
+    lash_conformance::ParkedTurnCrashPoint {
+        point: r#"{"operation":{"seam":"store","operation":{"kind":"release_session_execution_lease"}},"placement":"inside_call"}"#,
+        ticket: "FIG-3748",
+        reason: SETTLED_RUN_REDRIVE,
+    },
+];
+
+lash_conformance::turn_crash_level_1_tests!(parked: PARKED_LEVEL_ONE_POINTS; {
+    turn_crash_runner_fixture().await
+});
+
+lash_conformance::effect_layer_group_child_tests!({ turn_crash_runner_fixture().await });
+
+// The redrive of a turn crashed after its final commit returns the settled
+// run's receipt from the store without issuing the commands the crashed
+// execution journaled, so the handler returns where the journal holds its
+// next call: Restate reports a journal mismatch (570) and retries until the
+// invocation pauses. Repro: run this law on the double with
+// `LASH_RESTATE_TEST_WATCHDOG=1`.
+lash_conformance::turn_crash_after_commit_redrive_tests!(
+    #[ignore = "parked: the after-commit redrive diverges from the crashed execution's journal (FIG-3748)"]
+    {
+        turn_crash_runner_fixture().await
+    }
+);
 
 lash_conformance::turn_crash_generation_claim_tests!({ turn_crash_runner_fixture().await });
 

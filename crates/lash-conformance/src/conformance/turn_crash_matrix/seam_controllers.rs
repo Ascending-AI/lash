@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use lash_sansio::SessionId;
+use lash_sansio::sync::MutexExt;
 
 use super::{
     CrashPlacement, EffectOperation, ErrorReturnPlacement, SeamControl, TurnSeamOperation,
@@ -142,14 +143,13 @@ impl crate::testing::EffectLayer for SeamLayer {
             return inner.execute_effect(envelope, executor).await;
         };
         let operation = TurnSeamOperation::Effect(operation);
-        // FIG-3524: an armed error-return makes the tool-attempt seam fail
-        // once — at the seam itself, or inside its journal claim/finalize/
-        // renew — instead of crashing the task.
-        if let Some(placement) = self.control.armed_error_return()
-            && matches!(
-                operation,
-                TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
-            )
+        // FIG-3524: an armed error-return makes the first tool attempt that
+        // reaches the seam fail once — at the seam itself, or inside its
+        // journal claim/finalize/renew — instead of crashing the task.
+        if matches!(
+            operation,
+            TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
+        ) && let Some(placement) = self.control.take_tool_attempt_error_return()
         {
             match placement.journal_point() {
                 None => {
@@ -258,6 +258,133 @@ impl crate::testing::EffectLayer for SeamLayer {
                     .around(operation, inner.resolve_await_event(key, resolution))
                     .await
             }
+            None => inner.resolve_await_event(key, resolution).await,
+        }
+    }
+}
+
+/// The one layered host a runner-driven crash law builds all its runtimes on.
+///
+/// A runtime installs its tool-child host on the tier's host get-or-init, and
+/// that tool-child host holds the effect host it routes group children through
+/// weakly. So the first runtime's layered host routes every later runtime's
+/// children, and a law that layered the tier's host afresh for each execution
+/// would strand them once that first layered host dropped. The law layers the
+/// tier's host once, holds it for its whole run, and points the layer at the
+/// seam of the execution that runs now ([`LawSeamHost::route_to`]).
+#[derive(Clone)]
+pub(crate) struct LawSeamHost {
+    host: Arc<dyn crate::EffectHost>,
+    current: Arc<std::sync::Mutex<Option<SeamLayer>>>,
+}
+
+impl LawSeamHost {
+    /// `host` layered once for a law's lifetime, routing to no seam yet.
+    pub(crate) fn over(host: Arc<dyn crate::EffectHost>) -> Self {
+        let current = Arc::new(std::sync::Mutex::new(None));
+        let layer = Arc::new(RoutedSeamLayer {
+            current: Arc::clone(&current),
+        });
+        Self {
+            host: Arc::new(crate::testing::LayeredEffectHost::new(host, layer)),
+            current,
+        }
+    }
+
+    /// The layered host a law's runtimes run on.
+    pub(crate) fn host(&self) -> Arc<dyn crate::EffectHost> {
+        Arc::clone(&self.host)
+    }
+
+    /// Routes the host's layer to `seam` from now on.
+    pub(crate) fn route_to(&self, seam: &SeamLayer) {
+        *self.current.lock_recover() = Some(seam.clone());
+    }
+}
+
+/// The layer of a [`LawSeamHost`]: the seam of the execution that runs now,
+/// or a pass-through before any execution routed one.
+struct RoutedSeamLayer {
+    current: Arc<std::sync::Mutex<Option<SeamLayer>>>,
+}
+
+impl RoutedSeamLayer {
+    fn seam(&self) -> Option<SeamLayer> {
+        self.current.lock_recover().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::testing::EffectLayer for RoutedSeamLayer {
+    async fn execute_effect(
+        &self,
+        inner: &dyn RuntimeEffectController,
+        envelope: RuntimeEffectEnvelope,
+        executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let Some(seam) = self.seam() else {
+            return inner.execute_effect(envelope, executor).await;
+        };
+        // The host's layer carries a group child's effects, which the engine
+        // runs apart from the turn's own execution. When the law's crash
+        // kills the process running the turn, the child's execution dies with
+        // it: the call is dropped where it stands and the execution ends in a
+        // live fault, which the engine retries as it recovers any execution
+        // its process lost.
+        let control = seam.control.clone();
+        tokio::select! {
+            biased;
+            () = control.process_crash() => Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeStore,
+                "the group child's execution died with the crashed process",
+            )),
+            outcome = seam.execute_effect(inner, envelope, executor) => outcome,
+        }
+    }
+
+    async fn open_effect_group(
+        &self,
+        inner: &dyn RuntimeEffectController,
+        group: lash_core::RuntimeEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        match self.seam() {
+            Some(seam) => seam.open_effect_group(inner, group).await,
+            None => inner.open_effect_group(group).await,
+        }
+    }
+
+    async fn await_next_settlement(
+        &self,
+        inner: &dyn RuntimeEffectController,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::TurnCancelWait,
+    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        match self.seam() {
+            Some(seam) => seam.await_next_settlement(inner, handle, cancel).await,
+            None => inner.await_next_settlement(handle, cancel).await,
+        }
+    }
+
+    async fn close_effect_group(
+        &self,
+        inner: &dyn RuntimeEffectController,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        match self.seam() {
+            Some(seam) => seam.close_effect_group(inner, handle, disposition).await,
+            None => inner.close_effect_group(handle, disposition).await,
+        }
+    }
+
+    async fn resolve_await_event(
+        &self,
+        inner: &dyn crate::AwaitEventResolver,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        match self.seam() {
+            Some(seam) => seam.resolve_await_event(inner, key, resolution).await,
             None => inner.resolve_await_event(key, resolution).await,
         }
     }

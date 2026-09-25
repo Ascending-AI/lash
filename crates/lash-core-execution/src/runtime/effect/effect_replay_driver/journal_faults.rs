@@ -103,6 +103,17 @@ impl EffectJournalFaults {
         *self.state.armed.lock_recover() = Some((point, replay_key.to_string()));
     }
 
+    /// Forget every armed and fired fault and zero the counters, so a law
+    /// that arms several placements on one journal observes each alone.
+    pub fn reset(&self) {
+        *self.state.armed.lock_recover() = None;
+        *self.state.fired_for.lock_recover() = None;
+        self.state.persistent.store(false, Ordering::SeqCst);
+        self.state.fired.store(false, Ordering::SeqCst);
+        self.state.calls_after_fire.store(0, Ordering::SeqCst);
+        self.state.fires.store(0, Ordering::SeqCst);
+    }
+
     /// Disarm any armed fault; later calls reach the row store.
     pub fn heal(&self) {
         *self.state.armed.lock_recover() = None;

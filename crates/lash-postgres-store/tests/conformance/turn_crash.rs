@@ -61,79 +61,86 @@ fn crash_law_store(
     Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
 }
 
+/// A turn-crash runner fixture over a PostgreSQL effect host whose leases run
+/// on `lease_timings`: the runner cuts turns with that host's journal fault
+/// injector. `None` when no database is configured.
+async fn journal_runner_fixture(
+    lease_timings: lash_core_execution::facade_support::LeaseTimings,
+) -> Option<(
+    impl Sized,
+    Arc<dyn lash_core_execution::StoreSet>,
+    impl Fn(&str) -> Arc<lash_postgres_store::PostgresSessionStore> + Send + Sync + 'static,
+    Arc<dyn lash_core_execution::EffectHost>,
+    Arc<dyn lash_conformance::ConformanceTurnRunner>,
+)> {
+    let (database_lock, storage) = storage().await?;
+    reset(storage.pool()).await;
+    let database_url = database_url().expect("configured Postgres database URL");
+    let (attachments, stores) = pg_law_stores(&storage);
+    let host = Arc::new(lash_postgres_store::PostgresEffectHost::with_options(
+        &storage,
+        PostgresEffectReplayOptions {
+            lease_timings,
+            ..PostgresEffectReplayOptions::default()
+        },
+    ));
+    let faults = host.effect_journal_faults();
+    let host = host as Arc<dyn lash_core_execution::EffectHost>;
+    Some((
+        (database_lock, attachments),
+        stores,
+        move |scenario: &str| crash_law_store(&database_url, scenario),
+        Arc::clone(&host),
+        lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
+    ))
+}
+
+/// Effect leases that lapse on the recovery timings, so a successor reclaims
+/// what a crashed turn held.
+fn crash_lease_timings() -> lash_core_execution::facade_support::LeaseTimings {
+    lash_core_execution::facade_support::LeaseTimings::new(
+        std::time::Duration::from_millis(600),
+        std::time::Duration::from_millis(100),
+    )
+    .expect("crash-law effect lease timings")
+}
+
+// FIG-3524: the error-return sweep arms journal faults on the host; the short
+// renew interval lets a `renew` fault fire while the parked tool attempt is
+// still open.
 lash_conformance::turn_crash_matrix_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some(fixture) = journal_runner_fixture(
+        lash_core_execution::facade_support::LeaseTimings::new(
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_millis(50),
+        )
+        .expect("error-return effect lease timings"),
+    )
+    .await
+    else {
         eprintln!(
             "skipping Postgres real-turn crash matrix: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
-    reset(storage.pool()).await;
-    let database_url = database_url().expect("configured Postgres database URL");
-    let (attachments, stores) = pg_law_stores(&storage);
-    let store_url = database_url.clone();
-    let matrix_url = database_url.clone();
-    (
-        (database_lock, attachments),
-        stores,
-        move |scenario: &str| crash_law_store(&store_url, scenario) as Arc<dyn RuntimePersistence>,
-        move |_: &str, scope: ExecutionScope| journaled_crash_invocation(&matrix_url, scope),
-        move |_: &str, scope: ExecutionScope| {
-            // FIG-3524: the error-return sweep arms journal faults on its
-            // controller; the short renew interval lets a `renew` fault fire
-            // while the parked tool attempt is still open.
-            let database_url = database_url.clone();
-            let storage = sync_await(async move {
-                PostgresStorage::connect(&database_url)
-                    .await
-                    .expect("construct Postgres error-return journal pool")
-            });
-            let controller = PostgresRuntimeEffectController::with_options(
-                &storage,
-                scope.clone(),
-                PostgresEffectReplayOptions {
-                    lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
-                        std::time::Duration::from_secs(60),
-                        std::time::Duration::from_millis(50),
-                    )
-                    .expect("error-return effect lease timings"),
-                    ..PostgresEffectReplayOptions::default()
-                },
-            );
-            postgres_conformance_invocation(controller.clone(), scope)
-                .with_effect_journal_faults(controller.effect_journal_faults())
-        },
-    )
+    fixture
 });
 
-// The level-one matrix simulates each crash in process. On the journaled
+// The level-one matrix crashes each turn in process. On the journaled
 // PostgreSQL engine the crashed attempt's group child keeps running and
 // renewing its effect lease, which nothing in the process can stop, so the
-// successor waits on it forever. The native host this matrix ran on is gone;
-// the real SIGKILL matrix covers this engine's crash recovery.
+// successor waits on it forever. The real SIGKILL matrix covers this engine's
+// crash recovery.
 lash_conformance::turn_crash_level_1_tests!(
     #[ignore = "parked: an in-process crash cannot stop the journaled engine's attempt (FIG-3667)"]
     {
-        let Some((database_lock, storage)) = storage().await else {
+        let Some(fixture) = journal_runner_fixture(crash_lease_timings()).await else {
             eprintln!(
                 "skipping Postgres real-turn crash matrix: LASH_POSTGRES_DATABASE_URL is not set"
             );
             return;
         };
-        reset(storage.pool()).await;
-        let database_url = database_url().expect("configured Postgres database URL");
-        let (attachments, stores) = pg_law_stores(&storage);
-        let store_url = database_url.clone();
-        let matrix_url = database_url.clone();
-        (
-            (database_lock, attachments),
-            stores,
-            move |scenario: &str| {
-                crash_law_store(&store_url, scenario) as Arc<dyn RuntimePersistence>
-            },
-            move |_: &str, scope: ExecutionScope| journaled_crash_invocation(&matrix_url, scope),
-            move |_: &str, scope: ExecutionScope| journaled_crash_invocation(&database_url, scope),
-        )
+        fixture
     }
 );
 
@@ -143,34 +150,21 @@ lash_conformance::turn_crash_level_1_tests!(
 // timings. A crash drops the turn's task, and the recovery is a fresh runtime
 // over the same database.
 lash_conformance::turn_crash_runner_tests!({
-    let Some((database_lock, storage)) = storage().await else {
+    let Some(fixture) = journal_runner_fixture(crash_lease_timings()).await else {
         eprintln!(
             "skipping Postgres runner turn crash laws: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
-    reset(storage.pool()).await;
-    let database_url = database_url().expect("configured Postgres database URL");
-    let (attachments, stores) = pg_law_stores(&storage);
-    let host: Arc<dyn lash_core_execution::EffectHost> =
-        Arc::new(lash_postgres_store::PostgresEffectHost::with_options(
-            &storage,
-            PostgresEffectReplayOptions {
-                lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
-                    std::time::Duration::from_millis(600),
-                    std::time::Duration::from_millis(100),
-                )
-                .expect("crash-law effect lease timings"),
-                ..PostgresEffectReplayOptions::default()
-            },
-        ));
-    (
-        (database_lock, attachments),
-        stores,
-        move |scenario: &str| crash_law_store(&database_url, scenario),
-        Arc::clone(&host),
-        lash_conformance::HostTurnRunner::shared(host),
-    )
+    fixture
+});
+
+lash_conformance::effect_layer_group_child_tests!({
+    let Some(fixture) = journal_runner_fixture(crash_lease_timings()).await else {
+        eprintln!("skipping Postgres host-layer law: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    fixture
 });
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
