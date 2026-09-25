@@ -430,6 +430,7 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     cancel_requested_at_ms bigint,
     parked_since_ms bigint,
     parked_reason_code text,
+    park_executable_generation text,
     record_json text NOT NULL,
     CONSTRAINT ck_processes_on_parent_end CHECK ((on_parent_end = ANY (ARRAY['abandon'::text, 'cancel'::text]))),
     CONSTRAINT ck_processes_parent_scope_id CHECK ((((parent_scope_kind = 'host'::text) AND (parent_scope_id IS NULL)) OR ((parent_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text])) AND (parent_scope_id IS NOT NULL)))),
@@ -2097,6 +2098,13 @@ CREATE INDEX idx_lash_processes_parent_end_pending ON lash_durable_read_fixture.
 --
 
 CREATE INDEX idx_lash_processes_parent_scope ON lash_durable_read_fixture.lash_processes USING btree (parent_scope_kind, parent_scope_id, process_id);
+
+
+--
+-- Name: idx_lash_processes_park_executable_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_park_executable_generation ON lash_durable_read_fixture.lash_processes USING btree (park_executable_generation) WHERE (park_executable_generation IS NOT NULL);
 
 
 --

@@ -27,6 +27,7 @@ impl<'de> Deserialize<'de> for VmContinuation {
         #[serde(deny_unknown_fields)]
         struct Wire {
             format_version: u32,
+            executable: ExecutableIdentity,
             reference_semantics: bool,
             instruction_pointer: usize,
             active_function: Option<u32>,
@@ -57,6 +58,7 @@ impl<'de> Deserialize<'de> for VmContinuation {
         let wire = Wire::deserialize(raw).map_err(serde::de::Error::custom)?;
         let continuation = Self {
             format_version: wire.format_version,
+            executable: wire.executable,
             reference_semantics: wire.reference_semantics,
             instruction_pointer: wire.instruction_pointer,
             active_function: wire.active_function,
@@ -187,6 +189,13 @@ pub struct VmProfileContinuation {
 pub enum ContinuationError {
     #[error("continuation format version {found} is incompatible with version {expected}")]
     FormatVersionMismatch { expected: u32, found: u32 },
+    #[error(
+        "continuation was parked by executable `{found}`, not by this program's executable `{expected}`"
+    )]
+    ExecutableMismatch {
+        expected: ExecutableIdentity,
+        found: ExecutableIdentity,
+    },
     #[error("continuation function index exceeds the durable u32 index space")]
     FunctionIndexOverflow,
     #[error("continuation closure function index {index} is not present in the compiled program")]

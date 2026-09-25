@@ -23,7 +23,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             &projected,
             Vec::new(),
         );
-        let mut vm = Self::new(&program.chunk, slots, host, None, host.execution_mode());
+        let mut vm = Self::new(program, slots, host, None, host.execution_mode());
         vm.install_heap(heap);
         if host.profile_execution() {
             vm.enable_profile();

@@ -1,13 +1,13 @@
 //! The executable generation a durable run was admitted under (FIG-3571).
 //!
-//! A turn journals its admission, and a replay of that journal is correct
-//! only when the build replaying it runs the same code the admitting build
-//! ran: the same compile of the same cells, keyed and metered the same way.
-//! The code executor names that as one opaque generation. The admission
-//! records the generation it ran under, and a redrive under any other
-//! generation is refused before its first effect, typed, so the turn parks for
-//! a build of its own generation rather than re-issuing effects its journal
-//! already holds.
+//! A turn journals its admission, and a process its start, and a replay of
+//! that journal is correct only when the build replaying it runs the same code
+//! the admitting build ran: the same compile of the same program, keyed and
+//! metered the same way. The code executor, or the process engine, names that
+//! as one opaque generation. The admission records the generation it ran
+//! under, and a redrive under any other generation is refused before its first
+//! effect, typed, so the run parks for a build of its own generation rather
+//! than re-issuing effects its journal already holds.
 
 use serde::{Deserialize, Serialize};
 
@@ -49,5 +49,22 @@ impl ExecutableGenerationRefusal {
     #[must_use]
     pub fn spell(generation: Option<&ExecutableGeneration>) -> String {
         generation.map_or_else(|| "none".to_string(), ToString::to_string)
+    }
+
+    /// Admits a run whose admission recorded `recorded` into a build that runs
+    /// `current`, or refuses it. A run recorded with no generation is admitted
+    /// only by a build that names none: a missing stamp is never taken for
+    /// this build's.
+    pub fn check(
+        recorded: Option<&ExecutableGeneration>,
+        current: Option<ExecutableGeneration>,
+    ) -> Result<(), Self> {
+        if recorded == current.as_ref() {
+            return Ok(());
+        }
+        Err(Self {
+            found: recorded.cloned(),
+            current,
+        })
     }
 }

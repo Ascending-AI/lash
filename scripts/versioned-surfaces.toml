@@ -1570,6 +1570,17 @@ kind = "rust_serde_shapes"
 paths = ["crates/lashlang/src/runtime/vm/continuation.rs"]
 must_cover = ["VmContinuation"]
 
+# FIG-3571: the one compile entry assembles what compiles -- which program of
+# the artifact becomes `main`, which spans and execution context it compiles
+# under -- and stamps the executable identity the program runs as. An edit to
+# either changes what identical input compiles to without touching
+# `Instruction`, and the executable identity every parked run is fenced by
+# moves only with this constant.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/entry_points.rs"]
+symbols = ["compile", "compile_main"]
+
 # The Lashlang runtime's two durable byte formats -- the canonical snapshot and
 # the VM continuation -- share one leaf family: the heap. Both encode a heap
 # error's brand as `error_kind`, and Serde writes that enum BY NAME, so a

@@ -1192,6 +1192,63 @@ class VersionBumpFixtureTest(unittest.TestCase):
             {failure.surface.constant for failure in result.failures}, constants
         )
 
+    def test_each_compile_entry_demands_a_bytecode_bump(self) -> None:
+        # FIG-3571: the one compile entry decides what an artifact entry
+        # compiles to and the executable identity it runs as, so an edit to
+        # it moves the bytecode generation every parked run is fenced by.
+        entry_path = "crates/lashlang/src/runtime/entry_points.rs"
+        entry_symbols = ("compile", "compile_main")
+        (surface,) = [
+            surface
+            for surface in MODULE.load_config(REAL_CONFIG)
+            if surface.constant == "BYTECODE_FORMAT_VERSION"
+        ]
+        guarded = {
+            symbol
+            for guard in surface.guards
+            if guard.kind == "rust_items" and guard.paths == (entry_path,)
+            for symbol in guard.symbols
+        }
+        self.assertEqual(guarded, set(entry_symbols))
+
+        config = """
+        [[surface]]
+        constant = "BYTECODE_FORMAT_VERSION"
+        constant_path = "src/versions.rs"
+        description = "fixture compile entry"
+
+        [[surface.guard]]
+        kind = "rust_items"
+        paths = ["src/entry_points.rs"]
+        symbols = ["compile", "compile_main"]
+        """
+        source = "".join(f"fn {symbol}() {{ stable(); }}\n" for symbol in entry_symbols)
+        for symbol in entry_symbols:
+            with self.subTest(symbol=symbol):
+                fixture = FixtureRepository(config)
+                self.addCleanup(fixture.close)
+                fixture.write_file(
+                    "src/versions.rs", "pub const BYTECODE_FORMAT_VERSION: u32 = 29;\n"
+                )
+                fixture.write_file("src/entry_points.rs", source)
+                base = fixture.commit("compile entry base")
+                fixture.write_file(
+                    "src/entry_points.rs",
+                    source.replace(
+                        f"fn {symbol}() {{ stable(); }}",
+                        f"fn {symbol}() {{ changed(); }}",
+                    ),
+                )
+                head = fixture.commit(f"change {symbol} without a bump")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(
+                    {failure.surface.constant for failure in result.failures},
+                    {"BYTECODE_FORMAT_VERSION"},
+                )
+
     def test_rust_impl_guard_detects_custom_serializer_changes(self) -> None:
         config = """
         [[surface]]
@@ -1501,7 +1558,11 @@ class VersionBumpFixtureTest(unittest.TestCase):
                 match.group(1) for match in MODULE.RUST_SERDE_SHAPE.finditer(source)
             }
             declarations.update(MODULE.named_rust_items(source, declared))
-            self.assertLessEqual(set(guard.symbols), declared)
+            # A guarded function (the compile entry, FIG-3571) is an item, not
+            # a payload type: it carries no enum by value, so only the guarded
+            # types must be declarations the closure can walk.
+            functions = set(re.findall(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)", source))
+            self.assertLessEqual(set(guard.symbols) - functions, declared)
 
         # A type appears in a payload position: after `(`, `,`, `:` or `<`,
         # possibly behind a wrapper. A variant name appears after `{` or `}`,

@@ -92,6 +92,7 @@ pub fn compile(
             Ok(CompiledProgram {
                 chunk,
                 compile_stats,
+                executable: super::ExecutableIdentity::of(artifact.module_ref(), entry),
             })
         }
     }
@@ -121,6 +122,7 @@ pub(crate) fn compile_main(
     CompiledProgram {
         chunk,
         compile_stats,
+        executable: super::ExecutableIdentity::of(artifact.module_ref(), Entry::Main),
     }
 }
 
@@ -139,6 +141,7 @@ pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
     CompiledProgram {
         chunk,
         compile_stats,
+        executable: super::ExecutableIdentity::unlinked(),
     }
 }
 
@@ -212,13 +215,7 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
             projected,
             std::mem::take(&mut scratch.slot_values),
         );
-        let mut vm = Vm::new(
-            &program.chunk,
-            slots,
-            host,
-            Some(scratch),
-            host.execution_mode(),
-        );
+        let mut vm = Vm::new(program, slots, host, Some(scratch), host.execution_mode());
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
         let (runtime_globals, heap) = vm.recycle_into_state_parts(scratch)?;
@@ -235,7 +232,7 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
             projected,
             Vec::new(),
         );
-        let mut vm = Vm::new(&program.chunk, slots, host, None, host.execution_mode());
+        let mut vm = Vm::new(program, slots, host, None, host.execution_mode());
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
         let (runtime_globals, heap) = vm.into_state_parts()?;

@@ -20,13 +20,23 @@ pub const INSERT_COLUMNS: &str = "process_id, incarnation, registration_fingerpr
                 on_parent_end, cancel_requested_at_ms, record_json";
 
 /// The parked projection's columns, written by every fold that changes the
-/// park and `NULL` at registration (FIG-3659 NOW-B).
-pub const PARKED_COLUMNS: &str = "parked_since_ms, parked_reason_code";
+/// park and `NULL` at registration (FIG-3659 NOW-B). A `retired_generation`
+/// park also names its retired executable generation (FIG-3571).
+pub const PARKED_COLUMNS: &str = "parked_since_ms, parked_reason_code, park_executable_generation";
 
 /// The grouped read `summarize_parked` answers drain and the parked-work
 /// gauges from: each reason's live park count and its oldest `since_ms`, and
 /// none of the record's payload.
 pub const PARK_SUMMARY_COLUMNS: &str = "parked_reason_code, COUNT(*), MIN(parked_since_ms)";
+
+/// The grouped count `count_retired_parks_by_executable_generation` reads for
+/// drain status (FIG-3571).
+///
+/// Narrow on purpose: the deployment drain wants each retired executable
+/// generation's live process park count and nothing else, so the projection
+/// carries the projected generation column and the aggregate — none of the
+/// record's payload.
+pub const EXECUTABLE_GENERATION_COUNT_COLUMNS: &str = "park_executable_generation, COUNT(*)";
 
 /// The key and the record: what a read reports when the caller needs both the
 /// row's identity and its contents.
@@ -82,10 +92,12 @@ crate::statements! {
         /// a re-registration writes a new row rather than rewriting this one.
         /// `?8`/`?9` are the parked projection: the live park's `since_ms`
         /// and reason code, both `NULL` while the process is not parked.
+        /// `?10` is the retired executable generation a `retired_generation`
+        /// park names, `NULL` for any other park (FIG-3571).
         update_mutable_columns = "UPDATE processes
              SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
                  last_event_sequence = ?5, cancel_requested_at_ms = ?6, record_json = ?7,
-                 parked_since_ms = ?8, parked_reason_code = ?9
+                 parked_since_ms = ?8, parked_reason_code = ?9, park_executable_generation = ?10
              WHERE process_id = ?1";
 
         /// Live process parks per reason code, with each code's oldest
@@ -94,6 +106,14 @@ crate::statements! {
              FROM processes
              WHERE parked_since_ms IS NOT NULL
              GROUP BY parked_reason_code";
+
+        /// Live retired-generation process parks grouped by the generation
+        /// their start recorded (FIG-3571): read off the projected, indexed
+        /// `park_executable_generation` column, never the record.
+        count_retired_parks_by_executable_generation = "SELECT park_executable_generation, COUNT(*)
+             FROM processes
+             WHERE park_executable_generation IS NOT NULL
+             GROUP BY park_executable_generation";
 
         /// Every live process, whole. The unpaged read behind the in-memory
         /// worklist rebuild; the paged worklist scans are dialect-only because

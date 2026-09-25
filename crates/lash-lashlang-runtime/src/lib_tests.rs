@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::process_grammar_tests::run_sleep_process_started_under;
+use crate::process_grammar_tests::run_sleep_process;
 use lashlang::testing::ast_builders as b;
 
 thread_local! {
@@ -73,38 +73,19 @@ fn effect_group_wait_identity_uses_the_durable_group_contract() {
 /// A process engine runs inside a durable process execution. The harness
 /// registers the process under the invocation's authority and wires its event
 /// log, which the runtime writes the durable effect summary to (FIG-3464).
-async fn durable_process_events(
+pub(crate) async fn durable_process_events(
     registry: &Arc<dyn lash_core::ProcessRegistry>,
     registration: &lash_core::ProcessRegistration,
     authority: &lash_core::ProcessExecutionWriteAuthority,
-) -> lash_core_execution::session::RuntimeExecutionProcessEventContext {
-    durable_process_events_started_under(
-        registry,
-        registration,
-        authority,
-        Some(crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION),
-    )
-    .await
-}
-
-/// [`durable_process_events`] whose start record names `replay_grammar`.
-pub(crate) async fn durable_process_events_started_under(
-    registry: &Arc<dyn lash_core::ProcessRegistry>,
-    registration: &lash_core::ProcessRegistration,
-    authority: &lash_core::ProcessExecutionWriteAuthority,
-    replay_grammar: Option<u32>,
 ) -> lash_core_execution::session::RuntimeExecutionProcessEventContext {
     let env_ref = lash_core::testing::process_execution_env_fixture_ref();
     registry
         .register_process(registration.clone().with_execution_env_ref(Some(env_ref)))
         .await
         .expect("register the harness process");
-    // The start record a worker writes names the engine's replay-key grammar
-    // (FIG-3586); the harness writes the same one.
-    let mut started = authority
+    let started = authority
         .invocation_started()
         .expect("the harness invocation names its execution");
-    started.replay_grammar = replay_grammar;
     registry
         .record_first_started_with_authority(&registration.id, started, authority)
         .await
@@ -122,8 +103,7 @@ pub(crate) async fn durable_process_events_started_under(
 
 #[tokio::test(flavor = "current_thread")]
 async fn real_process_sleep_until_emits_deadline_and_completion() {
-    let (result, graph_store) =
-        run_sleep_process_started_under(Some(crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION)).await;
+    let (result, graph_store) = run_sleep_process().await;
     assert!(result.is_terminal());
     let graph = graph_store
         .graphs()
@@ -255,7 +235,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
                 fencing_token: lease.fencing_token,
                 attempt: 1,
                 started_at_ms: 1,
-                replay_grammar: Some(crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION),
+                generation: None,
             },
             &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
         )

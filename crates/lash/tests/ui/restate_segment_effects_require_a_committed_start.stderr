@@ -1,11 +1,22 @@
-error[E0451]: fields `admitted`, `segment_ordinal` and `authority` of struct `SegmentStarted` are private
-  --> tests/ui/restate_segment_effects_require_a_committed_start.rs:10:9
+error: cannot construct `SegmentStarted` with struct literal syntax due to private fields
+  --> tests/ui/restate_segment_effects_require_a_committed_start.rs:9:5
    |
  9 |     SegmentStarted {
-   |     -------------- in this type
+   |     ^^^^^^^^^^^^^^
 10 |         admitted,
-   |         ^^^^^^^^ private field
+   |         -------- private field
 11 |         segment_ordinal: 0,
-   |         ^^^^^^^^^^^^^^^ private field
+   |         ------------------ private field
 12 |         authority,
-   |         ^^^^^^^^^ private field
+   |         --------- private field
+   |
+   = note: ...and other private field `generation` that was not provided
+help: you might have meant to use the `new` associated function
+   |
+ 9 -     SegmentStarted {
+10 -         admitted,
+11 -         segment_ordinal: 0,
+12 -         authority,
+13 -     }
+ 9 +     SegmentStarted::new(_, _, _, _)
+   |

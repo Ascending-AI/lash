@@ -1543,7 +1543,7 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 42,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await

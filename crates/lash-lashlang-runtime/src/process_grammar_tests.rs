@@ -1,18 +1,15 @@
-//! FIG-3586 (T12): a lashlang process body under the replay-key grammar
-//! cutover. A body whose start record names another grammar, or none, and a
-//! parked segment written under the previous state shape are both refused
-//! before anything runs.
+//! FIG-3586 (T12): a parked segment written under the previous state shape is
+//! refused before anything runs. The start record's executable generation is
+//! the worker's fence (FIG-3571), before the engine is entered.
 
 use super::*;
-use crate::lib_tests::{durable_process_events_started_under, process_module};
-use lash_trace::TraceLanguageExecutionPayload;
+use crate::lib_tests::{durable_process_events, process_module};
 use lashlang::testing::ast_builders as b;
 
-/// Runs the `pause` sleep process through a real process context whose start
-/// record names `replay_grammar`, returning its outcome and trace graph.
-pub(crate) async fn run_sleep_process_started_under(
-    replay_grammar: Option<u32>,
-) -> (lash_core::ProcessRunOutcome, Arc<TraceLashlangGraphStore>) {
+/// Runs the `pause` sleep process through a real process context, returning
+/// its outcome and trace graph.
+pub(crate) async fn run_sleep_process()
+-> (lash_core::ProcessRunOutcome, Arc<TraceLashlangGraphStore>) {
     let store = crate::lib_tests::memory_artifact_store().await;
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
@@ -93,9 +90,7 @@ pub(crate) async fn run_sleep_process_started_under(
     let registry = lash_core::Backend::from(backend.clone()).process_registry();
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "sleep-run")
         .bind_attempt(1);
-    let process_events =
-        durable_process_events_started_under(&registry, &registration, &authority, replay_grammar)
-            .await;
+    let process_events = durable_process_events(&registry, &registration, &authority).await;
     let execution_registration = registration.clone();
     let context = lash_core::ProcessEngineRunContext::new(
         registration,
@@ -140,40 +135,6 @@ pub(crate) async fn run_sleep_process_started_under(
     .await
     .expect("process run succeeds");
     (result, graph_store)
-}
-
-/// T12 (FIG-3586): a process whose start record names no replay-key grammar,
-/// or another one, began its journal under keys this build cannot reach. It
-/// is refused before its body runs — nothing is journaled, not even its sleep.
-#[tokio::test(flavor = "current_thread")]
-async fn a_process_started_under_another_grammar_is_refused_before_its_body_runs() {
-    for grammar in [None, Some(crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION - 1)] {
-        let (result, graph_store) = run_sleep_process_started_under(grammar).await;
-        let lash_core::ProcessRunOutcome::Terminal { output } = result else {
-            panic!("the refusal is terminal: {result:?}");
-        };
-        let lash_core::ProcessAwaitOutput::Settled { output } = *output else {
-            panic!("the refusal settles the process");
-        };
-        let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
-            panic!("the refusal is a durable failure: {output:?}");
-        };
-        assert_eq!(
-            failure.code,
-            LashlangProcessFailureCode::ReplayKeyFormatCutover.as_str(),
-            "{failure:?}"
-        );
-        assert!(
-            graph_store
-                .graphs()
-                .iter()
-                .all(|graph| !graph.history.iter().any(|event| matches!(
-                    &event.event.payload,
-                    TraceLanguageExecutionPayload::NodeWaiting { .. }
-                ))),
-            "the body never ran"
-        );
-    }
 }
 
 /// T12 (FIG-3586): a parked segment written under the previous segment-state

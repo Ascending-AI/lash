@@ -748,6 +748,12 @@ impl LashlangProcessInput {
         lashlang_process_identity(self)
     }
 
+    /// The executable generation a run of this input runs as (FIG-3571):
+    /// the program identity its incarnation's start record is stamped with.
+    pub fn executable_generation(&self) -> lash_core::ExecutableGeneration {
+        lash_core::ExecutableGeneration::new(process::lashlang_program_hash(self))
+    }
+
     pub fn remote_identity(&self) -> lash_remote_protocol::RemoteProcessIdentity {
         lash_remote_protocol::RemoteProcessIdentity {
             kind: LASHLANG_ENGINE_KIND.to_string(),
@@ -1163,8 +1169,13 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         LASHLANG_ENGINE_KIND
     }
 
-    fn replay_key_grammar(&self) -> Option<u32> {
-        Some(LASHLANG_REPLAY_KEY_GRAMMAR_VERSION)
+    fn program_identity(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Option<lash_core::ExecutableGeneration> {
+        LashlangProcessInput::from_payload(payload.clone())
+            .ok()
+            .map(|input| input.executable_generation())
     }
 
     async fn run(

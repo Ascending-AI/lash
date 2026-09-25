@@ -4,6 +4,7 @@ use crate::runtime::HeapId;
 fn empty_continuation(heap: Heap) -> VmContinuation {
     VmContinuation {
         format_version: VM_CONTINUATION_FORMAT_VERSION,
+        executable: crate::ExecutableIdentity::unlinked(),
         reference_semantics: false,
         instruction_pointer: 0,
         active_function: None,

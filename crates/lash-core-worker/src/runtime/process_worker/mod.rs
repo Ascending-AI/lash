@@ -18,6 +18,7 @@ use self::worklist::{ProcessPassBegin, ProcessWorklistScan};
 
 mod drain;
 mod parent_end;
+mod park;
 mod recovery;
 mod registration;
 #[path = "../native_substrate/worklist.rs"]
@@ -474,20 +475,23 @@ impl DurableProcessWorker {
             .expect("native substrate config was validated when the worker was built")
     }
 
-    /// The replay-key grammar `registration`'s engine journals under
-    /// (FIG-3586): what the incarnation's start record must name. A durable
+    /// The executable generation `registration`'s engine runs it as
+    /// (FIG-3571): what the incarnation's start record must name. A durable
     /// substrate that records the start itself, before this worker runs the
     /// segment, stamps it from here so the record matches the one this worker
     /// would write (FIG-3588).
-    pub fn replay_key_grammar(&self, registration: &ProcessRegistration) -> Option<u32> {
+    pub fn executable_generation(
+        &self,
+        registration: &ProcessRegistration,
+    ) -> Option<crate::ExecutableGeneration> {
         match registration.input.as_ref() {
-            crate::ProcessInput::Engine { kind, .. } => self
+            crate::ProcessInput::Engine { kind, payload } => self
                 .config
                 .runtime_host
                 .process_engines
                 .require(kind)
                 .ok()
-                .and_then(|engine| engine.replay_key_grammar()),
+                .and_then(|engine| engine.program_identity(payload)),
             _ => None,
         }
     }
@@ -569,14 +573,14 @@ impl DurableProcessWorker {
             }
         });
         let execution_write_authority = execution_write_authority.bind_attempt(attempt);
-        // The start record's replay-key grammar (FIG-3586): the grammar the
-        // incarnation's first attempt ran under, stamped from its engine once
-        // and inherited by every later attempt, so an incarnation a
-        // pre-cutover build started stays unstamped and is refused by an
-        // engine that keys its journal by grammar.
-        let replay_grammar = match current.first_started.as_deref() {
-            Some(started) => started.replay_grammar,
-            None => self.replay_key_grammar(&registration),
+        // The start record's executable generation (FIG-3571): the one the
+        // incarnation's first attempt ran as, stamped from its engine once and
+        // inherited by every later attempt, never re-derived, so an
+        // incarnation another build started keeps that build's stamp.
+        let current_generation = self.executable_generation(&registration);
+        let generation = match current.first_started.as_deref() {
+            Some(started) => started.generation.clone(),
+            None => current_generation.clone(),
         };
         // A durable substrate admits a segment in its own journal before the
         // worker runs it (FIG-3588): the start record it wrote is read here,
@@ -596,7 +600,7 @@ impl DurableProcessWorker {
                         fencing_token,
                         attempt,
                         started_at_ms: self.now_ms(),
-                        replay_grammar,
+                        generation,
                     },
                     &execution_write_authority,
                 )
@@ -647,6 +651,23 @@ impl DurableProcessWorker {
                 .await?;
         }
         let park_authority = execution_write_authority.clone();
+        // The generation fence (FIG-3571), before the runtime, the artifact
+        // load and the compile: an incarnation started under another
+        // executable generation, or before the stamp existed, parks typed with
+        // nothing run. The admitted record is the one the start just returned.
+        let started_under = admitted
+            .first_started
+            .as_deref()
+            .and_then(|started| started.generation.as_ref());
+        if let Err(refusal) =
+            crate::ExecutableGenerationRefusal::check(started_under, current_generation)
+        {
+            let error =
+                PluginError::Runtime(crate::RuntimeError::retired_process_generation(refusal));
+            self.park_refused_process(&registration.id, &error, &park_authority)
+                .await?;
+            return Err(error);
+        }
         let execution_context =
             execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime = Box::pin(self.runtime_for_registration(&registration)).await?;
@@ -703,36 +724,9 @@ impl DurableProcessWorker {
             )
             .await
             .map_err(crate::ProcessInfraError::into_plugin_error);
-        if let Err(error) = &result
-            && let Some(reason) = error.park_reason()
-        {
-            // The body refused to replay its journal with nothing dispatched
-            // (FIG-3586): the process parks — non-terminal, with no terminal
-            // evidence — until an operator acts. The refusing park is what
-            // exempts its later sweeps from the attempt budget.
-            let code = reason.code();
-            let parked = self
-                .config
-                .process_registry()
-                .park_process_with_authority(&process_id, reason, &park_authority)
+        if let Err(error) = &result {
+            self.park_refused_process(&process_id, error, &park_authority)
                 .await?;
-            lash_core_ids::operational_metrics::record_work_parked("process", code.as_str());
-            tracing::warn!(
-                event = "process.parked",
-                process_id = process_id.as_str(),
-                reason_code = code.as_str(),
-                effect_kind = parked
-                    .park
-                    .as_deref()
-                    .and_then(|park| park.reason.effect_kind())
-                    .unwrap_or_default(),
-                attempts = parked.park.as_deref().map_or(0, |park| park.attempts),
-                park_id = parked
-                    .park
-                    .as_deref()
-                    .map_or(0, |park| park.park_id.feed_sequence()),
-                "process parked on a replay refusal"
-            );
         }
         result
     }

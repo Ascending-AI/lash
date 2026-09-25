@@ -1057,7 +1057,10 @@ mod tests {
                     ))
                     .await
                     .expect("restore seeds the committed baton");
-                assert_eq!(live_baton(&state).await, serde_json::json!("committed"));
+                assert_eq!(
+                    Box::pin(live_baton(&state)).await,
+                    serde_json::json!("committed")
+                );
 
                 let mutated = state
                     .execute_code(
@@ -1086,7 +1089,7 @@ mod tests {
                     .await
                     .expect("a same-frame restore without a snapshot succeeds");
                 assert_eq!(
-                    live_baton(&state).await,
+                    Box::pin(live_baton(&state)).await,
                     serde_json::json!("committed"),
                     "the restore must rebuild the execution from the view, not keep the \
                      uncommitted assignment"
@@ -1158,7 +1161,10 @@ mod tests {
                     committed,
                     "the restored execution is exactly the view's snapshot"
                 );
-                assert_eq!(live_baton(&state).await, serde_json::json!("committed"));
+                assert_eq!(
+                    Box::pin(live_baton(&state)).await,
+                    serde_json::json!("committed")
+                );
             });
     }
 }

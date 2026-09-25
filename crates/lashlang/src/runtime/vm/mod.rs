@@ -227,6 +227,8 @@ impl SlotState {
 
 pub struct Vm<'a, H> {
     chunk: &'a Chunk,
+    /// `chunk`'s program identity, stamped on and required back from a continuation.
+    executable: &'a super::ExecutableIdentity,
     ip: usize,
     stack: Vec<Value>,
     last_value: Option<Value>,

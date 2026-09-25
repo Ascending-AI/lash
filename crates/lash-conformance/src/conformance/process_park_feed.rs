@@ -81,7 +81,7 @@ async fn start_attempt(
                 fencing_token: lease.fencing_token,
                 attempt,
                 started_at_ms: lease.claimed_at_epoch_ms,
-                replay_grammar: None,
+                generation: None,
             },
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )

@@ -29,9 +29,10 @@ pub struct DeploymentDrainStatus {
     /// the minimum `since_ms` over parked turns and parked processes. `None`
     /// when nothing is parked.
     pub oldest_parked_since_ms: Option<u64>,
-    /// Parked turns admitted under an executable generation this build
-    /// retired, per that generation (FIG-3571): what an old-build drain of
-    /// each generation still has to redrive.
+    /// Parked turns admitted, and parked processes started, under an
+    /// executable generation this build retired, per that generation
+    /// (FIG-3571): what an old-build drain of each generation still has to
+    /// redrive.
     pub retired_by_executable_generation:
         std::collections::BTreeMap<lash_core::ExecutableGeneration, usize>,
     /// Host-clock epoch milliseconds at which this read completed.

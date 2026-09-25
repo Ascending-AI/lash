@@ -1601,6 +1601,7 @@ fn compile_labeled_program_with_historical_context(
     let current = crate::testing::harness::compile_linked_main(&linked);
     let mut historical_context = crate::artifact::CompiledModuleContext::from(&linked.artifact);
     historical_context.module_ref = historical_module_ref(historical_module_hash);
+    let historical_context_module_ref = historical_context.module_ref.clone();
     let (chunk, compile_stats) = Compiler::compile_linked_program(
         linked.artifact.ir(),
         Default::default(),
@@ -1610,6 +1611,10 @@ fn compile_labeled_program_with_historical_context(
     let historical = CompiledProgram {
         chunk,
         compile_stats,
+        executable: crate::ExecutableIdentity::of(
+            &historical_context_module_ref,
+            crate::Entry::Main,
+        ),
     };
     (current, historical)
 }
@@ -1641,6 +1646,7 @@ fn compile_labeled_process_with_historical_context(
     };
     let mut historical_context = crate::artifact::CompiledModuleContext::from(&linked.artifact);
     historical_context.module_ref = historical_module_ref(historical_module_hash);
+    let historical_context_module_ref = historical_context.module_ref.clone();
     historical_context.process_refs.insert(
         process_name.to_string(),
         crate::ProcessRef::new(
@@ -1657,6 +1663,10 @@ fn compile_labeled_process_with_historical_context(
     let historical = CompiledProgram {
         chunk,
         compile_stats,
+        executable: crate::ExecutableIdentity::of(
+            &historical_context_module_ref,
+            crate::Entry::Main,
+        ),
     };
     (current, historical)
 }

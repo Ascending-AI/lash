@@ -58,7 +58,10 @@ struct ToolChildProcessRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for ToolChildProcessRunner {
-    fn replay_key_grammar(&self, _registration: &lash_core::ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &lash_core::ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -118,7 +121,10 @@ impl LawProcessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for LawProcessRunner {
-    fn replay_key_grammar(&self, _registration: &lash_core::ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &lash_core::ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 

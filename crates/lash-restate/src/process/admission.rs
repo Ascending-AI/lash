@@ -85,17 +85,30 @@ pub struct SegmentStarted {
     admitted: lash_core::AdmittedScope,
     segment_ordinal: u64,
     authority: ProcessExecutionWriteAuthority,
+    generation: Option<Box<lash_core::ExecutableGeneration>>,
 }
 
 impl SegmentStarted {
-    fn new(process: ProcessRef, segment_ordinal: u64, execution_id: String) -> Self {
+    fn new(
+        process: ProcessRef,
+        segment_ordinal: u64,
+        execution_id: String,
+        generation: Option<lash_core::ExecutableGeneration>,
+    ) -> Self {
         let authority =
             ProcessExecutionWriteAuthority::invocation(process.process_id.clone(), execution_id);
         Self {
             admitted: lash_core::AdmittedScope::process(process),
             segment_ordinal,
             authority,
+            generation: generation.map(Box::new),
         }
+    }
+
+    /// The executable generation the incarnation's start record names: what
+    /// the runner's engine must run the segment as (FIG-3571).
+    pub fn generation(&self) -> Option<&lash_core::ExecutableGeneration> {
+        self.generation.as_deref()
     }
 
     /// The process scope the segment's effects are admitted under.
@@ -131,6 +144,7 @@ impl SegmentStarted {
             authority: authority.unwrap_or_else(|| {
                 ProcessExecutionWriteAuthority::invocation(process_id, "test-segment-execution")
             }),
+            generation: None,
         }
     }
 }
@@ -177,6 +191,11 @@ enum StartOutcome {
     Started {
         execution_id: String,
         process: ProcessRef,
+        /// The executable generation the incarnation's start record names
+        /// (FIG-3571), journaled with the start so a replay holds the segment
+        /// to the stamp it was admitted under.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generation: Option<lash_core::ExecutableGeneration>,
     },
     SubstrateLost {
         lost: ProcessStarted,
@@ -271,11 +290,12 @@ async fn read_record(
 /// These are the handler's first journaled commands; nothing may precede
 /// them, and no effect may follow them except under the proof they return.
 ///
-/// `replay_grammar` is the replay-key grammar the process's engine journals
-/// under (FIG-3586). Segment 0's start marker *is* the incarnation's start
-/// record, which every later attempt and segment inherits, so it must name
-/// that grammar exactly as the runner would; an unstamped record is refused
-/// by an engine that keys its journal by grammar, before its body runs.
+/// `generation` is the executable generation the process's engine runs it as
+/// (FIG-3571). Segment 0's start marker *is* the incarnation's start record,
+/// which every later attempt and segment inherits, so it names that
+/// generation exactly as the runner would; the start returns the stamp the
+/// record holds, and a segment whose runner names another is parked before
+/// its body runs.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn admit_segment(
     ctx: &WorkflowContext<'_>,
@@ -283,7 +303,7 @@ pub(crate) async fn admit_segment(
     continuations: &Arc<dyn lash_core::ProcessContinuationStore>,
     process_id: &lash_sansio::ProcessId,
     segment_ordinal: u64,
-    replay_grammar: Option<u32>,
+    generation: Option<lash_core::ExecutableGeneration>,
     effect_budget: impl Fn() -> u64 + Send + Sync + 'static,
 ) -> Result<SegmentAdmission, HandlerError> {
     let effect_budget = Arc::new(effect_budget);
@@ -387,7 +407,7 @@ pub(crate) async fn admit_segment(
             let nonce = nonce.clone();
             async move {
                 if segment_ordinal == 0 {
-                    start_root_segment(&registry, &process_id, nonce, replay_grammar).await
+                    start_root_segment(&registry, &process_id, nonce, generation.clone()).await
                 } else {
                     start_later_segment(
                         &registry,
@@ -408,8 +428,9 @@ pub(crate) async fn admit_segment(
         StartOutcome::Started {
             execution_id,
             process,
+            generation,
         } => Ok(SegmentAdmission::Started(Box::new(AdmittedSegment {
-            started: SegmentStarted::new(process, segment_ordinal, execution_id),
+            started: SegmentStarted::new(process, segment_ordinal, execution_id, generation),
             handover,
             policy,
             writer,
@@ -425,7 +446,7 @@ async fn start_root_segment(
     registry: &Arc<dyn ProcessRegistry>,
     process_id: &lash_sansio::ProcessId,
     nonce: String,
-    replay_grammar: Option<u32>,
+    generation: Option<lash_core::ExecutableGeneration>,
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
     if record.disposition == lash_core::RecoveryContract::ExternallyOwned {
@@ -443,6 +464,7 @@ async fn start_root_segment(
                 StartOutcome::Started {
                     execution_id: nonce,
                     process: ProcessRef::from_record(&record),
+                    generation: existing.generation.clone(),
                 }
             } else {
                 StartOutcome::SubstrateLost {
@@ -459,7 +481,7 @@ async fn start_root_segment(
         )))
     })?;
     started.started_at_ms = super::restate_now_ms();
-    started.replay_grammar = replay_grammar;
+    started.generation = generation.clone();
     match registry
         .record_first_started_with_authority(process_id, started, &authority)
         .await
@@ -469,6 +491,7 @@ async fn start_root_segment(
         | lash_core::ProcessStartOutcome::AlreadyApplied(_) => Ok(StartOutcome::Started {
             execution_id: nonce,
             process: ProcessRef::from_record(&record),
+            generation,
         }),
         lash_core::ProcessStartOutcome::AlreadyStarted { current, .. }
         | lash_core::ProcessStartOutcome::AttemptsExhausted { current, .. } => {
@@ -519,6 +542,7 @@ async fn start_later_segment(
         StartOutcome::Started {
             execution_id,
             process: ProcessRef::from_record(&record),
+            generation: root.generation.clone(),
         }
     } else {
         StartOutcome::SubstrateLost { lost: root }

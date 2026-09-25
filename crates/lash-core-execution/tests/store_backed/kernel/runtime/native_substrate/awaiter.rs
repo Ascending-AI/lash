@@ -602,7 +602,7 @@ mod tests {
                     fencing_token: 0,
                     attempt: 1,
                     started_at_ms: 1,
-                    replay_grammar: None,
+                    generation: None,
                 },
             )
             .await

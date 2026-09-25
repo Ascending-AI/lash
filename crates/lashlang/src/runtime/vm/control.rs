@@ -789,19 +789,18 @@ mod tests {
 
     use super::super::{ProjectedBindings, Record, SlotState};
     use super::*;
-    use crate::runtime::Compiler;
     use crate::runtime::vm::{IterCursor, IterState, LoopRestore};
 
     fn holder_test_vm<'a>(
-        chunk: &'a super::super::Chunk,
+        program: &'a crate::CompiledProgram,
         host: &'a crate::testing::harness::EchoHost,
     ) -> Vm<'a, crate::testing::harness::EchoHost> {
         Vm::new(
-            chunk,
+            program,
             SlotState::from_globals(
                 Record::new(),
-                &chunk.slot_names,
-                &chunk.private_slots,
+                &program.chunk.slot_names,
+                &program.chunk.private_slots,
                 &ProjectedBindings::new(),
                 Vec::new(),
             ),
@@ -811,13 +810,14 @@ mod tests {
         )
     }
 
-    fn test_chunk() -> super::super::Chunk {
-        Compiler::compile_program(&crate::testing::ast_builders::program(vec![
-            crate::testing::ast_builders::assign("x", crate::testing::ast_builders::num(0.0)),
-            crate::testing::ast_builders::assign("y", crate::testing::ast_builders::num(0.0)),
-            crate::testing::ast_builders::finish(crate::testing::ast_builders::num(0.0)),
-        ]))
-        .0
+    fn test_chunk() -> crate::CompiledProgram {
+        crate::runtime::entry_points::compile_program_internal(
+            &crate::testing::ast_builders::program(vec![
+                crate::testing::ast_builders::assign("x", crate::testing::ast_builders::num(0.0)),
+                crate::testing::ast_builders::assign("y", crate::testing::ast_builders::num(0.0)),
+                crate::testing::ast_builders::finish(crate::testing::ast_builders::num(0.0)),
+            ]),
+        )
     }
 
     /// The enumeration's durable prefix is exactly the sequence the old collect
@@ -940,7 +940,7 @@ mod tests {
 
     /// `while (i < n) { acc = (acc * 31 + i) & 65535; i = i + 1; }` with
     /// ECMA operators, then `finish acc`.
-    fn javascript_numeric_loop(iterations: f64) -> super::super::Chunk {
+    fn javascript_numeric_loop(iterations: f64) -> crate::CompiledProgram {
         use crate::ast::{Expr, JavaScriptBinaryOp as Op};
         use crate::testing::ast_builders as b;
         fn js(left: Expr, op: Op, right: Expr) -> Expr {
@@ -950,7 +950,7 @@ mod tests {
                 right: Box::new(right),
             }
         }
-        Compiler::compile_program(&b::program(vec![
+        crate::runtime::entry_points::compile_program_internal(&b::program(vec![
             b::assign("i", b::num(0.0)),
             b::assign("acc", b::num(0.0)),
             b::while_loop(
@@ -973,7 +973,6 @@ mod tests {
             ),
             b::finish(b::var("acc")),
         ]))
-        .0
     }
 
     /// FIG-3730: an instruction that cannot leave an inline compound behind

@@ -16,6 +16,7 @@ use lash_core::testing::trace_capture::{CapturedFieldKind, EventCapture, capturi
 mod attachment_owner_tests;
 mod drain_report_tests;
 mod fault_surface_tests;
+mod generation_fence_tests;
 mod pagination_tests;
 mod parent_end_redrive_tests;
 #[path = "recovery_disposition_tests.rs"]
@@ -1791,7 +1792,7 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await
@@ -1882,7 +1883,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await
@@ -1943,7 +1944,7 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await
@@ -2217,7 +2218,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await
@@ -2239,7 +2240,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await
@@ -2271,7 +2272,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await
@@ -2384,7 +2385,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await

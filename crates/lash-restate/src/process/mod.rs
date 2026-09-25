@@ -294,12 +294,15 @@ pub(crate) trait RestateProcessRunner: Send + Sync + 'static {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError>;
 
-    /// The replay-key grammar the engine running `registration` journals
-    /// under (FIG-3586). Admission stamps it on segment 0's start marker,
-    /// which is the incarnation's start record, so the record names the
-    /// grammar the runner's engine requires before any body runs. A runner
-    /// whose engine keys no journal by grammar answers `None`.
-    fn replay_key_grammar(&self, registration: &ProcessRegistration) -> Option<u32>;
+    /// The executable generation the engine running `registration` runs it
+    /// as (FIG-3571). Admission stamps it on segment 0's start marker, which
+    /// is the incarnation's start record, and every later segment is held to
+    /// the stamp before its runner is entered. A runner whose engine carries
+    /// no generation answers `None`.
+    fn executable_generation(
+        &self,
+        registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration>;
 
     /// Ask the child turn a `SessionTurn` process drives to stop now, as a
     /// durable request on the turn's gate (FIG-3673). A runner whose
@@ -361,10 +364,13 @@ impl RestateCoreProcessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for RestateCoreProcessRunner {
-    fn replay_key_grammar(&self, registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         self.worker()
             .ok()
-            .and_then(|worker| worker.replay_key_grammar(registration))
+            .and_then(|worker| worker.executable_generation(registration))
     }
 
     async fn stop_child_turn(

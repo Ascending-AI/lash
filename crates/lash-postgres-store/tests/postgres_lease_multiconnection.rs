@@ -179,7 +179,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
         fencing_token: 0,
         attempt: 1,
         started_at_ms: 111,
-        replay_grammar: None,
+        generation: None,
     };
     reg_a
         .record_first_started(&ProcessId::from(process_id.clone()), started.clone())

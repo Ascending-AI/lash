@@ -470,7 +470,11 @@ impl SqliteProcessRegistry {
                 record
                     .park
                     .as_deref()
-                    .map(|park| park.reason.code().as_str())
+                    .map(|park| park.reason.code().as_str()),
+                record
+                    .park
+                    .as_deref()
+                    .and_then(|park| park.reason.retired_executable_generation_key())
             ],
         )
         .map_err(process_sqlite_error)?;

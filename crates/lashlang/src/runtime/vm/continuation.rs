@@ -3,8 +3,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 use super::super::{
-    DateObject, ErrorKind, ErrorObject, ExecutionBound, HeapObject, HeapRestoreWire, MapObject,
-    PersistedRoots, RegExpObject, SetObject,
+    DateObject, ErrorKind, ErrorObject, ExecutableIdentity, ExecutionBound, HeapObject,
+    HeapRestoreWire, MapObject, PersistedRoots, RegExpObject, SetObject,
 };
 use super::*;
 
@@ -112,9 +112,15 @@ use super::exceptions::PendingErrorOrigin;
 /// lowering defect, never a pending guest error). A v26 continuation's reader
 /// meets an unknown kind, so it is refused.
 ///
+/// v28 (FIG-3571) binds a continuation to the executable that parked it: the
+/// wire carries the program's [`ExecutableIdentity`], and resume refuses any
+/// other program, direct public resume included. A v27 continuation names no
+/// executable, so it is refused rather than resumed against whatever program
+/// the caller supplies.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 27;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 28;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
@@ -184,6 +190,10 @@ impl TestSuspension {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct VmContinuation {
     pub format_version: u32,
+    /// The executable identity of the program that parked this continuation
+    /// ([`CompiledProgram::executable_identity`]); [`Vm::resume_from`] refuses
+    /// any other program.
+    pub executable: ExecutableIdentity,
     pub reference_semantics: bool,
     pub instruction_pointer: usize,
     pub active_function: Option<u32>,
@@ -1107,7 +1117,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// `scratch` is the recycled-buffer handoff — `Some(&mut scratch)` reuses
     /// the scratch execution's stack and iterator stack instead of allocating.
     pub(crate) fn new(
-        chunk: &'a Chunk,
+        program: &'a CompiledProgram,
         slots: SlotState,
         host: &'a H,
         scratch: Option<&mut ExecutionScratch>,
@@ -1121,7 +1131,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             None => (Vec::new(), Vec::new()),
         };
         Self {
-            chunk,
+            chunk: &program.chunk,
+            executable: &program.executable,
             ip: 0,
             stack,
             last_value: None,
@@ -1289,6 +1300,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 
         let mut continuation = VmContinuation {
             format_version: VM_CONTINUATION_FORMAT_VERSION,
+            executable: self.executable.clone(),
             reference_semantics: false,
             instruction_pointer: self.ip,
             active_function: self
@@ -1343,6 +1355,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             return Err(ContinuationError::FormatVersionMismatch {
                 expected: VM_CONTINUATION_FORMAT_VERSION,
                 found: continuation.format_version,
+            });
+        }
+        // The continuation resumes only the program that parked it: another
+        // module, another entry, or the same entry compiled under another
+        // build's contracts would run its saved instruction pointer and node
+        // counters against different code (FIG-3571).
+        if continuation.executable != program.executable {
+            return Err(ContinuationError::ExecutableMismatch {
+                expected: program.executable.clone(),
+                found: continuation.executable,
             });
         }
         // `reference_semantics` records whether this continuation's heap is a
@@ -1504,6 +1526,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             .collect();
         let mut vm = Self {
             chunk: &program.chunk,
+            executable: &program.executable,
             ip: continuation.instruction_pointer,
             stack: continuation.operand_stack,
             last_value: continuation.last_value,
