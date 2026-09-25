@@ -2228,6 +2228,14 @@ pub async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -
         .expect("the first host observes rank 1");
     assert_eq!(winner.position, 0);
 
+    // The resuming host is built only once the losing child is running: on
+    // legs whose children resolve their executors at the endpoint (Restate),
+    // `make()` installs the second host's resolver in place of the first's,
+    // and a child whose resolution lands after that swap would be handed the
+    // resuming host's staged executor (FIG-3695). `waiting` proves this
+    // child's executor is already executing under the first host's staging.
+    loser.wait_until_waiting().await;
+
     // The resuming host: a second instance over the same substrate, which knows
     // only what a durable continuation carries — the group and its own cursor.
     let second = make();

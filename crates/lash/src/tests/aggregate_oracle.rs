@@ -733,10 +733,18 @@ finish(await Promise.all(ids.map(async (id) => await oracle.step({ id: id }))));
             "{}/{label}: the aggregate value",
             tier.name
         );
+        // A journaled tier's group children are spawned tasks whose start
+        // order is the scheduler's (FIG-3637): the law is about *which*
+        // leaves the host was asked for, not the order it was asked in.
+        // Comparing sorted keeps the "exactly these leaves" guarantee —
+        // multiplicities included.
+        let mut started = run.theatre.started();
+        started.sort_unstable();
+        let mut expected_calls = expected_calls;
+        expected_calls.sort_unstable();
         assert_eq!(
-            run.theatre.started(),
-            expected_calls,
-            "{}/{label}: the calls the host was asked for, in order",
+            started, expected_calls,
+            "{}/{label}: the calls the host was asked for",
             tier.name
         );
         assert_eq!(
