@@ -1,4 +1,5 @@
 use super::*;
+use crate::rlm::RlmSendBuilderExt as _;
 use lash_core::store::{
     RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimePersistenceDecorator,
 };
@@ -189,9 +190,9 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
         let session = core.session("flat-checkpoint-growth").open().await?;
         for _ in 0..LARGE_BINDINGS {
             session
-                .turn(TurnInput::text("store"))
+                .send(TurnInput::text("store"))
                 .require_finish()?
-                .run()
+                .output()
                 .await?;
         }
         let state = session
@@ -213,9 +214,9 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
         let mut commit_count = 0;
         for turn in 0..DIRTY_TURNS {
             session
-                .turn(TurnInput::text("touch"))
+                .send(TurnInput::text("touch"))
                 .require_finish()?
-                .run()
+                .output()
                 .await?;
             let writes = std::mem::take(&mut *samples.lock_recover());
             assert!(!writes.is_empty(), "turn {turn} committed");
@@ -253,9 +254,9 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
         );
         assert_flat_checkpoint_sizes(&peaks);
         session
-            .turn(TurnInput::text("rebind"))
+            .send(TurnInput::text("rebind"))
             .require_finish()?
-            .run()
+            .output()
             .await?;
         let writes = std::mem::take(&mut *samples.lock_recover());
         let rewritten = writes
@@ -294,9 +295,9 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
             "FIG-1196 rebind: exactly one rewritten leaf; fifteen retained leaf identities; state_bytes={state_bytes}"
         );
         session
-            .turn(TurnInput::text("touch"))
+            .send(TurnInput::text("touch"))
             .require_finish()?
-            .run()
+            .output()
             .await?;
         assert!(
             samples
@@ -335,17 +336,17 @@ fn checkpoint_flatness_rejects_a_binding_that_grows_each_turn() -> Result<()> {
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("growing-checkpoint-witness").open().await?;
         session
-            .turn(TurnInput::text("store"))
+            .send(TurnInput::text("store"))
             .require_finish()?
-            .run()
+            .output()
             .await?;
         samples.lock_recover().clear();
         let mut peaks = Vec::new();
         for _ in 0..GROWING_TURNS {
             session
-                .turn(TurnInput::text("grow"))
+                .send(TurnInput::text("grow"))
                 .require_finish()?
-                .run()
+                .output()
                 .await?;
             let writes = std::mem::take(&mut *samples.lock_recover());
             peaks.push(

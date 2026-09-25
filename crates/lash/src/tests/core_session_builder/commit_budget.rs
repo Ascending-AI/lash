@@ -22,9 +22,9 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
     core.session("commit-graph-only-budget-surface")
         .open()
         .await?
-        .turn(TurnInput::text("graph rows only"))
-        .turn_id("commit-graph-only-budget-turn")
-        .run()
+        .send(TurnInput::text("graph rows only"))
+        .id("commit-graph-only-budget-turn")
+        .output()
         .await?;
 
     let session = core
@@ -32,14 +32,14 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .open()
         .await?;
     let error = session
-        .turn(TurnInput::text("adopt one attachment").with_attachment(
+        .send(TurnInput::text("adopt one attachment").with_attachment(
             lash_core::AttachmentSource::inline(
                 lash_core::MediaType::parse("image/png").expect("image media type"),
                 vec![1, 2, 3],
             ),
         ))
-        .turn_id("commit-adoption-row-budget-turn")
-        .run()
+        .id("commit-adoption-row-budget-turn")
+        .output()
         .await
         .expect_err("the adoption row must push the commit past its row limit");
 

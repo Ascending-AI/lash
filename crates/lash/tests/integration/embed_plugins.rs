@@ -241,8 +241,8 @@ async fn prompt_hook_and_tool_provider_read_typed_session_config() {
         .expect("session");
 
     let result = session
-        .turn(TurnInput::text("probe"))
-        .run()
+        .send(TurnInput::text("probe"))
+        .output()
         .await
         .expect("turn");
 

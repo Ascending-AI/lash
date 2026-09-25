@@ -12,8 +12,8 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
 
     let session = core.session("parked-config").open().await?;
     session
-        .turn(TurnInput::text("establish head"))
-        .run()
+        .send(TurnInput::text("establish head"))
+        .output()
         .await?;
     let expected_model = model_spec("settled-model", Some("settled-variant".to_string()), 64_000);
     let expected_generation = lash_core::GenerationOptions {
@@ -59,8 +59,8 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
 
     let session = core.session("incidental-reopen").open().await?;
     session
-        .turn(TurnInput::text("establish head"))
-        .run()
+        .send(TurnInput::text("establish head"))
+        .output()
         .await?;
     let commanded_model = model_spec("commanded-model", None, 64_000);
     let commanded_generation = lash_core::GenerationOptions {
@@ -125,8 +125,8 @@ async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Resul
     // Establish a durable head carrying the original model.
     let session = core.session("seeded-reopen").open().await?;
     session
-        .turn(TurnInput::text("establish head"))
-        .run()
+        .send(TurnInput::text("establish head"))
+        .output()
         .await?;
     drop(session);
 

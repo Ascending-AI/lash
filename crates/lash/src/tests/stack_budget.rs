@@ -32,8 +32,8 @@ finish({
         let events = RecordingEvents::default();
 
         let turn = session
-            .turn(TurnInput::text("run stack budget process fanout"))
-            .stream_to(&events)
+            .send(TurnInput::text("run stack budget process fanout"))
+            .output_into(&events)
             .await?;
         session.refresh_background_graph().await?;
 

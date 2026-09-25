@@ -35,8 +35,8 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
         .open()
         .await?;
     session
-        .turn(TurnInput::text("commit the initial generation seed"))
-        .run()
+        .send(TurnInput::text("commit the initial generation seed"))
+        .output()
         .await?;
     assert_eq!(
         store

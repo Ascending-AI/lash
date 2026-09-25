@@ -4,6 +4,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+#[cfg(feature = "rlm")]
+use crate::rlm::RlmSendBuilderExt as _;
 #[path = "session_lifecycle/provider_pin.rs"]
 mod provider_pin;
 #[path = "session_lifecycle/session_binding.rs"]
@@ -271,8 +273,8 @@ async fn standard_core_runs_mock_turn() -> Result<()> {
     let events = RecordingEvents::default();
 
     let result = session
-        .turn(TurnInput::text("hello"))
-        .stream_to(&events)
+        .send(TurnInput::text("hello"))
+        .output_into(&events)
         .await?;
 
     assert!(matches!(
@@ -318,8 +320,8 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
     let session = core.session("commit-budget-surface").open().await?;
 
     let error = match session
-        .turn(TurnInput::text("produce an oversized turn"))
-        .run()
+        .send(TurnInput::text("produce an oversized turn"))
+        .output()
         .await
     {
         Ok(_) => panic!("the oversized turn must fail at the production surface"),
@@ -366,7 +368,11 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("commit-node-budget-surface").open().await?;
 
-    let error = match session.turn(TurnInput::text("produce a turn")).run().await {
+    let error = match session
+        .send(TurnInput::text("produce a turn"))
+        .output()
+        .await
+    {
         Ok(_) => panic!("the over-limit node commit must fail at the production surface"),
         Err(error) => error,
     };
@@ -658,13 +664,13 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
         )],
     ))
     .await?;
-    session.turn(TurnInput::text("second")).run().await?;
+    session.send(TurnInput::text("second")).output().await?;
     session
         .admin()
         .config()
         .clear_prompt_slot(PromptSlot::Guidance)
         .await?;
-    session.turn(TurnInput::text("third")).run().await?;
+    session.send(TurnInput::text("third")).output().await?;
 
     let prompts = seen.lock_recover();
     assert_eq!(prompts.len(), 3);
@@ -708,7 +714,7 @@ async fn provider_overrides_apply_at_core_session_turn_and_config_scopes() -> Re
         .open()
         .await?;
 
-    let session_result = session.turn(TurnInput::text("hello")).run().await?;
+    let session_result = session.send(TurnInput::text("hello")).output().await?;
     assert_eq!(assistant_prose(&session_result.activities), "session");
 
     let turn_result = session
@@ -718,7 +724,7 @@ async fn provider_overrides_apply_at_core_session_turn_and_config_scopes() -> Re
         .await?;
     assert_eq!(assistant_prose(&turn_result.activities), "turn");
 
-    let after_turn = session.turn(TurnInput::text("hello")).run().await?;
+    let after_turn = session.send(TurnInput::text("hello")).output().await?;
     assert_eq!(assistant_prose(&after_turn.activities), "session");
 
     session
@@ -735,7 +741,7 @@ async fn provider_overrides_apply_at_core_session_turn_and_config_scopes() -> Re
         })
         .await?;
 
-    let updated = session.turn(TurnInput::text("hello")).run().await?;
+    let updated = session.send(TurnInput::text("hello")).output().await?;
     assert_eq!(assistant_prose(&updated.activities), "updated");
     Ok(())
 }
@@ -773,7 +779,7 @@ async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> 
         .open()
         .await?;
 
-    session.turn(TurnInput::text("hello")).run().await?;
+    session.send(TurnInput::text("hello")).output().await?;
     session
         .turn(TurnInput::text("hello"))
         .provider(recording_text_provider(
@@ -799,7 +805,7 @@ async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> 
             ..SessionConfigPatch::default()
         })
         .await?;
-    session.turn(TurnInput::text("hello")).run().await?;
+    session.send(TurnInput::text("hello")).output().await?;
 
     assert_eq!(
         *seen.lock_recover(),
@@ -870,9 +876,9 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()>
     let session = core.session("rlm-abilities-prompt").open().await?;
 
     session
-        .turn(TurnInput::text("hello"))
+        .send(TurnInput::text("hello"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
 
     let prompts = seen.lock_recover();
@@ -940,9 +946,9 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
         .await?;
 
     session
-        .turn(TurnInput::text("first"))
+        .send(TurnInput::text("first"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
     Box::pin(session.admin().state().append_messages(vec![
             lash_core::PluginMessage::text(lash_core::MessageRole::Assistant, ANSWER)
@@ -950,9 +956,9 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
         ]))
     .await?;
     session
-        .turn(TurnInput::text("second"))
+        .send(TurnInput::text("second"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
     core.flush_trace_sink()?;
 
@@ -1041,9 +1047,9 @@ async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -
 
     for (turn, answer) in ANSWERS.iter().enumerate() {
         session
-            .turn(TurnInput::text(format!("turn {}", turn + 1)))
+            .send(TurnInput::text(format!("turn {}", turn + 1)))
             .require_finish()?
-            .run()
+            .output()
             .await?;
         Box::pin(session.admin().state().append_messages(vec![
                 lash_core::PluginMessage::text(lash_core::MessageRole::Assistant, *answer)
@@ -1172,7 +1178,7 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
         .build(crate::testing::runtime_lease_owner())?;
 
     let markdown = core.session("rlm-root-markdown").open().await?;
-    markdown.turn(TurnInput::text("hello")).run().await?;
+    markdown.send(TurnInput::text("hello")).output().await?;
 
     let raw = core
         .session("rlm-root-raw")
@@ -1185,9 +1191,9 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
         )?
         .open()
         .await?;
-    raw.turn(TurnInput::text("hello"))
+    raw.send(TurnInput::text("hello"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
 
     let prompts = seen.lock_recover();
@@ -1220,16 +1226,16 @@ async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() 
         )?
         .open()
         .await?;
-    raw.turn(TurnInput::text("hello"))
+    raw.send(TurnInput::text("hello"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
     Box::pin(raw.close()).await?;
     let reopened = core.session("rlm-format-survives-reopen").open().await?;
     reopened
-        .turn(TurnInput::text("again"))
+        .send(TurnInput::text("again"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
 
     let prompts = seen.lock_recover();
@@ -1420,7 +1426,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("parked").open().await?;
-    session.turn(TurnInput::text("hello")).run().await?;
+    session.send(TurnInput::text("hello")).output().await?;
     let before = session
         .read_view()
         .messages()
@@ -1447,7 +1453,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     assert_eq!(after, before, "resume must restore the parked transcript");
     // The resumed session is live and can take another turn on top of the
     // restored transcript.
-    resumed.turn(TurnInput::text("again")).run().await?;
+    resumed.send(TurnInput::text("again")).output().await?;
     assert!(
         resumed
             .read_view()
@@ -1476,7 +1482,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("deleted-while-parked").open().await?;
-    session.turn(TurnInput::text("hello")).run().await?;
+    session.send(TurnInput::text("hello")).output().await?;
     let parked = Box::pin(session.park()).await?;
 
     delete_bound_session(&core, "deleted-while-parked").await?;
@@ -1695,8 +1701,8 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
         "embed-test"
     );
     session
-        .turn(TurnInput::text("runs with reconciled provider"))
-        .run()
+        .send(TurnInput::text("runs with reconciled provider"))
+        .output()
         .await?;
     Ok(())
 }
@@ -1737,8 +1743,8 @@ async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> 
 
     store.set_head_provider_id("other-provider");
     let error = session
-        .turn(TurnInput::text("runs against the adopted head provider"))
-        .run()
+        .send(TurnInput::text("runs against the adopted head provider"))
+        .output()
         .await
         .expect_err("the adopted head names a provider this host has not registered");
     match &error {
@@ -1771,11 +1777,11 @@ async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()>
     .build(crate::testing::runtime_lease_owner())?;
 
     let first = core.session("provider-reload").open().await?;
-    first.turn(TurnInput::text("first")).run().await?;
+    first.send(TurnInput::text("first")).output().await?;
     drop(first);
 
     let reopened = core.session("provider-reload").open().await?;
-    let second = reopened.turn(TurnInput::text("second")).run().await?;
+    let second = reopened.send(TurnInput::text("second")).output().await?;
 
     assert_eq!(assistant_prose(&second.activities), "echo: second");
     assert_eq!(
@@ -1796,8 +1802,8 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("delete-session").open().await?;
     session
-        .turn(TurnInput::text("stored before delete"))
-        .run()
+        .send(TurnInput::text("stored before delete"))
+        .output()
         .await?;
     assert!(!session.read_view().messages().is_empty());
     assert!(
@@ -2164,8 +2170,8 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
     );
 
     session
-        .turn(TurnInput::text("verify reconciliation"))
-        .run()
+        .send(TurnInput::text("verify reconciliation"))
+        .output()
         .await?;
 
     let observations = transform_observations.lock_recover().clone();

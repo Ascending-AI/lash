@@ -86,7 +86,7 @@ async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt()
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core_v1.session("core-prompt-redeploy").open().await?;
-    session.turn(TurnInput::text("commit V1")).run().await?;
+    session.send(TurnInput::text("commit V1")).output().await?;
     drop(session);
     drop(core_v1);
 
@@ -102,8 +102,8 @@ async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt()
         .session("core-prompt-redeploy")
         .open()
         .await?
-        .turn(TurnInput::text("render V2"))
-        .run()
+        .send(TurnInput::text("render V2"))
+        .output()
         .await?;
 
     let requests = captures.lock_recover();
@@ -136,8 +136,8 @@ async fn open_with_state_without_builder_prompt_renders_supplied_snapshot_prompt
             supplied,
         ))
         .await?
-        .turn(TurnInput::text("probe"))
-        .run()
+        .send(TurnInput::text("probe"))
+        .output()
         .await?;
 
     let requests = captures.lock_recover();
@@ -169,8 +169,8 @@ async fn open_with_state_builder_prompt_replaces_supplied_snapshot_prompt() -> R
             supplied,
         ))
         .await?
-        .turn(TurnInput::text("probe"))
-        .run()
+        .send(TurnInput::text("probe"))
+        .output()
         .await?;
 
     let requests = captures.lock_recover();
@@ -200,7 +200,7 @@ async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_in_memory()
         .instructions("HOST SUPPLIED AT REOPEN")
         .open()
         .await?;
-    session.turn(TurnInput::text("probe")).run().await?;
+    session.send(TurnInput::text("probe")).output().await?;
 
     let requests = captures.lock_recover();
     assert_eq!(requests.len(), 1);
@@ -223,7 +223,7 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_in_memo
     .build(crate::testing::runtime_lease_owner())?;
 
     let fresh = core.session("fresh-prompt-baseline").open().await?;
-    fresh.turn(TurnInput::text("fresh probe")).run().await?;
+    fresh.send(TurnInput::text("fresh probe")).output().await?;
     let legacy_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend_serving(snapshot_store_from_literal_head(
             LEGACY_PROMPTLESS_HEAD_JSON,
@@ -235,7 +235,10 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_in_memo
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let legacy = legacy_core.session("legacy-promptless").open().await?;
-    legacy.turn(TurnInput::text("legacy probe")).run().await?;
+    legacy
+        .send(TurnInput::text("legacy probe"))
+        .output()
+        .await?;
 
     let requests = captures.lock_recover();
     assert_eq!(requests.len(), 2);
@@ -265,7 +268,7 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_in_memory
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("committed-prompt").open().await?;
-    session.turn(TurnInput::text("probe")).run().await?;
+    session.send(TurnInput::text("probe")).output().await?;
 
     let requests = captures.lock_recover();
     assert!(rendered_system_prompt(&requests[0]).contains("COMMITTED PROMPT"));
@@ -293,7 +296,7 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_m
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("explicit-empty-prompt").open().await?;
-    session.turn(TurnInput::text("probe")).run().await?;
+    session.send(TurnInput::text("probe")).output().await?;
 
     let requests = captures.lock_recover();
     assert!(
@@ -332,7 +335,7 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_in_memory() -> Resul
         .instructions("NEW HOST PROMPT")
         .open()
         .await?;
-    session.turn(TurnInput::text("probe")).run().await?;
+    session.send(TurnInput::text("probe")).output().await?;
     core.flush_trace_sink()?;
 
     {
@@ -455,7 +458,7 @@ async fn legacy_promptless_head_with_host_prompt_renders_host_prompt_sqlite() ->
         .instructions("SQLITE HOST PROMPT")
         .open()
         .await?;
-    session.turn(TurnInput::text("probe")).run().await?;
+    session.send(TurnInput::text("probe")).output().await?;
     assert!(rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE HOST PROMPT"));
     Ok(())
 }
@@ -474,14 +477,14 @@ async fn legacy_promptless_head_without_host_prompt_matches_fresh_render_sqlite(
     core.session("fresh-sqlite-baseline")
         .open()
         .await?
-        .turn(TurnInput::text("fresh"))
-        .run()
+        .send(TurnInput::text("fresh"))
+        .output()
         .await?;
     core.session("legacy-promptless")
         .open()
         .await?
-        .turn(TurnInput::text("legacy"))
-        .run()
+        .send(TurnInput::text("legacy"))
+        .output()
         .await?;
     let requests = captures.lock_recover();
     assert_eq!(
@@ -509,8 +512,8 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_sqlite() 
     core.session("sqlite-committed")
         .open()
         .await?
-        .turn(TurnInput::text("probe"))
-        .run()
+        .send(TurnInput::text("probe"))
+        .output()
         .await?;
     assert!(
         rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE COMMITTED PROMPT")
@@ -539,8 +542,8 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqli
     core.session("sqlite-explicit-empty")
         .open()
         .await?
-        .turn(TurnInput::text("probe"))
-        .run()
+        .send(TurnInput::text("probe"))
+        .output()
         .await?;
     assert!(
         rendered_system_prompt(&captures.lock_recover()[0]).contains("SQLITE INHERITED DEFAULT")
@@ -571,8 +574,8 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<(
         .instructions("SQLITE NEW HOST PROMPT")
         .open()
         .await?
-        .turn(TurnInput::text("probe"))
-        .run()
+        .send(TurnInput::text("probe"))
+        .output()
         .await?;
     core.flush_trace_sink()?;
     let rendered = rendered_system_prompt(&captures.lock_recover()[0]);

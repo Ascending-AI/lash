@@ -128,8 +128,8 @@ fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<
         .await?;
 
         let session = core.session("fig2765-hole").open().await?;
-        let first = session.turn(TurnInput::text("one")).run().await?;
-        let second = session.turn(TurnInput::text("two")).run().await?;
+        let first = session.send(TurnInput::text("one")).output().await?;
+        let second = session.send(TurnInput::text("two")).output().await?;
         let first_call = first.result.llm_calls[0].call_id.0.clone();
         let second_call = second.result.llm_calls[0].call_id.0.clone();
         assert_ne!(first_call, second_call);
@@ -195,7 +195,7 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
         .await?;
 
         let session = core.session("fig2765-correction").open().await?;
-        session.turn(TurnInput::text("one")).run().await?;
+        session.send(TurnInput::text("one")).output().await?;
         Box::pin(session.close()).await?;
 
         let reopened = core.session("fig2765-correction").open().await?;
@@ -305,8 +305,8 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
         };
 
         let session = core.session("fig2765-cancel").open().await?;
-        session.turn(TurnInput::text("one")).run().await?;
-        session.turn(TurnInput::text("two")).run().await?;
+        session.send(TurnInput::text("one")).output().await?;
+        session.send(TurnInput::text("two")).output().await?;
         assert_eq!(session.unreported_usage_attempts().await.len(), 2);
 
         let mut pending = Box::pin(session.reconcile_unreported_usage());
@@ -404,7 +404,7 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
         };
 
         let session = core.session(session_id).open().await?;
-        session.turn(TurnInput::text("one")).run().await?;
+        session.send(TurnInput::text("one")).output().await?;
         Box::pin(session.close()).await?;
         let after_turn = head_revision().await;
 

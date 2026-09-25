@@ -128,8 +128,8 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session(format!("discovery-{mode}")).open().await?;
         let output = session
-            .turn(TurnInput::text("read the hidden tool"))
-            .run()
+            .send(TurnInput::text("read the hidden tool"))
+            .output()
             .await?;
         if mode == "native" {
             assert!(

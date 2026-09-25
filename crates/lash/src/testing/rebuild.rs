@@ -360,8 +360,8 @@ async fn open_mutate_and_restart_with_prompt(
 ) {
     let session = core.session(SESSION_ID).open().await.expect("open session");
     let output = session
-        .turn(lash_core::TurnInput::text(prompt))
-        .run()
+        .send(lash_core::TurnInput::text(prompt))
+        .output()
         .await
         .expect("register trigger route");
     assert_eq!(output.final_value(), Some(&serde_json::json!("registered")));
