@@ -86,7 +86,7 @@ impl EffectGroupDispatch {
         &self,
         ctx: &SharedWorkflowContext<'ctx>,
         request: &EffectGroupChildRequest,
-        child: &lash_core::runtime::effect::ToolChildRequest,
+        child: &lash_core::facade_support::ToolChildRequest,
         refusal: &RuntimeEffectControllerError,
         outcome: &EffectGroupChildRunOutcome,
     ) -> HandlerResult<Json<()>> {
