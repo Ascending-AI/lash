@@ -1,12 +1,13 @@
 use super::*;
 use lash::rlm::RlmSendBuilderExt;
 
+const SEED: u64 = 0xf9_0002;
+
 fn deferred_tools_test_core(
-    data_dir: &std::path::Path,
+    backend: Arc<dyn lash::Backend>,
     provider: ProviderHandle,
     deferred: deferred_tools::WorkbenchDeferredTools,
 ) -> LashCore {
-    let backend = test_file_backend(data_dir);
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -77,7 +78,8 @@ finish(result.digest);
             })
             .build()
             .into_handle();
-        let core = deferred_tools_test_core(&data_dir, provider, deferred);
+        let double = test_double_backend(SEED).await;
+        let core = deferred_tools_test_core(double.lash_backend(), provider, deferred);
         let session = core
             .session("workbench-deferred-round-trip")
             .open()
@@ -158,7 +160,8 @@ finish("typed link failures observed");
             })
             .build()
             .into_handle();
-        let core = deferred_tools_test_core(&data_dir, provider, deferred);
+        let double = test_double_backend(SEED).await;
+        let core = deferred_tools_test_core(double.lash_backend(), provider, deferred);
         let output = core
             .session("workbench-deferred-link-errors")
             .open()

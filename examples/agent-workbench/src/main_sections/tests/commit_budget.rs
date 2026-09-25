@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0xf9_0001;
+
 #[tokio::test]
 async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     let budget = lash::CommitBudget::new(
@@ -17,12 +19,9 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     let batching = lash::QueuedWorkBatchingConfig::new(1)
         .with_max_rows(8)
         .with_max_pending_age(std::time::Duration::from_secs(5));
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("SQLite memory backend"),
-    );
-    let host = lash::durability::RuntimeHostConfig::new(backend.into(), bounded, batching.clone());
+    let double = test_double_backend(SEED).await;
+    let backend = double.lash_backend();
+    let host = lash::durability::RuntimeHostConfig::new(backend, bounded, batching.clone());
     assert_eq!(host.durability.commit_budget, bounded);
     assert_eq!(host.durability.queued_work_batching, batching);
     assert_eq!(batching.action_token_reserve(), 1);
@@ -35,12 +34,8 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     let default_pending_age = lash::QueuedWorkBatchingConfig::DEFAULT_MAX_PENDING_AGE;
     assert_eq!(default_pending_age, std::time::Duration::from_secs(30));
 
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("SQLite memory backend"),
-    );
-    let error = match lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
+    let backend = double.lash_backend();
+    let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
@@ -51,12 +46,8 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     };
     assert!(matches!(error, lash::EmbedError::MissingCommitBudget));
 
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("SQLite memory backend"),
-    );
-    let error = match lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
+    let backend = double.lash_backend();
+    let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
@@ -68,12 +59,8 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     };
     assert!(matches!(error, lash::EmbedError::MissingQueuedWorkBatching));
 
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("SQLite memory backend"),
-    );
-    let configured = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
+    let backend = double.lash_backend();
+    let configured = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())

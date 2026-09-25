@@ -486,17 +486,17 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
 
-    /// A process observer over a fresh SQLite memory backend, and the
+    const SEED: u64 = 0xf9_0008;
+
+    /// A process observer over the Restate double's backend, and the
     /// backend's registry the test writes process rows into.
     async fn test_process_observer() -> (
         lash::process::ProcessWorkObserver,
         Arc<dyn lash::process::ProcessRegistry>,
+        lash_restate_test::RestateTestBackend,
     ) {
-        let backend = Arc::new(
-            lash_sqlite_store::SqliteBackend::memory()
-                .await
-                .expect("SQLite memory backend"),
-        );
+        let double = crate::tests::test_double_backend(SEED).await;
+        let backend = double.lash_backend();
         let registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
         let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
             .model(
@@ -513,7 +513,7 @@ mod tests {
             .processes()
             .observer()
             .expect("process observer configured");
-        (observer, registry)
+        (observer, registry, double)
     }
 
     fn test_graph(
@@ -566,7 +566,7 @@ mod tests {
 
     #[tokio::test]
     async fn graph_index_resolves_subagent_bridge_to_child_session_effect_graph() {
-        let (observer, registry) = test_process_observer().await;
+        let (observer, registry, _double) = test_process_observer().await;
         let child_session_id = "child-session";
         let create_request = lash::SessionCreateRequest::child_session(
             "root",
@@ -698,7 +698,7 @@ mod tests {
 
     #[tokio::test]
     async fn graph_index_filters_to_current_session_and_reachable_children() {
-        let (observer, registry) = test_process_observer().await;
+        let (observer, registry, _double) = test_process_observer().await;
         let current_session_id = &SessionId::from("current-session");
         let child_session_id = &SessionId::from("child-session");
         let old_session_id = &SessionId::from("old-session");

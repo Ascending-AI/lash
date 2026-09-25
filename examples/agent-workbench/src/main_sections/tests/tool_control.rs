@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0xf9_0005;
+
 #[derive(Clone, Copy)]
 struct WorkbenchControlTools;
 
@@ -128,7 +130,8 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .await
             .expect("open tool control process registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
-        let core = explicit_durable_test_facets(&data_dir)
+        let double = test_double_backend(SEED).await;
+        let core = explicit_durable_test_facets_on(double.lash_backend())
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("workbench-tool-control-model")

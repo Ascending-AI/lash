@@ -2,6 +2,8 @@ use super::*;
 use lash::SessionId;
 use lash::rlm::RlmSendBuilderExt;
 
+const SEED: u64 = 0xf9_0006;
+
 #[test]
 fn host_model_capability_validates_reasoning_effort_selections() {
     use lash::provider::{
@@ -126,7 +128,8 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .context_window_tokens(4_096)
             .build()
             .expect("initial config change model");
-        let core = explicit_durable_test_facets(&data_dir)
+        let double = test_double_backend(SEED).await;
+        let core = explicit_durable_test_facets_on(double.lash_backend())
             .provider(provider)
             .model(initial_model)
             .plugin(plugin)
@@ -205,7 +208,8 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
             })
             .build()
             .into_handle();
-        let core = explicit_durable_test_facets(&data_dir)
+        let double = test_double_backend(SEED).await;
+        let core = explicit_durable_test_facets_on(double.lash_backend())
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("workbench-context-transform-model")

@@ -1,5 +1,10 @@
-use super::tests::{explicit_durable_test_facets, run_async_test_on_stack_budget, text_response};
+use super::tests::{
+    explicit_durable_test_facets_on, run_async_test_on_stack_budget, test_double_backend,
+    text_response,
+};
 use super::*;
+
+const SEED: u64 = 0xf9_0007;
 
 /// Both halves of the derive-then-append fence the workbench annotator relies
 /// on, driven through real turns against a durable store.
@@ -34,7 +39,8 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
         .into_handle();
     let plugin = Arc::new(WorkbenchPluginFactory::new());
     let notes = plugin.derived_notes();
-    let core = explicit_durable_test_facets(&data_dir)
+    let double = test_double_backend(SEED).await;
+    let core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(provider)
         .model(
             lash::ModelSpec::builder("test-model")
