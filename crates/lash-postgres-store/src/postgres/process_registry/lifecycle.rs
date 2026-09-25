@@ -31,7 +31,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 &await_output,
             ));
         }
-        authority.validate(process_id, record.disposition, &await_output)?;
+        authority.validate(&record, &await_output)?;
         let request =
             facade_support::terminal_append_request(process_id, &await_output, Some(&authority));
         let occurred_at_ms = self.clock.timestamp_ms();

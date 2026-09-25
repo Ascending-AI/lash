@@ -247,6 +247,13 @@ pub enum PluginError {
         "process `{process_id}` recorded a caller departure before any outcome; awaiting it would never resolve"
     )]
     ProcessCallerDeparted { process_id: ProcessId },
+    /// A recovery would end a process that a later segment already carries
+    /// (FIG-3820).
+    #[error("process `{process_id}` is carried by its segment {segment_ordinal}")]
+    ProcessHandedOver {
+        process_id: ProcessId,
+        segment_ordinal: u64,
+    },
     #[error("process `{process_id}` is already terminal in state `{status:?}`")]
     ProcessAlreadyTerminal {
         process_id: ProcessId,
@@ -342,6 +349,7 @@ impl PluginError {
             | Self::ProcessNoLongerRetained { .. }
             | Self::ProcessCallerDeparted { .. }
             | Self::ProcessAlreadyTerminal { .. }
+            | Self::ProcessHandedOver { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
             | Self::ReservedProcessEvent { .. }
             | Self::InvalidProcessWakeIdentity { .. }
@@ -398,6 +406,7 @@ impl PluginError {
             | Self::ProcessNoLongerRetained { .. }
             | Self::ProcessCallerDeparted { .. }
             | Self::ProcessAlreadyTerminal { .. }
+            | Self::ProcessHandedOver { .. }
             | Self::ParentEnded { .. }
             | Self::ProcessCancelConflict { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }

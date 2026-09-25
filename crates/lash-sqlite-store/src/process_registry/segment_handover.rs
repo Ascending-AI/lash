@@ -11,7 +11,16 @@ impl SqliteProcessRegistry {
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
-                    Self::require_process_conn(tx, &process_id)?;
+                    let record = Self::require_process_conn(tx, &process_id)?;
+                    // An ended process takes no handover: its stored terminal
+                    // revokes every execution that would carry it on, in the
+                    // transaction that would park the handover (FIG-3820).
+                    if record.is_terminal() {
+                        return Err(lash_core_execution::PluginError::ProcessAlreadyTerminal {
+                            process_id: record.id.clone(),
+                            status: record.status,
+                        });
+                    }
                     let existing: Option<String> = tx
                         .query_row(
                             process_sql().handover.select_by_ordinal.sql(),

@@ -145,6 +145,16 @@ enum SegmentSignal {
     Resolved,
 }
 
+/// What a SubstrateLost recovery's completion step recorded.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "recovery", content = "value", rename_all = "snake_case")]
+enum SubstrateLostRecovery {
+    /// The process's stored terminal: the recovery's, or one stored first.
+    Ended(Box<ProcessAwaitOutput>),
+    /// A later segment carries the process; nothing was stored.
+    HandedOver { segment_ordinal: u64 },
+}
+
 fn cancelled_output(process_id: &ProcessId) -> ProcessAwaitOutput {
     ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
         lash_core::ToolCancellation::runtime(format!("process `{process_id}` was cancelled")),
@@ -424,6 +434,59 @@ where
         }
         self.deliver_segment_terminal(context, process_id, segment_ordinal, output)
             .await
+    }
+
+    /// End a process whose segment's journal is lost, as the completion step
+    /// (`lash.process.complete`) does, unless a later segment already carries
+    /// it: the recovery authority's check runs in the store's terminal append
+    /// transaction, and the step journals which way it went, so a replay
+    /// reads the recorded answer and never re-queries (FIG-3820).
+    async fn recover_substrate_lost_step(
+        &self,
+        journal: &WorkflowContext<'_>,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+        owner: lash_core::LeaseOwnerIdentity,
+    ) -> Result<SubstrateLostRecovery, HandlerError> {
+        let registry = &self.registry;
+        let Json(recovered) = journal
+            .run_json_or_retry_send::<Result<SubstrateLostRecovery, String>, _>(
+                COMPLETE_STEP.to_string(),
+                async move {
+                    let proposed = ProcessAwaitOutput::Abandoned {
+                        evidence: Box::new(AbandonEvidence {
+                            writer: AbandonWriter::ResumeRefused {
+                                reason: lash_core::ProcessResumeRefusal::SubstrateLost,
+                            },
+                            owner: Some(owner),
+                            epoch_ms: restate_now_ms(),
+                        }),
+                        control: None,
+                    };
+                    let authority = lash_core::ProcessCompletionAuthority::WorkflowKeyRecovery {
+                        workflow_key: process_id.to_string(),
+                        segment_ordinal,
+                    };
+                    match registry
+                        .complete_process(process_id, proposed, authority)
+                        .await
+                    {
+                        Ok(completion) => match completion.stored().outcome.clone() {
+                            Some(stored) => Ok(Ok(SubstrateLostRecovery::Ended(Box::new(stored)))),
+                            None => Ok(Err(format!(
+                                "process `{process_id}` completion returned a non-terminal record"
+                            ))),
+                        },
+                        Err(PluginError::ProcessHandedOver {
+                            segment_ordinal, ..
+                        }) => Ok(Ok(SubstrateLostRecovery::HandedOver { segment_ordinal })),
+                        Err(error) => step_fault(error),
+                    }
+                },
+            )
+            .await
+            .map_err(HandlerError::from)?;
+        recovered.map_err(|refusal| TerminalError::new(refusal).into())
     }
 
     /// Store the segment's terminal as one journaled step
@@ -869,6 +932,14 @@ where
                     next_segment_ordinal: latest_segment_ordinal,
                 }));
             }
+            SegmentAdmission::Ended { output } => {
+                // The process ended before this segment could carry it on: run
+                // nothing, republish the stored terminal (FIG-3820).
+                resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::SegmentFinished)?;
+                return self
+                    .deliver_segment_terminal(&ctx, &process_id, input.segment_ordinal, *output)
+                    .await;
+            }
             SegmentAdmission::MissingHandover => {
                 return self
                     .fail_segment(
@@ -891,18 +962,25 @@ where
                     lost_attempt = lost.attempt,
                     "a process segment started under a journal this invocation cannot read; abandoning instead of re-running"
                 );
-                let output = self
-                    .complete_terminal_step(
+                let output = match self
+                    .recover_substrate_lost_step(
                         &ctx,
                         &process_id,
-                        TerminalProposal::Abandoned {
-                            writer: AbandonWriter::ResumeRefused {
-                                reason: lash_core::ProcessResumeRefusal::SubstrateLost,
-                            },
-                            owner: Some(lost.owner),
-                        },
+                        input.segment_ordinal,
+                        lost.owner,
                     )
-                    .await?;
+                    .await?
+                {
+                    SubstrateLostRecovery::Ended(output) => *output,
+                    // A later segment carries the process: the lost execution
+                    // handed over before this recovery could end it, and the
+                    // recovery stands down (FIG-3820).
+                    SubstrateLostRecovery::HandedOver { segment_ordinal } => {
+                        return Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
+                            next_segment_ordinal: segment_ordinal,
+                        }));
+                    }
+                };
                 resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::SegmentFinished)?;
                 return self
                     .deliver_segment_terminal(&ctx, &process_id, input.segment_ordinal, output)
