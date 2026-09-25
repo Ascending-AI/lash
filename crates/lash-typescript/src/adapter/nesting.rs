@@ -35,12 +35,31 @@ struct SourceNestingFrame {
     postfix: bool,
 }
 
-#[derive(Default)]
 struct SourceNestingState {
     frames: Vec<SourceNestingFrame>,
     current_operators: usize,
     open_statement_forms: usize,
     open_conditionals: usize,
+    /// The deepest charge the scan has reached; the measuring entry point
+    /// below reports it, so the number a test reads is the charge the guard
+    /// itself enforces.
+    peak_depth: usize,
+    /// The charge at which the scan stops. Only the measuring entry point
+    /// lifts it; every other scan runs at `MAX_SOURCE_NESTING_DEPTH`.
+    limit: usize,
+}
+
+impl Default for SourceNestingState {
+    fn default() -> Self {
+        Self {
+            frames: Vec::new(),
+            current_operators: 0,
+            open_statement_forms: 0,
+            open_conditionals: 0,
+            peak_depth: 0,
+            limit: MAX_SOURCE_NESTING_DEPTH,
+        }
+    }
 }
 
 impl SourceNestingState {
@@ -74,8 +93,9 @@ impl SourceNestingState {
         self.ensure_within_limit(self.depth(), index)
     }
 
-    fn ensure_within_limit(&self, depth: usize, index: usize) -> Result<(), SourceSpan> {
-        if depth > MAX_SOURCE_NESTING_DEPTH {
+    fn ensure_within_limit(&mut self, depth: usize, index: usize) -> Result<(), SourceSpan> {
+        self.peak_depth = self.peak_depth.max(depth);
+        if depth > self.limit {
             return Err(SourceSpan {
                 start: index,
                 end: index + 1,
@@ -418,6 +438,19 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
         })
 }
 
+/// The deepest charge this scan reaches with the limit lifted, so a test can
+/// bound a corpus by recursion depth rather than by source bytes. A source
+/// whose scan ends early on a diagnostic reports the charge reached before
+/// that diagnostic; the early exit is itself a cheap rejection, so the bound
+/// stays honest.
+#[cfg(feature = "testing")]
+pub(crate) fn measure_source_nesting_charge(source: &str) -> usize {
+    let mut visitor = SourceNestingVisitor::new(source);
+    visitor.nesting.limit = usize::MAX;
+    let _ = visitor.scan();
+    visitor.nesting.peak_depth
+}
+
 enum SourceScanError {
     NestingLimit(SourceSpan),
     Diagnostic(Diagnostic),
@@ -454,7 +487,7 @@ impl<'source> SourceNestingVisitor<'source> {
         }
     }
 
-    fn scan(mut self) -> Result<(), SourceScanError> {
+    fn scan(&mut self) -> Result<(), SourceScanError> {
         while self.index < self.bytes.len() {
             self.visit_current()?;
             self.index += 1;

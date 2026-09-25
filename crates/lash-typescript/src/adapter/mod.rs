@@ -11,7 +11,7 @@ mod declarations;
 mod early_errors;
 mod enums;
 mod goal;
-mod nesting;
+pub(crate) mod nesting;
 mod optional_chain;
 mod prototype_chain;
 mod rejections;

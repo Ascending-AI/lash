@@ -28,6 +28,15 @@ pub fn parse_unguarded_for_measurement(source: &str) -> Result<lashlang::Program
     let normalized = adapter::parse_unguarded(source)?;
     lower::lower(&normalized)
 }
+
+/// The deepest charge the source-nesting scan assigns `source`, measured with
+/// its limit lifted so a test can bound a corpus by recursion depth rather
+/// than by byte length. A source whose scan ends early on a diagnostic reports
+/// the charge reached before it.
+#[cfg(feature = "testing")]
+pub fn measure_source_nesting_charge(source: &str) -> usize {
+    adapter::nesting::measure_source_nesting_charge(source)
+}
 /// The source language this front end records on every program it lowers.
 pub const TYPESCRIPT_LANGUAGE: &str = "typescript";
 
