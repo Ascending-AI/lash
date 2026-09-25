@@ -694,7 +694,7 @@ def check_ignored(
             errors.append(
                 f"#[ignore]d invocation {inv.suite} at {rel}:{inv.line} "
                 f"(claimant `{inv.claimant}`) names no "
-                "scripts/deferred-laws/*.toml shard entry -- a deferred law "
+                "scripts/deferred-laws/ shard entry -- a deferred law "
                 "needs a manifest entry naming the recipe that runs it"
             )
 

@@ -526,6 +526,15 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
 }
 
+# Directories a CI script reads whole, one file per change -- the deferred-law
+# shards, the replay-divergence shards. Name matching cannot see the glob, so
+# each directory declares its reader here: every tracked file under the key is
+# consumed by the value, which passes its own families on transitively.
+SHARD_DIR_READERS: Mapping[str, str] = {
+    "scripts/deferred-laws": "scripts/check_law_execution_receipts.py",
+    "scripts/restate-divergences": "scripts/ci/restate_suite.py",
+}
+
 # The plan outputs a `ci.yml` job may read that are not families. A job's
 # families are the family outputs it reads (`_job_families`); an output in
 # neither set counts as every family. `postgres_compatibility` is the schema
@@ -786,6 +795,17 @@ def ci_machinery_families(root: str | None = None) -> Mapping[str, frozenset[str
             families[target] |= own
         if owner is not None:
             edges.setdefault(owner, set()).update(targets)
+
+    # A shard directory's files are all read by its declared reader's glob.
+    for directory, reader in SHARD_DIR_READERS.items():
+        reader_node = _ci_machinery_node(reader)
+        if reader_node not in nodes:
+            continue
+        for path in tracked:
+            if path.startswith(directory + "/"):
+                node = _ci_machinery_node(path)
+                named.add(node)
+                edges.setdefault(reader_node, set()).add(node)
 
     # Close transitively: a consumer passes on what its own consumers run it for.
     changed = True
