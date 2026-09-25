@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::store::StoreTestSupport as _;
+use lash_core::store::{SessionCommitStore as _, TurnInputStore as _};
 use lash_core::{
     EffectAddress, ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy,
     RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
@@ -359,4 +360,95 @@ async fn a_current_sessions_group_child_passes_the_gate_to_admission() {
         Some("admit_child"),
         "a current-generation child proceeds to admission"
     );
+}
+
+/// FIG-3735: a turn handler whose redrive the generation gate refused parks
+/// the turn when one is in flight for its scope — here a direct turn whose
+/// journaled acceptance wrote its input row — and answers `None` for a scope
+/// with nothing in flight, whose refusal stays terminal.
+#[tokio::test]
+async fn a_refused_redrive_parks_only_a_turn_in_flight() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Arc::new(
+        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+            .await
+            .expect("open session store"),
+    );
+    let session_id = SessionId::from(SESSION);
+    lash_core::testing::store_fixtures::bind_conformance_session(
+        &(Arc::clone(&store) as Arc<dyn RuntimePersistence>),
+        &session_id,
+    )
+    .await;
+    // What the crashed execution's journaled acceptance wrote: the turn's
+    // input row, under the id its acceptance address provisions.
+    let in_flight = ExecutionScope::turn(SESSION, "turn-in-flight");
+    let acceptance = lash_core::runtime::causal::turn_acceptance_effect_invocation(
+        &in_flight,
+        &session_id,
+        &lash_core::TurnId::from("turn-in-flight"),
+    );
+    store
+        .enqueue_pending_turn_input(
+            lash_core::PendingTurnInputDraft::new(
+                session_id.clone(),
+                lash_core::TurnInputIngress::next_turn(),
+                lash_core::TurnInput::text("the in-flight turn's input"),
+            )
+            .with_input_id(lash_core::runtime::provisioned_turn_input_id(
+                acceptance.address(),
+            )),
+        )
+        .await
+        .expect("record the accepted input");
+    let previous = lash_core::store::CURRENT_SESSION_STATE_VERSION - 1;
+    store
+        .stamp_session_state_version_for_testing(previous)
+        .await
+        .expect("stamp the pre-cutover generation");
+    let sessions: Arc<dyn SessionStoreFactory> = Arc::new(OneSessionCatalog {
+        session_id: session_id.clone(),
+        store: Arc::clone(&store) as Arc<dyn RuntimePersistence>,
+    });
+    let refusal = lash_core::SessionStateVersionRefusal::of_store_error(
+        &lash_core::admit_session_state_generation(sessions.as_ref(), &session_id)
+            .await
+            .expect_err("the gate refuses the pre-cutover session"),
+    )
+    .expect("the refusal is the generation gate's");
+
+    let idle = ExecutionScope::turn(SESSION, "turn-never-accepted");
+    assert_eq!(
+        crate::park_generation_refused_turn(sessions.as_ref(), &idle, refusal, 1_000)
+            .await
+            .expect("read the idle scope"),
+        None,
+        "nothing ran for a scope with no accepted input: its refusal stays terminal"
+    );
+    assert_eq!(
+        store
+            .load_turn_park(&session_id)
+            .await
+            .expect("read the park"),
+        None
+    );
+
+    for (run, at_ms) in [(1_u32, 2_000_u64), (2, 3_000)] {
+        let park =
+            crate::park_generation_refused_turn(sessions.as_ref(), &in_flight, refusal, at_ms)
+                .await
+                .expect("record the park")
+                .expect("the in-flight turn parks");
+        assert_eq!(park.turn_id, lash_core::TurnId::from("turn-in-flight"));
+        assert_eq!(park.attempts, run, "each refused run re-parks the turn");
+        assert!(
+            matches!(
+                park.reason,
+                lash_core::store::ParkReason::SessionStateGenerationRefused { found, current, .. }
+                    if found == previous
+                        && current == lash_core::store::CURRENT_SESSION_STATE_VERSION
+            ),
+            "the park names both generations: {park:?}"
+        );
+    }
 }

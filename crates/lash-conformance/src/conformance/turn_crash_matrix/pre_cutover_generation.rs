@@ -197,7 +197,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
                 let parked = match generations {
                     Some(generations) => crate::park_turn_refused_by_generation(
                         session.as_ref(),
-                        &admitted,
+                        admitted.scope(),
                         generations,
                         stores.clock().timestamp_ms(),
                     )

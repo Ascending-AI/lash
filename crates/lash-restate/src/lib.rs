@@ -142,7 +142,8 @@ pub use process_attach::RestateProcessAttachRequest;
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use turn::RestateTurnAttach;
 pub use turn_handler::{
-    TURN_HANDLER_MAX_ATTEMPTS, parked_turn_failure, turn_handler_options, turn_service,
+    TURN_HANDLER_MAX_ATTEMPTS, park_generation_refused_turn, parked_turn_failure,
+    turn_handler_options, turn_service,
 };
 
 // Adapter-internal wire and seam types. They are `pub` so the Restate SDK's

@@ -52,3 +52,63 @@ pub(super) async fn journaled_session_admission(
         JournaledSessionAdmission::Refused { message } => Err(AppError::conflict(message)),
     }
 }
+
+/// The error a turn handler ends its attempt with when `error` refused it,
+/// once any generation refusal has parked the turn of `scope` (FIG-3735).
+///
+/// A refused redrive of a turn still in flight replays a journal that
+/// already holds its later commands: the turn parks with the typed
+/// generation refusal and the attempt ends [`AppErrorVerdict::Parked`], so
+/// the invocation keeps its journal and pauses after its attempt budget. A
+/// park the store cannot read or write parks the attempt all the same, and
+/// its retry writes the park. Anything else, a refusal with no turn in
+/// flight included, is `otherwise(error)`.
+pub(super) async fn park_generation_refused_turn(
+    state: &AppState,
+    scope: lash::runtime::ExecutionScope,
+    error: lash::EmbedError,
+    otherwise: fn(lash::EmbedError) -> AppError,
+) -> AppError {
+    let Some(refusal) = error.session_state_version_refusal() else {
+        return otherwise(error);
+    };
+    let parked = lash_restate::park_generation_refused_turn(
+        state.session_store_factory.as_ref(),
+        &scope,
+        refusal,
+        state.core.backend().clock().timestamp_ms(),
+    )
+    .await;
+    match parked {
+        Ok(None) => otherwise(error),
+        Ok(Some(_)) | Err(_) => AppError {
+            status: axum::http::StatusCode::CONFLICT,
+            message: format!(
+                "turn `{}` parked: its redrive was refused by the session-state generation \
+                 gate (found {}, current {}): {error}",
+                scope.id(),
+                refusal.found,
+                refusal.current
+            ),
+            verdict: AppErrorVerdict::Parked,
+            retirement: None,
+        },
+    }
+}
+
+/// `result`, or the error its attempt ends with: a generation refusal parks
+/// the turn of `scope` when one is in flight (see
+/// [`park_generation_refused_turn`]), and anything else is `otherwise`.
+pub(super) async fn or_park_refused<T>(
+    state: &AppState,
+    scope: &lash::runtime::ExecutionScope,
+    result: Result<T, lash::EmbedError>,
+    otherwise: fn(lash::EmbedError) -> AppError,
+) -> Result<T, AppError> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            Err(park_generation_refused_turn(state, scope.clone(), error, otherwise).await)
+        }
+    }
+}

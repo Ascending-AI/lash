@@ -781,10 +781,12 @@ async fn run_user_turn(
     let input = workbench_turn_input(&state, &request).await?;
     let turn_model_id = request.model.model.clone();
     let turn_model = model_spec_from_selection(request.model);
-    let session = state
+    let turn_scope =
+        lash::runtime::ExecutionScope::turn(request.session_id.as_str(), request.turn_id.clone());
+    let opened = state
         .open_session(&request.session_id, "restate.user_turn")
-        .await
-        .map_err(AppError::session_open)?;
+        .await;
+    let session = or_park_refused(&state, &turn_scope, opened, AppError::session_open).await?;
     apply_model_selection_to_session(&state, &session, turn_model.clone(), "restate_user_turn")
         .await?;
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
@@ -798,8 +800,8 @@ async fn run_user_turn(
         // Audited: require_finish only validates local turn-builder configuration and performs no session-store I/O.
         .map_err(AppError::internal)?
         .stream_to_with_effects(&ui_events, controller)
-        .await
-        .map_err(AppError::runtime)?;
+        .await;
+    let output = or_park_refused(&state, &turn_scope, output, AppError::runtime).await?;
     record_turn_output_for_model(
         &state,
         &session,
@@ -1096,10 +1098,12 @@ async fn run_queued_turn(
     )
     .await?;
     let turn_output_turn_id = request.drain_id();
-    let session = state
+    let drain_scope =
+        lash::runtime::ExecutionScope::queue_drain(request.session_id.as_str(), request.drain_id());
+    let opened = state
         .open_session(&request.session_id, "restate.queued_turn")
-        .await
-        .map_err(AppError::session_open)?;
+        .await;
+    let session = or_park_refused(&state, &drain_scope, opened, AppError::session_open).await?;
     let selected_model = model_spec_from_selection(state.selected_model());
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let ui_events = ChannelTurnEvents {
@@ -1116,18 +1120,22 @@ async fn run_queued_turn(
         }),
     );
     let output = match &request.scope {
-        QueuedTurnScope::All => request
-            .queued_turn(&session)
-            .stream_to_with_effects(&ui_events, controller)
-            .await
-            .map_err(AppError::runtime)?
-            .ran(),
+        QueuedTurnScope::All => {
+            let drain = request
+                .queued_turn(&session)
+                .stream_to_with_effects(&ui_events, controller)
+                .await;
+            or_park_refused(&state, &drain_scope, drain, AppError::runtime)
+                .await?
+                .ran()
+        }
         QueuedTurnScope::Selected { batch_ids } => {
-            request
+            let drain = request
                 .selected_queued_turn(&session, batch_ids)
                 .stream_to_with_effects(&ui_events, controller)
-                .await
-                .map_err(AppError::runtime)?
+                .await;
+            or_park_refused(&state, &drain_scope, drain, AppError::runtime)
+                .await?
                 .turn
         }
     };
@@ -1555,6 +1563,6 @@ use error_helpers::*;
 mod queued_work_ext;
 use queued_work_ext::QueuedWorkExt;
 mod session_admission;
-use session_admission::journaled_session_admission;
+use session_admission::{journaled_session_admission, or_park_refused};
 #[cfg(test)]
 mod tests;

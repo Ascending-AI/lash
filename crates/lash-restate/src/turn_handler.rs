@@ -69,3 +69,33 @@ impl std::fmt::Display for ParkedTurn {
 }
 
 impl std::error::Error for ParkedTurn {}
+
+/// Parks the in-flight turn of `scope` whose redrive the session-state
+/// generation gate refused, and returns the park (FIG-3735).
+///
+/// A turn handler calls it when its turn fails with a generation refusal
+/// (the facade's `EmbedError::session_state_version_refusal`). A
+/// scope with a turn in flight — a queue drain's unsettled run, a direct
+/// turn's journaled acceptance — ran under an earlier execution whose journal
+/// already holds commands: the handler ends the attempt with
+/// [`parked_turn_failure`], so the invocation keeps its journal and pauses
+/// after its attempt budget, and the typed park row names both generations. A
+/// scope with nothing in flight answers `None`: nothing was journaled, and
+/// the refusal is the turn's terminal answer. A store failure is the store's,
+/// and the handler retries it.
+pub async fn park_generation_refused_turn(
+    sessions: &dyn lash_core::SessionStoreFactory,
+    scope: &lash_core::ExecutionScope,
+    refusal: lash_core::SessionStateVersionRefusal,
+    at_ms: u64,
+) -> Result<Option<lash_core::store::TurnPark>, lash_core::StoreError> {
+    let session_id = match scope {
+        lash_core::ExecutionScope::QueueDrain { session_id, .. }
+        | lash_core::ExecutionScope::Turn { session_id, .. } => session_id,
+        _ => return Ok(None),
+    };
+    let Some(store) = sessions.open_existing_store_by_id(session_id).await? else {
+        return Ok(None);
+    };
+    lash_core::park_turn_refused_by_generation(store.as_ref(), scope, refusal, at_ms).await
+}

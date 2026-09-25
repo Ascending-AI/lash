@@ -729,8 +729,9 @@ pub async fn admit_session_state_generation(
 ///
 /// The gate refuses before any effect, so a redrive meets `refusal` before it
 /// issues its first command. A turn the refused session holds in flight for
-/// `admitted` — a begun, unsettled queued run for a queue-drain scope, an
-/// accepted input bound to the turn for a direct turn scope — was driven by
+/// `scope` — a begun, unsettled queued run for a queue-drain scope; for a
+/// direct turn scope, the open input row the turn's journaled acceptance
+/// wrote (its id is provisioned from the acceptance address) — was driven by
 /// an earlier execution, whose journal already holds commands the refused
 /// redrive cannot replay. Its handler must not return, or fail terminally,
 /// where that journal holds its next command: the turn parks, typed
@@ -741,11 +742,10 @@ pub async fn admit_session_state_generation(
 /// turn's terminal answer.
 pub async fn park_turn_refused_by_generation(
     store: &dyn crate::store::RuntimePersistence,
-    admitted: &crate::AdmittedScope,
+    scope: &crate::ExecutionScope,
     refusal: crate::SessionStateVersionRefusal,
     at_ms: u64,
 ) -> Result<Option<crate::store::TurnPark>, crate::StoreError> {
-    let scope = admitted.scope();
     let session_id = match scope {
         crate::ExecutionScope::QueueDrain { session_id, .. }
         | crate::ExecutionScope::Turn { session_id, .. } => session_id,
@@ -756,16 +756,17 @@ pub async fn park_turn_refused_by_generation(
             .queued_run(scope)
             .await?
             .is_some_and(|run| run.terminal.is_none()),
-        crate::ExecutionScope::Turn { turn_id, .. } => store
-            .list_pending_turn_inputs(session_id)
-            .await?
-            .iter()
-            .any(|read| {
-                matches!(
-                    &read.input.state,
-                    crate::TurnInputState::Accepted(ingress) if ingress.turn_id == *turn_id
-                )
-            }),
+        crate::ExecutionScope::Turn { turn_id, .. } => {
+            let accepted = super::provisioned_turn_input_id(
+                super::causal::turn_acceptance_effect_invocation(scope, session_id, turn_id)
+                    .address(),
+            );
+            store
+                .list_pending_turn_inputs(session_id)
+                .await?
+                .iter()
+                .any(|read| read.input.input_id.as_str() == accepted)
+        }
         _ => false,
     };
     if !in_flight {
