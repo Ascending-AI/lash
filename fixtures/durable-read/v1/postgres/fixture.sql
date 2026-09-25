@@ -330,6 +330,35 @@ CREATE TABLE lash_durable_read_fixture.lash_process_observers (
 
 
 --
+-- Name: lash_process_park_clock; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_process_park_clock (
+    singleton boolean DEFAULT true NOT NULL,
+    current_seq bigint DEFAULT 0 NOT NULL,
+    compaction_horizon bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_process_park_clock_singleton CHECK (singleton)
+);
+
+
+--
+-- Name: lash_process_park_events; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_process_park_events (
+    seq bigint NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
+    park_id bigint NOT NULL,
+    kind text NOT NULL,
+    cause text,
+    reason_json text,
+    at_ms bigint NOT NULL,
+    CONSTRAINT ck_process_park_events_kind CHECK ((kind = ANY (ARRAY['parked'::text, 'unparked'::text, 'cancelled'::text]))),
+    CONSTRAINT ck_process_park_events_parked_reason CHECK ((((kind = 'parked'::text) AND (reason_json IS NOT NULL) AND (cause IS NULL)) OR ((kind <> 'parked'::text) AND (reason_json IS NULL) AND (cause IS NOT NULL))))
+);
+
+
+--
 -- Name: lash_process_segment_handovers; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -398,10 +427,13 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     parent_scope_id text COLLATE pg_catalog."C",
     on_parent_end text NOT NULL,
     cancel_requested_at_ms bigint,
+    parked_since_ms bigint,
+    parked_reason_code text,
     record_json text NOT NULL,
     CONSTRAINT ck_processes_on_parent_end CHECK ((on_parent_end = ANY (ARRAY['abandon'::text, 'cancel'::text]))),
     CONSTRAINT ck_processes_parent_scope_id CHECK ((((parent_scope_kind = 'host'::text) AND (parent_scope_id IS NULL)) OR ((parent_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text])) AND (parent_scope_id IS NOT NULL)))),
     CONSTRAINT ck_processes_parent_scope_kind CHECK ((parent_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text, 'host'::text]))),
+    CONSTRAINT ck_processes_parked CHECK (((parked_since_ms IS NULL) = (parked_reason_code IS NULL))),
     CONSTRAINT ck_processes_status CHECK ((status = ANY (ARRAY['running'::text, 'waiting'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text, 'caller_departed'::text])))
 );
 
@@ -1108,6 +1140,19 @@ INSERT INTO lash_durable_read_fixture.lash_process_observers VALUES ('durable-re
 
 
 --
+-- Data for Name: lash_process_park_clock; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+INSERT INTO lash_durable_read_fixture.lash_process_park_clock VALUES (true, 0, 0);
+
+
+--
+-- Data for Name: lash_process_park_events; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_process_segment_handovers; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1132,8 +1177,8 @@ INSERT INTO lash_durable_read_fixture.lash_process_wake_deliveries VALUES ('wake
 -- Data for Name: lash_processes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('durable-read-waiting-process', 1, 'process-registration-definition:v8:blake3:82759cdfcd0d8f802217223ee19bdb1fb96fce63c138dc68bd2333710835e5a8', 'host', NULL, 'durable-read-engine', 'Durable read fixture', 1700000000000, 1700000000000, 4, 5, 'waiting', 'host', NULL, 'abandon', NULL, '{"id":"durable-read-waiting-process","incarnation":1,"last_event_sequence":4,"registration_fingerprint":"process-registration-definition:v8:blake3:82759cdfcd0d8f802217223ee19bdb1fb96fce63c138dc68bd2333710835e5a8","input":{"type":"engine","kind":"durable-read-engine","payload":{"fixture":"process"}},"disposition":"rerunnable","lifecycle":{"parent":{"kind":"host"},"on_parent_end":"abandon"},"identity":{"kind":"durable-read-engine","label":"Durable read fixture","definition":{"engine_kind":"durable-read-engine","definition":{"fixture":"process"},"signature":{"signature":"unknown"}}},"event_types":[{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}}],"provenance":{"originator":{"type":"host"}},"env_ref":"process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738","created_at_ms":1700000000000,"updated_at_ms":1700000000000,"wait":{"kind":{"kind":"signal","name":"fixture-ready","event_type":"process.signal.fixture-ready","key":"durable-read-wait-key","ordinal":1},"since_ms":123},"status":"waiting"}');
-INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('durable-read-wake-process', 6, 'process-registration-definition:v8:blake3:2db5f90463bcbc91f4fc68669d1c5cee8281921667931f33b685f28ff1c10463', 'host', 'durable-read-fixture', 'external', NULL, 1700000000000, 1700000000000, 1, 7, 'running', 'host', NULL, 'abandon', NULL, '{"id":"durable-read-wake-process","incarnation":6,"last_event_sequence":1,"registration_fingerprint":"process-registration-definition:v8:blake3:2db5f90463bcbc91f4fc68669d1c5cee8281921667931f33b685f28ff1c10463","input":{"type":"external","metadata":{"fixture":"wake"}},"disposition":"externally_owned","lifecycle":{"parent":{"kind":"host"},"on_parent_end":"abandon"},"identity":{"kind":"external"},"event_types":[{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}},{"name":"fixture.wake","payload_schema":{"schema":{}},"semantics":{"wake":{"when":{"present":"/wake_input"},"input":{"pointer":"/wake_input"}}}}],"provenance":{"originator":{"type":"host"}},"created_at_ms":1700000000000,"updated_at_ms":1700000000000,"status":"running"}');
+INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('durable-read-waiting-process', 1, 'process-registration-definition:v8:blake3:82759cdfcd0d8f802217223ee19bdb1fb96fce63c138dc68bd2333710835e5a8', 'host', NULL, 'durable-read-engine', 'Durable read fixture', 1700000000000, 1700000000000, 4, 5, 'waiting', 'host', NULL, 'abandon', NULL, NULL, NULL, '{"id":"durable-read-waiting-process","incarnation":1,"last_event_sequence":4,"registration_fingerprint":"process-registration-definition:v8:blake3:82759cdfcd0d8f802217223ee19bdb1fb96fce63c138dc68bd2333710835e5a8","input":{"type":"engine","kind":"durable-read-engine","payload":{"fixture":"process"}},"disposition":"rerunnable","lifecycle":{"parent":{"kind":"host"},"on_parent_end":"abandon"},"identity":{"kind":"durable-read-engine","label":"Durable read fixture","definition":{"engine_kind":"durable-read-engine","definition":{"fixture":"process"},"signature":{"signature":"unknown"}}},"event_types":[{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}}],"provenance":{"originator":{"type":"host"}},"env_ref":"process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738","created_at_ms":1700000000000,"updated_at_ms":1700000000000,"wait":{"kind":{"kind":"signal","name":"fixture-ready","event_type":"process.signal.fixture-ready","key":"durable-read-wait-key","ordinal":1},"since_ms":123},"status":"waiting"}');
+INSERT INTO lash_durable_read_fixture.lash_processes VALUES ('durable-read-wake-process', 6, 'process-registration-definition:v8:blake3:2db5f90463bcbc91f4fc68669d1c5cee8281921667931f33b685f28ff1c10463', 'host', 'durable-read-fixture', 'external', NULL, 1700000000000, 1700000000000, 1, 7, 'running', 'host', NULL, 'abandon', NULL, NULL, NULL, '{"id":"durable-read-wake-process","incarnation":6,"last_event_sequence":1,"registration_fingerprint":"process-registration-definition:v8:blake3:2db5f90463bcbc91f4fc68669d1c5cee8281921667931f33b685f28ff1c10463","input":{"type":"external","metadata":{"fixture":"wake"}},"disposition":"externally_owned","lifecycle":{"parent":{"kind":"host"},"on_parent_end":"abandon"},"identity":{"kind":"external"},"event_types":[{"name":"process.completed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"completed","await_output":{"pointer":"/await_output"}}}},{"name":"process.failed","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"failed","await_output":{"pointer":"/await_output"}}}},{"name":"process.cancelled","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"cancelled","await_output":{"pointer":"/await_output"}}}},{"name":"process.abandoned","payload_schema":{"schema":{}},"semantics":{"terminal":{"status":"abandoned","await_output":{"pointer":"/await_output"}}}},{"name":"fixture.wake","payload_schema":{"schema":{}},"semantics":{"wake":{"when":{"present":"/wake_input"},"input":{"pointer":"/wake_input"}}}}],"provenance":{"originator":{"type":"host"}},"created_at_ms":1700000000000,"updated_at_ms":1700000000000,"status":"running"}');
 
 
 --
@@ -1541,6 +1586,22 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_leases
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_observers
     ADD CONSTRAINT lash_process_observers_pkey PRIMARY KEY (session_id, process_id, process_incarnation);
+
+
+--
+-- Name: lash_process_park_clock lash_process_park_clock_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_park_clock
+    ADD CONSTRAINT lash_process_park_clock_pkey PRIMARY KEY (singleton);
+
+
+--
+-- Name: lash_process_park_events lash_process_park_events_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_park_events
+    ADD CONSTRAINT lash_process_park_events_pkey PRIMARY KEY (seq);
 
 
 --
@@ -2046,6 +2107,13 @@ CREATE INDEX idx_lash_processes_parent_end_pending ON lash_durable_read_fixture.
 --
 
 CREATE INDEX idx_lash_processes_parent_scope ON lash_durable_read_fixture.lash_processes USING btree (parent_scope_kind, parent_scope_id, process_id);
+
+
+--
+-- Name: idx_lash_processes_parked; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_parked ON lash_durable_read_fixture.lash_processes USING btree (parked_since_ms, process_id) WHERE (parked_since_ms IS NOT NULL);
 
 
 --

@@ -85,6 +85,30 @@ macro_rules! delegate_process_query {
             async fn count_non_terminal_processes(&self) -> Result<usize, $crate::PluginError> {
                 self.$inner.count_non_terminal_processes().await
             }
+
+            async fn list_parked_processes(
+                &self,
+                query: &$crate::store::ProcessParkQuery,
+            ) -> Result<Vec<$crate::ProcessRecord>, $crate::PluginError> {
+                self.$inner.list_parked_processes(query).await
+            }
+
+            async fn process_park_feed(
+                &self,
+                after: $crate::store::ParkFeedCursor,
+                limit: std::num::NonZeroUsize,
+            ) -> Result<
+                $crate::store::ParkFeedPage<$crate::store::ProcessParkKey>,
+                $crate::PluginError,
+            > {
+                self.$inner.process_park_feed(after, limit).await
+            }
+
+            async fn summarize_parked_processes(
+                &self,
+            ) -> Result<$crate::store::ParkSummary, $crate::PluginError> {
+                self.$inner.summarize_parked_processes().await
+            }
         }
     };
 }
@@ -433,6 +457,33 @@ macro_rules! delegate_process_lifecycle {
                     .clear_process_wait_with_authority(process_id, authority);
                 $event_hook
             }
+
+            async fn park_process_with_authority(
+                &self,
+                process_id: &$crate::ProcessId,
+                reason: $crate::store::ParkReason,
+                authority: &$crate::ProcessExecutionWriteAuthority,
+            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self
+                    .$inner
+                    .park_process_with_authority(process_id, reason, authority);
+                $event_hook
+            }
+
+            async fn begin_parked_rerun_with_authority(
+                &self,
+                process_id: &$crate::ProcessId,
+                authority: &$crate::ProcessExecutionWriteAuthority,
+            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self
+                    .$inner
+                    .begin_parked_rerun_with_authority(process_id, authority);
+                $event_hook
+            }
         }
     };
 }
@@ -719,6 +770,13 @@ macro_rules! delegate_process_retention {
                 self.$inner
                     .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
                     .await
+            }
+
+            async fn compact_process_park_feed(
+                &self,
+                through: $crate::store::ParkFeedCursor,
+            ) -> Result<(), $crate::PluginError> {
+                self.$inner.compact_process_park_feed(through).await
             }
 
             async fn prune_terminal_processes(

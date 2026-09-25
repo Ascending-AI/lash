@@ -635,17 +635,15 @@ impl DurableProcessWorker {
             )));
         }
         // A parked process (FIG-3586) is re-run to find out whether this build
-        // can replay its journal: its park is lifted for the run and recorded
-        // again if the run refuses again. A run that goes on to fail for any
-        // other reason spends its attempt budget as usual.
-        if current
-            .wait
-            .as_ref()
-            .is_some_and(crate::WaitState::is_parked)
-        {
+        // can replay its journal. The park stays on the record — listed, with
+        // its `since_ms` and `park_id` — while the rerun no longer exempts the
+        // process from its attempt budget: a run that refuses again re-parks
+        // it, and a run that goes on to fail for any other reason spends its
+        // budget as usual (FIG-3659 NOW-B).
+        if current.is_refusing_park() {
             self.config
                 .process_registry()
-                .clear_process_wait_with_authority(&registration.id, &execution_write_authority)
+                .begin_parked_rerun_with_authority(&registration.id, &execution_write_authority)
                 .await?;
         }
         let park_authority = execution_write_authority.clone();
@@ -706,23 +704,35 @@ impl DurableProcessWorker {
             .await
             .map_err(crate::ProcessInfraError::into_plugin_error);
         if let Err(error) = &result
-            && let Some(refusal) = parking_refusal(error)
+            && let Some(reason) = error.park_reason()
         {
             // The body refused to replay its journal with nothing dispatched
             // (FIG-3586): the process parks — non-terminal, with no terminal
-            // evidence — until an operator acts. The park is what exempts its
-            // later sweeps from the attempt budget.
-            let wait = crate::WaitState {
-                kind: crate::WaitKind::Parked {
-                    code: refusal.code.as_str().to_string(),
-                    message: refusal.message.clone(),
-                },
-                since_ms: self.now_ms(),
-            };
-            self.config
+            // evidence — until an operator acts. The refusing park is what
+            // exempts its later sweeps from the attempt budget.
+            let code = reason.code();
+            let parked = self
+                .config
                 .process_registry()
-                .set_process_wait_with_authority(&process_id, wait, &park_authority)
+                .park_process_with_authority(&process_id, reason, &park_authority)
                 .await?;
+            lash_core_ids::operational_metrics::record_work_parked("process", code.as_str());
+            tracing::warn!(
+                event = "process.parked",
+                process_id = process_id.as_str(),
+                reason_code = code.as_str(),
+                effect_kind = parked
+                    .park
+                    .as_deref()
+                    .and_then(|park| park.reason.effect_kind())
+                    .unwrap_or_default(),
+                attempts = parked.park.as_deref().map_or(0, |park| park.attempts),
+                park_id = parked
+                    .park
+                    .as_deref()
+                    .map_or(0, |park| park.park_id.feed_sequence()),
+                "process parked on a replay refusal"
+            );
         }
         result
     }
@@ -1107,10 +1117,7 @@ impl DurableProcessWorker {
             Err(disposition) => return ProcessRecoveryOutcome::Deferred(disposition),
         };
         if record.disposition == RecoveryContract::Rerunnable
-            && !record
-                .wait
-                .as_ref()
-                .is_some_and(crate::WaitState::is_parked)
+            && !record.is_refusing_park()
             && let (Some(max_attempts), Some(started)) =
                 (record.max_attempts, record.first_started.as_deref())
             && started.attempt >= max_attempts
@@ -1740,15 +1747,6 @@ mod permit_tests;
 mod recovery_tests;
 #[cfg(test)]
 mod test_backend;
-
-/// The replay refusal a process run ended on, when it is one that parks
-/// (FIG-3586): the body could not replay its journal and dispatched nothing.
-fn parking_refusal(error: &PluginError) -> Option<&crate::RuntimeEffectControllerError> {
-    match error {
-        PluginError::RuntimeEffectController(refusal) if refusal.code.parks_turn() => Some(refusal),
-        _ => None,
-    }
-}
 
 /// Who recorded a segment's start before the worker runs it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1099,35 +1099,23 @@ fn drain_area_witnesses() {
     });
     // W0297: lash::process::WaitKind::Signal::event_type [field]
     field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { event_type, .. } = value else {
-            return;
-        };
+        let lash::process::WaitKind::Signal { event_type, .. } = value;
         let _ = event_type;
     });
     // W0298: lash::process::WaitKind::Signal::key [field]
     field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { key, .. } = value else {
-            return;
-        };
+        let lash::process::WaitKind::Signal { key, .. } = value;
         let _ = key;
     });
     // W0299: lash::process::WaitKind::Signal::name [field]
     field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { name, .. } = value else {
-            return;
-        };
+        let lash::process::WaitKind::Signal { name, .. } = value;
         let _ = name;
     });
     // W0300: lash::process::WaitKind::Signal::ordinal [field]
     field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { ordinal, .. } = value else {
-            return;
-        };
+        let lash::process::WaitKind::Signal { ordinal, .. } = value;
         let _ = ordinal;
-    });
-    // FIG-3586: lash::process::WaitKind::Parked [variant]
-    variant_witness(|value: &lash::process::WaitKind| {
-        matches!(value, lash::process::WaitKind::Parked { .. })
     });
     // W0301: lash::process::WaitState [struct]
     type_witness::<lash::process::WaitState>();

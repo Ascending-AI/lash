@@ -236,6 +236,27 @@ impl ProcessLifecycle for ParentEndFault {
             .clear_process_wait_with_authority(process_id, authority)
             .await
     }
+
+    async fn park_process_with_authority(
+        &self,
+        process_id: &ProcessId,
+        reason: crate::store::ParkReason,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .park_process_with_authority(process_id, reason, authority)
+            .await
+    }
+
+    async fn begin_parked_rerun_with_authority(
+        &self,
+        process_id: &ProcessId,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .begin_parked_rerun_with_authority(process_id, authority)
+            .await
+    }
 }
 
 impl super::super::registry::ProcessClockRebind for ParentEndFault {

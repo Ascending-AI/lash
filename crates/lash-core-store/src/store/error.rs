@@ -726,7 +726,7 @@ pub enum StoreError {
     )]
     ParkFeedCursorCompacted {
         /// The lowest feed position the store still serves.
-        horizon: crate::store::TurnParkFeedCursor,
+        horizon: crate::store::ParkFeedCursor,
     },
     /// The storage substrate failed an operation before a trustworthy value
     /// could be returned.

@@ -202,6 +202,16 @@ pub enum PluginError {
         requested_cursor: crate::ProcessChangeCursor,
         tombstone_compaction_horizon: crate::ProcessChangeCursor,
     },
+    /// A process park feed cursor predates history
+    /// `compact_process_park_feed` removed. The consumer must relist parked
+    /// processes before resuming from the reported horizon.
+    #[error(
+        "process park feed cursor is below the compaction horizon {horizon:?}; a full relist is required"
+    )]
+    ProcessParkFeedCursorCompacted {
+        /// The lowest feed position the store still serves.
+        horizon: crate::store::ParkFeedCursor,
+    },
     #[error(transparent)]
     RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
     #[error("process `{process_id}` execution was already started by {by:?}")]
@@ -325,6 +335,7 @@ impl PluginError {
             | Self::ProcessUnknown { .. }
             | Self::ProcessIncarnationSuperseded { .. }
             | Self::ProcessChangeCursorPruned { .. }
+            | Self::ProcessParkFeedCursorCompacted { .. }
             | Self::ProcessAlreadyStarted { .. }
             | Self::ProcessAttemptsExhausted { .. }
             | Self::MonotonicCounterOverflow { .. }
@@ -338,6 +349,19 @@ impl PluginError {
             | Self::ProcessWorklistCursorBackendMismatch { .. }) => {
                 crate::RuntimeError::new(refusal, refused.to_string())
             }
+        }
+    }
+
+    /// The park this failure puts a process in, when it is a refusal that
+    /// parks ([`ParkReason::of_error`](crate::store::ParkReason::of_error)):
+    /// the body refused to replay its journal with nothing dispatched.
+    pub fn park_reason(&self) -> Option<crate::store::ParkReason> {
+        match self {
+            Self::Runtime(error) => crate::store::ParkReason::of_error(error),
+            Self::RuntimeEffectController(error) => {
+                crate::store::ParkReason::of_error(&error.clone().into_runtime_error())
+            }
+            _ => None,
         }
     }
 
@@ -370,6 +394,7 @@ impl PluginError {
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessIncarnationSuperseded { .. }
             | Self::ProcessChangeCursorPruned { .. }
+            | Self::ProcessParkFeedCursorCompacted { .. }
             | Self::ProcessNoLongerRetained { .. }
             | Self::ProcessCallerDeparted { .. }
             | Self::ProcessAlreadyTerminal { .. }

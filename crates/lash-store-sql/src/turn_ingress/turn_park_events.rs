@@ -7,7 +7,7 @@
 //! gone, so the table holds no session foreign key.
 //!
 //! `kind` is the transition's class and `cause` what ended it — a
-//! `TurnParkEventKind` decoded across the two columns plus `reason_json`,
+//! `ParkEventKind` decoded across the two columns plus `reason_json`,
 //! which only a `Parked` row carries. Reads are cursor pages (`seq > ?`);
 //! compaction deletes at or below a host-chosen cursor and raises the clock's
 //! horizon so a stale cursor is refused typed rather than silently partial.

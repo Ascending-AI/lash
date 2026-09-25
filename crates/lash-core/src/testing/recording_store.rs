@@ -769,15 +769,15 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
 
     async fn turn_park_feed(
         &self,
-        after: crate::store::TurnParkFeedCursor,
+        after: crate::store::ParkFeedCursor,
         limit: std::num::NonZeroUsize,
-    ) -> Result<crate::store::TurnParkFeedPage, StoreError> {
+    ) -> Result<crate::store::ParkFeedPage<crate::store::TurnParkTarget>, StoreError> {
         self.inner.turn_park_feed(after, limit).await
     }
 
     async fn compact_turn_park_feed(
         &self,
-        through: crate::store::TurnParkFeedCursor,
+        through: crate::store::ParkFeedCursor,
     ) -> Result<(), StoreError> {
         self.inner.compact_turn_park_feed(through).await
     }

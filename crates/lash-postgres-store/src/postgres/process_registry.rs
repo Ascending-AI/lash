@@ -16,6 +16,8 @@ mod lifecycle;
 mod list_plan_tests;
 #[path = "process_registry/parent_end.rs"]
 pub(crate) mod parent_end;
+#[path = "process_registry/park_feed.rs"]
+pub(crate) mod park_feed;
 mod prune;
 #[path = "process_registry/prune_api.rs"]
 pub(crate) mod prune_api;
@@ -195,6 +197,30 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
 
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
         worklist::count_non_terminal_processes(self).await
+    }
+
+    async fn list_parked_processes(
+        &self,
+        query: &lash_core_execution::store::ProcessParkQuery,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
+        park_feed::list_parked_processes(self, query).await
+    }
+
+    async fn process_park_feed(
+        &self,
+        after: lash_core_execution::store::ParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<
+        lash_core_execution::store::ParkFeedPage<lash_core_execution::store::ProcessParkKey>,
+        PluginError,
+    > {
+        park_feed::process_park_feed(self, after, limit).await
+    }
+
+    async fn summarize_parked_processes(
+        &self,
+    ) -> Result<lash_core_execution::store::ParkSummary, PluginError> {
+        park_feed::summarize_parked_processes(self).await
     }
 }
 
@@ -1086,6 +1112,13 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         incarnation: lash_core_execution::ProcessIncarnation,
     ) -> Result<lash_core_execution::ProcessArtifactCleanupAck, PluginError> {
         prune_api::complete_process_artifact_cleanup(self, process_id, incarnation).await
+    }
+
+    async fn compact_process_park_feed(
+        &self,
+        through: lash_core_execution::store::ParkFeedCursor,
+    ) -> Result<(), PluginError> {
+        park_feed::compact_process_park_feed(self, through).await
     }
 
     async fn compact_process_tombstones(

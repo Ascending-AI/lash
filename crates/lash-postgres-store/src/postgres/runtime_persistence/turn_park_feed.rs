@@ -34,7 +34,7 @@ async fn insert_turn_park_event_tx(
     session_id: &SessionId,
     turn_id: &str,
     park_id: i64,
-    kind: &lash_core_execution::store::TurnParkEventKind,
+    kind: &lash_core_execution::store::ParkEventKind,
     at_ms: u64,
 ) -> Result<(), StoreError> {
     let (cause, reason_json) = kind.encode_columns();
@@ -74,7 +74,7 @@ pub(crate) async fn log_turn_parked_tx(
         session_id,
         turn_id,
         seq,
-        &lash_core_execution::store::TurnParkEventKind::Parked {
+        &lash_core_execution::store::ParkEventKind::Parked {
             reason: reason.clone(),
         },
         at_ms,
@@ -90,7 +90,7 @@ pub(crate) async fn log_turn_park_closed_tx(
     session_id: &SessionId,
     turn_id: &str,
     park_id: i64,
-    kind: &lash_core_execution::store::TurnParkEventKind,
+    kind: &lash_core_execution::store::ParkEventKind,
     at_ms: u64,
 ) -> Result<(), StoreError> {
     let seq = allocate_turn_park_seq_tx(tx).await?;

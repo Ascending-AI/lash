@@ -363,7 +363,7 @@ impl SessionCommitStore for Store {
                                 &session_id,
                                 &superseded_turn_id,
                                 superseded_park_id,
-                                &lash_core_execution::store::TurnParkEventKind::Unparked {
+                                &lash_core_execution::store::ParkEventKind::Unparked {
                                     cause: lash_core_execution::store::UnparkCause::Superseded,
                                 },
                                 at_ms,
@@ -524,7 +524,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                 &commit.session_id,
                                 &released_turn_id,
                                 released_park_id,
-                                &lash_core_execution::store::TurnParkEventKind::Unparked {
+                                &lash_core_execution::store::ParkEventKind::Unparked {
                                     cause: lash_core_execution::store::UnparkCause::TurnCommitted,
                                 },
                                 crate::clamp_epoch_ms(now),

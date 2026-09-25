@@ -464,6 +464,8 @@ tables = [
     "process_tombstones",
     "process_wake_deliveries",
     "process_change_clock",
+    "process_park_clock",
+    "process_park_events",
     "process_artifact_cleanup",
     "parent_end_plans",
     "wake_allocation_floors",
@@ -480,6 +482,8 @@ statement_prefixes = [
     "process_tombstone",
     "process_wake_delivery",
     "process_change_clock",
+    "process_park_clock",
+    "process_park_event",
     "process_artifact_cleanup",
     "parent_end_plan",
     "wake_allocation_floor",
@@ -492,6 +496,8 @@ shared = [
     "crates/lash-store-sql/src/process/leases.rs",
     "crates/lash-store-sql/src/process/observers.rs",
     "crates/lash-store-sql/src/process/parent_end_plans.rs",
+    "crates/lash-store-sql/src/process/park_clock.rs",
+    "crates/lash-store-sql/src/process/park_events.rs",
     "crates/lash-store-sql/src/process/processes.rs",
     "crates/lash-store-sql/src/process/segment_handovers.rs",
     "crates/lash-store-sql/src/process/tombstones.rs",
@@ -530,6 +536,8 @@ process_segment_handovers = "crates/lash-store-sql/src/process/segment_handovers
 process_tombstones = "crates/lash-store-sql/src/process/tombstones.rs"
 process_wake_deliveries = "crates/lash-store-sql/src/process/wake_deliveries.rs"
 process_change_clock = "crates/lash-store-sql/src/process/change_clock.rs"
+process_park_clock = "crates/lash-store-sql/src/process/park_clock.rs"
+process_park_events = "crates/lash-store-sql/src/process/park_events.rs"
 process_artifact_cleanup = "crates/lash-store-sql/src/process/artifact_cleanup.rs"
 parent_end_plans = "crates/lash-store-sql/src/process/parent_end_plans.rs"
 wake_allocation_floors = "crates/lash-store-sql/src/process/wake_allocation_floors.rs"
@@ -3748,6 +3756,78 @@ reader sees and the events still on disk agree.
 
 [[dialect_only]]
 statement = "turn_park_clock.raise_compaction_horizon"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation; scalar max"
+reason = """
+The singleton flag forks as everywhere on this table, and the
+raise-not-lower max is SQLite's two-argument `MAX` where PostgreSQL spells
+it `GREATEST`.
+"""
+
+[[dialect_only]]
+statement = "process.list_parked"
+backends = ["sqlite", "postgres"]
+kind = "list bind"
+reason = """
+A variable-length reason-code set binds as one JSON array through
+`json_each` on SQLite and as a text array through `= ANY(...)` on
+PostgreSQL, and SQLite pins the scan to the parked projection's partial
+index by name.
+"""
+
+[[dialect_only]]
+statement = "process_park_clock.bump"
+backends = ["sqlite"]
+kind = "boolean representation"
+reason = """
+The singleton flag is INTEGER 1 on SQLite and BOOLEAN TRUE on PostgreSQL, and
+SQLite reads the bumped value back with a second statement where PostgreSQL
+uses RETURNING.
+"""
+
+[[dialect_only]]
+statement = "process_park_clock.select_current"
+backends = ["sqlite"]
+kind = "boolean representation"
+reason = "Singleton-flag fork; the second half of SQLite's bump pair."
+
+[[dialect_only]]
+statement = "process_park_clock.bump_returning"
+backends = ["postgres"]
+kind = "boolean representation"
+reason = "The PostgreSQL half of the process_park_clock.bump fork."
+
+[[dialect_only]]
+statement = "process_park_clock.select_current_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+Compaction must clamp `through` to a `current_seq` it holds under the row's
+write lock: taking the lock before the delete serializes against in-flight
+appends so the horizon can never pass a sequence that is already allocated.
+SQLite takes the same decision under its database write lock and reads
+through `process_park_clock.select_current`.
+"""
+
+[[dialect_only]]
+statement = "process_park_clock.select_compaction_horizon"
+backends = ["sqlite"]
+kind = "boolean representation"
+reason = "Singleton-flag fork; PostgreSQL's read takes a share lock, which is the entry below."
+
+[[dialect_only]]
+statement = "process_park_clock.select_compaction_horizon_for_share"
+backends = ["postgres"]
+kind = "FOR SHARE"
+reason = """
+A feed reader must not accept a cursor that an in-flight compaction is about
+to refuse: the share lock waits out the compacting writer, which holds the
+row's write lock from its horizon raise to its commit, so the horizon the
+reader sees and the events still on disk agree.
+"""
+
+[[dialect_only]]
+statement = "process_park_clock.raise_compaction_horizon"
 backends = ["sqlite", "postgres"]
 kind = "boolean representation; scalar max"
 reason = """

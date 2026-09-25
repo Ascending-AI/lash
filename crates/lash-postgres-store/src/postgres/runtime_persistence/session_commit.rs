@@ -1172,7 +1172,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 &park.session_id,
                 &superseded_turn_id,
                 superseded_park_id,
-                &lash_core_execution::store::TurnParkEventKind::Unparked {
+                &lash_core_execution::store::ParkEventKind::Unparked {
                     cause: lash_core_execution::store::UnparkCause::Superseded,
                 },
                 park.at_ms,

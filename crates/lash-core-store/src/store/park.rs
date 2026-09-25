@@ -32,7 +32,18 @@ use crate::{RuntimeError, RuntimeErrorCode, SessionId, TurnId};
 /// that opened it. A same-turn re-park keeps it; a superseding park mints a
 /// new one. The operator verbs take it as their CAS token.
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(transparent)]
 pub struct ParkId(u64);
@@ -297,6 +308,14 @@ pub enum UnparkCause {
     RunSettled,
     /// A different turn parked over it in the same session.
     Superseded,
+    /// The parked process appended a lifecycle fact past its refusal: a rerun
+    /// got past replay and made progress (NOW-B).
+    ProcessProgressed,
+    /// The parked process reached a terminal status other than `Cancelled`.
+    ProcessTerminal {
+        /// The terminal status it reached.
+        status: crate::ProcessStatus,
+    },
 }
 
 /// What ended a park by cancelling the work it held.
@@ -306,24 +325,28 @@ pub enum UnparkCause {
 pub enum ParkCancelCause {
     /// An input withdrawal released the parked turn's last held work.
     InputWithdrawn,
-    /// The session was deleted, single or batch (NOW-B adds the process
-    /// causes).
+    /// The session was deleted, single or batch.
     SessionDeleted,
+    /// The parked process reached its terminal `Cancelled` status.
+    ProcessCancelled {
+        /// The origin of the cancel request it recorded, when it recorded one.
+        origin: Option<lash_sansio::CancelOrigin>,
+    },
 }
 
-/// One entry of a store's turn park feed: the durable transition ledger every
-/// park write and every park clear appends to in the same transaction
-/// (FIG-3659).
+/// One transition of a park, as both park feeds record it (FIG-3659): the
+/// durable transition ledger every park write and every park clear appends
+/// to in the same transaction, for turns and processes alike.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum TurnParkEventKind {
-    /// A park opened: `reason` is what the turn refused with.
+pub enum ParkEventKind {
+    /// A park opened: `reason` is what the work refused with.
     Parked {
-        /// Why the turn parked.
+        /// Why the work parked.
         reason: ParkReason,
     },
-    /// A park ended without cancelling the turn's held work.
+    /// A park ended without cancelling the work it held.
     Unparked {
         /// What settled the park.
         cause: UnparkCause,
@@ -335,29 +358,45 @@ pub enum TurnParkEventKind {
     },
 }
 
+/// The stored `cause` column value: the serde tag for a unit cause, its JSON
+/// body for a payload-carrying one.
+fn encode_cause<T: Serialize>(cause: &T) -> String {
+    let value = serde_json::to_value(cause).unwrap_or_default();
+    match value.as_object() {
+        Some(object) if object.len() == 1 => object
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .map_or_else(|| value.to_string(), str::to_string),
+        _ => value.to_string(),
+    }
+}
+
+/// Decode a stored `cause` column: a bare tag is a unit cause, anything else
+/// is the JSON body of a payload-carrying one.
+fn decode_cause<T: serde::de::DeserializeOwned>(cause: &str) -> Option<T> {
+    if cause.starts_with('{') {
+        serde_json::from_str(cause).ok()
+    } else {
+        serde_json::from_value(serde_json::json!({ "type": cause })).ok()
+    }
+}
+
 impl UnparkCause {
     /// The stored `cause` column value: the serde tag for a unit cause, its
-    /// JSON body for a payload-carrying one (NOW-B).
+    /// JSON body for a payload-carrying one.
     pub fn encode(&self) -> String {
-        match self {
-            Self::TurnCommitted => "turn_committed".to_string(),
-            Self::RunSettled => "run_settled".to_string(),
-            Self::Superseded => "superseded".to_string(),
-        }
+        encode_cause(self)
     }
 }
 
 impl ParkCancelCause {
     /// The stored `cause` column value; see [`UnparkCause::encode`].
     pub fn encode(&self) -> String {
-        match self {
-            Self::InputWithdrawn => "input_withdrawn".to_string(),
-            Self::SessionDeleted => "session_deleted".to_string(),
-        }
+        encode_cause(self)
     }
 }
 
-impl TurnParkEventKind {
+impl ParkEventKind {
     /// The stored `kind` column value.
     #[must_use]
     pub fn kind_code(&self) -> &'static str {
@@ -394,7 +433,7 @@ impl TurnParkEventKind {
         reason_json: Option<&str>,
     ) -> Result<Self, crate::StoreError> {
         let corrupt = |message: String| crate::StoreError::StoredDataCorrupt {
-            record_kind: "TurnParkEvent",
+            record_kind: "ParkEvent",
             message,
         };
         match kind {
@@ -409,78 +448,71 @@ impl TurnParkEventKind {
                 let cause =
                     cause.ok_or_else(|| corrupt("unparked event carries no cause".to_string()))?;
                 Ok(Self::Unparked {
-                    cause: decode_unpark_cause(cause)?,
+                    cause: decode_cause(cause).ok_or_else(|| {
+                        corrupt(format!("unparked event cause `{cause}` is unknown"))
+                    })?,
                 })
             }
             "cancelled" => {
                 let cause =
                     cause.ok_or_else(|| corrupt("cancelled event carries no cause".to_string()))?;
                 Ok(Self::Cancelled {
-                    cause: decode_cancel_cause(cause)?,
+                    cause: decode_cause(cause).ok_or_else(|| {
+                        corrupt(format!("cancelled event cause `{cause}` is unknown"))
+                    })?,
                 })
             }
-            other => Err(corrupt(format!(
-                "turn park event kind `{other}` is unknown"
-            ))),
+            other => Err(corrupt(format!("park event kind `{other}` is unknown"))),
         }
     }
 }
 
-fn decode_unpark_cause(cause: &str) -> Result<UnparkCause, crate::StoreError> {
-    let decoded = match cause {
-        "turn_committed" => Some(UnparkCause::TurnCommitted),
-        "run_settled" => Some(UnparkCause::RunSettled),
-        "superseded" => Some(UnparkCause::Superseded),
-        _ => None,
-    };
-    decoded.ok_or_else(|| crate::StoreError::StoredDataCorrupt {
-        record_kind: "TurnParkEvent",
-        message: format!("unparked event cause `{cause}` is unknown"),
-    })
-}
-
-fn decode_cancel_cause(cause: &str) -> Result<ParkCancelCause, crate::StoreError> {
-    let decoded = match cause {
-        "input_withdrawn" => Some(ParkCancelCause::InputWithdrawn),
-        "session_deleted" => Some(ParkCancelCause::SessionDeleted),
-        _ => None,
-    };
-    decoded.ok_or_else(|| crate::StoreError::StoredDataCorrupt {
-        record_kind: "TurnParkEvent",
-        message: format!("cancelled event cause `{cause}` is unknown"),
-    })
-}
-
-/// One feed row. `seq` is the store's clock sequence; `park_id` is the park
-/// the transition applies to (for `Unparked`/`Cancelled` it names the park
-/// that closed, which is already gone from `turn_parks`).
+/// The work a turn park feed event names: the parked turn of one session.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TurnParkFeedEvent {
-    /// The store clock sequence this event was allocated.
-    pub seq: u64,
-    /// Host-clock epoch milliseconds the transition happened.
-    pub at_ms: u64,
+pub struct TurnParkTarget {
     /// The session the transitioned park belonged to.
     pub session_id: SessionId,
     /// The turn the transitioned park belonged to.
     pub turn_id: TurnId,
+}
+
+/// The one key a parked process is named by, in its park projection and its
+/// park feed.
+///
+/// Today it is the process's host-facing id; FIG-3607 swaps it for the minted
+/// process id, and every park surface follows this one type.
+pub type ProcessParkKey = crate::ProcessId;
+
+/// One park feed row, shared by the turn and the process feeds. `seq` is the
+/// feed's own clock sequence; `park_id` is the park the transition applies to
+/// (for `Unparked`/`Cancelled` it names the park that closed, which is
+/// already gone from the live park projection).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParkFeedEvent<Target> {
+    /// The feed clock sequence this event was allocated.
+    pub seq: u64,
+    /// Host-clock epoch milliseconds the transition happened.
+    pub at_ms: u64,
+    /// The work whose park transitioned.
+    pub target: Target,
     /// The park the transition applies to.
     pub park_id: ParkId,
     /// The transition.
-    pub kind: TurnParkEventKind,
+    pub kind: ParkEventKind,
 }
 
-/// Opaque position in one store's turn park feed.
+/// Opaque position in one store's park feed.
 ///
-/// The wrapped sequence is meaningful only to the backend that issued it and
-/// is not comparable across stores. Backends expose constructors/accessors so
-/// store implementations can persist and bind the position; consumers treat
-/// values as cursors, never as timestamps.
+/// The wrapped sequence is meaningful only to the feed that issued it: a
+/// turn park feed position and a process park feed position are not
+/// comparable, and neither is comparable across stores. Backends expose
+/// constructors/accessors so store implementations can persist and bind the
+/// position; consumers treat values as cursors, never as timestamps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct TurnParkFeedCursor(u64);
+pub struct ParkFeedCursor(u64);
 
-impl TurnParkFeedCursor {
+impl ParkFeedCursor {
     /// The feed's first position: every event follows it.
     #[must_use]
     pub fn initial() -> Self {
@@ -500,15 +532,83 @@ impl TurnParkFeedCursor {
     }
 }
 
-/// One page of the turn park feed: the events strictly after the cursor the
-/// caller passed, and the cursor that resumes after them.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TurnParkFeedPage {
+/// One page of a park feed: the events strictly after the cursor the caller
+/// passed, and the cursor that resumes after them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParkFeedPage<Target> {
     /// Events in commit order (`seq` ascending).
-    pub events: Vec<TurnParkFeedEvent>,
+    pub events: Vec<ParkFeedEvent<Target>>,
     /// Resume position: the last event's sequence, or the caller's cursor
     /// when the page is empty.
-    pub next: TurnParkFeedCursor,
+    pub next: ParkFeedCursor,
+}
+
+impl<Target> Default for ParkFeedPage<Target> {
+    fn default() -> Self {
+        Self {
+            events: Vec::new(),
+            next: ParkFeedCursor::default(),
+        }
+    }
+}
+
+/// The parked state a process record carries (NOW-B).
+///
+/// A process parks when its body refuses to replay its journal: nothing is
+/// settled and nothing was dispatched, so the process stays non-terminal and
+/// holds what it holds until an operator acts. The park lives on the record
+/// for as long as the process makes no progress: a rerun that refuses again
+/// re-parks it (`attempts += 1`, `since_ms` and `park_id` kept), and the
+/// first lifecycle fact past the refusal — progress or a terminal — clears it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ProcessPark {
+    /// Why the process parked, as its latest refusal said.
+    pub reason: ParkReason,
+    /// The process event sequence of the `process.parked` fact that opened
+    /// this park: the CAS token the operator verbs take.
+    pub park_id: ParkId,
+    /// Host-clock epoch milliseconds of the first refusal of this park.
+    pub since_ms: u64,
+    /// Host-clock epoch milliseconds of the most recent refusal.
+    pub last_refused_ms: u64,
+    /// Refusals since the park opened (1 on the first).
+    pub attempts: u32,
+    /// Whether the latest run refused: a rerun under way clears it, and the
+    /// run's own refusal sets it again. Only a refusing park exempts the
+    /// process's next start from its attempt budget, so a rerun that gets
+    /// past replay and then fails live spends its budget as usual.
+    pub refusing: bool,
+}
+
+/// The filter a `list_parked_processes` read applies.
+#[derive(Clone, Debug)]
+pub struct ProcessParkQuery {
+    /// Restrict to these reason codes; `None` (or an empty set) means all.
+    pub reasons: Option<BTreeSet<ParkReasonCode>>,
+    /// Age filter: only parks whose `since_ms` is at or before this instant.
+    pub parked_at_or_before_ms: Option<u64>,
+    /// Keyset: rows strictly after `(since_ms, process key)` in the
+    /// `(since_ms, process key)` ordering.
+    pub after: Option<(u64, ProcessParkKey)>,
+    /// Page size.
+    pub limit: NonZeroUsize,
+}
+
+/// The live parks of one kind of work, for drain and metrics.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParkSummary {
+    /// Live parks per reason code; codes with no park are absent.
+    pub by_reason: BTreeMap<ParkReasonCode, usize>,
+    /// The oldest live park's `since_ms`, `None` when nothing is parked.
+    pub oldest_since_ms: Option<u64>,
+}
+
+impl ParkSummary {
+    /// Every live park, over all reasons.
+    #[must_use]
+    pub fn total(&self) -> usize {
+        self.by_reason.values().sum()
+    }
 }
 
 /// The filter a `list_turn_parks` read applies.

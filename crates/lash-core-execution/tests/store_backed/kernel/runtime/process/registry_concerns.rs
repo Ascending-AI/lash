@@ -58,6 +58,27 @@ mod concern_isolation_tests {
         async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
             self.inner.count_non_terminal_processes().await
         }
+        async fn list_parked_processes(
+            &self,
+            query: &lash_core_execution::store::ProcessParkQuery,
+        ) -> Result<Vec<ProcessRecord>, PluginError> {
+            self.inner.list_parked_processes(query).await
+        }
+        async fn process_park_feed(
+            &self,
+            after: lash_core_execution::store::ParkFeedCursor,
+            limit: NonZeroUsize,
+        ) -> Result<
+            lash_core_execution::store::ParkFeedPage<lash_core_execution::store::ProcessParkKey>,
+            PluginError,
+        > {
+            self.inner.process_park_feed(after, limit).await
+        }
+        async fn summarize_parked_processes(
+            &self,
+        ) -> Result<lash_core_execution::store::ParkSummary, PluginError> {
+            self.inner.summarize_parked_processes().await
+        }
     }
 
     #[async_trait::async_trait]

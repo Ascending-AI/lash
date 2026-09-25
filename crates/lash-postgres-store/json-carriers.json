@@ -118,5 +118,9 @@
   "lash_turn_park_events.reason_json": {
     "verdict": "enroll-now",
     "reason": "A `parked` feed event carries the same ParkReason payload lash_turn_parks.reason_json stores (FIG-3659); its schemars shape participates in the component shape gate with it."
+  },
+  "lash_process_park_events.reason_json": {
+    "verdict": "enroll-now",
+    "reason": "A `parked` process park feed event carries the same ParkReason payload the turn park feed stores (FIG-3659 NOW-B); its schemars shape participates in the component shape gate with it."
   }
 }

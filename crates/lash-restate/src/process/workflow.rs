@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use lash_core::{
     AbandonEvidence, AbandonWriter, PluginError, ProcessAwaitOutput, ProcessExecutionContext,
-    ProcessRegistration, ProcessRegistry, ScopedEffectController,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ScopedEffectController,
 };
 use restate_sdk::context::{
     ContextClient, ContextPromises, SharedWorkflowContext, WorkflowContext,
@@ -470,6 +470,23 @@ where
                 "process `{process_id}` segment {segment_ordinal} omitted its validated handover"
             ))));
         }
+        // A parked process's retry re-runs its body to find out whether this
+        // build can replay the journal (FIG-3659 NOW-B): the park stays
+        // listed, and stops refusing until the body refuses again. The read
+        // and the write sit outside the journal — they issue no command, so
+        // they cannot move the replay.
+        if let Some(record) = self
+            .registry
+            .get_process(&process_id)
+            .await
+            .map_err(HandlerError::from)?
+            .filter(ProcessRecord::is_refusing_park)
+        {
+            self.registry
+                .begin_parked_rerun_with_authority(&process_id, &park_authority(&record, started))
+                .await
+                .map_err(HandlerError::from)?;
+        }
         let requires_cancelled_session_turn = matches!(
             registration.input.as_ref(),
             lash_core::ProcessInput::SessionTurn { .. }
@@ -533,14 +550,77 @@ where
                     owner: Some(*by),
                 }))
             }
-            // A segment whose journal diverged cannot complete mid-replay: it
-            // ends its attempt the one way a park ends (FIG-3697).
-            Err(err) if is_replay_mismatch(&err) => Err(crate::parked_turn_failure(err)),
+            // A segment whose journal diverged parks the process (FIG-3659
+            // NOW-B, FIG-3674): the park is written through the registry —
+            // non-terminal, no terminal evidence, its claims held — and the
+            // attempt ends the one way a park ends, retryably, because it
+            // cannot complete mid-replay (FIG-3697). A retry re-parks the same
+            // park until a build that can replay the journal runs it.
+            Err(err) if is_replay_mismatch(&err) => {
+                self.park_diverged_process(&process_id, &err, started).await;
+                Err(crate::parked_turn_failure(err))
+            }
             Err(err) if err.is_retryable() => Err(HandlerError::from(err)),
             Err(err) if err.is_terminal() => Ok(SegmentRunEnd::Terminal(TerminalProposal::Output(
                 Box::new(terminal_process_output(err)),
             ))),
             Err(err) => Err(handler_error_from_plugin(err)),
+        }
+    }
+
+    /// Park `process_id` on the replay refusal `refusal` (FIG-3659 NOW-B).
+    ///
+    /// Best effort, like a turn's park: the attempt fails retryably either
+    /// way, and a retry that refuses again writes the park again, so a failed
+    /// write is logged rather than allowed to turn a park into a failure.
+    async fn park_diverged_process(
+        &self,
+        process_id: &ProcessId,
+        refusal: &PluginError,
+        started: &SegmentStarted,
+    ) {
+        let Some(reason) = refusal.park_reason() else {
+            return;
+        };
+        let code = reason.code();
+        let parked = match self.registry.get_process(process_id).await {
+            Ok(Some(record)) => {
+                self.registry
+                    .park_process_with_authority(
+                        process_id,
+                        reason,
+                        &park_authority(&record, started),
+                    )
+                    .await
+            }
+            Ok(None) => Err(lash_core::runtime::registry_transitions::unknown_process(
+                process_id,
+            )),
+            Err(error) => Err(error),
+        };
+        match parked {
+            Ok(parked) => {
+                lash_core::operational_metrics::record_work_parked("process", code.as_str());
+                let park = parked.park.as_deref();
+                tracing::warn!(
+                    event = "process.parked",
+                    process_id = process_id.as_str(),
+                    reason_code = code.as_str(),
+                    effect_kind = park
+                        .and_then(|park| park.reason.effect_kind())
+                        .unwrap_or_default(),
+                    attempts = park.map_or(0, |park| park.attempts),
+                    park_id = park.map_or(0, |park| park.park_id.feed_sequence()),
+                    "process parked on a replay divergence"
+                );
+            }
+            Err(error) => tracing::error!(
+                event = "process.park_record_failed",
+                process_id = process_id.as_str(),
+                reason_code = code.as_str(),
+                error = %error,
+                "a diverged process could not record its park"
+            ),
         }
     }
 }
@@ -1075,4 +1155,21 @@ where
             .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
         Ok(Json(output))
     }
+}
+
+/// The execution authority a segment writes its park under: the segment's
+/// execution identity bound to the attempt its root start recorded. Restate
+/// successors of one attempt share the root execution id, so the record's
+/// retained start names the attempt the identity is valid for; a stale
+/// identity still fails the registry's same-execution fence.
+fn park_authority(
+    record: &ProcessRecord,
+    started: &SegmentStarted,
+) -> lash_core::ProcessExecutionWriteAuthority {
+    started.write_authority().bind_attempt(
+        record
+            .first_started
+            .as_deref()
+            .map_or(1, |started| started.attempt),
+    )
 }

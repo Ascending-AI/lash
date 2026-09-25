@@ -96,7 +96,6 @@ impl From<lash_core::WaitKind> for RemoteProcessWaitKind {
                 key,
                 ordinal,
             },
-            lash_core::WaitKind::Parked { code, message } => Self::Parked { code, message },
         }
     }
 }
@@ -115,8 +114,69 @@ impl From<RemoteProcessWaitKind> for lash_core::WaitKind {
                 key,
                 ordinal,
             },
-            RemoteProcessWaitKind::Parked { code, message } => Self::Parked { code, message },
         }
+    }
+}
+
+impl TryFrom<lash_core::store::ProcessPark> for RemoteProcessPark {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: lash_core::store::ProcessPark) -> Result<Self, Self::Error> {
+        let lash_core::store::ProcessPark {
+            reason,
+            park_id,
+            since_ms,
+            last_refused_ms,
+            attempts,
+            refusing,
+        } = value;
+        // The mirror is the reason's serde form, arm for arm: a round trip
+        // through it is the conversion, so a core arm the mirror lacks is
+        // refused rather than guessed at.
+        let reason = serde_json::to_value(&reason)
+            .and_then(serde_json::from_value)
+            .map_err(|error| RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessPark",
+                message: format!("park reason has no remote form: {error}"),
+            })?;
+        Ok(Self {
+            reason,
+            park_id: park_id.feed_sequence(),
+            since_ms,
+            last_refused_ms,
+            attempts,
+            refusing,
+        })
+    }
+}
+
+impl TryFrom<RemoteProcessPark> for lash_core::store::ProcessPark {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteProcessPark) -> Result<Self, Self::Error> {
+        value.validate("RemoteProcessPark")?;
+        let RemoteProcessPark {
+            reason,
+            park_id,
+            since_ms,
+            last_refused_ms,
+            attempts,
+            refusing,
+        } = value;
+        let reason = serde_json::to_value(&reason)
+            .and_then(serde_json::from_value)
+            .map_err(|error| RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessPark",
+                message: format!("park reason is not a core park reason: {error}"),
+            })?;
+        Ok(Self {
+            reason,
+            park_id: lash_core::store::ParkId::from_feed_sequence(park_id),
+            since_ms,
+            last_refused_ms,
+            attempts,
+            refusing,
+        })
     }
 }
 

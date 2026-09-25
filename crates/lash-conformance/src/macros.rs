@@ -383,6 +383,12 @@ macro_rules! process_registry_tests {
                 (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
                 (process_prune_scoped_by_originator, "scoped-prune"),
                 (process_prune_batch_tombstones, "batch-prune"),
+                (parked_processes_list_by_since_with_filters_and_keyset_pages, "parked-process-list"),
+                (a_process_re_park_keeps_its_park_and_counts_attempts, "process-re-park"),
+                (progress_after_a_rerun_clears_the_park_once, "process-park-progress"),
+                (a_parked_process_that_ends_closes_its_park_by_how_it_ended, "process-park-terminal"),
+                (only_a_refusing_park_exempts_a_start_from_the_attempt_budget, "process-park-budget"),
+                (a_compacted_process_park_feed_cursor_is_refused_typed, "process-park-feed-compaction"),
             ]
         }
     };
