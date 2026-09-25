@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import tempfile
@@ -908,13 +909,24 @@ class FeatureCoverageContractTests(unittest.TestCase):
         self.assertIn("lane 'member-testing' has no executable commands", result.stdout)
         self.assertIn("lacks an exact ON command for member/testing", result.stdout)
 
-    def test_workspace_checker_completes_within_ci_budget(self) -> None:
+    def test_workspace_checker_bounds_scanned_sources(self) -> None:
+        # A wall-clock budget flakes under `just floor`'s parallel gates, so
+        # the budget is on work instead: cfg_requirements scans each workspace
+        # Rust source once, and a regression that does more work (re-scanning
+        # per feature, walking files repeatedly) multiplies this deterministic
+        # count on any machine.
         result = run_subprocess(
             ["python3", str(CHECKER), "check", "--root", str(ROOT)],
             check=False,
-            timeout=10,
+            env={**os.environ, "LASH_FEATURE_COVERAGE_STATS": "1"},
+            timeout=120,  # liveness guard only; the source count is the budget
         )
         self.assertEqual(result.returncode, 0, result.stdout)
+        match = re.search(r"feature coverage scan: (\d+) Rust sources", result.stdout)
+        self.assertIsNotNone(match, result.stdout)
+        # Measured at 2559 sources on 2026-09-25; ~25% headroom for ordinary
+        # source growth. A real bump means the checker scans more than once.
+        self.assertLessEqual(int(match.group(1)), 3200, result.stdout)
 
 
 if __name__ == "__main__":

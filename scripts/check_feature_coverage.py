@@ -30,6 +30,11 @@ RUST_CHAR_LITERAL = re.compile(
 )
 NON_NEWLINE = re.compile(r"[^\n]")
 
+# Incremented once per Rust source scanned in cfg_requirements. LASH_FEATURE_COVERAGE_STATS
+# prints it at the end of a successful check so the contract test can bound the
+# checker's work deterministically instead of asserting on wall clock.
+SCANNED_RUST_SOURCES = 0
+
 
 @dataclass(frozen=True)
 class Package:
@@ -640,9 +645,11 @@ def parsed_cfg_attribute(
 
 
 def cfg_requirements(package: Package) -> PackageCfgRequirements:
+    global SCANNED_RUST_SOURCES
     found: dict[str, dict[str, set[str]]] = {}
     predicate_requirements: list[CfgPredicateRequirement] = []
     for source in package.path.rglob("*.rs"):
+        SCANNED_RUST_SOURCES += 1
         text = source.read_text(encoding="utf-8")
         masked = masked_rust(text)
         attributes = rust_attributes(source, text, masked)
@@ -1216,6 +1223,8 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
         f"{len(declared)} declared features, {len(lanes)} executable lanes, "
         f"{len(unresolved)} explicit unresolved"
     )
+    if os.environ.get("LASH_FEATURE_COVERAGE_STATS"):
+        print(f"feature coverage scan: {SCANNED_RUST_SOURCES} Rust sources")
     return packages, plan
 
 
