@@ -420,21 +420,26 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
         },
     ]);
     let observed_cancel = Arc::new(AtomicBool::new(false));
+    let tool_started = Arc::new(tokio::sync::Notify::new());
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(SlowTool {
         observed_cancel: Arc::clone(&observed_cancel),
+        started: Arc::clone(&tool_started),
     });
     let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
     let cancel = CancellationToken::new();
     let cancel_trigger = cancel.clone();
+    let (cancel_at_tx, cancel_at_rx) = tokio::sync::oneshot::channel::<std::time::Instant>();
     lash_core::task::spawn(async move {
-        // Give the turn time to spawn the slow tool before we cancel.
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Cancel only once the slow tool is actually in flight, so the
+        // cooperative-cancel assert cannot race the tool's start.
+        tool_started.notified().await;
         cancel_trigger.cancel();
+        let _ = cancel_at_tx.send(std::time::Instant::now());
     });
 
-    let start = std::time::Instant::now();
-    let _ = runtime
-        .run_turn_assembled(
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        runtime.run_turn_assembled(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "trigger slow tool".to_string(),
@@ -450,13 +455,19 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
                 &SessionId::from("root"),
                 &TurnId::from("cancel-tool-turn"),
             ),
-        )
-        .await;
-    let elapsed = start.elapsed();
+        ),
+    )
+    .await
+    .expect("cancelled turn did not return within 30s");
+
+    let cancel_at = cancel_at_rx
+        .await
+        .expect("the cancel task records the instant it fired");
+    let elapsed_since_cancel = cancel_at.elapsed();
 
     assert!(
-        elapsed < std::time::Duration::from_secs(2),
-        "turn cancellation did not tear down in-flight tool call quickly: elapsed={elapsed:?}"
+        elapsed_since_cancel < std::time::Duration::from_secs(2),
+        "turn cancellation did not tear down in-flight tool call quickly: elapsed_since_cancel={elapsed_since_cancel:?}"
     );
     // The tool either saw the cancellation token and returned, or its future
     // was aborted by the JoinSet. Either outcome is acceptable — what matters

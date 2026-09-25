@@ -825,6 +825,10 @@ fn terminal_tool_definition(index: usize) -> crate::ToolDefinition {
 /// cancellation unwinds in-flight tool tasks promptly.
 pub struct SlowTool {
     pub observed_cancel: Arc<AtomicBool>,
+    /// Notified (via `notify_one`, so an early notify is stored) as the tool
+    /// begins executing, before it waits; lets a test synchronise on the tool
+    /// being in flight rather than on wall-clock delay.
+    pub started: Arc<tokio::sync::Notify>,
 }
 
 #[async_trait::async_trait]
@@ -839,6 +843,7 @@ impl crate::ToolProvider for SlowTool {
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let observed = Arc::clone(&self.observed_cancel);
+        self.started.notify_one();
         if let Some(token) = call.context.cancellation_token() {
             let token = token.clone();
             tokio::select! {
