@@ -172,6 +172,23 @@ class WithServiceContract(unittest.TestCase):
                     self.assertTrue(recipe.startswith("cargo "))
 
 
+def terminal_signals() -> None:
+    """Give the spawned wrapper the signal state a terminal login has.
+
+    `preexec_fn` for the wrapper spawn below. `exec` preserves a signal
+    disposition of SIG_IGN, and callers can legitimately start this suite
+    with SIGINT ignored -- a backgrounded command in a non-interactive shell
+    is the usual cause, and it is how the gate runner can be reached. A bash
+    that enters with SIGINT ignored cannot trap it (`trap ... INT` becomes a
+    silent no-op), so the interrupt this test sends would vanish: the wrapper
+    would wait out the whole `sleep 60` and never print its trap's line. The
+    wrapped command and its children inherit the reset too.
+    """
+    for sig in (signal.SIGINT, signal.SIGQUIT):
+        signal.signal(sig, signal.SIG_DFL)
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT, signal.SIGQUIT})
+
+
 class FakeDocker:
     """A `docker` on PATH that logs its calls and answers scripted probes."""
 
@@ -327,7 +344,11 @@ class WithServiceBehaviour(unittest.TestCase):
                 # what makes bash run the trap instead of waiting out the
                 # command it is blocked on.
                 start_new_session=True,
+                preexec_fn=terminal_signals,
             )
+            # `started` exists only once the wrapped command runs, which is
+            # after the wrapper installed its traps; signalling earlier could
+            # land before the INT trap exists.
             deadline = time.monotonic() + 60
             while not started.exists() and time.monotonic() < deadline:
                 time.sleep(0.1)
