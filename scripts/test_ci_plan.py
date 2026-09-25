@@ -753,7 +753,7 @@ class GateScopeTests(unittest.TestCase):
         self.assertEqual(frozenset({self.RUST, self.SCRIPTS}), scope.families)
 
     def test_a_pinned_doc_input_runs_the_rust_battery(self) -> None:
-        scope = self.scope("docs/adr/0008-confidence-gate.md")
+        scope = self.scope("docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md")
         self.assertEqual("rust-input-docs", scope.classification)
         self.assertEqual(frozenset({self.RUST}), scope.families)
 

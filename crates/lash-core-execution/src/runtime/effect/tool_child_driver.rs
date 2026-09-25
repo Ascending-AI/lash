@@ -677,12 +677,15 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
 /// controller is valid exactly as long as the handler drives it.
 #[async_trait::async_trait]
 pub trait ToolChildDriver: Send {
-    /// Runs the child to a terminal on `controller`, returning its settlement
-    /// outcome. `child` is the child's own `ToolInvocation` envelope address —
-    /// the replay row its §4 final commits against (ADR 0099 §4). A live
-    /// opener's token is the parent of the child's body token, as it is for
-    /// the in-process `execute`; a deployment-built context has none, and the
-    /// opener's turn cancel reaches the child through its durable gate.
+    /// Runs the child to a terminal on `controller`, routed through the stack
+    /// of the host that routed the child
+    /// ([`EffectHost::route_handler_child_controller`]), returning its
+    /// settlement outcome. `child` is the child's own `ToolInvocation`
+    /// envelope address — the replay row its §4 final commits against (ADR
+    /// 0099 §4). A live opener's token is the parent of the child's body
+    /// token, as it is for the in-process `execute`; a deployment-built
+    /// context has none, and the opener's turn cancel reaches the child
+    /// through its durable gate.
     async fn drive<'run>(
         &self,
         request: &ToolChildRequest,
@@ -699,6 +702,16 @@ impl ToolChildDriver for ToolChildRunner {
         child: crate::EffectAddress,
         controller: ScopedEffectController<'run>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        // The engine's handler minted `controller` from its own context. It
+        // crosses the stack of the host that routed this child, so a layer
+        // over the opener's host sees the child's effects on every engine, as
+        // it does where the host mints the child's controller itself
+        // (`child_controller`).
+        let controller = self
+            .host
+            .effect_host()?
+            .route_handler_child_controller(controller)
+            .map_err(RuntimeEffectControllerError::from)?;
         Box::pin(run_tool_child(
             &self.host,
             &self.opener,

@@ -695,9 +695,12 @@ fn check_durable_content(sessions: &[SessionContent]) -> Result<ContentCounts, S
             ));
         }
 
+        // An all-zero report carries no charge and the runtime writes no
+        // delta for it on any path (see `failed_attempt_usage_ledgered`).
         let completed_usage = completed
             .iter()
             .filter_map(|attempt| attempt.usage)
+            .filter(|usage| !usage.is_zero())
             .collect::<Vec<_>>();
         if session.has_failed_reported_attempt() {
             // A failed attempt's reported usage is FIG-3514's law; here every

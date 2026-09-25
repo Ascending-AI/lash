@@ -1,12 +1,12 @@
 {
   "schema": "lash.sim.failing-trace-fixture.v1",
-  "fixture_id": "agent-parallel-join-missing-wake-session",
+  "fixture_id": "agent-parallel-join-missing-provider-session",
   "seed": 31,
   "profile": "fast-random",
   "max_boundaries": 32,
   "mutation": {
-    "omit_process_wake_join_session": true
+    "omit_provider_runtime_session": true
   },
   "expected_oracle_id": "sim.oracle.scenario-mini.agent.parallel-spawn-join-determinism.v1",
-  "expected_reason_contains": "did not record deterministic process/worker ordering"
+  "expected_reason_contains": "did not record provider completions across runtime sessions"
 }

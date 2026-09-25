@@ -2,58 +2,19 @@
 //!
 //! A simulated turn runs where a deployment runs one: inside a handler of
 //! lash-restate's engine, on the in-process Restate server double
-//! ([`SimEngine`]), over a SQLite memory store set. The generated world still
-//! runs on a SQLite memory backend on the simulator clock. When the simulator
-//! records the checkpoint writes a run commits, it wraps the backend's own
-//! session factory in an observer, and every other port stays the backend's.
+//! ([`SimEngine`]), over a SQLite memory store set; SQLite is storage only.
+//! When the simulator records the checkpoint writes a run commits, it wraps
+//! the engine backend's session factory in an observer, and every other port
+//! stays the backend's.
+
 use std::sync::Arc;
 
 use lash_core::sync::MutexExt as _;
 use lash_core::{Backend, SessionStoreFactory};
 use lash_lashlang_runtime::{LashlangArtifactStore, LashlangArtifactStoreSet as _};
 
-use crate::clock::SimClock;
 use crate::runner::FixedScriptRunnerError;
 use crate::store::{CheckpointWriteCollector, ObservedSessionStoreFactory};
-
-/// A fresh SQLite memory backend on the system clock.
-pub async fn memory_backend()
--> Result<Arc<lash_sqlite_store::SqliteBackend>, FixedScriptRunnerError> {
-    lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .map(Arc::new)
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
-}
-
-/// `base` with the effect host's leases held for the simulator's runtime
-/// lease span: the simulator advances its clock across whole schedules, and
-/// an effect lease is an operational liveness guard, not a generated
-/// scenario event, exactly like the runtime leases [`crate::lease`] sets.
-pub(crate) fn sim_sqlite_options(
-    base: lash_sqlite_store::SqliteBackendOptions,
-) -> lash_sqlite_store::SqliteBackendOptions {
-    lash_sqlite_store::SqliteBackendOptions {
-        effect_replay: lash_sqlite_store::SqliteEffectReplayOptions {
-            lease_timings: crate::lease::sim_runtime_lease_timings(),
-            ..base.effect_replay
-        },
-        ..base
-    }
-}
-
-/// A fresh SQLite memory backend whose runtime and store stamps follow
-/// `clock`.
-pub(crate) async fn sim_memory_backend(
-    clock: Arc<SimClock>,
-) -> Result<Arc<lash_sqlite_store::SqliteBackend>, FixedScriptRunnerError> {
-    lash_sqlite_store::SqliteBackend::memory_with_options_and_clock(
-        sim_sqlite_options(lash_sqlite_store::SqliteBackendOptions::memory()),
-        clock,
-    )
-    .await
-    .map(Arc::new)
-    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
-}
 
 /// Where the simulator runs turns: lash-restate's engine on a fresh
 /// in-process Restate server double under the scenario's seed, with serial
@@ -81,24 +42,30 @@ impl SimEngine {
     /// one attempt runs at a time, and one seed grants the turn in one order
     /// on a current-thread runtime.
     pub async fn new(seed: u64) -> Result<Self, FixedScriptRunnerError> {
-        lash_restate_test::backend(
-            seed,
-            lash_restate_test::ServerConfig::default()
-                .scheduling(lash_restate_test::Scheduling::Serial),
-        )
-        .await
-        .map(|restate| Self { restate })
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
+        Self::scheduled(seed, lash_restate_test::Scheduling::Serial).await
     }
 
-    /// An engine whose server double runs every live attempt concurrently,
-    /// as `restate-server` does. A scenario that stops a running turn from
-    /// outside it needs this: a host-local stop is a durable request on the
-    /// turn's cancellation gate, an ingress call, and serial scheduling lands
-    /// ingress only between attempts, so it would wait on the very attempt it
-    /// stops (FIG-3672 P9).
+    /// A fresh engine on a server double under `seed` whose live attempts
+    /// run whenever Tokio polls them, as `restate-server` does: the
+    /// generated search lane's cross-session concurrency. A scenario that
+    /// stops a running turn from outside it needs this too: a host-local stop
+    /// is a durable request on the turn's cancellation gate, an ingress call,
+    /// and serial scheduling lands ingress only between attempts, so it would
+    /// wait on the very attempt it stops (FIG-3672 P9).
     pub async fn concurrent(seed: u64) -> Result<Self, FixedScriptRunnerError> {
-        lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+        Self::scheduled(seed, lash_restate_test::Scheduling::Concurrent).await
+    }
+
+    async fn scheduled(
+        seed: u64,
+        scheduling: lash_restate_test::Scheduling,
+    ) -> Result<Self, FixedScriptRunnerError> {
+        let mut config = lash_restate_test::ServerConfig::default().scheduling(scheduling);
+        // A crashed attempt is retried at once: retry timing is no contract,
+        // and a simulated world crashes an attempt on every durable effect.
+        config.retry.initial_interval = std::time::Duration::from_millis(1);
+        config.retry.max_interval = std::time::Duration::from_millis(10);
+        lash_restate_test::backend(seed, config)
             .await
             .map(|restate| Self { restate })
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
@@ -265,7 +232,7 @@ impl lash::TurnActivitySink for DiscardedTurnActivity {
     async fn emit(&self, _activity: lash::TurnActivity) {}
 }
 
-/// `inner` with its session factory decorated.
+/// The engine's backend with its session factory decorated.
 ///
 /// A checkpoint-write observer over the session factory forwards every
 /// binding to the factory it wraps, so the backend's ports still meet each
@@ -278,15 +245,6 @@ pub struct DecoratedBackend {
 }
 
 impl DecoratedBackend {
-    /// `inner`, undecorated.
-    pub fn over(inner: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>) -> Self {
-        Self {
-            factory: inner.session_store_factory(),
-            artifacts: inner.lashlang_artifact_store(),
-            inner,
-        }
-    }
-
     /// `engine`'s backend, undecorated: it reaches the server double only
     /// through its connection, so a core over it never keeps the server
     /// alive.

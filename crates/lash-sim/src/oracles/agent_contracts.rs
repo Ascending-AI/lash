@@ -27,13 +27,10 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
         assertion: "Agent facade starts a Lashlang process that executes app_lookup and records a completed labeled process graph",
         check: check_agent_started_process_tool_call_graph,
         extras_before: &[],
-        extras_after: &[
-            ExtraFact::ProcessWake("agent_started_process_graph"),
-            ExtraFact::ToolReentry {
-                fact: "agent_started_process_tool_call",
-                require_provider_event_release: false,
-            },
-        ],
+        extras_after: &[ExtraFact::ToolReentry {
+            fact: "agent_started_process_tool_call",
+            require_provider_event_release: false,
+        }],
     },
     ContractFactSpec {
         spec: contract_spec(
@@ -46,7 +43,6 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
         extras_before: &[],
         extras_after: &[
             ExtraFact::DurableReplay("agent_durable_input_first_and_replay"),
-            ExtraFact::ProcessWake("agent_durable_input_process_wake"),
             ExtraFact::ObserverReconnect("agent_durable_input_observer_reconnect"),
         ],
     },
@@ -59,9 +55,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
         assertion: "Agent facade starts a Lashlang process that spawns a default subagent, preserves the labeled child-session graph, and returns the typed child value",
         check: check_agent_started_process_subagent_spawn,
         extras_before: &[],
-        extras_after: &[ExtraFact::ProcessWake(
-            "agent_started_process_subagent_spawn",
-        )],
+        extras_after: &[],
     },
     ContractFactSpec {
         spec: contract_spec(AGENT_SCENARIO_CONTRACTS, "agent.session_turn_process_child"),
@@ -69,10 +63,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
         assertion: "Agent facade starts and awaits a child process to produce a concrete final value",
         check: check_agent_session_turn_process_child,
         extras_before: &[],
-        extras_after: &[
-            ExtraFact::ProcessWake("agent_session_turn_process_child_wake"),
-            ExtraFact::Custom(agent_session_turn_child_provider_fact),
-        ],
+        extras_after: &[],
     },
     ContractFactSpec {
         spec: contract_spec(AGENT_SCENARIO_CONTRACTS, "agent.nested_process_start_await"),
@@ -80,7 +71,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
         assertion: "Agent facade starts a parent Lashlang process that starts and awaits a child process with connected graph evidence",
         check: check_agent_nested_process_start_await,
         extras_before: &[],
-        extras_after: &[ExtraFact::ProcessWake("agent_nested_process_start_await")],
+        extras_after: &[],
     },
     ContractFactSpec {
         spec: contract_spec(
@@ -91,10 +82,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
         assertion: "Agent facade preserves a failed subagent task graph, terminal process state, and task.fail reason without provider exhaustion or false final value",
         check: check_agent_failed_child_preserves_failure_graph,
         extras_before: &[],
-        extras_after: &[
-            ExtraFact::WorkerStale("agent_failed_child_worker_graph"),
-            ExtraFact::BackendRetry("agent_failed_child_backend_graph"),
-        ],
+        extras_after: &[ExtraFact::BackendRetry("agent_failed_child_backend_graph")],
     },
     ContractFactSpec {
         spec: contract_spec(AGENT_SCENARIO_CONTRACTS, "agent.parallel_spawn_and_join"),
@@ -102,10 +90,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
         assertion: "Agent facade starts two child processes and joins their concrete final values in order",
         check: check_agent_parallel_spawn_and_join,
         extras_before: &[],
-        extras_after: &[
-            ExtraFact::ProcessWake("agent_parallel_spawn_process_wakes"),
-            ExtraFact::WorkerStale("agent_parallel_spawn_join_worker_order"),
-        ],
+        extras_after: &[],
     },
     ContractFactSpec {
         spec: contract_spec(

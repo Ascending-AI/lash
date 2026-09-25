@@ -16,15 +16,11 @@ pub enum BoundaryKind {
     Tool,
     ExecCode,
     DurableEffect,
-    ProcessWake,
-    ProcessLifecycle,
-    Worker,
     Observer,
     Cancellation,
     Trigger,
     BackendFailure,
     ProviderMutation,
-    LeaseTime,
 }
 
 /// The one name mapping is the serde derive above: `Display` and `FromStr`
@@ -261,8 +257,6 @@ pub enum RuntimeCompletionFamily {
     ToolReturn,
     ExecResult,
     DurableEffectCompletion,
-    WorkerLeaseCompletion,
-    ProcessWake,
     ObserverSnapshot,
 }
 
@@ -616,11 +610,11 @@ mod tests {
                 json!({}),
             ),
             BoundaryEvent::new(
-                "lease-time-b",
+                "observer-b",
                 "session-b",
-                BoundaryKind::LeaseTime,
+                BoundaryKind::Observer,
                 11,
-                "lease.clock",
+                "observer.snapshot",
                 json!({}),
             ),
         ];
@@ -633,7 +627,7 @@ mod tests {
         assert_eq!(first_ids, second_ids);
         assert_eq!(first_ids.len(), 4);
         assert_eq!(first_ids.first().map(String::as_str), Some("ingress-a"));
-        assert_eq!(first_ids.last().map(String::as_str), Some("lease-time-b"));
+        assert_eq!(first_ids.last().map(String::as_str), Some("observer-b"));
     }
 
     #[test]

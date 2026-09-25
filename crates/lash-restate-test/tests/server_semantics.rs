@@ -207,6 +207,38 @@ impl Relay {
     }
 }
 
+/// [`INGRESS`] for [`Beside`], so its law runs beside the relay's.
+static BESIDE_INGRESS: Mutex<Option<RestateTestServer>> = Mutex::new(None);
+
+struct Beside;
+
+#[restate_sdk::service]
+impl Beside {
+    /// From inside a `ctx.run`, waits on a task it spawned beside itself —
+    /// as lash's gate watches do — that calls `Counter/{key}/add` through
+    /// the server's ingress. The spawned task does not carry the attempt, so
+    /// its request lands as one from outside every attempt, while the
+    /// handler waits on it without being blocked on the server.
+    #[handler]
+    async fn ask(&self, ctx: Context<'_>, Json(key): Json<String>) -> HandlerResult<Json<String>> {
+        let server = BESIDE_INGRESS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap();
+        let answer = ctx
+            .run(|| async move {
+                let task = tokio::spawn(async move {
+                    post(&server, &format!("Counter/{key}/add"), "1").await.1
+                });
+                Ok(task.await.unwrap())
+            })
+            .name("ask-beside")
+            .await?;
+        Ok(Json(answer))
+    }
+}
+
 fn endpoint() -> Endpoint {
     Endpoint::builder()
         .bind(Counter)
@@ -216,6 +248,7 @@ fn endpoint() -> Endpoint {
         .bind(Flaky)
         .bind(Gauge)
         .bind(Relay)
+        .bind(Beside)
         .build()
 }
 
@@ -562,5 +595,34 @@ async fn a_handler_waiting_on_its_own_ingress_request_yields_the_serial_turn() {
         // moves to the counter at once instead of after a stall.
         assert_eq!(server.stats().stall_preemptions, 0);
         *INGRESS.lock().unwrap() = None;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_outside_request_a_stalled_holder_waits_on_lands_after_a_stall() {
+    for config in [
+        ServerConfig::default().scheduling(Scheduling::Serial),
+        ServerConfig::default()
+            .always_replay(true)
+            .scheduling(Scheduling::Serial),
+    ] {
+        let server = server(config).await;
+        *BESIDE_INGRESS.lock().unwrap() = Some(server.clone());
+        // The holder is the only live attempt and waits on work the server
+        // cannot see; the request that work waits on must still land once
+        // the holder has stalled, not wait for a turn nobody frees.
+        let answer = tokio::time::timeout(
+            Duration::from_secs(20),
+            post(&server, "Beside/ask", "\"beside\""),
+        )
+        .await
+        .expect("the outside request lands after the holder stalls");
+        assert_eq!(answer, (200, "\"1\"".into()));
+        assert!(
+            server.stats().stall_preemptions >= 1,
+            "the landing is counted as a stall: {:?}",
+            server.stats()
+        );
+        *BESIDE_INGRESS.lock().unwrap() = None;
     }
 }

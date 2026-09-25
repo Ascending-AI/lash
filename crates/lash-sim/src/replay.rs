@@ -73,16 +73,12 @@ pub fn replay_trace(
 
     for expected in &trace.events {
         let event = expected.as_event();
-        // Worker lease fencing is produced by the REAL session-execution lease
-        // store at generation time (and re-verified by the SQLite/Postgres backend
-        // replays). The abstract ModelStore cannot re-derive it, so the model
-        // carries the REAL recorded reclaim/fence facts rather than fabricating
-        // them: thread the recorded observation in directly instead of projecting.
-        let observed = if matches!(
-            event.kind,
-            BoundaryKind::Worker | BoundaryKind::ProcessLifecycle | BoundaryKind::BackendFailure
-        ) || event.payload.get("suspend_resume").and_then(Value::as_bool)
-            == Some(true)
+        // A backend fault is produced by the REAL store injector at generation
+        // time, and a suspend resume by the real parked turn. The abstract
+        // ModelStore cannot re-derive either, so the model carries the recorded
+        // observation rather than fabricating it.
+        let observed = if event.kind == BoundaryKind::BackendFailure
+            || event.payload.get("suspend_resume").and_then(Value::as_bool) == Some(true)
         {
             store.apply_observed_boundary(&event, &expected.observed);
             expected.observed.clone()

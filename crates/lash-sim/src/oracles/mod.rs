@@ -1,4 +1,3 @@
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::{BTreeMap, BTreeSet};
@@ -29,15 +28,9 @@ pub const CANCELLATION_ORACLE: &str = "sim.oracle.cancellation-observed.v1";
 pub const DURABLE_EFFECT_EXACTLY_ONCE_ORACLE: &str = "sim.oracle.durable-effect-exactly-once.v1";
 pub const EXEC_CODE_ORACLE: &str = "sim.oracle.exec-code-observed.v1";
 pub const INGRESS_SESSION_OPENED_ORACLE: &str = "sim.oracle.ingress-session-opened.v1";
-pub const LEASE_TIME_MONOTONIC_ORACLE: &str = "sim.oracle.lease-time-monotonic.v1";
 pub const OBSERVER_CONVERGENCE_ORACLE: &str = "sim.oracle.observer-convergence.v1";
 pub const OBSERVER_RECONNECT_ORACLE: &str = "sim.oracle.observer-reconnect.v1";
 pub const OPERATIONAL_COVERAGE_ORACLE: &str = "sim.oracle.operational-coverage.v1";
-pub const PROCESS_WAKE_ORACLE: &str = "sim.oracle.process-wake-observed.v1";
-pub const PROCESS_WAKE_AT_MOST_ONCE_ORACLE: &str =
-    "sim.oracle.process-wake-at-most-once-runtime-turn.v1";
-pub const PROCESS_NEVER_DOUBLE_STARTED_ORACLE: &str = "sim.oracle.process-never-double-started.v1";
-pub const ABANDONED_REQUIRES_EVIDENCE_ORACLE: &str = "sim.oracle.abandoned-requires-evidence.v1";
 pub const PROVIDER_MUTATION_ORACLE: &str = "sim.oracle.provider-mutation-rejected.v1";
 pub const QUEUED_INGRESS_ORACLE: &str = "sim.oracle.queued-ingress-observed.v1";
 pub const REPLAY_DETERMINISM_ORACLE: &str = "sim.oracle.replay-determinism.v1";
@@ -71,10 +64,6 @@ pub const SCENARIO_MINI_RUNTIME_QUEUED_HIDDEN_ORACLE: &str =
     "sim.oracle.scenario-mini.runtime.queued-input-hidden-while-live.v1";
 pub const SCENARIO_MINI_RUNTIME_CANCEL_IDLE_ORACLE: &str =
     "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-claim.v1";
-pub const SCENARIO_MINI_RUNTIME_PROCESS_WAKE_DEDUPE_ORACLE: &str =
-    "sim.oracle.scenario-mini.runtime.process-wake-duplicate-rejected.v1";
-pub const SCENARIO_MINI_RUNTIME_STALE_LEASE_ORACLE: &str =
-    "sim.oracle.scenario-mini.runtime.stale-lease-commit-rejected.v1";
 pub const SCENARIO_MINI_STANDARD_STREAM_FINALIZE_ORACLE: &str =
     "sim.oracle.scenario-mini.standard.streamed-text-finalizes-once.v1";
 pub const SCENARIO_MINI_STANDARD_PROVIDER_ERROR_ORACLE: &str =
@@ -95,7 +84,6 @@ pub const SCENARIO_MINI_AGENT_PARALLEL_JOIN_ORACLE: &str =
     "sim.oracle.scenario-mini.agent.parallel-spawn-join-determinism.v1";
 pub const TOOL_BOUNDARY_ORACLE: &str = "sim.oracle.tool-boundary-observed.v1";
 pub const TRIGGER_ORACLE: &str = "sim.oracle.trigger-delivery-observed.v1";
-pub const WORKER_STALE_COMPLETION_ORACLE: &str = "sim.oracle.worker-stale-completion-rejected.v1";
 pub const GENERATED_SUSPEND_RESUME_ORACLE: &str = "sim.oracle.generated-suspend-resume.v1";
 pub const GENERATED_FINAL_VALUE_ORACLE: &str =
     "sim.oracle.generated-final-value-semantic-channel.v1";
@@ -153,25 +141,22 @@ pub use mini_scenarios::{
     scenario_contract_generated_facts_for_semantic, scenario_contract_generated_facts_with_memo,
     scenario_contract_oracles,
 };
-use recovery_and_scheduling::*;
 pub use recovery_and_scheduling::{
     HEALTHY_LONG_TURN_LIVENESS_ORACLE, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS,
-    WORKER_FAILOVER_CONTINUATION_ORACLE, abandoned_requires_evidence, durable_effect_exactly_once,
-    healthy_long_turn_liveness, lease_time_monotonic, operational_coverage,
-    process_never_double_started, scheduler_controlled_delivery,
-    scheduler_owned_runtime_completions, state_machine_semantic_invariants,
-    worker_failover_continues_work, worker_stale_completion_rejected,
+    durable_effect_exactly_once, healthy_long_turn_liveness, operational_coverage,
+    scheduler_controlled_delivery, scheduler_owned_runtime_completions,
+    state_machine_semantic_invariants,
 };
 use rlm_contracts::*;
 use runtime_observation::*;
 pub use runtime_observation::{
     backend_failure_observed, cancellation_observed, cross_session_isolation, exec_code_observed,
     generated_runtime_provider_matrix, ingress_sessions_opened, observer_convergence,
-    observer_reconnect_observed, peak_concurrent_live_turns, process_wake_at_most_once,
-    process_wake_observed, provider_mutation_rejected, provider_transport_mutation_classified,
-    provider_turn_interleaving_depth, queued_ingress_observed, runtime_graph_acyclic,
-    runtime_session_graph_contract, runtime_single_active_agent_frame, runtime_usage_monotonic,
-    tool_boundary_observed, trigger_delivery_observed,
+    observer_reconnect_observed, peak_concurrent_live_turns, provider_mutation_rejected,
+    provider_transport_mutation_classified, provider_turn_interleaving_depth,
+    queued_ingress_observed, runtime_graph_acyclic, runtime_session_graph_contract,
+    runtime_single_active_agent_frame, runtime_usage_monotonic, tool_boundary_observed,
+    trigger_delivery_observed,
 };
 use semantic_laws::*;
 pub use semantic_laws::{
@@ -329,19 +314,6 @@ pub fn walk_generated_trace_oracles<S, V>(
         PROVIDER_TURN_INTERLEAVING_ORACLE,
         provider_turn_interleaving_depth(events, expectations)
     );
-    battery!(PROCESS_WAKE_ORACLE, process_wake_observed(summary, events));
-    battery!(
-        PROCESS_WAKE_AT_MOST_ONCE_ORACLE,
-        process_wake_at_most_once(events)
-    );
-    battery!(
-        PROCESS_NEVER_DOUBLE_STARTED_ORACLE,
-        process_never_double_started(events)
-    );
-    battery!(
-        ABANDONED_REQUIRES_EVIDENCE_ORACLE,
-        abandoned_requires_evidence(events)
-    );
     battery!(
         TOOL_BOUNDARY_ORACLE,
         tool_boundary_observed(summary, events)
@@ -380,20 +352,8 @@ pub fn walk_generated_trace_oracles<S, V>(
         durable_effect_exactly_once(summary)
     );
     battery!(
-        WORKER_STALE_COMPLETION_ORACLE,
-        worker_stale_completion_rejected(summary)
-    );
-    battery!(
-        WORKER_FAILOVER_CONTINUATION_ORACLE,
-        worker_failover_continues_work(events)
-    );
-    battery!(
         HEALTHY_LONG_TURN_LIVENESS_ORACLE,
         healthy_long_turn_liveness(events)
-    );
-    battery!(
-        LEASE_TIME_MONOTONIC_ORACLE,
-        lease_time_monotonic(events, expectations)
     );
     battery!(
         GENERATED_SUSPEND_RESUME_ORACLE,
@@ -418,14 +378,6 @@ pub fn walk_generated_trace_oracles<S, V>(
     battery!(
         SCENARIO_MINI_RUNTIME_CANCEL_IDLE_ORACLE,
         mini_runtime_cancellation_prevents_idle_claim(events)
-    );
-    battery!(
-        SCENARIO_MINI_RUNTIME_PROCESS_WAKE_DEDUPE_ORACLE,
-        mini_runtime_process_wake_duplicate_rejected(events)
-    );
-    battery!(
-        SCENARIO_MINI_RUNTIME_STALE_LEASE_ORACLE,
-        mini_runtime_stale_lease_commit_rejected(events, summary)
     );
     battery!(
         SCENARIO_MINI_STANDARD_STREAM_FINALIZE_ORACLE,

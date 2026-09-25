@@ -74,10 +74,15 @@ pub struct ScopedEffectController<'run> {
 ///   the guard remembers that one was made, so a command that no longer
 ///   writes what the journal recorded is caught after it returns;
 /// * a command the journal holds nothing for while it still holds entries
-///   beyond it is **refusing**: its first write is refused with the run's
-///   divergence, before anything is claimed, because the recorded run did not
-///   dispatch it there and nothing may be dispatched live inside a recorded
-///   run.
+///   beyond it is **refusing**: its first write under the run's namespace, or
+///   one that names no key (a group open, a proxied process command), is
+///   refused with the run's divergence, before anything is claimed, because
+///   the recorded run did not dispatch it there and nothing may be dispatched
+///   live inside a recorded run. A write outside the namespace — the call's
+///   presentation, keyed by its call id — passes: the recorded run may have
+///   made it with nothing under the namespace (an orchestrating body that
+///   issued no nested effect, a call settled in preparation), and the host
+///   judges it against its own record (FIG-3680).
 ///
 /// A command the journal holds while it still holds entries beyond it is
 /// **fenced by key**: a write to a key under the run's namespace that the
@@ -98,7 +103,7 @@ pub struct ScopedEffectController<'run> {
 /// nothing, so it carries no refusal.
 #[derive(Debug)]
 pub struct CommandJournalGuard {
-    refusal: Option<RuntimeEffectControllerError>,
+    refusal: Option<RefusedWriteRange>,
     fence: Option<RecordedKeyFence>,
     served_only: Option<ServedOnlyRange>,
     touched: std::sync::atomic::AtomicBool,
@@ -132,6 +137,26 @@ impl RecordedKeyFence {
     }
 }
 
+/// The run namespace a command the journal holds nothing for is refused
+/// writes in, while the journal still holds entries beyond it (FIG-3586,
+/// FIG-3680). A write that names no key cannot be placed, so it is refused
+/// too; a keyed write outside the namespace is the host's to judge and passes.
+#[derive(Clone, Debug)]
+pub struct RefusedWriteRange {
+    /// The namespace's closed key range, compared bytewise.
+    pub lower: String,
+    pub upper: String,
+    /// The refusal a write in the range meets.
+    pub refusal: RuntimeEffectControllerError,
+}
+
+impl RefusedWriteRange {
+    fn refuses(&self, key: Option<&str>) -> Option<RuntimeEffectControllerError> {
+        let judged = key.is_none_or(|key| self.lower.as_str() <= key && key <= self.upper.as_str());
+        judged.then(|| self.refusal.clone())
+    }
+}
+
 /// The run namespace a served-only command's effects are judged in, and the
 /// refusal an effect in it meets when its engine would run it live
 /// (FIG-3587, FIG-3719). Effects outside the namespace — a result's
@@ -153,10 +178,7 @@ impl ServedOnlyRange {
 }
 
 impl CommandJournalGuard {
-    fn with(
-        refusal: Option<RuntimeEffectControllerError>,
-        fence: Option<RecordedKeyFence>,
-    ) -> Self {
+    fn with(refusal: Option<RefusedWriteRange>, fence: Option<RecordedKeyFence>) -> Self {
         Self {
             refusal,
             fence,
@@ -171,9 +193,10 @@ impl CommandJournalGuard {
         Self::with(None, None)
     }
 
-    /// A guard that refuses the command's first write with `refusal`.
-    pub fn refusing(refusal: RuntimeEffectControllerError) -> Self {
-        Self::with(Some(refusal), None)
+    /// A guard that refuses the command's first write in `range` with its
+    /// refusal.
+    pub fn refusing(range: RefusedWriteRange) -> Self {
+        Self::with(Some(range), None)
     }
 
     /// A guard that admits writes to the keys `fence` holds and refuses any
@@ -223,12 +246,16 @@ impl CommandJournalGuard {
     pub fn admit(&self, key: Option<&str>) -> Result<(), RuntimeEffectControllerError> {
         self.touched
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        let refusal = self.refusal.clone().or_else(|| {
-            self.fence
-                .as_ref()
-                .zip(key)
-                .and_then(|(fence, key)| fence.refuses(key))
-        });
+        let refusal = self
+            .refusal
+            .as_ref()
+            .and_then(|range| range.refuses(key))
+            .or_else(|| {
+                self.fence
+                    .as_ref()
+                    .zip(key)
+                    .and_then(|(fence, key)| fence.refuses(key))
+            });
         match refusal {
             Some(refusal) => {
                 self.tripped

@@ -364,3 +364,51 @@ fn a_key_fence_leaves_keys_outside_the_namespace_to_the_host() {
     assert!(guard.admit(None).is_ok());
     assert!(guard.tripped().is_none());
 }
+
+/// FIG-3680: a command the journal holds nothing for while it holds entries
+/// beyond it refuses a write under the run's namespace, and one that names no
+/// key, but leaves a write outside the namespace — the presentation of an
+/// orchestrating call whose body issued no nested effect — to the host.
+#[test]
+fn a_refusing_guard_judges_only_the_run_namespace() {
+    let run = run_over(vec![key(1, "attempt:1")], Vec::new());
+    let command = issue_to(&run, 0);
+    let Ok(CommandAdmission::RefuseWrites(divergence)) =
+        run.enter(&command, CommandShape::ToolCall)
+    else {
+        panic!("nothing at the ordinal with an entry beyond it refuses writes");
+    };
+    let range = namespace().range();
+    let refusing = || {
+        lash_core::CommandJournalGuard::refusing(lash_core::RefusedWriteRange {
+            lower: range.lower.clone(),
+            upper: range.upper.clone(),
+            refusal: divergence.clone().into_error(&SealAttribution::default()),
+        })
+    };
+
+    let presenting = refusing();
+    assert!(
+        presenting
+            .admit(Some("lashlang:v2:opener:0000000000:present"))
+            .is_ok(),
+        "a write outside the namespace is the host's to judge"
+    );
+    assert!(presenting.touched() && presenting.tripped().is_none());
+
+    let dispatching = refusing();
+    let refusal = dispatching
+        .admit(Some(&key(0, "attempt:1")))
+        .expect_err("a write under the namespace refuses");
+    assert_eq!(refusal.code, RuntimeErrorCode::LashlangCellReplayDivergence);
+    assert!(
+        dispatching.tripped().is_some(),
+        "the run stops on the refusal"
+    );
+
+    let unkeyed = refusing();
+    assert!(
+        unkeyed.admit(None).is_err(),
+        "a write that names no key cannot be placed, so it refuses"
+    );
+}

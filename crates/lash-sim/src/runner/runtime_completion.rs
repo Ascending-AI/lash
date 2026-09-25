@@ -8,8 +8,6 @@ pub const SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS: &[BoundaryKind] = &[
     BoundaryKind::Tool,
     BoundaryKind::ExecCode,
     BoundaryKind::DurableEffect,
-    BoundaryKind::Worker,
-    BoundaryKind::ProcessWake,
     BoundaryKind::Observer,
 ];
 
@@ -19,16 +17,13 @@ pub(super) struct RuntimeCompletionState {
     pub(super) queued_boundaries: BTreeSet<String>,
     pub(super) provider_completions_by_session: BTreeMap<String, usize>,
     pub(super) active_provider_turns_by_session: BTreeMap<String, usize>,
-    pub(super) durable_first_completions: BTreeSet<String>,
-    /// When set, at most ONE live provider turn is admitted across ALL sessions:
-    /// a provider turn becomes ready only when no provider turn is in flight
-    /// anywhere. This is enabled ONLY for the cross-backend durable re-run
-    /// (SQLite/Postgres), where preserved cross-session concurrency would let the
-    /// async store's mid-op await points interleave differently from the
-    /// synchronous in-memory reference and change a timing-sensitive
-    /// `next_turn` `claim_and_run_pending` lease race — drifting the exchange
-    /// count. Durable-state equivalence is well-posed under serial execution. The
-    /// model-store generated SEARCH lane leaves this OFF and keeps full preserved
+    /// When set, at most ONE live provider turn is admitted across ALL sessions,
+    /// and a boundary that runs an effect in its own handler (tool, exec-code,
+    /// durable effect) waits until none is live. This is the SERIAL lane's
+    /// discipline: the server double runs one attempt at a time, and a live
+    /// turn parked on a scripted provider gate holds that turn, so a second
+    /// handler admitted beside it could only start by preempting it. The
+    /// generated SEARCH lane leaves this OFF and keeps full preserved
     /// concurrency (and its interleaving oracle) for concurrency fuzzing.
     pub(super) serialize_provider_turns: bool,
 }
@@ -61,31 +56,15 @@ impl RuntimeCompletionState {
                     *active = active.saturating_sub(1);
                 }
             }
-            BoundaryKind::DurableEffect => {
-                if event
-                    .observed
-                    .get("replayed")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    return;
-                }
-                if let Some(durable_key) = durable_key(event) {
-                    self.durable_first_completions.insert(durable_key);
-                }
-            }
             BoundaryKind::ProviderEvent
             | BoundaryKind::Tool
             | BoundaryKind::ExecCode
-            | BoundaryKind::ProcessWake
-            | BoundaryKind::ProcessLifecycle
-            | BoundaryKind::Worker
+            | BoundaryKind::DurableEffect
             | BoundaryKind::Observer
             | BoundaryKind::Cancellation
             | BoundaryKind::Trigger
             | BoundaryKind::BackendFailure
-            | BoundaryKind::ProviderMutation
-            | BoundaryKind::LeaseTime => {}
+            | BoundaryKind::ProviderMutation => {}
         }
     }
 
@@ -137,8 +116,12 @@ impl RuntimeCompletionState {
         self.queued_boundaries.contains(boundary_id)
     }
 
-    fn durable_completed(&self, durable_key: &str) -> bool {
-        self.durable_first_completions.contains(durable_key)
+    /// Whether a boundary that runs its own handler may start now: never
+    /// beside a live provider turn of its session, and under the serial
+    /// discipline never beside any live provider turn.
+    fn handler_boundary_ready(&self, actor_alias: &str) -> bool {
+        !self.provider_active(actor_alias)
+            && (!self.serialize_provider_turns || !self.any_provider_active())
     }
 }
 
@@ -214,10 +197,9 @@ pub(super) fn runtime_completion_ready(
     match event.kind {
         BoundaryKind::Provider => {
             state.next_provider_turn_ready(event)
-                // Cross-backend durable re-run only: admit a provider turn only
-                // when none is live anywhere, so live turns never overlap and the
-                // backend's async-vs-sync store timing cannot change committed
-                // outcomes. The generated SEARCH lane leaves this off.
+                // Serial lane only: admit a provider turn only when none is
+                // live anywhere, so live turns never overlap. The generated
+                // SEARCH lane leaves this off.
                 && (!state.serialize_provider_turns || !state.any_provider_active())
         }
         BoundaryKind::Observer => {
@@ -234,10 +216,6 @@ pub(super) fn runtime_completion_ready(
         BoundaryKind::BackendFailure | BoundaryKind::ProviderMutation => {
             state.session_opened(&event.actor_alias) && !state.provider_active(&event.actor_alias)
         }
-        BoundaryKind::Worker => {
-            let session = completion_session_alias(event);
-            state.session_opened(&session) && !state.provider_active(&session)
-        }
         BoundaryKind::Cancellation => event
             .payload
             .get("target")
@@ -245,39 +223,17 @@ pub(super) fn runtime_completion_ready(
             .is_some_and(|target| state.queued_boundary_exists(target)),
         BoundaryKind::Tool | BoundaryKind::ExecCode => {
             state.provider_completed(&event.actor_alias)
-                && !state.provider_active(&event.actor_alias)
+                && state.handler_boundary_ready(&event.actor_alias)
         }
         BoundaryKind::DurableEffect => {
-            if state.provider_active(&event.actor_alias) {
-                return false;
-            }
-            if event.label.contains("replay") {
-                durable_key_from_event(event)
-                    .is_some_and(|durable_key| state.durable_completed(&durable_key))
-            } else {
-                state.session_opened(&event.actor_alias)
-            }
-        }
-        BoundaryKind::ProcessWake => {
-            let session = completion_session_alias(event);
-            state.session_opened(&session) && !state.provider_active(&session)
+            state.session_opened(&event.actor_alias)
+                && state.handler_boundary_ready(&event.actor_alias)
         }
         BoundaryKind::Ingress
         | BoundaryKind::QueuedIngress
         | BoundaryKind::ProviderEvent
-        | BoundaryKind::ProcessLifecycle
-        | BoundaryKind::Trigger
-        | BoundaryKind::LeaseTime => false,
+        | BoundaryKind::Trigger => false,
     }
-}
-
-fn completion_session_alias(event: &BoundaryEvent) -> String {
-    event
-        .payload
-        .get("session")
-        .and_then(Value::as_str)
-        .unwrap_or(&event.actor_alias)
-        .to_string()
 }
 
 pub(super) fn runtime_completion_family(kind: BoundaryKind) -> Option<RuntimeCompletionFamily> {
@@ -289,15 +245,11 @@ pub(super) fn runtime_completion_family(kind: BoundaryKind) -> Option<RuntimeCom
         BoundaryKind::Tool => RuntimeCompletionFamily::ToolReturn,
         BoundaryKind::ExecCode => RuntimeCompletionFamily::ExecResult,
         BoundaryKind::DurableEffect => RuntimeCompletionFamily::DurableEffectCompletion,
-        BoundaryKind::Worker => RuntimeCompletionFamily::WorkerLeaseCompletion,
-        BoundaryKind::ProcessWake => RuntimeCompletionFamily::ProcessWake,
         BoundaryKind::Observer => RuntimeCompletionFamily::ObserverSnapshot,
         BoundaryKind::Ingress
         | BoundaryKind::QueuedIngress
         | BoundaryKind::ProviderEvent
-        | BoundaryKind::ProcessLifecycle
-        | BoundaryKind::Trigger
-        | BoundaryKind::LeaseTime => return None,
+        | BoundaryKind::Trigger => return None,
     })
 }
 
@@ -353,40 +305,13 @@ pub(super) fn runtime_completion_units(
         BoundaryKind::ProviderMutation => "provider:mutated_script_parser_rejection",
         BoundaryKind::Tool => "runtime:tool_attempt_return",
         BoundaryKind::ExecCode => "runtime:exec_code_result",
-        BoundaryKind::DurableEffect => {
-            if event.label.contains("replay") {
-                "runtime:durable_effect_replay"
-            } else {
-                "runtime:durable_effect_local_completion"
-            }
-        }
-        BoundaryKind::Worker => "runtime:worker_stale_completion",
-        BoundaryKind::ProcessWake => "runtime:process_wake_delivery",
+        BoundaryKind::DurableEffect => "runtime:durable_effect_crash_redrive",
         BoundaryKind::Observer => "runtime:observer_snapshot",
         BoundaryKind::Provider
         | BoundaryKind::Ingress
         | BoundaryKind::QueuedIngress
         | BoundaryKind::ProviderEvent
-        | BoundaryKind::ProcessLifecycle
-        | BoundaryKind::Trigger
-        | BoundaryKind::LeaseTime => "runtime:completion",
+        | BoundaryKind::Trigger => "runtime:completion",
     };
     Ok(vec![RuntimeCompletionUnit::new(unit, event.at)])
-}
-
-fn durable_key(event: &crate::scheduler::DeliveredBoundary) -> Option<String> {
-    event
-        .observed
-        .get("durable_key")
-        .or_else(|| event.payload.get("durable_key"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
-fn durable_key_from_event(event: &BoundaryEvent) -> Option<String> {
-    event
-        .payload
-        .get("durable_key")
-        .and_then(Value::as_str)
-        .map(str::to_string)
 }

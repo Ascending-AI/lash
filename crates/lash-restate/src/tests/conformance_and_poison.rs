@@ -60,29 +60,6 @@ lash_conformance::turn_work_driver_tests!({
     })
 });
 
-/// A recording-context invocation whose redrive resumes the same journal,
-/// allowing it to extend past what the crashed attempt recorded.
-pub(super) fn crash_redrive_conformance_invocation(
-    _scenario: &str,
-    scope: ExecutionScope,
-) -> lash_conformance::ConformanceInvocation {
-    let context = Arc::new(ReplayableRecordingContext::default());
-    let controller: Arc<dyn RuntimeEffectController> = Arc::new(
-        RestateRuntimeEffectController::new_for_test(Arc::clone(&context)),
-    );
-    lash_conformance::ConformanceInvocation::new(
-        controller,
-        scope,
-        || {},
-        move || {
-            context.start_replay_allowing_journal_extension();
-            Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
-                &context,
-            ))) as Arc<dyn RuntimeEffectController>
-        },
-    )
-}
-
 pub(super) fn replayable_conformance_invocation(
     context: Arc<ReplayableRecordingContext>,
 ) -> lash_conformance::ConformanceInvocation {
@@ -482,69 +459,6 @@ lash_conformance::wake_delivery_crash_tests!({
         },
     )
 });
-
-/// The Restate crash-matrix fixture: the tempdir guard, the store set for
-/// every port the laws do not certify, a SQLite state carrier per scenario,
-/// and the recording-context invocation factories.
-type RestateCrashFixture = (
-    tempfile::TempDir,
-    Arc<dyn lash_core::StoreSet>,
-    Box<dyn Fn(&str) -> Arc<dyn lash_core::RuntimePersistence>>,
-    fn(&str, ExecutionScope) -> lash_conformance::ConformanceInvocation,
-    fn(&str, ExecutionScope) -> lash_conformance::ConformanceInvocation,
-);
-
-async fn restate_turn_crash_fixture() -> RestateCrashFixture {
-    let dir = tempfile::tempdir().expect("Restate turn-crash conformance tempdir");
-    let root = dir.path().to_path_buf();
-    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("open the Restate turn-crash store set"),
-    );
-    (
-        dir,
-        stores,
-        Box::new(move |scenario: &str| {
-            let path = root.join(format!("restate-turn-crash-{scenario}.db"));
-            sync_await(async move {
-                Arc::new(
-                    lash_sqlite_store::Store::open(&path)
-                        .await
-                        .expect("open Restate turn-crash SQLite state carrier"),
-                ) as Arc<dyn lash_core::RuntimePersistence>
-            })
-        }),
-        crash_redrive_conformance_invocation,
-        // The Restate recording controller has no SQLite/Postgres effect
-        // journal: only the tool-attempt error-return placement runs here.
-        crash_redrive_conformance_invocation,
-    )
-}
-
-// FIG-3561: #2166 moved the trace leg here from active to parked. On main
-// before #2166 the trace law ignored the tier's invocation and always drove
-// the in-process native controller, so this leg traced a native turn over a
-// SQLite carrier and certified nothing about Restate. With the native tier
-// deleted the law runs on the tier's own controller, and the reference turn's
-// tool call opens an effect group the recording context cannot host: the turn
-// ends with its assistant text `trace` instead of `trace turn complete`. The
-// crash laws drive a turn outside any handler, so the server double cannot
-// host them either until they run through a handler turn runner. The SQL legs
-// hold the trace until then.
-lash_conformance::turn_crash_trace_tests!(
-    #[ignore = "parked: needs the live Restate harness for effect groups (FIG-3561)"]
-    {
-        restate_turn_crash_fixture().await
-    }
-);
-
-lash_conformance::turn_crash_recovery_tests!(
-    #[ignore = "parked: needs the live Restate harness for effect groups (FIG-3561)"]
-    {
-        restate_turn_crash_fixture().await
-    }
-);
 
 // A Restate host resolves its group children at the endpoint, so it is never
 // an unregistered host: `effect_group_unwired_host_tests!` does not apply.

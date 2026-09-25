@@ -270,19 +270,40 @@ fn full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler(
     );
 }
 
+/// The serial lane on the server double delivers one boundary sequence and
+/// reaches one outcome per seed.
+#[test]
+fn serial_engine_lane_is_deterministic_across_seeds() {
+    for seed in [3_u64, 11, 29] {
+        let run = || {
+            run_serial_lane(generate_workload(seed, "fast-random", 48).expect("workload"))
+                .expect("serial lane run")
+        };
+        let first = run();
+        let second = run();
+        let verdict = serial_engine_determinism(seed, &first, &second);
+        assert!(verdict.is_passed(), "{}", verdict.message);
+        assert!(
+            !first.schedule_trace.is_empty(),
+            "seed {seed}: the serial lane ran no attempt on the server"
+        );
+        assert!(
+            first
+                .delivered
+                .iter()
+                .any(|(_, kind)| *kind == BoundaryKind::DurableEffect),
+            "seed {seed}: the serial lane delivered no durable effect"
+        );
+    }
+}
+
 #[tokio::test]
 async fn runtime_completion_serialization_mutation_guard() {
     let seed = regression_corpus_seed("full-random", 12);
     let workload = generate_workload(seed, "full-random", 384).expect("workload");
-    let clock = SimClock::new();
-    let mut world = GeneratedRuntimeWorld::with_backend(
-        crate::backend::sim_memory_backend(clock.clone())
-            .await
-            .expect("SQLite memory backend"),
-        RuntimeEffectReplayStore::Memory,
-        true,
-        clock,
-    );
+    let mut world = GeneratedRuntimeWorld::serial(workload.seed)
+        .await
+        .expect("serial world");
 
     let (events, _summary) = drive_generated_workload(&mut world, &workload)
         .await
@@ -1318,8 +1339,8 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
             "scenario packages must not share identical generated transition fact graphs"
         );
     }
-    assert_eq!(report.generated_backend_regression_fixtures.len(), 8);
-    assert_eq!(report.counts.generated_backend_regression_fixtures, 8);
+    assert_eq!(report.generated_backend_regression_fixtures.len(), 6);
+    assert_eq!(report.counts.generated_backend_regression_fixtures, 6);
     let backend_regression_ids = report
         .generated_backend_regression_fixtures
         .iter()
@@ -1328,8 +1349,6 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     for fixture_id in [
         "queued-active-turn-cancel-race",
         "trigger-wakeup-routes-process",
-        "duplicate-process-wake-idempotency",
-        "worker-stale-completion-fenced",
         "durable-effect-crash-reopen-replay",
         "backend-retry-terminalization",
         "provider-protocol-terminalization",
@@ -1359,7 +1378,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         report
             .scenario_contracts
             .iter()
-            .any(|manifest| manifest.suite == "runtime" && manifest.contract_count == 8)
+            .any(|manifest| manifest.suite == "runtime" && manifest.contract_count == 6)
     );
     for suite in ["runtime", "standard", "rlm", "agent"] {
         assert!(
@@ -1388,7 +1407,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         ("runtime", "trigger-wakeup-operational-missing"),
         ("standard", "standard-provider-error-missing-parser-matrix"),
         ("rlm", "rlm-lashlang-cell-missing-continuation"),
-        ("agent", "agent-parallel-join-missing-wake-session"),
+        ("agent", "agent-parallel-join-missing-provider-session"),
     ] {
         assert!(
             negative_fixtures.contains(&(suite, fixture_id)),
@@ -1407,9 +1426,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         "cancellation",
         "duplicate-replayed-inputs",
         "backend-retry",
-        "lease-fencing",
         "provider-failure",
-        "worker-failover",
         "rlm-lashlang-exec",
         "tool-loop",
         "durable-effect",
@@ -1545,7 +1562,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         .collect::<BTreeMap<_, _>>();
     assert_eq!(
         runtime_transition_facts.len(),
-        8,
+        6,
         "every runtime scenario contract must have generated transition facts"
     );
     for (semantic_oracle, facts) in &runtime_transition_facts {
@@ -1557,8 +1574,8 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     assert!(
         runtime_transition_facts
             .get("runtime.command_only_queue_drain")
-            .is_some_and(|facts| facts.contains("command_queue_drains_with_real_lease_fence")),
-        "command-only runtime contract must assert queued source keys plus real lease fencing"
+            .is_some_and(|facts| facts.contains("command_queue_drains_queued_source_keys")),
+        "command-only runtime contract must assert its queued source keys"
     );
     assert!(
         runtime_transition_facts
@@ -1579,7 +1596,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         report
             .model_only_boundary_reviews
             .iter()
-            .any(|review| review.boundary_kind == "worker")
+            .any(|review| review.boundary_kind == "durable_effect")
     );
     assert!(
         report
@@ -1656,18 +1673,18 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
             .as_array()
             .unwrap()
             .len(),
-        8
+        6
     );
     assert_eq!(
         summary["counts"]["generated_backend_regression_fixtures"],
-        8
+        6
     );
     assert!(
         summary["model_only_boundary_reviews"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|review| review["boundary_kind"] == "worker")
+            .any(|review| review["boundary_kind"] == "durable_effect")
     );
 }
 
@@ -1717,24 +1734,12 @@ fn runtime_scenario_contracts_dispatch_to_contract_owned_facts() {
                 ],
             ),
             "runtime.command_only_queue_drain" => (
-                vec![
-                    line(
-                        1,
-                        BoundaryKind::QueuedIngress,
-                        json!({"source_key": "command-source"}),
-                    ),
-                    line(
-                        2,
-                        BoundaryKind::LeaseTime,
-                        json!({
-                            "runtime_lease_probe": {
-                                "real_lease_store": true,
-                                "session_execution_lease_fencing_token": 2,
-                            }
-                        }),
-                    ),
-                ],
-                vec!["command_queue_drains_with_real_lease_fence"],
+                vec![line(
+                    1,
+                    BoundaryKind::QueuedIngress,
+                    json!({"source_key": "command-source"}),
+                )],
+                vec!["command_queue_drains_queued_source_keys"],
             ),
             "runtime.queued_work_keeps_pending_input" => (
                 vec![line(
@@ -1809,36 +1814,6 @@ fn runtime_scenario_contracts_dispatch_to_contract_owned_facts() {
                     "cancellation_terminalized_pending_input",
                 ],
             ),
-            "runtime.advisory_lease_head_cas" => (
-                vec![line(
-                    1,
-                    BoundaryKind::Worker,
-                    json!({
-                        "stale_completion_rejected": true,
-                        "runtime_active_lease": {"fencing_token": 2},
-                        "runtime_stale_completion": {"fencing_token": 1},
-                    }),
-                )],
-                vec!["lease_release_rejects_stale_completion"],
-            ),
-            "runtime.stale_lease_ttl" => (
-                vec![line(
-                    1,
-                    BoundaryKind::Worker,
-                    json!({
-                        "lease_owner_changed": true,
-                        "runtime_worker_store": {
-                            "session_execution_lease_acquired_after_ttl": true,
-                            "worker_owned_work": {
-                                "second_owner_resumed_work": true,
-                                "second_owner_outranks_first": true,
-                                "source_key": "worker-source",
-                            },
-                        },
-                    }),
-                )],
-                vec!["stale_lease_ttl_takeover_resumes_worker_owned_work"],
-            ),
             semantic => panic!("missing runtime contract test fixture for {semantic}"),
         };
 
@@ -1874,78 +1849,7 @@ fn generated_transcript_write_failure_is_best_effort() {
 }
 
 #[test]
-fn postgres_effect_history_native_claim_is_consistent_across_reviews_docs_and_gate() {
-    let repo_root = repo_root_for_test();
-    let mut corpus = vec![(
-        "model_only_boundary_reviews".to_string(),
-        serde_json::to_string(&model_only_boundary_reviews()).expect("reviews JSON"),
-    )];
-    for relative in [
-        "scripts/confidence-gate.sh",
-        "docs/adr/0008-confidence-gate.md",
-        "docs/adr/0009-deterministic-simulation-harness.md",
-        "CONTEXT.md",
-    ] {
-        corpus.push((
-            relative.to_string(),
-            std::fs::read_to_string(repo_root.join(relative))
-                .unwrap_or_else(|err| panic!("read {relative}: {err}")),
-        ));
-    }
-
-    for (label, body) in &corpus {
-        for stale in [
-            "Postgres has no native Postgres effect-history controller",
-            "permanent_non_goal_without_postgres_runtime_effect_controller",
-            "without_postgres_runtime_effect_controller",
-            "not_available_in_lash_postgres_store",
-            "postgres-effect-history-exclusion",
-        ] {
-            assert!(
-                !body.contains(stale),
-                "{label} still contains stale Postgres effect-history exclusion wording: {stale}"
-            );
-        }
-    }
-
-    let reviews = &corpus[0].1;
-    assert!(reviews.contains("PostgresRuntimeEffectController"));
-    assert!(reviews.contains("lash_runtime_effect_replay"));
-    let script = corpus
-        .iter()
-        .find(|(label, _)| label == "scripts/confidence-gate.sh")
-        .map(|(_, body)| body)
-        .expect("confidence gate corpus");
-    assert!(script.contains("native_postgres_runtime_effect_controller"));
-    assert!(script.contains("postgres-effect-history-status.json"));
-}
-
-/// Under Cargo `CARGO_MANIFEST_DIR` is absolute; under Bazel it is the runfiles-relative
-/// package directory, so the walk ends at the empty path, which names the working directory.
-fn repo_root_for_test() -> std::path::PathBuf {
-    let mut cursor = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    loop {
-        let candidate = if cursor.as_os_str().is_empty() {
-            std::path::PathBuf::from(".")
-        } else {
-            cursor.clone()
-        };
-        if candidate.join("scripts/confidence-gate.sh").is_file()
-            && candidate.join("docs/adr/0008-confidence-gate.md").is_file()
-        {
-            return candidate;
-        }
-        if !cursor.pop() {
-            panic!(
-                "could not locate repository root from CARGO_MANIFEST_DIR={}",
-                env!("CARGO_MANIFEST_DIR")
-            );
-        }
-    }
-}
-
-#[test]
-fn runtime_completion_ready_gates_provider_tool_durable_worker_boundaries() {
+fn runtime_completion_ready_gates_provider_tool_and_durable_boundaries() {
     let mut state = RuntimeCompletionState::default();
     let provider_one = BoundaryEvent::new(
         "session-001:provider:001",
@@ -1971,34 +1875,18 @@ fn runtime_completion_ready_gates_provider_tool_durable_worker_boundaries() {
         "tool.return",
         json!({}),
     );
-    let durable_first = BoundaryEvent::new(
+    let durable = BoundaryEvent::new(
         "session-001:durable:001",
         "session-001",
         BoundaryKind::DurableEffect,
         7,
-        "durable.effect.complete",
+        "durable.sleep.crash-redrive",
         json!({"durable_key": "sleep/session-001/001"}),
-    );
-    let durable_replay = BoundaryEvent::new(
-        "session-001:durable:001:replay",
-        "session-001",
-        BoundaryKind::DurableEffect,
-        8,
-        "durable.effect.replay",
-        json!({"durable_key": "sleep/session-001/001"}),
-    );
-    let worker = BoundaryEvent::new(
-        "worker-001:stale-completion",
-        "worker-001",
-        BoundaryKind::Worker,
-        9,
-        "worker.stale-completion-rejected",
-        json!({"session": "session-001"}),
     );
 
     assert!(!runtime_completion_ready(&provider_one, &state));
     assert!(!runtime_completion_ready(&tool, &state));
-    assert!(!runtime_completion_ready(&worker, &state));
+    assert!(!runtime_completion_ready(&durable, &state));
     state.observe(&test_delivered(
         0,
         "session-001:ingress",
@@ -2009,9 +1897,7 @@ fn runtime_completion_ready_gates_provider_tool_durable_worker_boundaries() {
     assert!(runtime_completion_ready(&provider_one, &state));
     assert!(!runtime_completion_ready(&provider_two, &state));
     assert!(!runtime_completion_ready(&tool, &state));
-    assert!(runtime_completion_ready(&durable_first, &state));
-    assert!(!runtime_completion_ready(&durable_replay, &state));
-    assert!(runtime_completion_ready(&worker, &state));
+    assert!(runtime_completion_ready(&durable, &state));
 
     state.observe(&test_delivered(
         1,
@@ -2023,17 +1909,32 @@ fn runtime_completion_ready_gates_provider_tool_durable_worker_boundaries() {
     assert!(runtime_completion_ready(&provider_two, &state));
     assert!(runtime_completion_ready(&tool, &state));
 
-    state.observe(&test_delivered(
-        2,
-        "session-001:durable:001",
-        "session-001",
-        BoundaryKind::DurableEffect,
-        json!({
-            "durable_key": "sleep/session-001/001",
-            "replayed": false
-        }),
+    // Under the serial discipline a handler boundary never starts beside a
+    // live provider turn of any session.
+    let mut serial = RuntimeCompletionState {
+        serialize_provider_turns: true,
+        ..RuntimeCompletionState::default()
+    };
+    for alias in ["session-001", "session-002"] {
+        serial.observe(&test_delivered(
+            0,
+            &format!("{alias}:ingress"),
+            alias,
+            BoundaryKind::Ingress,
+            json!({}),
+        ));
+    }
+    assert!(runtime_completion_ready(&durable, &serial));
+    serial.provider_started("session-002");
+    assert!(!runtime_completion_ready(&durable, &serial));
+    serial.observe(&test_delivered(
+        1,
+        "session-002:provider:001",
+        "session-002",
+        BoundaryKind::Provider,
+        json!({}),
     ));
-    assert!(runtime_completion_ready(&durable_replay, &state));
+    assert!(runtime_completion_ready(&durable, &serial));
 }
 
 #[test]
@@ -2164,14 +2065,14 @@ fn runtime_completion_backend_mutation_idle_session_mutation_guard() {
 }
 
 #[test]
-fn runtime_completion_process_wake_and_observer_readiness_and_units() {
-    let wake = BoundaryEvent::new(
-        "session-001:process-wake:001",
+fn runtime_completion_durable_and_observer_readiness_and_units() {
+    let durable = BoundaryEvent::new(
+        "session-001:durable-effect:001",
         "session-001",
-        BoundaryKind::ProcessWake,
+        BoundaryKind::DurableEffect,
         1,
-        "process.wake",
-        json!({"session": "session-001"}),
+        "durable.sleep.crash-redrive",
+        json!({"durable_key": "sleep/session-001/001"}),
     );
     let observer = BoundaryEvent::new(
         "session-001:observer:001",
@@ -2184,8 +2085,8 @@ fn runtime_completion_process_wake_and_observer_readiness_and_units() {
     let mut state = RuntimeCompletionState::default();
 
     assert!(
-        !runtime_completion_ready(&wake, &state),
-        "process wake must not run before its session opens"
+        !runtime_completion_ready(&durable, &state),
+        "a durable effect must not run before its session opens"
     );
     assert!(
         !runtime_completion_ready(&observer, &state),
@@ -2199,10 +2100,7 @@ fn runtime_completion_process_wake_and_observer_readiness_and_units() {
         BoundaryKind::Ingress,
         json!({}),
     ));
-    assert!(
-        runtime_completion_ready(&wake, &state),
-        "process wake is ready once session is open and idle"
-    );
+    assert!(runtime_completion_ready(&durable, &state));
     assert!(
         !runtime_completion_ready(&observer, &state),
         "observer is not ready until turn 1 completes"
@@ -2210,8 +2108,8 @@ fn runtime_completion_process_wake_and_observer_readiness_and_units() {
 
     state.provider_started("session-001");
     assert!(
-        !runtime_completion_ready(&wake, &state),
-        "process wake is not ready while provider turn is active"
+        !runtime_completion_ready(&durable, &state),
+        "a durable effect is not ready while its session's provider turn is active"
     );
 
     state.observe(&test_delivered(
@@ -2221,27 +2119,27 @@ fn runtime_completion_process_wake_and_observer_readiness_and_units() {
         BoundaryKind::Provider,
         json!({}),
     ));
-    assert!(
-        runtime_completion_ready(&wake, &state),
-        "process wake is ready again once provider turn settles"
-    );
+    assert!(runtime_completion_ready(&durable, &state));
     assert!(
         runtime_completion_ready(&observer, &state),
         "observer is ready once turn 1 completes"
     );
 
     assert_eq!(
-        runtime_completion_family(wake.kind),
-        Some(RuntimeCompletionFamily::ProcessWake)
+        runtime_completion_family(durable.kind),
+        Some(RuntimeCompletionFamily::DurableEffectCompletion)
     );
     assert_eq!(
         runtime_completion_family(observer.kind),
         Some(RuntimeCompletionFamily::ObserverSnapshot)
     );
 
-    let wake_units = runtime_completion_units(&wake).expect("wake units");
-    assert_eq!(wake_units.len(), 1);
-    assert_eq!(wake_units[0].unit, "runtime:process_wake_delivery");
+    let durable_units = runtime_completion_units(&durable).expect("durable units");
+    assert_eq!(durable_units.len(), 1);
+    assert_eq!(
+        durable_units[0].unit,
+        "runtime:durable_effect_crash_redrive"
+    );
 
     let observer_units = runtime_completion_units(&observer).expect("observer units");
     assert_eq!(observer_units.len(), 1);
@@ -2258,15 +2156,11 @@ fn is_scheduler_owned_runtime_completion_matches_kinds() {
         BoundaryKind::Tool,
         BoundaryKind::ExecCode,
         BoundaryKind::DurableEffect,
-        BoundaryKind::ProcessWake,
-        BoundaryKind::ProcessLifecycle,
-        BoundaryKind::Worker,
         BoundaryKind::Observer,
         BoundaryKind::Cancellation,
         BoundaryKind::Trigger,
         BoundaryKind::BackendFailure,
         BoundaryKind::ProviderMutation,
-        BoundaryKind::LeaseTime,
     ] {
         assert_eq!(
             is_scheduler_owned_runtime_completion(kind),
@@ -2314,18 +2208,11 @@ fn test_delivered(
 }
 
 #[tokio::test]
-async fn confidence_seed_claim_before_cancel_replays_exact_outcome() {
+async fn confidence_seed_cancellation_replays_exact_outcome() {
     let workload = generate_workload(0x80ea_b361_fe47_8810, "full-random", 2000).expect("workload");
     let trace = run_generated_workload_for_fixture(workload, "confidence-claim-regression")
         .await
         .expect("live workload");
-    let cancellation = trace
-        .events
-        .iter()
-        .find(|event| event.boundary_id == "session-002:cancellation:001")
-        .expect("pinned cancellation");
-    assert_eq!(cancellation.observed["cancel_outcome"], "already_claimed");
-    assert_eq!(cancellation.observed["cancelled"], false);
     assert!(
         trace
             .events
@@ -2335,17 +2222,6 @@ async fn confidence_seed_claim_before_cancel_replays_exact_outcome() {
     );
     crate::replay::replay_trace(Path::new("confidence-claim-regression"), &trace)
         .expect("exact cancellation replay");
-    let mut missing_admissions = trace.clone();
-    for event in &mut missing_admissions.events {
-        event
-            .payload
-            .as_object_mut()
-            .expect("payload")
-            .remove("provider_admissions");
-    }
-    assert!(
-        crate::replay::replay_trace(Path::new("missing-admissions"), &missing_admissions).is_err()
-    );
     let mut predecessor = trace;
     predecessor.schema = "lash.sim.trace.v1".to_string();
     assert!(matches!(

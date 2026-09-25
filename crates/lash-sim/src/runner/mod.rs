@@ -47,7 +47,8 @@ use crate::minimize::{MinimizeError, minimize_trace};
 use crate::oracles::{
     LiveProviderFailureFacts, REPLAY_DETERMINISM_ORACLE, combine_oracles,
     live_provider_failure_coverage, peak_concurrent_live_turns, pending_tool_completion,
-    runtime_final_value_semantic, runtime_provider_turn, scenario_contract_generated_facts,
+    replay_determinism, runtime_final_value_semantic, runtime_provider_turn,
+    scenario_contract_generated_facts,
 };
 use crate::provider::{
     ProviderWireEvent, ProviderWireHeader, ProviderWireScript, ScriptedLlmHttpExchange,
@@ -55,7 +56,7 @@ use crate::provider::{
 };
 use crate::provider_mutations::{ProviderMutationMatrixCache, is_transport_provider_mutation};
 use crate::replay::{ReplayError, replay_trace};
-use crate::runtime_boundaries::{RuntimeBoundaryHarness, RuntimeEffectReplayStore};
+use crate::runtime_boundaries::RuntimeBoundaryHarness;
 use crate::runtime_contracts::{
     RuntimeTurnObservation, require_passed, runtime_agent_frame_invariant_facts,
     runtime_final_value_invariant_facts, runtime_graph_invariant_facts, runtime_turn_contract,

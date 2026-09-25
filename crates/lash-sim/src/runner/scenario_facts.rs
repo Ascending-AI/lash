@@ -33,15 +33,6 @@ pub(super) fn scenario_transition_facts(
                     facts.push(trigger_wakeup_fact(contract, selected_events)?);
                     facts.push(queued_active_turn_fact(contract, selected_events)?);
                 }
-                "runtime.advisory_lease_head_cas" => {
-                    facts.push(worker_stale_completion_rejection_fact(
-                        contract,
-                        selected_events,
-                    )?);
-                }
-                "runtime.stale_lease_ttl" => {
-                    facts.push(worker_stale_lease_ttl_fact(contract, selected_events)?);
-                }
                 "runtime.observation_replay_preserves_input" => {
                     facts.push(observer_reconnect_transition_fact(
                         contract,
@@ -97,10 +88,6 @@ pub(super) fn scenario_backend_regression_reference(
         "runtime.command_before_turn_work" => (
             "trigger-wakeup-routes-process",
             "trigger occurrence records a stable source key, reserves a matching delivery, and starts process wake routing without live external input",
-        ),
-        "runtime.advisory_lease_head_cas" | "runtime.stale_lease_ttl" => (
-            "worker-stale-completion-fenced",
-            "stale worker completion is rejected by durable commit fencing while the live incarnation remains active",
         ),
         "standard.provider_error_without_checkpoint" => (
             "provider-protocol-terminalization",
@@ -321,27 +308,7 @@ fn command_queue_drain_fact(
                     .is_some_and(|source_key| !source_key.is_empty())
         })
         .collect::<Vec<_>>();
-    let lease_events = selected_events
-        .iter()
-        .filter(|line| {
-            line.event.kind == BoundaryKind::LeaseTime
-                && line
-                    .event
-                    .observed
-                    .pointer("/runtime_lease_probe/real_lease_store")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line
-                    .event
-                    .observed
-                    .pointer("/runtime_lease_probe/session_execution_lease_fencing_token")
-                    .and_then(Value::as_u64)
-                    .is_some()
-        })
-        .collect::<Vec<_>>();
-    let mut events = Vec::new();
-    events.extend(queued_events.iter().copied());
-    events.extend(lease_events.iter().copied());
+    let events = queued_events.clone();
     let observed = json!({
         "queued_inputs": queued_events.iter().map(|line| json!({
             "boundary_id": line.event.boundary_id,
@@ -349,17 +316,11 @@ fn command_queue_drain_fact(
             "input_state": line.event.observed.get("input_state").cloned().unwrap_or(Value::Null),
             "ingress_mode": line.event.observed.get("ingress_mode").cloned().unwrap_or(Value::Null),
         })).collect::<Vec<_>>(),
-        "lease_fences": lease_events.iter().map(|line| json!({
-            "boundary_id": line.event.boundary_id,
-            "session": line.event.actor_alias,
-            "fencing_token": line.event.observed.pointer("/runtime_lease_probe/session_execution_lease_fencing_token").cloned().unwrap_or(Value::Null),
-            "real_lease_store": true,
-        })).collect::<Vec<_>>(),
     });
     require_transition_fact(
         contract,
-        "command_queue_drains_with_real_lease_fence",
-        "command-only queued work carries scheduler-owned source keys and drains under real session-execution-lease fencing tokens",
+        "command_queue_drains_queued_source_keys",
+        "command-only queued work carries scheduler-owned source keys and drains",
         events,
         observed,
     )
@@ -419,108 +380,6 @@ fn observer_reconnect_transition_fact(
         contract,
         "observer_reconnect_replays_original_input_state",
         "observer reconnect boundary reads a concrete session observation with converged session id, turn index, graph, and transcript state",
-        events,
-        observed,
-    )
-}
-
-fn worker_stale_completion_rejection_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let events = selected_events
-        .iter()
-        .filter(|line| {
-            line.event.kind == BoundaryKind::Worker
-                && line
-                    .event
-                    .observed
-                    .get("stale_completion_rejected")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line.event.observed.get("runtime_active_lease").is_some()
-                && line
-                    .event
-                    .observed
-                    .get("runtime_stale_completion")
-                    .is_some()
-                && line
-                    .event
-                    .observed
-                    .pointer("/runtime_active_lease/fencing_token")
-                    .and_then(Value::as_u64)
-                    > line
-                        .event
-                        .observed
-                        .pointer("/runtime_stale_completion/fencing_token")
-                        .and_then(Value::as_u64)
-        })
-        .collect::<Vec<_>>();
-    let observed = json!({
-        "stale_completions": events.iter().map(|line| json!({
-            "boundary_id": line.event.boundary_id,
-            "active_fencing_token": line.event.observed.pointer("/runtime_active_lease/fencing_token").cloned().unwrap_or(Value::Null),
-            "stale_fencing_token": line.event.observed.pointer("/runtime_stale_completion/fencing_token").cloned().unwrap_or(Value::Null),
-            "stale_completion_rejected": true,
-        })).collect::<Vec<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "lease_release_rejects_stale_completion",
-        "stale worker completion carries an older fence and is rejected while the live lease remains active",
-        events,
-        observed,
-    )
-}
-
-fn worker_stale_lease_ttl_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let events = selected_events
-        .iter()
-        .filter(|line| {
-            line.event.kind == BoundaryKind::Worker
-                && line
-                    .event
-                    .observed
-                    .get("lease_owner_changed")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line
-                    .event
-                    .observed
-                    .pointer("/runtime_worker_store/session_execution_lease_acquired_after_ttl")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line
-                    .event
-                    .observed
-                    .pointer("/runtime_worker_store/worker_owned_work/second_owner_resumed_work")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line
-                    .event
-                    .observed
-                    .pointer("/runtime_worker_store/worker_owned_work/second_owner_outranks_first")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-        })
-        .collect::<Vec<_>>();
-    let observed = json!({
-        "stale_lease_takeovers": events.iter().map(|line| json!({
-            "boundary_id": line.event.boundary_id,
-            "initial_owner": line.event.observed.get("initial_owner").cloned().unwrap_or(Value::Null),
-            "active_owner": line.event.observed.get("active_owner").cloned().unwrap_or(Value::Null),
-            "source_key": line.event.observed.pointer("/runtime_worker_store/worker_owned_work/source_key").cloned().unwrap_or(Value::Null),
-            "second_owner_resumed_work": true,
-            "second_owner_outranks_first": true,
-        })).collect::<Vec<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "stale_lease_ttl_takeover_resumes_worker_owned_work",
-        "successor worker waits for the stale lease TTL, acquires a higher fence, and resumes the owned work",
         events,
         observed,
     )

@@ -92,7 +92,7 @@ fn provider_counter_gap_round_trips_and_stays_on_original_turn() {
 
 #[test]
 fn unmapped_scenario_semantics_fail_loudly_for_every_suite() {
-    let summary = AbstractWorldSummary::with_digest(0, 0, vec![], vec![], vec![]);
+    let summary = AbstractWorldSummary::with_digest(0, 0, vec![], vec![]);
 
     for (suite, verdict) in [
         (
@@ -767,7 +767,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         "unexpected RLM LashLang continuation failure: {err}"
     );
 
-    let mut no_observer_reconnect = events.clone();
+    let mut no_observer_reconnect = events;
     no_observer_reconnect.retain(|event| event.kind != BoundaryKind::Observer);
     let err = scenario_contract_generated_facts_for_semantic(
         "agent.durable_input_suspension_resolution",
@@ -777,18 +777,6 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
     assert!(
         err.contains("reconnected observer"),
         "unexpected Agent durable-input failure: {err}"
-    );
-
-    let mut no_join_worker = events;
-    no_join_worker.retain(|event| event.kind != BoundaryKind::Worker);
-    let err = scenario_contract_generated_facts_for_semantic(
-        "agent.parallel_spawn_and_join",
-        &no_join_worker,
-    )
-    .expect_err("Agent parallel spawn/join must require worker stale-completion evidence");
-    assert!(
-        err.contains("stale completion rejection"),
-        "unexpected Agent parallel-join failure: {err}"
     );
 }
 
@@ -914,7 +902,6 @@ fn coverage_oracles_are_failing_capable_not_presence_only() {
         observer_reconnect_observed(&summary, &events),
         backend_failure_observed(&summary, &events),
         provider_mutation_rejected(&summary, &events),
-        process_wake_observed(&summary, &events),
         tool_boundary_observed(&summary, &events),
         exec_code_observed(&summary, &events),
     ] {
@@ -936,7 +923,6 @@ fn coverage_oracles_are_failing_capable_not_presence_only() {
         observer_reconnect_observed(&summary, &[]),
         backend_failure_observed(&summary, &[]),
         provider_mutation_rejected(&summary, &[]),
-        process_wake_observed(&summary, &[]),
         tool_boundary_observed(&summary, &[]),
         exec_code_observed(&summary, &[]),
     ] {
@@ -986,88 +972,6 @@ async fn seeded_duplicate_raw_graph_row_mutation_fails_with_projection_contrast(
     let raw_verdict = runtime_graph_acyclic(&trace.durable_writes);
     assert!(!raw_verdict.is_passed(), "duplicate raw row must be red");
     assert!(raw_verdict.message.contains("duplicate row"));
-}
-
-fn process_wake_turn_event(
-    sequence: usize,
-    boundary_id: &str,
-    source_key: &str,
-    runtime_turn_id: Option<&TurnId>,
-) -> DeliveredBoundary {
-    delivered_with_payload(
-        sequence,
-        boundary_id,
-        "session-001",
-        BoundaryKind::ProcessWake,
-        json!({}),
-        json!({
-            "runtime_queued_work": {
-                "enqueued": true,
-                "claimed": runtime_turn_id.is_some(),
-                "runtime_turn_id": runtime_turn_id,
-                "source_key": source_key,
-            }
-        }),
-    )
-}
-
-#[test]
-fn process_wake_at_most_once_fails_on_duplicate_runtime_turns() {
-    let source_key = "process/wake/session-001/001";
-    let valid = vec![
-        process_wake_turn_event(
-            1,
-            "wake:first",
-            source_key,
-            Some(&TurnId::from("turn:first")),
-        ),
-        process_wake_turn_event(2, "wake:duplicate", source_key, None),
-    ];
-    assert!(process_wake_at_most_once(&valid).is_passed());
-
-    let duplicate = vec![
-        process_wake_turn_event(
-            1,
-            "wake:first",
-            source_key,
-            Some(&TurnId::from("turn:first")),
-        ),
-        process_wake_turn_event(
-            2,
-            "wake:duplicate",
-            source_key,
-            Some(&TurnId::from("turn:second")),
-        ),
-    ];
-    let verdict = process_wake_at_most_once(&duplicate);
-    assert!(!verdict.is_passed());
-    assert!(
-        verdict
-            .message
-            .contains("materialized into 2 runtime turns")
-    );
-
-    let missing_turn_id = vec![delivered_with_payload(
-        1,
-        "wake:missing-turn",
-        "session-001",
-        BoundaryKind::ProcessWake,
-        json!({}),
-        json!({
-            "runtime_queued_work": {
-                "enqueued": true,
-                "claimed": true,
-                "source_key": source_key,
-            }
-        }),
-    )];
-    let verdict = process_wake_at_most_once(&missing_turn_id);
-    assert!(!verdict.is_passed());
-    assert!(
-        verdict
-            .message
-            .contains("no runtime-turn materialization id")
-    );
 }
 
 #[test]

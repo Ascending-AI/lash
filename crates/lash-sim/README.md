@@ -17,8 +17,9 @@ the replay evidence. The `run` command has two modes:
 
 - `--mode evidence` (default): every seed writes trace/replay/minimize
   artifacts plus a best-effort review transcript (`.trace.txt`, with path and
-  SHA-256 recorded when present). Roughly minutes per seed; this is the
-  bounded evidence lane.
+  SHA-256 recorded when present), and runs the workload twice more in the
+  SERIAL lane (below). Roughly minutes per seed; this is the bounded evidence
+  lane.
 - `--mode search`: every seed runs live with the full oracle set plus an
   in-memory determinism replay; nothing is persisted per passing seed. A
   failing seed writes a complete reproducibility package under
@@ -26,6 +27,17 @@ the replay evidence. The `run` command has two modes:
   failing oracle, final summary, minimized regression package) and fails the
   run with the exact replay command. Roughly a second per seed, which is what
   makes plan-scale seed budgets real.
+
+Every turn and every effect boundary of a generated world runs where a
+deployment runs it: inside a handler of lash-restate's engine on the
+in-process Restate server double (`lash-restate-test`), seeded by the
+workload's seed, on virtual time (`backend::SimEngine`). SQLite is storage
+only. The search lane's server runs live attempts concurrently, so sessions
+interleave as they would against a real server; the serial lane
+(`sim.oracle.serial-engine-determinism.v1`) runs one live provider turn at a
+time on a server that runs one attempt at a time, and requires two runs of one
+seed to deliver the same boundaries, reach the same outcome and grant the
+server's turn in the same order, with no stall preemption.
 
 Count-based runs partition deterministically with `--shard <i>/<n>`: shard
 `i/n` owns every seed index where `index % n == i - 1`, so the union of all
@@ -85,10 +97,8 @@ bound, not a discovered runtime invariant violation.
   `lash-llm-transport`, with chunk-split invariance properties over the SSE
   framing layer and the Anthropic/Google stream parsers.
 - The fixed runtime proofs, the agent contracts and the provider, feedback
-  and logical-turn laws run each turn where a deployment runs one: inside a
-  handler of lash-restate's engine on the in-process Restate server double
-  (`lash-restate-test`), under the scenario's seed with serial scheduling
-  (`backend::SimEngine`). SQLite and PostgreSQL appear only as stores.
+  and logical-turn laws run each turn on the same engine, under their own
+  seeds with serial scheduling. SQLite and PostgreSQL appear only as stores.
 - The real SQLite transaction wrapper has a production-absent, `testing`
   feature-gated fault controller. `lash-sim backend-faults` deterministically
   injects aborts after `BEGIN IMMEDIATE` and before commit, a commit-boundary
@@ -98,17 +108,18 @@ bound, not a discovered runtime invariant violation.
   reproduction package before the command exits. The same command derives an
   explicit two-arm plan from the generated workload and records zero-, single-,
   paired-, and repeat-run evidence for its bounded composition oracle.
-- Generated traces are produced by `lash-sim.generated-workload.v10`, a
+- Generated traces are produced by `lash-sim.generated-workload.v11`, a
   deterministic state-machine generator over sessions, provider scripts,
   queued ingress, cancellation, triggers, observer reconnects, backend
-  failure choices, provider mutations, atomic tools, exec-code, process waits,
-  process wakes, worker lease/failover, retries, and duplicates.
+  failure choices, provider mutations, atomic tools, exec-code, durable
+  effects under crash and redrive, retries, and duplicates.
 - Generated traces include scheduler/completion evidence, a named
   `sim.oracle.operational-coverage.v1` oracle for the operational case set,
   and scenario contract oracles for Runtime, Standard, RLM, and Agent coverage
   without importing scenario test modules. Combined with interleaved live
-  turns, suspend/resume, a live failure turn, the invariant floor, and real
-  worker failover, this is seeded boundary orchestration over real execution,
+  turns, suspend/resume, a live failure turn, the invariant floor, and durable
+  effects redriven by the engine, this is seeded boundary orchestration over
+  real execution,
   not a claim that Tokio interleavings are deterministic.
 - Runtime, Standard, RLM, and Agent scenario contract metadata is exported
   from production/test-independent modules and serialized into `lash-sim`
@@ -120,9 +131,9 @@ bound, not a discovered runtime invariant violation.
   contract-specific generated transition shape, required evidence assertions,
   a family negative fixture, and matching verdicts.
 - Generated summaries include explicit model-only boundary reviews for the
-  remaining partially modeled durable-effect, worker, backend-failure,
-  provider-mutation, tool, exec-code, and process-wake boundaries, each with a
-  named oracle and artifact evidence.
+  remaining partially modeled durable-effect, backend-failure,
+  provider-mutation, tool, and exec-code boundaries, each with a named oracle
+  and artifact evidence.
 - Provider manifests include reviewed non-DST exclusions for remaining
   Codex/OAuth/direct provider paths so direct reqwest/OAuth seams are named
   instead of accidental.
@@ -175,7 +186,7 @@ The deferred cross-backend suites run in their named service gates.
   Agent suites each emit distinct per-contract generated semantic oracles,
   with package guards preventing protocol/agent contracts from sharing the
   same backing verdict or high-risk selected evidence while still retaining
-  the 13 real per-behavior mini-oracles.
+  the 11 real per-behavior mini-oracles.
 - One regression fixture is promoted under `crates/lash-sim/replays/`, and
   the promotion metadata is explicit that it is not a discovered product
   bug. The `queued-active-turn-cancel-race` fixture is a generated
@@ -186,13 +197,11 @@ The deferred cross-backend suites run in their named service gates.
   product regression has been discovered by this lane to date.
 - Generator substance is real: the fast profile is genuinely seed-random,
   provider mutations have distinct executable behaviors, queued-ingress mode
-  varies, and worker failover is generated as REAL failover — a second worker
-  incarnation reclaims the crashed owner's session-execution lease at a
-  strictly higher fencing token and CONTINUES the queued work the dead owner
-  could not, rejecting its stale completion
-  (`sim.oracle.worker-failover-continues-work.v1`). The abstract model no
-  longer fabricates worker fencing: it carries the real reclaim/fence facts
-  produced by the live lease store.
+  varies, and a durable effect is a REAL crash and redrive — its first handler
+  attempt runs the effect and dies after the engine recorded it, and the
+  engine replays the invocation into a redrive that is served the recorded
+  result without running the effect again
+  (`sim.oracle.durable-effect-exactly-once.v1`).
 - Failure capture is a first-class contract: a generated seed whose oracle
   fails persists the full reproducibility package under
   `failures/seed-<hex>/` before the run aborts, in both evidence and search

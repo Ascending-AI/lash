@@ -1205,9 +1205,8 @@ operational-coverage-missing-cancellation
 scheduler-owned-provider-completion-missing-evidence
 queued-input-operational-missing
 trigger-wakeup-operational-missing
-process-wake-operational-missing
 rlm-lashlang-cell-missing-continuation
-agent-parallel-join-missing-wake-session
+agent-parallel-join-missing-provider-session
 standard-provider-error-missing-parser-matrix
 standard-max-turn-stop-missing
 rlm-typed-finish-terminal-event-missing
@@ -1216,7 +1215,6 @@ agent-tuple-json-array-shape-broken
 agent-started-process-subagent-child-graph-missing
 agent-failed-child-task-fail-evidence-missing
 provider-mutation-runtime-completion-missing
-worker-failover-stale-rejection-missing
 backend-retry-runtime-completion-missing
 EOF
 }
@@ -1271,9 +1269,8 @@ run_minimizer_fixture_suite() {
     "crates/lash-sim/failure-fixtures/scheduler-owned-provider-completion-missing-evidence.json",
     "crates/lash-sim/failure-fixtures/queued-input-operational-missing.json",
     "crates/lash-sim/failure-fixtures/trigger-wakeup-operational-missing.json",
-    "crates/lash-sim/failure-fixtures/process-wake-operational-missing.json",
     "crates/lash-sim/failure-fixtures/rlm-lashlang-cell-missing-continuation.json",
-    "crates/lash-sim/failure-fixtures/agent-parallel-join-missing-wake-session.json",
+    "crates/lash-sim/failure-fixtures/agent-parallel-join-missing-provider-session.json",
     "crates/lash-sim/failure-fixtures/standard-provider-error-missing-parser-matrix.json",
     "crates/lash-sim/failure-fixtures/standard-max-turn-stop-missing.json",
     "crates/lash-sim/failure-fixtures/rlm-typed-finish-terminal-event-missing.json",
@@ -1282,7 +1279,6 @@ run_minimizer_fixture_suite() {
     "crates/lash-sim/failure-fixtures/agent-started-process-subagent-child-graph-missing.json",
     "crates/lash-sim/failure-fixtures/agent-failed-child-task-fail-evidence-missing.json",
     "crates/lash-sim/failure-fixtures/provider-mutation-runtime-completion-missing.json",
-    "crates/lash-sim/failure-fixtures/worker-failover-stale-rejection-missing.json",
     "crates/lash-sim/failure-fixtures/backend-retry-runtime-completion-missing.json"
   ],
   "test_filter": "minimizer",
@@ -1292,9 +1288,8 @@ run_minimizer_fixture_suite() {
     "scheduler_owned_provider_completion_missing_evidence": "failing-fixtures/scheduler-owned-provider-completion-missing-evidence/minimized-regression/package.json",
     "queued_input_operational_missing": "failing-fixtures/queued-input-operational-missing/minimized-regression/package.json",
     "trigger_wakeup_operational_missing": "failing-fixtures/trigger-wakeup-operational-missing/minimized-regression/package.json",
-    "process_wake_operational_missing": "failing-fixtures/process-wake-operational-missing/minimized-regression/package.json",
     "rlm_lashlang_cell_missing_continuation": "failing-fixtures/rlm-lashlang-cell-missing-continuation/minimized-regression/package.json",
-    "agent_parallel_join_missing_wake_session": "failing-fixtures/agent-parallel-join-missing-wake-session/minimized-regression/package.json",
+    "agent_parallel_join_missing_provider_session": "failing-fixtures/agent-parallel-join-missing-provider-session/minimized-regression/package.json",
     "standard_provider_error_missing_parser_matrix": "failing-fixtures/standard-provider-error-missing-parser-matrix/minimized-regression/package.json",
     "standard_max_turn_stop_missing": "failing-fixtures/standard-max-turn-stop-missing/minimized-regression/package.json",
     "rlm_typed_finish_terminal_event_missing": "failing-fixtures/rlm-typed-finish-terminal-event-missing/minimized-regression/package.json",
@@ -1303,7 +1298,6 @@ run_minimizer_fixture_suite() {
     "agent_started_process_subagent_child_graph_missing": "failing-fixtures/agent-started-process-subagent-child-graph-missing/minimized-regression/package.json",
     "agent_failed_child_task_fail_evidence_missing": "failing-fixtures/agent-failed-child-task-fail-evidence-missing/minimized-regression/package.json",
     "provider_mutation_runtime_completion_missing": "failing-fixtures/provider-mutation-runtime-completion-missing/minimized-regression/package.json",
-    "worker_failover_stale_rejection_missing": "failing-fixtures/worker-failover-stale-rejection-missing/minimized-regression/package.json",
     "backend_retry_runtime_completion_missing": "failing-fixtures/backend-retry-runtime-completion-missing/minimized-regression/package.json"
   }
 }
@@ -1626,7 +1620,7 @@ write_sim_lane_declarations() {
   "lane": "${lane}",
   "minimized_regression_packages": "included_in_lash_sim_run",
   "operational_coverage_oracle": "sim.oracle.operational-coverage.v1",
-  "operational_cases": "queueing_inputs,triggers,cancellation,observer_reconnects,provider_failures_mutations,process_wakes,tool_exec,durable_effects,worker_lease_failover,backend_choices,retries,duplicates",
+  "operational_cases": "queueing_inputs,triggers,cancellation,observer_reconnects,provider_failures_mutations,tool_exec,durable_effects,backend_choices,retries,duplicates",
   "scenario_contract_manifests": "included_in_lash_sim_summary",
   "scenario_contract_slices": "included_in_lash_sim_summary_with_generated_shape_transition_kind_and_negative_fixture",
   "sim_search_run": "$(scheduled_existing_artifact_path sim_search_run "$(schedule_lane_fallback_reason)")",

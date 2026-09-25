@@ -215,6 +215,16 @@ pub trait ConformanceTurnRunner: Send + Sync {
         panic!("this tier's turn runner cannot crash a turn from outside its attempt");
     }
 
+    /// The fault injector of the effect journal the runner's turns record
+    /// into, when the tier's engine keeps one a law can fault: a law arms a
+    /// journal claim, finalize or renew error through it. `None` when the
+    /// engine's journal is not the law's to fault.
+    fn effect_journal_faults(
+        &self,
+    ) -> Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults> {
+        None
+    }
+
     /// The replay keys of every effect the tier journaled for `scope`'s
     /// turn, or `None` when this runner cannot read them. A law finds the
     /// key of a [`JournalCut`] here, from a probe run of the same turn.
@@ -391,6 +401,12 @@ impl ConformanceTurnRunner for HostTurnRunner {
                 panic!("the crashing attempt ended ({end:?}) before its crash fired")
             }
         }
+    }
+
+    fn effect_journal_faults(
+        &self,
+    ) -> Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults> {
+        self.journal_faults.clone()
     }
 
     #[expect(

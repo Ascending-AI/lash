@@ -469,7 +469,6 @@ mod tests {
             aliases.iter().map(|alias| (*alias).to_string()).collect(),
             20,
             2,
-            4,
         )
     }
 
