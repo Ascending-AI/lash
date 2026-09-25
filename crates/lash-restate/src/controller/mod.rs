@@ -605,23 +605,22 @@ where
     }
 }
 
-#[async_trait::async_trait]
-impl<'ctx, C> RuntimeEffectController for RestateRuntimeEffectController<'ctx, C>
+impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
-    fn owns_commit_backpressure(&self) -> bool {
-        true
-    }
-
-    async fn open_effect_group(
+    /// Opens `group` on behalf of `opener`, the admitted scope of the
+    /// controller the group is opened through: the shape records it, and
+    /// every child the dispatcher runs is admitted from it (FIG-3780).
+    pub(crate) async fn open_effect_group_opened_by(
         &self,
         group: RuntimeEffectGroup,
+        opener: &lash_core::AdmittedScope,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        group.validate_execution_scope(group.invocation().execution_scope())?;
+        group.validate_execution_scope(opener.scope())?;
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
-        let shape = EffectGroupShape::from_group(&group)?;
+        let shape = EffectGroupShape::from_group(&group, opener)?;
         let open_request = EffectGroupOpenRequest {
             shape,
             content_checked: group.reopen() == lash_core::GroupReopen::RetainedContent,
@@ -727,6 +726,37 @@ where
                 Err(crate::effect_group::content_mismatch(&group_key, position))
             }
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl<'ctx, C> RuntimeEffectController for RestateRuntimeEffectController<'ctx, C>
+where
+    C: RestateControllerContext<'ctx>,
+{
+    fn owns_commit_backpressure(&self) -> bool {
+        true
+    }
+
+    /// A bare controller has no process admission of its own, so a group
+    /// opened on it is admitted unpinned: a process's groups open only under
+    /// its segment controller, which knows the incarnation.
+    async fn open_effect_group(
+        &self,
+        group: RuntimeEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        let opener =
+            lash_core::AdmittedScope::unpinned(group.invocation().execution_scope().clone())
+                .map_err(|error| {
+                    RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+                        format!(
+                            "effect group {} has no admitted opener: {error}",
+                            group.group_key()
+                        ),
+                    )
+                })?;
+        self.open_effect_group_opened_by(group, &opener).await
     }
 
     async fn await_next_settlement(

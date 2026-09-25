@@ -24,7 +24,9 @@ use crate::durable_wait::durable_wait_index_key_for_scope;
 /// scope's `LashDurableWaitIndex` object so its quiescence proof counts them.
 pub(super) struct ScopeRecordingController<'run, 'ctx, C> {
     pub(super) inner: &'run RestateRuntimeEffectController<'ctx, C>,
-    pub(super) scope: ExecutionScope,
+    /// The admitted scope this controller serves: the claim address its
+    /// effects fence on and, for a process, the incarnation it runs under.
+    pub(super) admitted: lash_core::AdmittedScope,
     /// The group child this controller's semantic admissions are minted
     /// under, when it was bound by
     /// [`RestateRuntimeEffectController::scoped_effect_controller_for_group_child`]
@@ -39,14 +41,15 @@ where
     /// The scope's index key when its effects are recorded: non-session
     /// scopes only.
     fn index_key(&self) -> Option<String> {
-        self.scope
+        self.admitted
+            .scope()
             .session_id()
             .is_none()
-            .then(|| durable_wait_index_key_for_scope(&self.scope))
+            .then(|| durable_wait_index_key_for_scope(self.admitted.scope()))
     }
 
     fn scope_retired(&self) -> RuntimeEffectControllerError {
-        match self.scope.journal_identity() {
+        match self.admitted.scope().journal_identity() {
             Ok(identity) => {
                 lash_core::facade_support::effect_replay_driver::scope_retired(identity.key())
             }
@@ -74,15 +77,16 @@ where
     where
         Self: 'a,
     {
+        // A rebound scope controller is a different admission domain: the
+        // binding survives only while the scope it was minted under does.
+        let binding = self
+            .binding
+            .clone()
+            .filter(|binding| binding.child.execution_scope == *admitted.scope());
         Arc::new(ScopeRecordingController {
             inner: self.inner,
-            scope: admitted.scope().clone(),
-            // A rebound scope controller is a different admission domain: the
-            // binding survives only while the scope it was minted under does.
-            binding: self
-                .binding
-                .clone()
-                .filter(|binding| binding.child.execution_scope == *admitted.scope()),
+            admitted,
+            binding,
         })
     }
 }
@@ -237,13 +241,13 @@ where
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        if envelope.invocation.execution_scope() != &self.scope {
+        if envelope.invocation.execution_scope() != self.admitted.scope() {
             return Err(RuntimeEffectControllerError::new(
                 lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch,
                 format!(
                     "runtime effect address scope {:?} does not match admitted controller scope {:?}",
                     envelope.invocation.execution_scope(),
-                    self.scope
+                    self.admitted.scope()
                 ),
             ));
         }
@@ -320,7 +324,7 @@ where
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        group.validate_execution_scope(&self.scope)?;
+        group.validate_execution_scope(self.admitted.scope())?;
         if let Some(index_key) = self.index_key()
             && !self
                 .inner
@@ -331,7 +335,9 @@ where
         {
             return Err(self.scope_retired());
         }
-        self.inner.open_effect_group(group).await
+        self.inner
+            .open_effect_group_opened_by(group, &self.admitted)
+            .await
     }
 
     async fn await_next_settlement(

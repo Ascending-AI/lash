@@ -107,17 +107,22 @@ pub trait EffectHost: AwaitEventResolver {
         )
     }
 
-    /// A group child's controller that an engine handler built over its own
-    /// invocation context, routed through this host's stack: whatever wraps
-    /// the controllers this host lends ([`scoped`](Self::scoped),
+    /// A controller that an engine handler built over its own invocation
+    /// context, routed through this host's stack: whatever wraps the
+    /// controllers this host lends ([`scoped`](Self::scoped),
     /// [`scoped_for_group_child`](Self::scoped_for_group_child)) wraps this
     /// one too, for as long as the handler's borrow lives.
     ///
-    /// A handler-driven engine (Restate) mints a group child's controller
-    /// from the child invocation's own context, never from this host, so
-    /// without this step the child's effects would bypass every layer its
-    /// opener's effects cross. The default is the controller unchanged: a
-    /// host that wraps nothing has nothing to add.
+    /// A handler-driven engine (Restate) mints the controllers of a group's
+    /// children (tool, timer and durable wait) and of a process segment from
+    /// the invocation's own context, never from this host, so without this
+    /// step their effects would bypass every layer the host's other effects
+    /// cross. Each is routed exactly once, where the engine hands it to core:
+    /// group children through the resolver
+    /// ([`GroupExecutors::route_handler_child_controller`](crate::GroupExecutors::route_handler_child_controller)),
+    /// segments in `DurableProcessWorker`. A turn handler's controller is the
+    /// embedder's to route. The default is the controller unchanged: a host
+    /// that wraps nothing has nothing to add.
     fn route_handler_child_controller<'run>(
         &self,
         controller: ScopedEffectController<'run>,

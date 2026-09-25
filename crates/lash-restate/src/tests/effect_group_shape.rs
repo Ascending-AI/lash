@@ -22,6 +22,7 @@ fn a_wire_shape_may_disagree_with_itself_and_is_refused_terminally() {
         replay_keys: vec!["child-0".to_owned()],
         wait_scope: ExecutionScope::runtime_operation("group-key"),
         membership: Vec::new(),
+        opener: lash_core::AdmittedScope::turn("session", "turn"),
     };
     let encoded = serde_json::to_vec(&mismatched).expect("serialize mismatched shape");
     let decoded: EffectGroupShape =
@@ -50,6 +51,7 @@ fn a_child_position_past_the_replay_keys_is_a_typed_terminal_error() {
         replay_keys: vec!["child-0".to_owned()],
         wait_scope: ExecutionScope::runtime_operation("group-key"),
         membership: vec!["{}".to_owned()],
+        opener: lash_core::AdmittedScope::turn("session", "turn"),
     };
 
     assert_eq!(shape.replay_key(0).expect("the recorded child"), "child-0");
@@ -76,6 +78,7 @@ fn a_shape_that_cannot_rebuild_its_children_is_refused_terminally() {
         replay_keys: vec!["child-0".to_owned(), "child-1".to_owned()],
         wait_scope: ExecutionScope::runtime_operation("group-key"),
         membership: Vec::new(),
+        opener: lash_core::AdmittedScope::turn("session", "turn"),
     };
     let error = empty
         .validate_wire()
@@ -94,6 +97,7 @@ fn a_shape_that_cannot_rebuild_its_children_is_refused_terminally() {
         replay_keys: vec!["child-0".to_owned(), "child-1".to_owned()],
         wait_scope: ExecutionScope::runtime_operation("group-key"),
         membership: vec!["{}".to_owned()],
+        opener: lash_core::AdmittedScope::turn("session", "turn"),
     };
     assert!(
         short

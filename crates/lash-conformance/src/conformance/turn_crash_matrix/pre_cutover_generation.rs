@@ -50,6 +50,10 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
 {
+    // One layered host for the whole law: a runtime installs its tool-child
+    // host get-or-init, so a host layered afresh per execution would strand
+    // every later execution's group children (see `LawSeamHost`).
+    let host = LawSeamHost::over(host);
     let scenario = "pre-cutover-generation-redrive";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let store = make(scenario) as Arc<dyn RuntimePersistence>;
@@ -71,13 +75,13 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
     let crashing: crate::ConformanceTurnAttempt = {
         let stores = Arc::clone(&stores);
         let store = Arc::clone(&store);
-        let host = Arc::clone(&host);
+        let host = host.clone();
         let identity = identity.clone();
         let tool = tool.clone();
         Arc::new(move |scoped| {
             let stores = Arc::clone(&stores);
             let store = SeamStore::wrap(Arc::clone(&store), seam.control.clone());
-            let host = Arc::clone(&host);
+            let host = host.clone();
             let identity = identity.clone();
             let seam = seam.clone();
             let tool = tool.clone();
@@ -147,7 +151,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
     let redrive: crate::ConformanceTurnAttempt = {
         let stores = Arc::clone(&stores);
         let store = make(scenario) as Arc<dyn RuntimePersistence>;
-        let host = Arc::clone(&host);
+        let host = host.clone();
         let identity = identity.clone();
         let tool = tool.clone();
         let admitted = admitted.clone();
@@ -155,7 +159,7 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
         Arc::new(move |scoped| {
             let stores = Arc::clone(&stores);
             let store = SeamStore::wrap(Arc::clone(&store), successor_seam.control.clone());
-            let host = Arc::clone(&host);
+            let host = host.clone();
             let identity = identity.clone();
             let seam = successor_seam.clone();
             let tool = tool.clone();
@@ -327,6 +331,10 @@ pub async fn pre_cutover_generation_turn_claim_is_refused_typed<F, S>(
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
 {
+    // One layered host for the whole law: a runtime installs its tool-child
+    // host get-or-init, so a host layered afresh per execution would strand
+    // every later execution's group children (see `LawSeamHost`).
+    let host = LawSeamHost::over(host);
     for (scenario, path) in [
         ("pre-cutover-generation-claim-direct", ClaimPath::Direct),
         ("pre-cutover-generation-claim-queued", ClaimPath::Queued),
@@ -342,7 +350,7 @@ pub async fn pre_cutover_generation_turn_claim_is_refused_typed<F, S>(
 async fn refuse_claim<F, S>(
     stores: &Arc<dyn crate::StoreSet>,
     make: &F,
-    host: &Arc<dyn crate::EffectHost>,
+    host: &LawSeamHost,
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     scenario: &str,
     path: ClaimPath,
@@ -371,13 +379,13 @@ async fn refuse_claim<F, S>(
     let (refusals, mut refused) = tokio::sync::mpsc::unbounded_channel();
     let attempt: crate::ConformanceTurnAttempt = {
         let stores = Arc::clone(stores);
-        let host = Arc::clone(host);
+        let host = host.clone();
         let identity = identity.clone();
         let tool = tool.clone();
         Arc::new(move |scoped| {
             let stores = Arc::clone(&stores);
             let store = SeamStore::wrap(Arc::clone(&store), seam.control.clone());
-            let host = Arc::clone(&host);
+            let host = host.clone();
             let identity = identity.clone();
             let seam = seam.clone();
             let tool = tool.clone();
