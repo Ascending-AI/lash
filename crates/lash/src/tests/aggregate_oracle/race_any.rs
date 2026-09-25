@@ -45,6 +45,12 @@ async fn await_turn_end(driven: &DrivenOracle) {
 
 /// §11 clause 4: a timer admitted beside a held tool wins the race, and the
 /// aggregate resumes while the tool is still inside its attempt.
+///
+/// The leaf after the race holds too. The timer can fire before the loser's
+/// dispatch reaches the host, and a turn that ran on to `finish` would then
+/// close the group and cancel the loser before it ever started; holding
+/// `after` keeps the turn open until the loser has been observed inside its
+/// attempt, so the case never depends on the loser beating the timer.
 async fn a_race_resumes_on_its_timer_while_a_held_tool_runs(tier: &JournaledTier) -> Result<()> {
     let driven = drive_cells(
         tier,
@@ -54,14 +60,14 @@ async fn a_race_resumes_on_its_timer_while_a_held_tool_runs(tier: &JournaledTier
   oracle.step({ id: "slow", hold: true }),
   sleep(20)
 ]);
-await oracle.step({ id: "after" });
+await oracle.step({ id: "after", hold: true });
 finish({ timedOut: winner === undefined });"#,
         )],
     )
     .await?;
 
-    driven.theatre.await_started("slow").await;
     driven.theatre.await_started("after").await;
+    driven.theatre.await_started("slow").await;
     assert!(
         !driven.theatre.settled().contains(&"slow".to_string()),
         "{}: the race resumed on its timer while the held tool had not settled, saw {:?}",
@@ -69,6 +75,7 @@ finish({ timedOut: winner === undefined });"#,
         driven.theatre.settled()
     );
     driven.theatre.release("slow");
+    driven.theatre.release("after");
     let run = driven.finish().await?;
     assert_eq!(
         run.final_value(),
