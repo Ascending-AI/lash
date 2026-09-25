@@ -68,6 +68,12 @@ DROP TABLE IF EXISTS lash_pending_turn_inputs CASCADE;
 
 DROP TABLE IF EXISTS lash_session_ingress CASCADE;
 
+DROP TABLE IF EXISTS lash_session_roots CASCADE;
+
+DROP TABLE IF EXISTS lash_session_root_inputs CASCADE;
+
+DROP TABLE IF EXISTS lash_control_intents CASCADE;
+
 DROP TABLE IF EXISTS lash_attachment_manifest CASCADE;
 
 DROP TABLE IF EXISTS lash_attachment_condemnations CASCADE;
