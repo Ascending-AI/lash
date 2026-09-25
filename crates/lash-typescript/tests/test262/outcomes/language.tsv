@@ -5297,7 +5297,7 @@ test/language/reserved-words/label-ident-null-escaped.js	pass	-
 test/language/reserved-words/label-ident-null.js	pass	-
 test/language/reserved-words/label-ident-true-escaped.js	pass	-
 test/language/reserved-words/label-ident-true.js	pass	-
-test/language/reserved-words/unreserved-words.js	fail	FIG-3710
+test/language/reserved-words/unreserved-words.js	harness	binding-collision
 test/language/rest-parameters/array-pattern.js	pass	-
 test/language/rest-parameters/arrow-function.js	pass	-
 test/language/rest-parameters/expected-argument-count.js	pass	-

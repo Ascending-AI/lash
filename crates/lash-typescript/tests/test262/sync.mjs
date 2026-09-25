@@ -136,6 +136,9 @@ const typescriptNames = [
   // ECMAScript constructs and operations the dialect refuses with no
   // upstream feature tag to hang the ruling on (FIG-3646). Each names the
   // refusal the selection shows, so every `refused` outcome maps to a row.
+  // The `arguments` object outside a non-arrow function (FIG-3708); no
+  // feature tag names it.
+  "arguments",
   "array-holes",
   "array-index-delete",
   "array-named-properties",

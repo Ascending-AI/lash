@@ -22,6 +22,7 @@ pub enum DiagnosticCode {
     AccessorUnsupported,
     PrototypeMutationUnsupported,
     ThisUnsupported,
+    ArgumentsUnsupported,
     NamespaceUnsupported,
     DecoratorUnsupported,
     DynamicImportUnsupported,
@@ -102,6 +103,7 @@ impl DiagnosticCode {
         Self::AccessorUnsupported,
         Self::PrototypeMutationUnsupported,
         Self::ThisUnsupported,
+        Self::ArgumentsUnsupported,
         Self::NamespaceUnsupported,
         Self::DecoratorUnsupported,
         Self::DynamicImportUnsupported,
@@ -205,6 +207,9 @@ impl DiagnosticCode {
             }
             Self::ThisUnsupported => {
                 "pass the value in as a parameter; `globalThis.name` holds durable session state"
+            }
+            Self::ArgumentsUnsupported => {
+                "declare an explicit `...rest` parameter and use it instead"
             }
             Self::NamespaceUnsupported => "declare the values at the top level of the cell",
             Self::DecoratorUnsupported => "call the wrapper function explicitly",
@@ -328,6 +333,7 @@ impl DiagnosticCode {
             | Self::AccessorUnsupported
             | Self::PrototypeMutationUnsupported
             | Self::ThisUnsupported
+            | Self::ArgumentsUnsupported
             | Self::NamespaceUnsupported
             | Self::DecoratorUnsupported
             | Self::DynamicImportUnsupported
@@ -417,6 +423,7 @@ impl DiagnosticCode {
             Self::AccessorUnsupported => "TS_ACCESSOR_UNSUPPORTED",
             Self::PrototypeMutationUnsupported => "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
             Self::ThisUnsupported => "TS_THIS_UNSUPPORTED",
+            Self::ArgumentsUnsupported => "TS_ARGUMENTS_UNSUPPORTED",
             Self::NamespaceUnsupported => "TS_NAMESPACE_UNSUPPORTED",
             Self::DecoratorUnsupported => "TS_DECORATOR_UNSUPPORTED",
             Self::DynamicImportUnsupported => "TS_DYNAMIC_IMPORT_UNSUPPORTED",

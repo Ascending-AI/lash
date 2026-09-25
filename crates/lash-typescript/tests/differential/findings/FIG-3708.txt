@@ -1,0 +1,7 @@
+arguments
+arguments.length
+typeof arguments
+(function () { return arguments.length; })(1, 2, 3)
+(function () { return arguments[1]; })(7, 8)
+(function () { return (() => arguments.length)(); })(1, 2)
+(() => arguments.length)()

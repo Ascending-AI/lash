@@ -112,6 +112,17 @@ bytecode, VM ABI, VM continuation, snapshot and semantic-hash versions move
 together; a continuation or snapshot from before cells is refused by its
 format version.
 
+Amended 2026-09-25 (FIG-3708): `arguments` outside a non-arrow function
+refuses under its own code, `TS_ARGUMENTS_UNSUPPORTED`; it previously
+borrowed `TS_THIS_UNSUPPORTED`. Inside a non-arrow function the arguments
+object is materialized as before — no behavior moved. The "v1 rejection
+classes" enumeration below is corrected in the same change: `var`,
+destructuring, `for...in`, `switch`, `do`/`while`, spread, optional chaining,
+enums, object methods, regular expressions, computed properties,
+array-literal elisions, parameter defaults and rest, compound assignment and
+every classic `for` form are accepted now, and the census and crate README
+are named as the executable source of truth over the prose list.
+
 ## Context
 
 Lash accepts model-authored code, and a model's prior on TypeScript is far
@@ -165,15 +176,23 @@ let the register understate the surface by nine methods for a full round.
 
 ### The v1 rejection classes
 
-Rejected with a stable code, statically: classes, generators, `var`,
-destructuring, `for...in`, non-canonical classic `for` forms (overruled
-by FIG-3706: every form is accepted), modules and imports, JSX, enums, namespaces, decorators, `eval` and `Function`,
-prototype access, accessors, object methods, regular expressions, BigInt,
-spread, optional chaining, `switch`, `do`/`while`, labels, `this`, `super`,
-`new`, `delete`, `in`, `instanceof`, exponentiation, bitwise operators, sequence
-expressions, tagged templates, computed properties, array-literal elisions
-(`[0, , 2]`), parameter defaults and rest parameters, and the compound
-assignment operators (`x += 1` and `a[0] += 5` alike). Identifiers beginning with `__typescript_` are reserved for the
+Rejected with a stable code, statically: classes and private names,
+generators, modules and imports in every form, JSX, namespaces, decorators,
+`eval` and `Function`, prototype access and mutation, accessors, BigInt,
+`with`, `debugger`, labels, `super` and the meta-properties (`new.target`,
+`import.meta`), `this` and `arguments` outside a function, `new` outside the
+constructor exception list, `instanceof` outside the heap kinds, `delete` of
+a non-reference or an array index, sequence (comma) expressions, tagged
+templates, `using` declarations, `for await`, mutable captures, function
+redeclaration, and unresolvable references. The first version of this list
+named constructs the dialect has since accepted — `var`, destructuring,
+`for...in`, `switch`, `do`/`while`, spread, optional chaining, enums, object
+methods, regular expressions, computed properties, array-literal elisions,
+parameter defaults and rest, compound assignment, and classic `for` in every
+form — so it is a map, not the source of truth: the census
+(`tests/test262/census.tsv`) and the crate README carry the executable list,
+and the refusals the pinned `tsc --strict` shares are ADR 0064's strictness
+table. Identifiers beginning with `__typescript_` are reserved for the
 lowerer's generated bindings.
 
 Three rejections are dialect-specific enough to state their reasons here.

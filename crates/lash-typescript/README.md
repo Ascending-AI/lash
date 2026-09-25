@@ -632,7 +632,18 @@ to an ordinary row. The session generator draws none of their shapes until
 then, each exclusion naming its entry here. They are listed so no divergence
 is silent while its fix is owed.
 
-None is open: FIG-3625, FIG-3626, FIG-3627 and FIG-3631 fixed the last four.
+- `arrow-arguments-argv` (found under FIG-3708, no ticket yet): an
+  `arguments` mention inside an arrow function reads the arrow's own call
+  arguments rather than the enclosing non-arrow function's arguments object —
+  `function f() { return (() => arguments.length)(); }` answers `0` where
+  Node answers `f`'s count — and in a top-level arrow it materializes the
+  arrow's empty argv where a bare mention refuses. The implicit `arguments`
+  binding a non-arrow function declares is keyed on a bare `arguments`
+  identifier in its own statements, so a nested arrow's mention is never
+  seen.
+
+None else is open: FIG-3625, FIG-3626, FIG-3627 and FIG-3631 fixed the last
+four before this one was found.
 
 ## Syntax, iteration, and Node traps
 
@@ -648,8 +659,9 @@ or method's `this` is its call's receiver (FIG-3700): the object of a member cal
 and the `forEach` of `Map`, `Set` and `URLSearchParams`), the holder a JSON
 replacer or `toJSON` is called on, and `undefined` for a plain call. An arrow's
 `this` is its enclosing function's. Top-level `this` rejects, including through
-an arrow outside every function, and `arguments` rejects with a rest-parameter
-replacement.
+an arrow outside every function. Inside a non-arrow function `arguments` is the
+call's arguments materialized; outside one it rejects as
+`TS_ARGUMENTS_UNSUPPORTED` with a rest-parameter replacement (FIG-3708).
 
 Iterator-returning `.entries()`, `.keys()`, and `.values()` calls, and
 `matchAll`, are accepted only when consumed directly by `for...of`, spread,

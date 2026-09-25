@@ -91,6 +91,12 @@ persists (`TS_FUNCTION_NOT_PERSISTED`); a top-level binding a closure writes is
 the session slot itself, reached live, so the next cell reads its current
 value. `TS_MUTABLE_CAPTURE_UNSUPPORTED` is deleted.
 
+Amended 2026-09-25 (FIG-3708): `arguments` outside a non-arrow function is
+an unsupported feature, not registered strictness, and it refuses under its
+own code `TS_ARGUMENTS_UNSUPPORTED` (previously `TS_THIS_UNSUPPORTED`) — a
+legacy exotic object whose use case rest parameters cover. Inside a
+non-arrow function the arguments object is supported; nothing moved.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves
@@ -213,7 +219,8 @@ aspirational:
    ADR claimed a snapshot deviation the code does not have.
 3. **Repair-carrying rejection.** Everything still rejected — classes,
    generators as a protocol, getters/setters, prototype surgery, `eval`,
-   labels, locale surfaces, host timer callbacks — rejects with a
+   labels, `arguments` outside a function, locale surfaces, host timer
+   callbacks — rejects with a
    diagnostic that names the construct and the in-dialect rewrite. The
    rejected set shrinks only by evidence: observed collision traffic
    promotes a construct into a ruling, in either direction.
