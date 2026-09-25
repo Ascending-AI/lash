@@ -322,6 +322,7 @@ mod walk {
 
     fn handover(segment_ordinal: u64) -> lash_core_execution::PersistedSegmentHandover {
         lash_core_execution::PersistedSegmentHandover {
+            writer: String::new(),
             segment_ordinal,
             handover: lash_core_execution::SegmentHandover {
                 reason: lash_core_execution::BoundaryReason::JournalBudget,

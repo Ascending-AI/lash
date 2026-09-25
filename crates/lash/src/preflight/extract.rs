@@ -748,6 +748,7 @@ mod tests {
         })
         .to_string();
         let payload = serde_json::to_string(&lash_core::PersistedSegmentHandover {
+            writer: String::new(),
             segment_ordinal: 1,
             handover: lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,

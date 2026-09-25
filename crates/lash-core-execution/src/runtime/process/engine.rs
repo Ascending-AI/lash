@@ -32,6 +32,14 @@ pub struct SegmentHandover {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PersistedSegmentHandover {
     pub segment_ordinal: u64,
+    /// The segment execution that wrote this handover: the nonce its
+    /// admission recorded. A second put by the same writer is that
+    /// execution's own retried write, and the store keeps the bytes it holds:
+    /// the engine state carries measured wall-clock time, so a redriven
+    /// segment re-derives the same handover with different bytes. Empty names
+    /// no writer and matches none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub writer: String,
     pub handover: SegmentHandover,
 }
 

@@ -11,6 +11,7 @@ pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segme
         .put_segment_handover(
             &ProcessId::from("mid-chain"),
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 3,
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,

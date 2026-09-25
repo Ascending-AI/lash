@@ -1934,9 +1934,10 @@ statement = "process_segment_handover.upsert_identical"
 backends = ["postgres"]
 kind = "ON CONFLICT"
 reason = """
-The conflict clause carries the refusal: a repeat of the same bytes is
-idempotent, a different handover writes no row and the caller raises the
-conflict.
+The conflict clause carries the refusal: a repeat of the same bytes, or any
+handover from the writer already parked there, is idempotent and keeps the
+parked bytes; another writer's handover writes no row and the caller raises
+the conflict.
 """
 
 [[dialect_only]]

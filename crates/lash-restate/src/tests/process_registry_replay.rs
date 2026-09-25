@@ -1660,6 +1660,7 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
         panic!("first incarnation must end at a segment boundary");
     };
     let persisted = lash_core::PersistedSegmentHandover {
+        writer: String::new(),
         segment_ordinal: 1,
         handover: first_handover,
     };
@@ -1896,6 +1897,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
             };
             let next = ordinal + 1;
             let persisted = lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: next,
                 handover: boundary,
             };

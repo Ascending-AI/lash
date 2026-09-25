@@ -25,6 +25,14 @@ impl SqliteProcessRegistry {
                         if existing == encoded {
                             return Ok(());
                         }
+                        // The writer's own retried write keeps the parked
+                        // bytes: a redriven segment re-derives its handover
+                        // with a different measured elapsed time.
+                        let parked: PersistedSegmentHandover =
+                            serde_json::from_str(&existing).map_err(process_decode_error)?;
+                        if !handover.writer.is_empty() && parked.writer == handover.writer {
+                            return Ok(());
+                        }
                         return Err(lash_core_execution::PluginError::Session(format!(
                             "process `{process_id}` segment {} handover conflict",
                             handover.segment_ordinal

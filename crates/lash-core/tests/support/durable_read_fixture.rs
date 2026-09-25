@@ -2294,6 +2294,7 @@ fn fixture_wait_state() -> WaitState {
 
 fn fixture_handover() -> PersistedSegmentHandover {
     PersistedSegmentHandover {
+        writer: String::new(),
         segment_ordinal: 1,
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,

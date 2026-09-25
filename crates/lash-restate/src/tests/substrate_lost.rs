@@ -193,6 +193,7 @@ impl HandedOverSegment {
             .put_segment_handover(
                 &ProcessId::from(process_id),
                 lash_core::PersistedSegmentHandover {
+                    writer: String::new(),
                     segment_ordinal: 1,
                     handover: lash_core::SegmentHandover {
                         reason: lash_core::BoundaryReason::JournalBudget,
@@ -458,6 +459,7 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
         .put_segment_handover(
             &process_id,
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 1,
                 handover: boundary,
             },
@@ -617,6 +619,7 @@ pub(super) async fn a_completed_segment_is_superseded_not_refused() {
         .put_segment_handover(
             &segment.registration.id,
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 2,
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -840,6 +843,160 @@ pub(super) async fn a_successor_reference_store_fault_is_retried_by_restate() {
             .map(|external| external.segment_ordinal()),
         Some(1),
         "the retry names the successor"
+    );
+}
+
+/// The failure code a terminal record carries, if it ended Failed.
+fn terminal_failure_code(record: &lash_core::ProcessRecord) -> Option<String> {
+    let outcome = serde_json::to_value(record.outcome.as_ref()?).ok()?;
+    fn find(value: &serde_json::Value) -> Option<String> {
+        match value {
+            serde_json::Value::Object(map) => map
+                .get("code")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| map.values().find_map(find)),
+            serde_json::Value::Array(items) => items.iter().find_map(find),
+            _ => None,
+        }
+    }
+    find(&outcome)
+}
+
+/// FIG-3809/FIG-3789: a handover write no retry can fix ends the process
+/// Failed, typed `process_segment_handover_write`, and publishes the terminal
+/// its awaiters wait on; the invocation never ends with the process Running.
+#[tokio::test]
+pub(super) async fn a_failed_handover_write_ends_the_process_failed_typed() {
+    let process_id = ProcessId::from("segment-failure-handover-write");
+    let stores = memory_process_stores().await;
+    let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
+    let continuations = Arc::clone(&stores.continuations);
+    let registration = rerunnable_registration(process_id.as_str());
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register the handing-over row");
+    let endpoint = Endpoint::builder()
+        .bind(
+            LashProcessWorkflowImpl::new_for_test(
+                Arc::new(BoundaryRunner),
+                Arc::clone(&registry),
+                Arc::clone(&continuations),
+            )
+            .serve(),
+        )
+        .build();
+    stores
+        .registry
+        .fail_next_external_ref_write(PluginError::Session(
+            "injected non-retryable reference write failure".to_string(),
+        ));
+    let output = invoke_process_workflow_endpoint(
+        &endpoint,
+        "run",
+        process_id.as_str(),
+        &segment_input(&registration, 0),
+        true,
+    )
+    .await
+    .expect("the segment ends inside its invocation");
+    assert_eq!(
+        restate_output_failure_message(&output),
+        None,
+        "the invocation publishes a terminal, it does not fail"
+    );
+    assert!(
+        matches!(
+            restate_output_json::<RestateProcessWorkflowOutput>(&output),
+            Some(RestateProcessWorkflowOutput::Terminal { .. })
+        ),
+        "the segment delivers the process terminal"
+    );
+    assert!(
+        restate_message_types(&output)
+            .expect("decode the segment")
+            .contains(&RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE),
+        "the root segment resolves the terminal promise awaiters wait on"
+    );
+    let record = registry
+        .get_process(&process_id)
+        .await
+        .expect("read the failed row")
+        .expect("the row stays registered");
+    assert!(record.is_terminal(), "the process ended: {record:?}");
+    assert_eq!(
+        terminal_failure_code(&record).as_deref(),
+        Some("process_segment_handover_write")
+    );
+    assert!(
+        continuations
+            .get_segment_handover(&process_id, 1)
+            .await
+            .expect("read the successor handover")
+            .is_none(),
+        "nothing was handed over"
+    );
+}
+
+/// FIG-3809/FIG-3789: a later segment admitted with no handover to resume
+/// from ends its process Failed, typed `process_segment_handover_missing`,
+/// and delivers the terminal to the root workflow awaiters wait on.
+#[tokio::test]
+pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
+    let process_id = ProcessId::from("segment-failure-handover-missing");
+    let stores = memory_process_stores().await;
+    let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
+    let continuations = Arc::clone(&stores.continuations);
+    let registration = rerunnable_registration(process_id.as_str());
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register the row");
+    let endpoint = Endpoint::builder()
+        .bind(
+            LashProcessWorkflowImpl::new_for_test(
+                Arc::new(BoundaryRunner),
+                Arc::clone(&registry),
+                Arc::clone(&continuations),
+            )
+            .serve(),
+        )
+        .build();
+    let suspended = invoke_endpoint_body_with_json_call_responses_then_suspend(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        endpoint_protocol::encode_invocation_body(
+            &format!("{}#1", process_id.as_str()),
+            &segment_input(&registration, 1),
+        )
+        .expect("encode segment 1"),
+        Vec::new(),
+    )
+    .await
+    .expect("the segment suspends on its root delivery");
+    assert_eq!(restate_output_failure_message(&suspended), None);
+    assert!(
+        restate_recorded_commands(&suspended)
+            .expect("decode the segment")
+            .iter()
+            .any(
+                |command| command.call.as_ref().is_some_and(|(service, handler)| {
+                    service == "LashProcessWorkflow" && handler == "complete_terminal"
+                })
+            ),
+        "the segment delivers the terminal to the root workflow"
+    );
+    let record = registry
+        .get_process(&process_id)
+        .await
+        .expect("read the failed row")
+        .expect("the row stays registered");
+    assert!(record.is_terminal(), "the process ended: {record:?}");
+    assert_eq!(
+        terminal_failure_code(&record).as_deref(),
+        Some("process_segment_handover_missing")
     );
 }
 

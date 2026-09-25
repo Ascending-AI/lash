@@ -192,6 +192,10 @@ impl ServerConfig {
     }
 }
 
+/// Told the crashed invocation's target (`Svc/key/handler`) when a crash
+/// drops its attempt.
+pub type CrashListener = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// One registered deployment: its id, its endpoint, what it serves and the
 /// hooks a test attached at registration. The server keeps them in
 /// registration order; the newest that serves a service name takes new
@@ -314,6 +318,9 @@ pub(crate) struct Shared {
     /// Told the new virtual time whenever it moves, so clocks the handlers
     /// read (a store set's) move with it.
     time_listener: OnceLock<Arc<dyn Fn(u64) + Send + Sync>>,
+    /// Told the crashed invocation's target after a crash drops its attempt
+    /// and before the replaying attempt starts.
+    crash_listener: OnceLock<CrashListener>,
     /// The server's tasks still alive: attempts and time and turn drivers.
     tasks: Arc<AtomicUsize>,
 }
@@ -796,6 +803,7 @@ impl RestateTestServer {
             activity: Arc::new(Notify::new()),
             granted: Notify::new(),
             time_listener: OnceLock::new(),
+            crash_listener: OnceLock::new(),
             tasks: Arc::new(AtomicUsize::new(0)),
         });
         if let TimeMode::AutoAdvance { idle, horizon } = shared.config.time {
@@ -1022,6 +1030,16 @@ impl RestateTestServer {
     /// Crash attempts at random frames, seeded by the server's seed.
     pub fn crash_randomly(&self, random: Option<RandomCrashes>) {
         self.shared.lock().crash_plan.set_random(random);
+    }
+
+    /// Call `listener` with the crashed invocation's target
+    /// (`Svc/key/handler`) every time a crash drops an attempt, before the
+    /// replaying attempt starts (once; a second listener is refused). It runs
+    /// under the server's lock, so it must not call back into the server: a
+    /// test swaps what the deployment runs on here, as a restarted
+    /// deployment comes back with a fresh process.
+    pub fn on_crash(&self, listener: CrashListener) -> bool {
+        self.shared.crash_listener.set(listener).is_ok()
     }
 
     pub fn clear_crashes(&self) {

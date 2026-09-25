@@ -18,7 +18,7 @@ use lash_core::{AdmittedScope, ScopedEffectController, StoreSet};
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
     RestateAuthorityId, RestateBackend, RestateConnection, RestateIngressClient,
-    RestateProcessWorkerSlot, RestateQueuedWork,
+    RestateProcessServing, RestateProcessWorkerSlot, RestateQueuedWork,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
@@ -92,7 +92,7 @@ impl std::fmt::Debug for RestateTestBackend {
 /// `ServerConfig::default()` unless a test needs another time mode, protocol
 /// version, retry policy or always-replay.
 pub async fn backend(seed: u64, config: ServerConfig) -> Result<RestateTestBackend, BackendError> {
-    RestateTestBackend::build(config.with_seed(seed), "", DeploymentHooks::default()).await
+    RestateTestBackend::build(config.with_seed(seed), None, "", DeploymentHooks::default()).await
 }
 
 /// [`backend`] with a `label` and deployment `hooks` on the first build, so
@@ -106,12 +106,30 @@ pub async fn backend_with_build(
     label: impl Into<String>,
     hooks: DeploymentHooks,
 ) -> Result<RestateTestBackend, BackendError> {
-    RestateTestBackend::build(config.with_seed(seed), label, hooks).await
+    RestateTestBackend::build(config.with_seed(seed), None, label, hooks).await
+}
+
+/// [`backend`], whose endpoint cuts every process segment after
+/// `segment_effect_budget` completed effects instead of the default 10,000,
+/// so a short process crosses segment boundaries.
+pub async fn backend_with_segment_budget(
+    seed: u64,
+    config: ServerConfig,
+    segment_effect_budget: u64,
+) -> Result<RestateTestBackend, BackendError> {
+    RestateTestBackend::build(
+        config.with_seed(seed),
+        Some(segment_effect_budget),
+        "",
+        DeploymentHooks::default(),
+    )
+    .await
 }
 
 impl RestateTestBackend {
     async fn build(
         config: ServerConfig,
+        segment_effect_budget: Option<u64>,
         first_label: impl Into<String>,
         first_hooks: DeploymentHooks,
     ) -> Result<Self, BackendError> {
@@ -141,8 +159,13 @@ impl RestateTestBackend {
         // serves processes on whatever worker the fixture installs later.
         let processes = RestateProcessWorkerSlot::new();
         let jobs = Arc::new(ParkedJobs::default());
+        let serving = RestateProcessServing::from(processes.clone());
+        let serving = match segment_effect_budget {
+            Some(budget) => serving.with_segment_effect_budget_selector(move |_| budget),
+            None => serving,
+        };
         let endpoint = restate
-            .endpoint_builder(processes.clone())
+            .endpoint_builder(serving)
             .bind(HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority: authority.clone(),
@@ -227,6 +250,12 @@ impl RestateTestBackend {
     /// segment fails naming the empty worker slot.
     pub fn install_process_worker(&self, worker: DurableProcessWorker) {
         self.processes.install(worker);
+    }
+
+    /// The slot the endpoint serves process segments from. Clones share it,
+    /// so a crash listener can swap the worker the replaying attempt meets.
+    pub fn process_worker_slot(&self) -> RestateProcessWorkerSlot {
+        self.processes.clone()
     }
 
     /// Run `job` inside a workflow handler on the server, on the handler's

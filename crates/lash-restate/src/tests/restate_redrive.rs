@@ -997,6 +997,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         .await
         .expect("record retained Restate execution start");
     let persisted = lash_core::PersistedSegmentHandover {
+        writer: String::new(),
         segment_ordinal: 1,
         handover: lash_core::SegmentHandover {
             reason: lash_core::BoundaryReason::JournalBudget,
@@ -1089,13 +1090,15 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     );
 }
 
-/// FIG-2083: a terminal segment whose durable handover is gone must fail hard.
-/// The removed FIG-811 shim replayed `record.outcome` and re-issued
-/// `complete_terminal` from a missing durable fact. Current deployments retain
-/// handovers until pruning, so this branch only fired on pre-window state or a
-/// genuine bug; a missing handover may not fabricate a terminal completion.
+/// FIG-2083, under FIG-3809: a terminal segment whose durable handover is gone
+/// neither fabricates a terminal nor strands its process. A redrive of the
+/// deployed journal replays the runner from the handover its resume step
+/// journaled, so it delivers the stored terminal with no journal mismatch; a
+/// fresh attempt that finds no handover ends through the completion step,
+/// which keeps the terminal the process already holds.
 #[tokio::test]
-pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() {
+pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_its_journaled_handover()
+ {
     let process_id = "fig2083-missing-terminal-handover";
     let (registry, continuations) = process_stores();
     let registration = rerunnable_registration(process_id);
@@ -1120,6 +1123,7 @@ pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() 
         .put_segment_handover(
             &ProcessId::from(process_id),
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 1,
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -1179,14 +1183,42 @@ pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() 
             .is_some(),
         "the attempt commits a durable terminal outcome before its root delivery suspends"
     );
+    let stored = registry
+        .get_process(&ProcessId::from(process_id))
+        .await
+        .expect("read terminal process")
+        .expect("terminal process record")
+        .outcome;
     continuations
         .delete_segment_handovers(&ProcessId::from(process_id))
         .await
         .expect("model a terminal segment whose handover is no longer durable");
 
-    // A fresh attempt on the same terminal input must refuse on the absent
-    // handover instead of replaying the stored terminal outcome.
-    let refused = invoke_endpoint_body_with_json_call_responses_then_suspend(
+    // Redriving the deployed terminal-delivery journal replays the runner
+    // from the journaled handover: no mismatch, the stored terminal.
+    let replay = encode_process_terminal_delivery_replay(process_id, &input, &suspended)
+        .and_then(|replay| with_admission(&replay, &admission))
+        .expect("splice the deployed terminal delivery");
+    let redriven = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
+        .await
+        .expect("the redrive replays inside the invocation");
+    assert_eq!(
+        restate_error_code(&redriven),
+        None,
+        "the redrive replays its journaled handover: {:?}",
+        restate_error_message(&redriven)
+    );
+    assert!(
+        matches!(
+            restate_output_json::<RestateProcessWorkflowOutput>(&redriven),
+            Some(RestateProcessWorkflowOutput::Terminal { .. })
+        ),
+        "the redrive delivers the terminal its journal recorded"
+    );
+
+    // A fresh attempt admits no handover and ends through the completion
+    // step, which keeps the terminal the process already holds.
+    let fresh = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
@@ -1195,47 +1227,33 @@ pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() 
         Vec::new(),
     )
     .await
-    .expect("the missing handover must render inside the invocation");
-    let rendered = restate_output_failure_message(&refused)
-        .expect("a terminal segment without a durable handover must fail hard");
+    .expect("the fresh attempt suspends on its root delivery");
     assert!(
-        rendered.contains(&format!(
-            "missing persisted handover for process `{process_id}` segment 1"
-        )),
-        "a missing durable handover must not replay a terminal outcome: {rendered}"
+        restate_recorded_commands(&fresh)
+            .expect("decode the fresh attempt")
+            .iter()
+            .any(|command| command
+                .frame
+                .windows(b"lash.process.complete".len())
+                .any(|window| window == b"lash.process.complete")),
+        "the fresh attempt ends through the completion step"
     );
-
-    // Redriving the already-deployed terminal-delivery journal must also refuse
-    // hard, never fabricating a terminal completion from the missing handover.
-    //
-    // Operator note: a pre-lazy-cleanup journal that still carries the delivered
-    // commands is permanently stranded here. The handler now refuses at the
-    // absent handover before consuming them, so Restate surfaces a terminal
-    // JOURNAL_MISMATCH rather than the explicit refusal. That mismatch is
-    // intended, not corruption: the journal is no longer replayable under the
-    // current handover contract, and the process already holds its durable
-    // terminal, so the invocation must not be retried or re-completed.
-    let replay = encode_process_terminal_delivery_replay(process_id, &input, &suspended)
-        .and_then(|replay| with_admission(&replay, &admission))
-        .expect("splice the deployed terminal delivery");
-    let redriven = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
-        .await
-        .expect("the redrive must render its refusal inside the invocation");
-    assert!(
-        restate_output_json::<RestateProcessWorkflowOutput>(&redriven).is_none(),
-        "redriving a terminal segment without its handover must not fabricate a terminal outcome"
+    assert_eq!(
+        restate_output_failure_message(&fresh),
+        None,
+        "a missing handover ends the process through its completion step, never an \
+         invocation failure that strands it"
     );
-    let redriven_error = restate_error_message(&redriven)
-        .expect("redriving a terminal segment without its handover must fail hard");
-    assert!(
-        redriven_error.contains(&format!(
-            "missing persisted handover for process `{process_id}` segment 1"
-        )) || restate_error_code(&redriven) == Some(570),
-        "the redrive must refuse on the missing handover or a JOURNAL_MISMATCH, \
-         never a fabricated outcome: {redriven_error}"
+    assert_eq!(
+        registry
+            .get_process(&ProcessId::from(process_id))
+            .await
+            .expect("read terminal process")
+            .expect("terminal process record")
+            .outcome,
+        stored,
+        "no terminal is fabricated over the stored one"
     );
-    // Error code 570 is verified only against the in-crate Restate endpoint
-    // harness; it is inferred, not observed, on a live Restate runtime.
 }
 
 #[tokio::test]
@@ -1264,6 +1282,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         .put_segment_handover(
             &ProcessId::from(process_id),
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 1,
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,

@@ -56,7 +56,7 @@ use std::sync::Arc;
 /// journals around its runner: the admission verdict and the start step above,
 /// the segment's recorded cancel races and peeks, and the terminal, boundary
 /// and handover steps after it (FIG-3673). Any change to those commands, or to
-/// what they key on, bumps it.
+/// what they key on, bumps it (paused pre-1.0, FIG-3660).
 /// Every submitter stamps it on
 /// [`RestateProcessWorkflowInput`](super::RestateProcessWorkflowInput), and the
 /// handler refuses any other generation before it journals anything. An
@@ -191,16 +191,24 @@ pub(crate) fn handover_digest(
         .collect())
 }
 
+/// A segment whose start marker committed.
+#[derive(Debug)]
+pub(crate) struct AdmittedSegment {
+    pub(crate) started: SegmentStarted,
+    /// The digest of the handover it resumes from, as the verdict recorded.
+    pub(crate) handover: Option<String>,
+    pub(crate) policy: SegmentPolicy,
+    /// The nonce this admission recorded: the writer of the handover the
+    /// segment parks, the same on every redrive.
+    pub(crate) writer: String,
+}
+
 /// How one invocation of a segment proceeds.
 #[derive(Debug)]
 pub(crate) enum SegmentAdmission {
     /// The marker committed; the segment may run under the recorded policy,
     /// from the handover whose digest the verdict recorded.
-    Started {
-        started: SegmentStarted,
-        handover: Option<String>,
-        policy: SegmentPolicy,
-    },
+    Started(Box<AdmittedSegment>),
     /// A later segment's handover is not retained: nothing can resume it.
     MissingHandover,
     /// The segment started under a journal this invocation cannot read.
@@ -345,6 +353,7 @@ pub(crate) async fn admit_segment(
         }
     };
 
+    let writer = nonce.clone();
     let Json(start) = {
         let registry = Arc::clone(registry);
         let continuations = Arc::clone(continuations);
@@ -377,11 +386,12 @@ pub(crate) async fn admit_segment(
         StartOutcome::Started {
             execution_id,
             process,
-        } => Ok(SegmentAdmission::Started {
+        } => Ok(SegmentAdmission::Started(Box::new(AdmittedSegment {
             started: SegmentStarted::new(process, segment_ordinal, execution_id),
             handover,
             policy,
-        }),
+            writer,
+        }))),
         StartOutcome::SubstrateLost { lost } => Ok(SegmentAdmission::SubstrateLost { lost }),
     }
 }
