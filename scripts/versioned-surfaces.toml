@@ -2294,7 +2294,7 @@ manifest = "RestateEffectJournal"
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lash-restate/src/controller/effect_journal.rs"]
-must_cover = ["RecordedRuntimeEffect", "GaveUpEntry", "Stamped"]
+must_cover = ["RecordedRuntimeEffect", "GaveUpEntry", "Stamped", "FrontierMark"]
 
 [[surface.guard]]
 kind = "rust_items"

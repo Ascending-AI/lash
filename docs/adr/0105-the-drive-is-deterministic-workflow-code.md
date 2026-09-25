@@ -252,6 +252,13 @@ The engine tests in `lash-core-execution` run this shape on a `!Send` and a
   which case no cancel call is made. A replay reads that answer and makes the
   same calls. A store fault inside the step is not recorded; the attempt
   retries. Effect-journal generation 8.
+- **A process start and a sleep journal a frontier marker (FIG-3779).** Each
+  journals a `ctx.run` at `lash:{replay_key}:frontier` before it acts, on
+  every execution: whether the effect is served only (a drifted binding's)
+  depends on the live registry, so a marker only drift adds would change the
+  journal between the live pass and its redrive. The marker is where a
+  served-only start or sleep learns whether it was recorded (ADR 0103).
+  Effect-journal generation 9.
 - **Process-scope waits race the process's cancellation (P16).** A wait
   that observes no turn is a process body's (`waitSignal`, a group rank wait,
   a process await, a sleep). It races the process segment's durable cancel

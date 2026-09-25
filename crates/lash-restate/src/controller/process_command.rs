@@ -163,6 +163,9 @@ where
         }
         return Ok(outcome);
     }
+    // Read before the executor is taken apart: a start answers its served-only
+    // mark at its frontier marker (FIG-3779).
+    let served_only = local_executor.served_only();
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
     let process_env_store = execution.process_env_store;
@@ -175,6 +178,16 @@ where
             env_spec,
             execution_context,
         } => {
+            // The marker comes first, before anything the start writes: a
+            // start refused at its live frontier has acted on nothing.
+            super::live_frontier::pass_process_start_frontier(
+                context,
+                invocation,
+                &registration.id,
+                served_only.as_ref(),
+                registry.as_ref(),
+            )
+            .await?;
             let staging_owner = lash_core::ArtifactOwner::process_start(&registration.id);
             let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
                 let env_store = process_env_store.as_ref().ok_or_else(|| {

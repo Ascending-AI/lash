@@ -1097,6 +1097,14 @@ where
                 local_executor.execute(envelope).await
             }
             RestateEffectExecution::Timer { invocation, spec } => {
+                // Every sleep journals its frontier marker first, so a
+                // served-only one answers there (FIG-3779).
+                live_frontier::pass_sleep_frontier(
+                    &self.context,
+                    &invocation,
+                    local_executor.served_only().as_ref(),
+                )
+                .await?;
                 let RuntimeSleepOptions {
                     cancellation: _,
                     observe_turn_cancel,

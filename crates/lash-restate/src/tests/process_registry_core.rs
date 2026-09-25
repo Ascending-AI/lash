@@ -898,9 +898,15 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
             .collect::<Vec<_>>(),
         vec!["task-1"]
     );
+    assert_eq!(
+        context.runs.lock_recover().len(),
+        1,
+        "process workflow scheduling must not call Restate context from inside ctx.run: \
+         the start journals only its frontier marker (FIG-3779)"
+    );
     assert!(
-        context.runs.lock_recover().is_empty(),
-        "process workflow scheduling must not call Restate context from inside ctx.run"
+        context.runs.lock_recover()[0].ends_with(":frontier"),
+        "the start's one run is its frontier marker"
     );
 }
 

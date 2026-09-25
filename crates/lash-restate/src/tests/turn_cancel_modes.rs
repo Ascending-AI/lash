@@ -459,7 +459,8 @@ fn deferred_wake_signal() -> serde_json::Value {
 async fn deferred_wake_during_a_parked_sleep_reparks_on_the_escalation_promise() {
     let endpoint = fig1631_sleep_gate_endpoint();
     let workflow_key = "fig635-sleep-gate-deferred-mid-sleep";
-    let (_parked, calls) = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let gate = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let calls = &gate.calls;
 
     let replay = encode_call_replay(
         workflow_key,
@@ -468,6 +469,7 @@ async fn deferred_wake_during_a_parked_sleep_reparks_on_the_escalation_promise()
         Some((17, deferred_wake_signal())),
     )
     .expect("splice a deferred wake that fires after the gate registered");
+    let replay = gate.replay(replay);
     let deferred = endpoint_protocol::invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "Fig1631SleepGate",

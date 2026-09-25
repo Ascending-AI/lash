@@ -431,18 +431,23 @@ impl<'run> ScopedEffectController<'run> {
         if let Some(guard) = &self.journal_guard {
             guard.admit(Some(envelope.invocation.replay_key()))?;
             // A wait on an external completion dispatches nothing
-            // (FIG-3587), and neither does the host's deterministic work
-            // around a call — reading the recorded environment, presenting a
-            // result, recording an incorporation (FIG-3725): only a
-            // dispatching effect is served only.
-            let dispatches = !matches!(
-                envelope.command,
+            // (FIG-3587) — an await event, or the await of a process the
+            // command started, whose start answers for itself (FIG-3779) —
+            // and neither does the host's deterministic work around a call —
+            // reading the recorded environment, presenting a result,
+            // recording an incorporation (FIG-3725): only a dispatching
+            // effect is served only.
+            let dispatches = match &envelope.command {
                 crate::RuntimeEffectCommand::AwaitEvent { .. }
-                    | crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
-                    | crate::RuntimeEffectCommand::LoadExecutionEnv { .. }
-                    | crate::RuntimeEffectCommand::PresentToolResult { .. }
-                    | crate::RuntimeEffectCommand::IncorporateGroupSettlements { .. }
-            );
+                | crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
+                | crate::RuntimeEffectCommand::LoadExecutionEnv { .. }
+                | crate::RuntimeEffectCommand::PresentToolResult { .. }
+                | crate::RuntimeEffectCommand::IncorporateGroupSettlements { .. } => false,
+                crate::RuntimeEffectCommand::Process { command } => {
+                    !matches!(command.as_ref(), crate::ProcessCommand::Await { .. })
+                }
+                _ => true,
+            };
             let key = envelope.invocation.replay_key();
             if let Some(range) = guard
                 .served_only

@@ -23,5 +23,7 @@ pub use registration_refusals::{
     REFUSAL_FIXTURE_PROCESS_ID as PROCESS_REFUSAL_FIXTURE_PROCESS_ID,
     accepted_process_registration, refused_process_registrations,
 };
-pub use registry_faults::{ProcessRegistryFaults, WorklistPagePause, WorklistPageRead};
+pub use registry_faults::{
+    ProcessRegistryFaults, RegistrationHoldPoint, WorklistPagePause, WorklistPageRead,
+};
 pub use support::TestProcessRegistryWriteExt;

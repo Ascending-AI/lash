@@ -1072,6 +1072,15 @@ pub(super) async fn admission_journal<T: serde::Serialize>(
 /// raised to match. Every command `body` carries was recorded after
 /// admission, so its completion ids already follow the admission's.
 pub(super) fn with_admission(body: &[u8], admission: &[u8]) -> Result<Bytes, TerminalError> {
+    with_leading_runs(body, admission)
+}
+
+/// Splice the `RunCommand`s `leading` recorded — a process's admission steps,
+/// or the frontier marker a handler's first sleep or process start journals
+/// (FIG-3779) — in front of the journal `body` replays, completed with the
+/// values they proposed, as [`with_admission`] does.
+pub(super) fn with_leading_runs(body: &[u8], leading: &[u8]) -> Result<Bytes, TerminalError> {
+    let admission = leading;
     let frames = split_frames(body)
         .ok_or_else(|| TerminalError::new("replay body omitted a valid frame"))?;
     let (Some(start), Some(input)) = (frames.first(), frames.get(1)) else {
@@ -1085,10 +1094,10 @@ pub(super) fn with_admission(body: &[u8], admission: &[u8]) -> Result<Bytes, Ter
     let known = protobuf_varint_field(start_payload, 3)
         .ok_or_else(|| TerminalError::new("start message omitted its entry count"))?;
     let key = String::from_utf8(key.to_vec()).map_err(TerminalError::from_error)?;
-    let known = u32::try_from(known + 2)
-        .map_err(|_| TerminalError::new("admitted replay entry count exceeded u32"))?;
     let admission_runs = restate_message_frames(admission, 0x0411)
         .ok_or_else(|| TerminalError::new("admission journal omitted a valid frame"))?;
+    let known = u32::try_from(known + admission_runs.len() as u64)
+        .map_err(|_| TerminalError::new("admitted replay entry count exceeded u32"))?;
     let proposals = restate_message_frames(admission, 0x0005)
         .ok_or_else(|| TerminalError::new("admission journal omitted a valid frame"))?;
     let mut spliced = BytesMut::new();
@@ -1811,6 +1820,24 @@ async fn invoke_endpoint_body_with_scripted_responses_unbounded(
                 break;
             }
             match message_type {
+                // The runtime acknowledges a proposed run completion with the
+                // value the handler proposed: a sleep's or a process start's
+                // frontier marker (FIG-3779) completes as it would deployed.
+                0x0005 => {
+                    let payload = &output[decoded + 8..frame_end];
+                    let (completion_id, value) =
+                        proposed_run_completion(payload).ok_or_else(|| {
+                            TerminalError::new("endpoint returned an invalid run completion")
+                        })?;
+                    if let Some(sender) = input_sender.as_mut() {
+                        sender
+                            .send(encode_run_completion(completion_id, value))
+                            .await
+                            .map_err(|err| {
+                                TerminalError::new(format!("run completion input failed: {err}"))
+                            })?;
+                    }
+                }
                 0x040E => {
                     let completion_id = u32::try_from(
                         protobuf_varint_field(&output[decoded + 8..frame_end], 10).ok_or_else(
