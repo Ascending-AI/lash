@@ -120,6 +120,16 @@ impl SimEngine {
                 let build = Arc::clone(&build);
                 let slot = Arc::clone(&slot);
                 Box::pin(async move {
+                    // The handler minted the drain's controller from its own
+                    // context, so it crosses the host's stack here, once.
+                    let scoped = match session.effect_host().route_handler_child_controller(scoped)
+                    {
+                        Ok(scoped) => scoped,
+                        Err(err) => {
+                            *slot.lock_recover() = Some(Err(err.into()));
+                            return;
+                        }
+                    };
                     let collected = CollectedTurnActivity::default();
                     let drained = build(&session)
                         .drain_id(drain_id)
@@ -188,6 +198,16 @@ impl SimEngine {
                 let build = Arc::clone(&build);
                 let slot = Arc::clone(&slot);
                 Box::pin(async move {
+                    // The handler minted the turn's controller from its own
+                    // context, so it crosses the host's stack here, once.
+                    let scoped = match session.effect_host().route_handler_child_controller(scoped)
+                    {
+                        Ok(scoped) => scoped,
+                        Err(err) => {
+                            *slot.lock_recover() = Some(Err(err.into()));
+                            return;
+                        }
+                    };
                     let result = async {
                         build(&session)?
                             .turn_id(turn_id)
@@ -240,6 +260,12 @@ impl lash::TurnActivitySink for DiscardedTurnActivity {
 pub struct DecoratedBackend {
     inner: Arc<dyn Backend>,
     factory: Arc<dyn SessionStoreFactory>,
+    /// `inner`'s effect host wrapped once in the boundary test's layer, held
+    /// for the backend's lifetime: a runtime installs its tool-child host
+    /// get-or-init and holds the installing host weakly, so the same Arc must
+    /// answer every `effect_host()` call — a per-call wrapper would strand
+    /// group children.
+    effect_host: Option<Arc<dyn lash_core::EffectHost>>,
 }
 
 impl DecoratedBackend {
@@ -251,6 +277,7 @@ impl DecoratedBackend {
         Self {
             factory: inner.session_store_factory(),
             inner,
+            effect_host: None,
         }
     }
 
@@ -258,6 +285,17 @@ impl DecoratedBackend {
     /// `collector`.
     pub fn observing(mut self, collector: CheckpointWriteCollector) -> Self {
         self.factory = Arc::new(ObservedSessionStoreFactory::new(self.factory, collector));
+        self
+    }
+
+    /// Wrap the inner effect host in `layer`, once, and hold the wrapping
+    /// host: every controller this backend's host lends or routes then
+    /// crosses the layer.
+    pub fn with_effect_layer(mut self, layer: Arc<dyn lash_core::testing::EffectLayer>) -> Self {
+        self.effect_host = Some(Arc::new(lash_core::testing::LayeredEffectHost::new(
+            self.inner.effect_host(),
+            layer,
+        )));
         self
     }
 }
@@ -276,7 +314,10 @@ impl Backend for DecoratedBackend {
     }
 
     fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
-        self.inner.effect_host()
+        match &self.effect_host {
+            Some(host) => Arc::clone(host),
+            None => self.inner.effect_host(),
+        }
     }
 
     fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
