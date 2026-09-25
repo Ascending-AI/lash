@@ -70,6 +70,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
         .put_segment_handover(
             &ProcessId::from(process_id),
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 1,
                 handover: boundary_handover(1),
             },
@@ -120,6 +121,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
         .put_segment_handover(
             &ProcessId::from(process_id),
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 3,
                 handover: boundary_handover(3),
             },
@@ -200,6 +202,7 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
         .put_segment_handover(
             &ProcessId::from(process_id),
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 2,
                 handover: boundary_handover(2),
             },
@@ -265,6 +268,7 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
         .put_segment_handover(
             &ProcessId::from(process_id),
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 3,
                 handover: boundary_handover(3),
             },

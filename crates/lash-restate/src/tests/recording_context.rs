@@ -1758,7 +1758,10 @@ impl ReplayableRecordingContext {
 /// journaled fact, or the frontier marker a process start or a sleep
 /// journals before it acts (FIG-3779).
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
-    effect_name.ends_with(".process-cancel-admission:v1") || effect_name.ends_with(":frontier")
+    effect_name.ends_with(".process-cancel-admission:v1")
+        || effect_name.ends_with(".process-await-guard:v1")
+        || effect_name.starts_with("lash.process.wait.")
+        || effect_name.ends_with(":frontier")
 }
 
 /// Decodes one journaled record into its recorded effect. A step whose engine

@@ -230,140 +230,42 @@ async fn process_await_endpoint(
     (endpoint, registry)
 }
 
-pub(super) async fn fig790_pre_pr_suspended_process_call(
-    process_id: &ProcessId,
-) -> endpoint_protocol::RestateCallFrame {
-    let endpoint = Endpoint::builder()
-        .bind(Fig790TurnObservationPublisherImpl.serve())
-        .build();
-    let suspended = invoke_endpoint(
-        &endpoint,
-        "Fig790TurnObservationPublisher",
-        "run",
-        &format!("{process_id}-pre-pr-fixture"),
-        &Fig790TurnObservationPublisherInput {
-            process_id: ProcessId::from(process_id.to_string()),
-            prequeue_event: false,
-        },
-    )
-    .await
-    .expect("capture the deployed pre-PR process-await journal shape");
-    let calls = restate_call_frames(&suspended).expect("decode pre-PR process-await call");
-    let [call] = calls.as_slice() else {
-        panic!("pre-PR process-await fixture must contain exactly one call");
-    };
-    assert_eq!(call.handler, "await_terminal");
-    call.clone()
+/// A process await's first command is its recorded existence guard
+/// (FIG-3808): the first attempt proposes it and suspends on its completion.
+pub(super) async fn process_await_guard(
+    endpoint: &Endpoint,
+    key: &str,
+    input: &Fig790ProcessAwaitRedriveInput,
+) -> Bytes {
+    let guard = invoke_endpoint(endpoint, "Fig790ProcessAwaitRedrive", "run", key, input)
+        .await
+        .expect("the first attempt records the await's guard");
+    assert_eq!(
+        restate_message_types(&guard)
+            .expect("decode the guard attempt")
+            .first(),
+        Some(&RESTATE_RUN_COMMAND_MESSAGE_TYPE),
+        "the process await's first command is its guard"
+    );
+    guard
 }
 
-// Backend compatibility gate: a process-await invocation suspended before
-// FIG-790 has only `await_terminal` in its journal. Its terminal redrive must
-// accept that command as an exact prefix and append cancellation observation.
-#[tokio::test]
-pub(super) async fn fig790_pre_pr_suspended_process_await_redrives_to_terminal() {
-    let process_id = "fig790-pre-pr-terminal";
-    let pre_pr_call = fig790_pre_pr_suspended_process_call(&ProcessId::from(process_id)).await;
-    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
-    let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
-        cancel_on_suspend_wake: false,
-    };
-    let terminal = process_success(serde_json::json!({ "deployment_compat": "terminal" }));
-    let replay = encode_call_replay(
-        "fig790-pre-pr-terminal",
-        &input,
-        &[(
-            pre_pr_call,
-            Some(serde_json::to_value(&terminal).expect("serialize process terminal")),
-        )],
-        None,
-    )
-    .expect("splice pre-PR terminal journal");
-    let output = invoke_endpoint_body_with_json_call_responses(
-        &endpoint,
+/// The attempt that follows the recorded guard: the await's race commands.
+pub(super) async fn process_await_after_guard(
+    endpoint: &Endpoint,
+    key: &str,
+    input: &Fig790ProcessAwaitRedriveInput,
+    guard: &[u8],
+) -> Bytes {
+    invoke_endpoint_body(
+        endpoint,
         "Fig790ProcessAwaitRedrive",
         "run",
-        replay,
-        vec![
-            serde_json::to_value(RestateDurableWaitRegistration::Registered)
-                .expect("serialize registered observation"),
-            serde_json::Value::Null,
-        ],
+        endpoint_protocol::admitted_invocation_body(key, input, guard)
+            .expect("splice the recorded guard"),
     )
     .await
-    .expect("new code must redrive the deployed pre-PR journal prefix");
-
-    assert_eq!(
-        restate_call_frames(&output)
-            .expect("decode appended terminal-redrive calls")
-            .iter()
-            .map(|call| call.handler.as_str())
-            .collect::<Vec<_>>(),
-        vec!["register_awakeable", "unregister_awakeable"]
-    );
-    assert_eq!(
-        restate_output_json::<ProcessAwaitOutput>(&output),
-        Some(terminal)
-    );
-}
-
-// Backend compatibility gate: the same pre-PR suspended prefix must also
-// redrive when turn cancellation was already resolved before registration.
-// This is deliberately distinct from a revoked session.
-#[tokio::test]
-pub(super) async fn fig790_pre_pr_suspended_process_await_redrives_to_cancelled() {
-    let process_id = "fig790-pre-pr-cancelled";
-    let pre_pr_call = fig790_pre_pr_suspended_process_call(&ProcessId::from(process_id)).await;
-    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
-    let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
-        cancel_on_suspend_wake: false,
-    };
-    let cancelled = fig790_cancelled_process_output(&ProcessId::from(process_id));
-    let replay = encode_call_replay(
-        "fig790-pre-pr-cancelled",
-        &input,
-        &[(pre_pr_call, None)],
-        Some((
-            17,
-            serde_json::to_value(RestateTurnCancelWake::TurnCancelled)
-                .expect("serialize already-resolved turn cancellation"),
-        )),
-    )
-    .expect("splice pre-PR cancelled journal");
-    let output = invoke_endpoint_body_with_json_call_responses(
-        &endpoint,
-        "Fig790ProcessAwaitRedrive",
-        "run",
-        replay,
-        vec![
-            serde_json::to_value(RestateDurableWaitRegistration::Registered)
-                .expect("serialize registered observation"),
-            serde_json::Value::Null,
-            serde_json::to_value(&cancelled).expect("serialize cancelled process terminal"),
-        ],
-    )
-    .await
-    .expect("already-resolved cancellation must redrive the pre-PR journal");
-
-    assert_eq!(
-        restate_call_frames(&output)
-            .expect("decode appended cancellation-redrive calls")
-            .iter()
-            .map(|call| call.handler.as_str())
-            .collect::<Vec<_>>(),
-        vec!["register_awakeable", "cancel", "await_terminal"]
-    );
-    assert_eq!(
-        restate_output_json::<ProcessAwaitOutput>(&output),
-        Some(cancelled)
-    );
+    .expect("the await journals its race after its guard")
 }
 
 #[tokio::test]
@@ -380,15 +282,9 @@ pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_proce
     let registration = serde_json::to_value(RestateDurableWaitRegistration::Revoked)
         .expect("serialize revoked registration");
 
-    let suspended = invoke_endpoint(
-        &endpoint,
-        "Fig790ProcessAwaitRedrive",
-        "run",
-        "fig790-revoked-session",
-        &input,
-    )
-    .await
-    .expect("capture the process-await command prefix");
+    let guard = process_await_guard(&endpoint, "fig790-revoked-session", &input).await;
+    let suspended =
+        process_await_after_guard(&endpoint, "fig790-revoked-session", &input, &guard).await;
     let calls = restate_call_frames(&suspended).expect("decode process-await call frames");
     assert_eq!(
         calls
@@ -408,6 +304,7 @@ pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_proce
         ],
         None,
     )
+    .and_then(|replay| endpoint_protocol::with_leading_runs(&replay, &guard))
     .expect("splice revoked-session call journal");
     let first = invoke_endpoint_body(
         &endpoint,
@@ -474,15 +371,10 @@ pub(super) async fn fig790_registered_session_revocation_unwinds_without_cancell
         ),
         cancel_on_suspend_wake: false,
     };
-    let suspended = invoke_endpoint(
-        &endpoint,
-        "Fig790ProcessAwaitRedrive",
-        "run",
-        "fig790-registered-then-revoked",
-        &input,
-    )
-    .await
-    .expect("capture registered process-await commands");
+    let guard = process_await_guard(&endpoint, "fig790-registered-then-revoked", &input).await;
+    let suspended =
+        process_await_after_guard(&endpoint, "fig790-registered-then-revoked", &input, &guard)
+            .await;
     let calls = restate_call_frames(&suspended).expect("decode registered process-await calls");
     assert_eq!(
         calls
@@ -510,6 +402,7 @@ pub(super) async fn fig790_registered_session_revocation_unwinds_without_cancell
                 .expect("serialize registered-session revocation"),
         )),
     )
+    .and_then(|replay| endpoint_protocol::with_leading_runs(&replay, &guard))
     .expect("splice registered-then-revoked process await");
     let output = invoke_endpoint_body(&endpoint, "Fig790ProcessAwaitRedrive", "run", replay)
         .await
@@ -548,15 +441,14 @@ pub(super) async fn fig790_process_terminal_wins_when_terminal_and_cancellation_
         ),
         cancel_on_suspend_wake: false,
     };
-    let suspended = invoke_endpoint(
+    let guard = process_await_guard(&endpoint, "fig790-terminal-and-cancel-ready", &input).await;
+    let suspended = process_await_after_guard(
         &endpoint,
-        "Fig790ProcessAwaitRedrive",
-        "run",
         "fig790-terminal-and-cancel-ready",
         &input,
+        &guard,
     )
-    .await
-    .expect("capture process-await race commands");
+    .await;
     let calls = restate_call_frames(&suspended).expect("decode process-await race calls");
     assert_eq!(
         calls
@@ -588,6 +480,7 @@ pub(super) async fn fig790_process_terminal_wins_when_terminal_and_cancellation_
                 .expect("serialize simultaneously-ready cancellation"),
         )),
     )
+    .and_then(|replay| endpoint_protocol::with_leading_runs(&replay, &guard))
     .expect("splice both-ready process-await race");
     let output = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
@@ -628,15 +521,10 @@ pub(super) async fn fig790_cancel_during_suspension_of_a_process_turn_composes_w
     let registered = serde_json::to_value(RestateDurableWaitRegistration::Registered)
         .expect("serialize registered turn-cancel wait");
 
-    let registering = invoke_endpoint(
-        &endpoint,
-        "Fig790ProcessAwaitRedrive",
-        "run",
-        "fig790-cancel-during-suspension",
-        &input,
-    )
-    .await
-    .expect("turn-cancel registration must suspend cleanly");
+    let guard = process_await_guard(&endpoint, "fig790-cancel-during-suspension", &input).await;
+    let registering =
+        process_await_after_guard(&endpoint, "fig790-cancel-during-suspension", &input, &guard)
+            .await;
     assert_eq!(
         restate_message_types(&registering).expect("decode turn-cancel registration frames"),
         vec![
@@ -664,6 +552,7 @@ pub(super) async fn fig790_cancel_during_suspension_of_a_process_turn_composes_w
         ],
         None,
     )
+    .and_then(|replay| endpoint_protocol::with_leading_runs(&replay, &guard))
     .expect("splice registered turn-cancel observation");
     let process_suspended = invoke_endpoint_body(
         &endpoint,
@@ -698,6 +587,7 @@ pub(super) async fn fig790_cancel_during_suspension_of_a_process_turn_composes_w
                 .expect("serialize durable turn cancellation"),
         )),
     )
+    .and_then(|replay| endpoint_protocol::with_leading_runs(&replay, &guard))
     .expect("splice suspended process-await journal and cancellation signal");
     let redriven = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
@@ -755,15 +645,8 @@ pub(super) async fn a_turn_stop_over_a_process_await_replays_its_recorded_cancel
         ),
         cancel_on_suspend_wake: false,
     };
-    let initial = invoke_endpoint(
-        &endpoint,
-        "Fig790ProcessAwaitRedrive",
-        "run",
-        process_id,
-        &input,
-    )
-    .await
-    .expect("capture the process-await race");
+    let guard = process_await_guard(&endpoint, process_id, &input).await;
+    let initial = process_await_after_guard(&endpoint, process_id, &input, &guard).await;
     let initial_calls = restate_call_frames(&initial).expect("decode the race's calls");
     assert_eq!(
         initial_calls
@@ -792,7 +675,7 @@ pub(super) async fn a_turn_stop_over_a_process_await_replays_its_recorded_cancel
     let gate =
         serde_json::to_vec(&RestateTurnCancelWake::TurnCancelled).expect("serialize the turn stop");
 
-    let mut journal = vec![initial];
+    let mut journal = vec![guard, initial];
     let mut appended = Vec::new();
     let output = loop {
         let outputs = journal.iter().map(Bytes::as_ref).collect::<Vec<_>>();
@@ -884,15 +767,8 @@ pub(super) async fn a_turn_stop_over_an_ended_process_reads_its_terminal_without
         ),
         cancel_on_suspend_wake: false,
     };
-    let initial = invoke_endpoint(
-        &endpoint,
-        "Fig790ProcessAwaitRedrive",
-        "run",
-        process_id,
-        &input,
-    )
-    .await
-    .expect("capture the process-await race");
+    let guard = process_await_guard(&endpoint, process_id, &input).await;
+    let initial = process_await_after_guard(&endpoint, process_id, &input, &guard).await;
     let initial_calls = restate_call_frames(&initial).expect("decode the race's calls");
     let terminal = process_success(serde_json::json!({ "ended": "before the stop" }));
     registry
@@ -922,6 +798,7 @@ pub(super) async fn a_turn_stop_over_an_ended_process_reads_its_terminal_without
                 .expect("serialize the turn stop"),
         )),
     )
+    .and_then(|replay| endpoint_protocol::with_leading_runs(&replay, &guard))
     .expect("splice the gate-won race");
     let output = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
@@ -2199,3 +2076,113 @@ lash_conformance::backend_tests!({
     )) as Arc<dyn lash_core::Backend>;
     ((), backend)
 });
+
+/// FIG-3808: a process await's existence guard is a recorded step, so a
+/// crash-redriven awaiter serves the guard its first execution passed. By
+/// the redrive the awaited process has ended, its row has been pruned, and
+/// its name has been registered again: a live guard would refuse where the
+/// first execution was admitted.
+#[tokio::test]
+pub(super) async fn a_redriven_process_await_serves_its_recorded_guard_after_the_child_is_pruned() {
+    let process_id = "fig3808-guard-after-prune";
+    let (endpoint, registry) = external_process_await_endpoint(&ProcessId::from(process_id)).await;
+    let input = Fig790ProcessAwaitRedriveInput {
+        process_ref: lash_core::ProcessRef::new(
+            process_id,
+            lash_core::ProcessIncarnation::from_registration_sequence(1),
+        ),
+        cancel_on_suspend_wake: false,
+    };
+    let guard = process_await_guard(&endpoint, process_id, &input).await;
+    let raced = process_await_after_guard(&endpoint, process_id, &input, &guard).await;
+    let calls = restate_call_frames(&raced).expect("decode the await's race");
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        vec!["await_terminal", "register_awakeable"]
+    );
+
+    // The child ends, is pruned, and its name is registered again before
+    // the awaiter is redriven.
+    let terminal = process_success(serde_json::json!({ "ended": "before the redrive" }));
+    let ended = registry
+        .complete_process(
+            &ProcessId::from(process_id),
+            terminal.clone(),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("the child ends");
+    registry
+        .prune_terminal_processes(
+            ended.updated_at_ms.saturating_add(1),
+            None,
+            lash_core::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("the ended child is pruned");
+    assert!(
+        registry
+            .get_process_ref(&input.process_ref)
+            .await
+            .is_err_or_none(),
+        "the awaited incarnation is gone"
+    );
+    registry
+        .register_process(external_registration(process_id))
+        .await
+        .expect("the name is registered again");
+
+    let replay = encode_call_replay(
+        process_id,
+        &input,
+        &[
+            (
+                calls[0].clone(),
+                Some(serde_json::to_value(&terminal).expect("serialize the terminal")),
+            ),
+            (
+                calls[1].clone(),
+                Some(
+                    serde_json::to_value(RestateDurableWaitRegistration::Registered)
+                        .expect("serialize the registered gate"),
+                ),
+            ),
+        ],
+        None,
+    )
+    .and_then(|replay| endpoint_protocol::with_leading_runs(&replay, &guard))
+    .expect("splice the recorded await");
+    let output = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "Fig790ProcessAwaitRedrive",
+        "run",
+        replay,
+        vec![serde_json::Value::Null],
+    )
+    .await
+    .expect("the redrive settles");
+    assert_eq!(
+        restate_error_message(&output),
+        None,
+        "the redrive must not diverge from its journal"
+    );
+    assert_eq!(
+        restate_output_json::<ProcessAwaitOutput>(&output),
+        Some(terminal),
+        "the redrive serves the recorded guard and the recorded terminal: {:?}",
+        restate_output_failure_message(&output)
+    );
+}
+
+trait IsErrOrNone {
+    fn is_err_or_none(&self) -> bool;
+}
+
+impl<T, E> IsErrOrNone for Result<Option<T>, E> {
+    fn is_err_or_none(&self) -> bool {
+        !matches!(self, Ok(Some(_)))
+    }
+}

@@ -511,7 +511,6 @@ async fn deferred_wake_during_a_parked_sleep_reparks_on_the_escalation_promise()
 #[tokio::test]
 async fn deferred_wake_during_a_parked_process_await_never_cancels_the_process() {
     let process_id = "fig635-process-await-deferred";
-    let pre_pr_call = fig790_pre_pr_suspended_process_call(&ProcessId::from(process_id)).await;
     let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
     let input = Fig790ProcessAwaitRedriveInput {
         process_ref: lash_core::ProcessRef::new(
@@ -520,12 +519,21 @@ async fn deferred_wake_during_a_parked_process_await_never_cancels_the_process()
         ),
         cancel_on_suspend_wake: false,
     };
+    let guard = process_await_guard(&endpoint, process_id, &input).await;
+    let raced = process_await_after_guard(&endpoint, process_id, &input, &guard).await;
+    let parked_await = restate_call_frames(&raced)
+        .expect("decode the await's race")
+        .into_iter()
+        .next()
+        .expect("the await's call");
+    assert_eq!(parked_await.handler, "await_terminal");
     let replay = encode_call_replay(
-        "fig635-process-await-deferred",
+        process_id,
         &input,
-        &[(pre_pr_call, None)],
+        &[(parked_await, None)],
         Some((17, deferred_wake_signal())),
     )
+    .and_then(|replay| endpoint_protocol::with_leading_runs(&replay, &guard))
     .expect("splice a deferred wake against a parked process await");
     let deferred = endpoint_protocol::invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,

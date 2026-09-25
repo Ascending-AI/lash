@@ -102,6 +102,20 @@ fn validate_process_command_journal_identity<T: PartialEq>(
     ))
 }
 
+/// Whether `process_ref` names a process incarnation the registry retains:
+/// the refusal is typed, never a missing row read as a pending wait.
+async fn await_existence_guard(
+    registry: &dyn ProcessRegistry,
+    process_ref: &lash_core::ProcessRef,
+) -> Result<(), PluginError> {
+    match registry.get_process_ref(process_ref).await? {
+        Some(_) => Ok(()),
+        None => Err(lash_core::runtime::registry_transitions::unknown_process(
+            &process_ref.process_id,
+        )),
+    }
+}
+
 /// The cancel a turn's stop owes the process it was awaiting, as the recorded
 /// answer of the turn-stop admission step.
 ///
@@ -387,39 +401,34 @@ lash_core::TurnFailureCause::Outcome,
             ))
         }
         ProcessCommand::Await { process_ref } => {
-            registry.get_process_ref(&process_ref).await?;
             let process_id = process_ref.process_id.clone();
-            // Replay-determinism class inventory: PR #166 removed the process
-            // start gate. FIG-788 always redrives the process runner, retains
-            // ordinal handovers until terminal delivery resolves, and schedules
-            // each segment successor before reading cancellation. FIG-790 emits
-            // Process::Await before observing state. FIG-793 emits LlmCall
-            // before its durable cancel peek. FIG-806 makes TriggerRouter emit
-            // the deterministic process start before consulting reservation
-            // status. FIG-1126 keeps await-event key minting pure and performs
-            // the revocation observation at the unconditional await boundary.
+            // The existence guard is a recorded step (FIG-3808): a guard the
+            // first execution passed never fails on a replay, even after the
+            // awaited process ended and its row was pruned or its name was
+            // registered again. Its answer is Ok or the typed refusal the
+            // registry gave; a retryable store fault ends the attempt
+            // unrecorded and the step runs again.
             //
-            // FIG-1521 makes the pre-journal engine-admission gate mechanically
-            // pure: its descriptor contains only a static kind and a
-            // non-capturing function pointer over recorded payload/env inputs.
-            // World readiness belongs to ProcessEngine::run, after the Start
-            // command replays, so temporary store/catalog failure remains a
-            // retryable process-infrastructure failure rather than a durable
-            // command refusal.
-            //
-            // This existence guard remains an explicit retention exposure, not
-            // a proof: registration precedes the effect, and terminal events
-            // plus weak-observer removal retain the row, but a host can prune a
-            // terminal row while this invocation is still replayable. There is
-            // no finite waiter-lifetime bound against which the raw prune cutoff
-            // can be validated. In that case `get_process` returns
-            // `Err(ProcessNoLongerRetained)` at `?`, not `Ok(None)` at this
-            // branch. Hosts must retain terminal rows beyond every such waiter.
-            if registry.get_process(&process_id).await?.is_none() {
-                return Err(
-                    lash_core::runtime::registry_transitions::unknown_process(&process_id).into(),
-                );
-            }
+            // FIG-790 emits Process::Await before observing state; FIG-1521
+            // keeps the pre-journal engine-admission gate pure; world
+            // readiness belongs to ProcessEngine::run, after the Start command
+            // replays.
+            let guard_registry = Arc::clone(&registry);
+            let guard_ref = process_ref.clone();
+            let Json(guarded) = context
+                .run_json_or_retry_send::<Result<(), PluginError>, _>(
+                    process_command_journal_name(invocation, "process-await-guard"),
+                    async move {
+                        match await_existence_guard(guard_registry.as_ref(), &guard_ref).await {
+                            Ok(()) => Ok(Ok(())),
+                            Err(error) if error.is_retryable() => Err(error.to_string()),
+                            Err(error) => Ok(Err(error)),
+                        }
+                    },
+                )
+                .await
+                .map_err(|error| process_command_journal_error("await guard", error))?;
+            guarded?;
             // A process await that observes no turn races the awaiting
             // process segment's durable cancel promise when a process drive
             // issues it (FIG-3673).

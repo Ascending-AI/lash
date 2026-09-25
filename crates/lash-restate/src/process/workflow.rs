@@ -64,6 +64,10 @@ const CANCEL_CHILD_TURN_STEP: &str = "lash.process.cancel.child-turn";
 /// The journal name of the step that retires the handovers a segment no
 /// longer needs.
 const RETIRE_STEP: &str = "lash.segment.retire";
+/// The handover a later segment resumes from, read once and journaled, so a
+/// redrive replays the runner from the recorded handover even after the
+/// segment retired it (FIG-3809).
+const RESUME_STEP: &str = "lash.segment.resume";
 
 /// The terminal a segment proposes; the completion step turns it into the
 /// stored outcome.
@@ -91,6 +95,54 @@ fn step_fault<T>(error: PluginError) -> Result<Result<T, String>, String> {
     } else {
         Ok(Err(error.to_string()))
     }
+}
+
+/// A segment failure no retry can fix, by class; each ends the process
+/// Failed under its own code.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "class", content = "message", rename_all = "snake_case")]
+pub(crate) enum SegmentFailure {
+    /// The handover this segment resumes from is not retained.
+    HandoverMissing(String),
+    /// The retained handover is not the one admission recorded.
+    HandoverMismatch(String),
+    /// The segment's effect controller could not be minted.
+    Controller(String),
+    /// The recorded boundary read failed.
+    Boundary(String),
+    /// The handover to the successor could not be written.
+    HandoverWrite(String),
+}
+
+impl SegmentFailure {
+    fn code(&self) -> &'static str {
+        match self {
+            Self::HandoverMissing(_) => "process_segment_handover_missing",
+            Self::HandoverMismatch(_) => "process_segment_handover_mismatch",
+            Self::Controller(_) => "process_segment_controller",
+            Self::Boundary(_) => "process_segment_boundary",
+            Self::HandoverWrite(_) => "process_segment_handover_write",
+        }
+    }
+
+    fn into_output(self) -> ProcessAwaitOutput {
+        let code = self.code();
+        let (Self::HandoverMissing(message)
+        | Self::HandoverMismatch(message)
+        | Self::Controller(message)
+        | Self::Boundary(message)
+        | Self::HandoverWrite(message)) = self;
+        ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
+            lash_core::ToolFailure::runtime(lash_core::ToolFailureClass::Execution, code, message),
+        ))
+    }
+}
+
+/// Whether a failing segment already resolved its cancel promise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SegmentSignal {
+    Unresolved,
+    Resolved,
 }
 
 fn cancelled_output(process_id: &ProcessId) -> ProcessAwaitOutput {
@@ -341,6 +393,39 @@ where
         .into())
     }
 
+    /// End the process Failed, typed by `failure`'s code, from a segment
+    /// error no retry can fix, and publish the terminal: a segment never
+    /// ends while its process stays Running with its awaiters parked
+    /// (FIG-3789). `signal` says whether the segment already resolved its
+    /// cancel promise.
+    async fn fail_segment(
+        &self,
+        context: &WorkflowContext<'_>,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+        failure: SegmentFailure,
+        signal: SegmentSignal,
+    ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
+        tracing::warn!(
+            process_id = process_id.as_str(),
+            segment_ordinal,
+            code = failure.code(),
+            "a process segment failed; ending the process"
+        );
+        let output = self
+            .complete_terminal_step(
+                context,
+                process_id,
+                TerminalProposal::Output(Box::new(failure.into_output())),
+            )
+            .await?;
+        if signal == SegmentSignal::Unresolved {
+            resolve_process_cancel_signal(context, RestateProcessCancelSignal::SegmentFinished)?;
+        }
+        self.deliver_segment_terminal(context, process_id, segment_ordinal, output)
+            .await
+    }
+
     /// Store the segment's terminal as one journaled step
     /// (`lash.process.complete`): the evidence clock and the owner read run
     /// inside it, and the stored outcome it journals is the terminal promise's
@@ -561,10 +646,26 @@ where
                 Err(crate::parked_turn_failure(err))
             }
             Err(err) if err.is_retryable() => Err(HandlerError::from(err)),
+            // Another owner carries the process, or no process is left to
+            // end: this invocation stops without writing a terminal.
+            Err(
+                err @ (PluginError::ProcessLeaseSuperseded { .. }
+                | PluginError::SessionExecutionLeaseLost { .. }
+                | PluginError::ProcessUnknown { .. }
+                | PluginError::ProcessNotVisible { .. }),
+            ) => Err(handler_error_from_plugin(err)),
+            // A failure retrying cannot fix without changing durable state
+            // ends the process Failed, typed by its code.
             Err(err) if err.is_terminal() => Ok(SegmentRunEnd::Terminal(TerminalProposal::Output(
                 Box::new(terminal_process_output(err)),
             ))),
-            Err(err) => Err(handler_error_from_plugin(err)),
+            // Any other runner failure is the host's infrastructure (an
+            // unavailable store, a plugin the deployment could not wire),
+            // never a producer outcome: the attempt fails retryably, so the
+            // process stays recoverable on its retry policy rather than
+            // ending with neither a terminal nor a live invocation
+            // (FIG-3789).
+            Err(err) => Err(HandlerError::from(err)),
         }
     }
 
@@ -733,7 +834,7 @@ where
         // nothing branches around the runner on a non-journaled read.
         let selector = Arc::clone(&self.segment_effect_budget);
         let registration = input.registration.clone();
-        let (started, handover_digest_recorded, policy) = match admit_segment(
+        let (started, handover_digest_recorded, policy, writer) = match admit_segment(
             &ctx,
             &self.registry,
             &self.continuations,
@@ -744,11 +845,15 @@ where
         )
         .await?
         {
-            SegmentAdmission::Started {
-                started,
-                handover,
-                policy,
-            } => (started, handover, policy),
+            SegmentAdmission::Started(admitted) => {
+                let super::admission::AdmittedSegment {
+                    started,
+                    handover,
+                    policy,
+                    writer,
+                } = *admitted;
+                (started, handover, policy, writer)
+            }
             SegmentAdmission::Superseded {
                 latest_segment_ordinal,
             } => {
@@ -765,10 +870,18 @@ where
                 }));
             }
             SegmentAdmission::MissingHandover => {
-                return Err(HandlerError::from(TerminalError::new(format!(
-                    "missing persisted handover for process `{process_id}` segment {}",
-                    input.segment_ordinal
-                ))));
+                return self
+                    .fail_segment(
+                        &ctx,
+                        &process_id,
+                        input.segment_ordinal,
+                        SegmentFailure::HandoverMissing(format!(
+                            "missing persisted handover for process `{process_id}` segment {}",
+                            input.segment_ordinal
+                        )),
+                        SegmentSignal::Unresolved,
+                    )
+                    .await;
             }
             SegmentAdmission::SubstrateLost { lost } => {
                 tracing::warn!(
@@ -796,32 +909,71 @@ where
                     .await;
             }
         };
-        // The handover a later segment resumes from is immutable per ordinal
-        // and retained until terminal (FIG-811): read it after admission and
-        // hold it to the digest the verdict recorded.
+        // The handover a later segment resumes from is immutable per ordinal:
+        // read it once after admission, hold it to the digest the verdict
+        // recorded, and journal it. A redrive replays the runner from the
+        // recorded handover, so the segment may retire it once it has handed
+        // over (FIG-3809).
         let mut handover = match handover_digest_recorded {
             None => None,
             Some(recorded) => {
-                let persisted = self
-                    .continuations
-                    .get_segment_handover(&process_id, input.segment_ordinal)
+                let continuations = &self.continuations;
+                let pid = &process_id;
+                let segment_ordinal = input.segment_ordinal;
+                let Json(resumed) = ctx
+                    .run_json_or_retry_send::<Result<lash_core::SegmentHandover, SegmentFailure>, _>(
+                        RESUME_STEP.to_string(),
+                        async move {
+                            let persisted = match continuations
+                                .get_segment_handover(pid, segment_ordinal)
+                                .await
+                            {
+                                Ok(persisted) => persisted,
+                                Err(error) if error.is_retryable() => {
+                                    return Err(error.to_string());
+                                }
+                                Err(error) => {
+                                    return Ok(Err(SegmentFailure::HandoverMissing(
+                                        error.to_string(),
+                                    )));
+                                }
+                            };
+                            let Some(persisted) = persisted else {
+                                return Ok(Err(SegmentFailure::HandoverMissing(format!(
+                                    "missing persisted handover for process `{pid}` segment \
+                                     {segment_ordinal}: its admission recorded one that is no \
+                                     longer retained"
+                                ))));
+                            };
+                            Ok(match handover_digest(&persisted.handover) {
+                                Ok(digest) if digest == recorded => Ok(persisted.handover),
+                                Ok(_) => Err(SegmentFailure::HandoverMismatch(format!(
+                                    "process `{pid}` segment {segment_ordinal} handover differs \
+                                     from the one its admission recorded"
+                                ))),
+                                Err(error) => Err(SegmentFailure::HandoverMismatch(format!(
+                                    "process `{pid}` segment {segment_ordinal} handover digest: \
+                                     {error:?}"
+                                ))),
+                            })
+                        },
+                    )
                     .await
-                    .map_err(HandlerError::from)?
-                    .ok_or_else(|| {
-                        HandlerError::from(TerminalError::new(format!(
-                            "missing persisted handover for process `{process_id}` segment {}: \
-                             its admission recorded one that is no longer retained",
-                            input.segment_ordinal
-                        )))
-                    })?;
-                if handover_digest(&persisted.handover)? != recorded {
-                    return Err(TerminalError::new(format!(
-                        "process `{process_id}` segment {} handover differs from the one its admission recorded",
-                        input.segment_ordinal
-                    ))
-                    .into());
+                    .map_err(HandlerError::from)?;
+                match resumed {
+                    Ok(handover) => Some(handover),
+                    Err(failure) => {
+                        return self
+                            .fail_segment(
+                                &ctx,
+                                &process_id,
+                                input.segment_ordinal,
+                                failure,
+                                SegmentSignal::Unresolved,
+                            )
+                            .await;
+                    }
                 }
-                Some(persisted.handover)
             }
         };
         let options = RestateEffectControllerOptions::default()
@@ -840,9 +992,20 @@ where
             controller
         };
         let end = loop {
-            let scoped_effect_controller = controller
-                .process_segment_controller(&started)
-                .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
+            let scoped_effect_controller = match controller.process_segment_controller(&started) {
+                Ok(scoped) => scoped,
+                Err(error) => {
+                    return self
+                        .fail_segment(
+                            controller.context(),
+                            &process_id,
+                            input.segment_ordinal,
+                            SegmentFailure::Controller(error.to_string()),
+                            SegmentSignal::Unresolved,
+                        )
+                        .await;
+                }
+            };
             let end = self
                 .run_registration(
                     input.registration.clone(),
@@ -857,13 +1020,13 @@ where
                 // read here would decide on a redrive whether the runner is
                 // entered again in this invocation.
                 let registry = &self.registry;
-                let process_id = &process_id;
+                let pid = &process_id;
                 let Json(declined) = controller
                     .context()
                     .run_json_or_retry_send::<Result<bool, String>, _>(
                         BOUNDARY_STEP.to_string(),
                         async move {
-                            match registry.get_process(process_id).await {
+                            match registry.get_process(pid).await {
                                 Ok(record) => Ok(Ok(boundary_must_be_declined(record.as_ref()))),
                                 Err(error) => step_fault(error),
                             }
@@ -871,9 +1034,23 @@ where
                     )
                     .await
                     .map_err(HandlerError::from)?;
-                if declined.map_err(TerminalError::new)? {
-                    handover = Some(boundary.clone());
-                    continue;
+                match declined {
+                    Ok(true) => {
+                        handover = Some(boundary.clone());
+                        continue;
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        return self
+                            .fail_segment(
+                                controller.context(),
+                                &process_id,
+                                input.segment_ordinal,
+                                SegmentFailure::Boundary(error),
+                                SegmentSignal::Unresolved,
+                            )
+                            .await;
+                    }
                 }
             }
             break end;
@@ -936,6 +1113,7 @@ where
                         .put_segment_handover(
                             pid,
                             lash_core::PersistedSegmentHandover {
+                                writer,
                                 segment_ordinal: next_segment_ordinal,
                                 handover,
                             },
@@ -949,7 +1127,18 @@ where
             )
             .await
             .map_err(HandlerError::from)?;
-        handed_over.map_err(TerminalError::new)?;
+        if let Err(error) = handed_over {
+            // Nothing was sent: the process is still this segment's to end.
+            return self
+                .fail_segment(
+                    context,
+                    &process_id,
+                    input.segment_ordinal,
+                    SegmentFailure::HandoverWrite(error),
+                    SegmentSignal::Resolved,
+                )
+                .await;
+        }
         // FIG-788: successor emission is unconditional. A cancellation
         // can land between attempts, so the recorded read below may
         // shape only commands after this deployed prefix.
@@ -976,12 +1165,8 @@ where
                 async move {
                     let record = match registry.get_process(pid).await {
                         Ok(Some(record)) => record,
-                        Ok(None) => {
-                            return Ok(Err(
-                                lash_core::runtime::registry_transitions::unknown_process(pid)
-                                    .to_string(),
-                            ));
-                        }
+                        // No process is left to cancel.
+                        Ok(None) => return Ok(Ok(None)),
                         Err(error) => return step_fault(error),
                     };
                     if record.cancel_request.is_none() {
@@ -994,6 +1179,8 @@ where
             )
             .await
             .map_err(HandlerError::from)?;
+        // The successor carries the process from the send on, so a failure
+        // from here cannot strand it: it ends only this invocation.
         if let Some(cancel) = forward.map_err(TerminalError::new)? {
             let deliver = context
                 .workflow_client::<LashProcessWorkflowClient>(successor_key)
@@ -1002,11 +1189,9 @@ where
         }
         // This segment has handed the process on and recorded the cancel it
         // forwards, so its handover is no longer anyone's to read: retire it,
-        // and any older one. Until here it is retained, so a redrive of this
-        // segment in the handover gap can still replay its runner and forward
-        // a cancel that landed in the gap (FIG-3673). A redrive after this
-        // step finds no handover and ends: its successor was sent and its
-        // forward recorded.
+        // and any older one. A redrive of this segment, before or after this
+        // step, replays its runner from the handover its resume step
+        // journaled (FIG-3809).
         if input.segment_ordinal > 0 {
             let continuations = &self.continuations;
             let pid = &process_id;
@@ -1026,7 +1211,17 @@ where
                 )
                 .await
                 .map_err(HandlerError::from)?;
-            retired.map_err(TerminalError::new)?;
+            if let Err(error) = retired {
+                // Retiring is cleanup: a handover left behind is deleted with
+                // the process when it is pruned, and the successor carries
+                // the process either way.
+                tracing::warn!(
+                    process_id = process_id.as_str(),
+                    segment_ordinal = input.segment_ordinal,
+                    error = error.as_str(),
+                    "a retired process segment could not delete its handovers"
+                );
+            }
         }
         Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
             next_segment_ordinal,

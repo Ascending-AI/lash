@@ -363,21 +363,47 @@ The engine tests in `lash-core-execution` run this shape on a `!Send` and a
     step and journals the stored outcome that the terminal promise
     publishes.
   - `lash.segment.boundary` records whether a boundary is declined.
-  - `lash.segment.handover` records the successor reference and the handover.
+  - `lash.segment.resume` journals the handover a later segment resumes
+    from, checked against the digest its admission recorded. A redrive
+    replays the runner from the journaled handover, never from the store.
+  - `lash.segment.handover` records the successor reference and the
+    handover. The stored handover names its writer (the admission's
+    recorded nonce). The engine state carries measured wall-clock time, so a
+    redrive that re-runs this step re-derives different bytes. A put by the
+    same writer keeps the bytes already stored; another writer's put is a
+    conflict (FIG-3809).
   - `lash.segment.cancel-forward` records whether a cancel is forwarded to
     the successor.
   - `lash.segment.retire` retires the segment's own handover (and older
     ones). It runs after the segment has sent its successor and recorded
-    the cancel it forwards. A put never retires an older handover. So a
-    segment redriven in its handover gap can still replay its runner and
-    forward a cancel that landed in the gap, even after its successor has
-    handed over in turn.
+    the cancel it forwards. A put never retires an older handover. A
+    redrive before or after retire replays from the journaled resume
+    handover. A retire the store refuses is logged and skipped: pruning the
+    process deletes what it left.
   - In the shared `cancel` and `deliver_cancel` handlers, the steps are
     `lash.process.cancel.record`, `lash.process.cancel.child-turn` and
     `lash.process.cancel.route`.
 
   Each step records a non-retryable refusal as its answer. A retryable
   store fault ends the attempt unrecorded, so the step runs again.
+
+  A segment never ends while its process stays `Running` (FIG-3789). Each
+  failure class has one fixed path:
+  - A missing or mismatched resume handover, a controller that cannot be
+    minted, a failed boundary read and a failed handover write each end the
+    process `Failed` through `lash.process.complete`. The failure is typed
+    `process_segment_handover_missing`, `_handover_mismatch`, `_controller`,
+    `_boundary` or `_handover_write`, and the terminal is published to
+    awaiters.
+  - A runner error that no retry can fix (`is_terminal`) ends the process
+    `Failed` under its own code.
+  - An opaque runner error is the host's infrastructure and fails the
+    attempt retryably, so the process stays recoverable.
+  - A lost lease or an unknown process ends only the invocation, because
+    another owner carries the process or no process is left.
+  - Once the successor is sent, the successor carries the process. A
+    failure after the send therefore ends only the predecessor's
+    invocation.
 
   The process body's wait-state writes are steps too, through
   `RuntimeEffectController::record_process_drive_step`: entering and
@@ -414,6 +440,30 @@ The engine tests in `lash-core-execution` run this shape on a `!Send` and a
   live write, and it refuses a terminal process, which every redrive after
   the completion step reaches.
 - Restate process journal generation 3. The effect journal is unchanged.
+- **The process crash matrix (FIG-3809).** `lash-restate-test`'s
+  `process_crash_replay` runs a real Lashlang process across three
+  segments. The process sleeps, calls a tool, waits for a signal and calls
+  the tool again. The matrix:
+  - crashes every segment journal point once and redrives it, three ways:
+    plain, under always-replay, and on a fresh process worker;
+  - runs 16 serially scheduled seeds under always-replay, each with a cancel
+    injected at a seeded point.
+
+  Every run reaches the reference terminal, or `Cancelled` when the cancel
+  landed first. There is no journal mismatch, and each tool call runs once
+  unless the crash lost its result. The matrix found the retire and handover
+  replay faults above. The resume step changes the process journal's shape
+  without a generation bump: bumps are paused until the 1.0 cut (FIG-3660).
+- **The process-await guard (FIG-3808).** A process `Await`'s existence
+  guard is one recorded step (`process-await-guard`). It records `Ok` or
+  the typed refusal. A redrive after the child finished and was pruned
+  serves the recorded answer. The effect journal generation is not bumped
+  (paused pre-1.0, FIG-3660).
+- **The pre-run record read (W1) is replay-invariant.** The read decides
+  nothing a later mutation could change. A terminal record carries no park:
+  the terminal fold clears the wait. So clearing a park on a terminal record
+  cannot happen. A law moves the cancel request, the wait and the external
+  reference between attempts and replays the run unchanged.
 
 ### 4. Group operations are complete
 

@@ -526,6 +526,10 @@ pub struct SegmentStartMarker {
 /// it.
 #[async_trait::async_trait]
 pub trait ProcessContinuationStore: Send + Sync {
+    /// Park `handover` at its ordinal. The same bytes again, or any handover
+    /// from the writer whose handover is already parked there (its own retried
+    /// write), succeed and keep the parked bytes; a different writer's
+    /// handover is a conflict.
     async fn put_segment_handover(
         &self,
         process_id: &ProcessId,

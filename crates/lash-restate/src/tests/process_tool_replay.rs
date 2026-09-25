@@ -322,3 +322,139 @@ async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_s
         "the redrive reproduces the recorded terminal"
     );
 }
+
+/// FIG-3808: the worker's pre-run read of a Restate-admitted segment's
+/// record is replay-invariant. It feeds the run only what admission fixed and
+/// nothing later rewrites: the incarnation, the start (attempt, owner, replay
+/// grammar) and the disposition. A redrive after the record's mutable state
+/// moved on (a cancel request, a park, a successor reference) replays the
+/// recorded run unchanged; beginning the parked rerun is the one write the
+/// read leads to, and it shapes no journal command. A terminal record
+/// carries no park: the terminal fold clears it.
+#[tokio::test]
+async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchanged() {
+    let process_id = "restate-process-pre-run-read-invariant";
+    let executions = Arc::new(AtomicUsize::new(0));
+    let registry = process_registry();
+    let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
+        memory_session_store_factory().await;
+    let env_ref = persist_recovery_env_ref().await;
+    let registration =
+        counting_tool_registration(process_id, lash_core::RecoveryContract::Rerunnable, env_ref);
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register the process");
+    let worker = recovery_worker_with_plugins(
+        Arc::clone(&registry),
+        store_factory,
+        vec![counting_tool_plugin(Arc::clone(&executions))],
+    )
+    .await;
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+        process_id,
+        "process-pre-run-read-invariant-execution",
+    );
+    let run = |context: Arc<ReplayableRecordingContext>| {
+        let worker = worker.clone();
+        let registry = Arc::clone(&registry);
+        let registration = registration.clone();
+        let authority = authority.clone();
+        async move {
+            let controller = RestateRuntimeEffectController::new_for_test(context);
+            worker
+                .run_process_segment_with_scoped_effect_controller(
+                    registration,
+                    ProcessExecutionContext::default(),
+                    authority,
+                    controller
+                        .process_scope_for_test(
+                            recorded_process_admission(
+                                registry.as_ref(),
+                                &ProcessId::from(process_id),
+                            )
+                            .await,
+                        )
+                        .expect("scope the process"),
+                    tokio_util::sync::CancellationToken::new(),
+                    None,
+                )
+                .await
+        }
+    };
+
+    let first = run(Arc::clone(&context)).await.expect("run the process");
+    let recorded_steps = context.runs();
+    let before = registry
+        .get_process(&ProcessId::from(process_id))
+        .await
+        .expect("read the record")
+        .expect("the record stands");
+
+    // The record's mutable state moves on between attempts.
+    registry
+        .append_event(
+            &ProcessId::from(process_id),
+            lash_core::ProcessEventAppendRequest::cancel_requested(
+                &lash_core::ProcessRef::from_record(&before),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:pre-run-read",
+                    11,
+                ),
+            ),
+        )
+        .await
+        .expect("record a cancel request");
+    registry
+        .park_process_with_authority(
+            &ProcessId::from(process_id),
+            lash_core::store::ParkReason::ReplayDivergence {
+                message: "parked between attempts".to_string(),
+            },
+            &authority.clone().bind_attempt(1),
+        )
+        .await
+        .expect("park the process");
+    registry
+        .set_external_ref(
+            &ProcessId::from(process_id),
+            lash_core::ProcessExternalRef {
+                backend: "restate".to_string(),
+                id: "LashProcessWorkflow/elsewhere".to_string(),
+                metadata: None,
+                segment_ordinal: Some(1),
+            },
+        )
+        .await
+        .expect("move the successor reference");
+
+    context.start_replay();
+    let replayed = run(Arc::clone(&context))
+        .await
+        .expect("redrive the process");
+    assert_eq!(
+        replayed, first,
+        "the redrive reproduces the recorded outcome"
+    );
+    assert_eq!(
+        context.runs()[recorded_steps.len()..],
+        recorded_steps[..],
+        "the redrive issues exactly the steps the first execution recorded"
+    );
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+    let after = registry
+        .get_process(&ProcessId::from(process_id))
+        .await
+        .expect("read the record")
+        .expect("the record stands");
+    assert!(
+        after.park.as_deref().is_some_and(|park| !park.refusing),
+        "the rerun began under the recorded park, the one write the read leads to"
+    );
+    assert_eq!(
+        after.first_started, before.first_started,
+        "the start admission recorded is never rewritten"
+    );
+}

@@ -633,18 +633,23 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `process_segment_handovers` statements only PostgreSQL issues.
     pub(crate) struct SegmentHandoverPostgresStatements @ "process_segment_handover" {
-        /// Park the handover of `?1` at segment `?2`, reporting no row when a
-        /// different handover is already parked there.
+        /// Park the handover of `?1` at segment `?2`, reporting no row when
+        /// another writer's handover is already parked there.
         ///
-        /// The conflict clause carries the refusal: a repeat of the same bytes
-        /// is idempotent, a different handover writes nothing and the caller
-        /// raises the conflict. SQLite reads the ordinal under its write lock
-        /// and decides the same thing in Rust.
+        /// The conflict clause carries the refusal: a repeat of the same
+        /// bytes, or any handover from the writer already parked there (its own
+        /// retried write), is idempotent and keeps the parked bytes; another
+        /// writer's handover writes nothing and the caller raises the
+        /// conflict. SQLite reads the ordinal under its write lock and decides
+        /// the same thing in Rust.
         upsert_identical = "INSERT INTO process_segment_handovers
              (process_id, segment_ordinal, handover_json) VALUES (?1, ?2, ?3)
              ON CONFLICT (process_id, segment_ordinal) DO UPDATE
-             SET handover_json = EXCLUDED.handover_json
-             WHERE process_segment_handovers.handover_json = EXCLUDED.handover_json";
+             SET handover_json = process_segment_handovers.handover_json
+             WHERE process_segment_handovers.handover_json = EXCLUDED.handover_json
+                OR (COALESCE(EXCLUDED.handover_json::jsonb ->> 'writer', '') <> ''
+                    AND process_segment_handovers.handover_json::jsonb ->> 'writer'
+                        = EXCLUDED.handover_json::jsonb ->> 'writer')";
 
         /// The parked-continuation page of the preflight walk: after `?1` /
         /// `?2`, at most `?3`.

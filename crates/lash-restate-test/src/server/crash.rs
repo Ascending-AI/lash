@@ -31,6 +31,9 @@ pub struct CrashRule {
     pub point: CrashPoint,
     pub service: Option<String>,
     pub handler: Option<String>,
+    /// The object or workflow key the crashing invocation addresses; `None`
+    /// matches any key.
+    pub key: Option<String>,
     /// Fire only on attempts numbered at most this (1-based); `None` fires
     /// on any attempt.
     pub max_attempt: Option<u32>,
@@ -43,6 +46,7 @@ impl CrashRule {
             point,
             service: None,
             handler: None,
+            key: None,
             max_attempt: None,
             times: 1,
         }
@@ -55,6 +59,12 @@ impl CrashRule {
 
     pub fn handler(mut self, handler: impl Into<String>) -> Self {
         self.handler = Some(handler.into());
+        self
+    }
+
+    /// Crash only an invocation addressing this object or workflow key.
+    pub fn key(mut self, key: impl Into<String>) -> Self {
+        self.key = Some(key.into());
         self
     }
 
@@ -81,6 +91,10 @@ impl CrashRule {
                 .handler
                 .as_deref()
                 .is_some_and(|handler| handler != site.handler)
+            || self
+                .key
+                .as_deref()
+                .is_some_and(|key| Some(key) != site.key.as_deref())
             || self.max_attempt.is_some_and(|max| site.attempt > max)
         {
             return false;
@@ -116,6 +130,7 @@ pub struct RandomCrashes {
 pub struct CrashSite {
     pub service: String,
     pub handler: String,
+    pub key: Option<String>,
     pub ty: MessageType,
     /// The journal index this frame takes if it is a command.
     pub command_index: usize,

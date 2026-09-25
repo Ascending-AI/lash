@@ -758,6 +758,7 @@ impl State {
         CrashSite {
             service: invocation.target.service.clone(),
             handler: invocation.target.handler.clone(),
+            key: invocation.target.key.clone(),
             ty: frame.ty,
             command_index,
             run_name,
@@ -1216,6 +1217,9 @@ impl State {
         });
         self.stats.crashes += 1;
         invocation.status = Status::BackingOff;
+        if let Some(listener) = sh.crash_listener.get() {
+            listener(&invocation.target.display());
+        }
         self.start_attempt(sh, key);
         true
     }

@@ -18,6 +18,7 @@ pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
         .put_segment_handover(
             &ProcessId::from("segment-invariant"),
             lash_core::PersistedSegmentHandover {
+                writer: String::new(),
                 segment_ordinal: 1,
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -1065,6 +1066,7 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                     .put_segment_handover(
                         &registration.id,
                         lash_core::PersistedSegmentHandover {
+                            writer: String::new(),
                             segment_ordinal: next,
                             handover: boundary,
                         },

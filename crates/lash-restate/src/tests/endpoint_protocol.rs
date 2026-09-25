@@ -1053,14 +1053,46 @@ pub(super) async fn admission_journal<T: serde::Serialize>(
     let start = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", retry).await?;
     let mut journal = verdict.to_vec();
     journal.extend_from_slice(&start);
+    // A segment that resumes from a handover journals it right after
+    // admission (`lash.segment.resume`); it belongs to the prefix every later
+    // command follows.
+    let retry = encode_journal_retry(workflow_key, input, &journal, 2)?;
+    let next = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", retry).await?;
+    let resumes = restate_recorded_commands(&next)
+        .ok_or_else(|| TerminalError::new("post-admission attempt omitted a valid frame"))?
+        .first()
+        .is_some_and(|command| {
+            command.message_type == 0x0411
+                && command
+                    .frame
+                    .windows(b"lash.segment.resume".len())
+                    .any(|window| window == b"lash.segment.resume")
+        });
+    if resumes {
+        let frames = split_frames(&next)
+            .ok_or_else(|| TerminalError::new("post-admission attempt omitted a valid frame"))?;
+        // The resume run and its proposed completion.
+        let resume = frames
+            .into_iter()
+            .filter(|frame| {
+                matches!(
+                    frame.get(..2).map(|ty| u16::from_be_bytes([ty[0], ty[1]])),
+                    Some(0x0411 | 0x0005)
+                )
+            })
+            .take(2);
+        for frame in resume {
+            journal.extend_from_slice(frame);
+        }
+    }
     let runs = restate_recorded_commands(&journal)
         .ok_or_else(|| TerminalError::new("admission journal omitted a valid frame"))?
         .into_iter()
         .filter(|command| command.message_type == 0x0411)
         .count();
-    if runs != 2 {
+    if runs != 2 + usize::from(resumes) {
         return Err(TerminalError::new(format!(
-            "admission journals exactly its two steps, found {runs} runs"
+            "admission journals exactly its steps, found {runs} runs"
         )));
     }
     Ok(journal)

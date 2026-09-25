@@ -35,6 +35,7 @@ pub async fn process_continuation_store(
         .await
         .expect("register continuation owner");
     let handover = PersistedSegmentHandover {
+        writer: String::new(),
         segment_ordinal: 1,
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
@@ -74,6 +75,45 @@ pub async fn process_continuation_store(
             .await
             .is_err(),
         "same ordinal with different bytes must conflict"
+    );
+
+    // A writer's own retried write keeps the parked bytes; another writer's
+    // handover at the same ordinal still conflicts (FIG-3809).
+    let written = PersistedSegmentHandover {
+        writer: "segment-nonce-a".to_string(),
+        segment_ordinal: 2,
+        handover: SegmentHandover {
+            reason: BoundaryReason::JournalBudget,
+            program_hash: "program-v1".to_string(),
+            engine_state: vec![5, 6],
+        },
+    };
+    store
+        .put_segment_handover(&ProcessId::from(process_id), written.clone())
+        .await
+        .expect("persist the writer's handover");
+    let mut rederived = written.clone();
+    rederived.handover.engine_state.push(7);
+    store
+        .put_segment_handover(&ProcessId::from(process_id), rederived.clone())
+        .await
+        .expect("the writer's own retried write is idempotent");
+    assert_eq!(
+        store
+            .get_segment_handover(&ProcessId::from(process_id), 2)
+            .await
+            .expect("read the writer's handover"),
+        Some(written.clone()),
+        "the parked bytes stay"
+    );
+    let mut other_writer = rederived;
+    other_writer.writer = "segment-nonce-b".to_string();
+    assert!(
+        store
+            .put_segment_handover(&ProcessId::from(process_id), other_writer)
+            .await
+            .is_err(),
+        "another writer's handover at the same ordinal must conflict"
     );
 
     // FIG-3588: a retained handover carries its segment's start marker,
@@ -182,6 +222,7 @@ pub async fn process_continuation_store(
         .await
         .expect("register prunable continuation owner");
     let pruned_handover = PersistedSegmentHandover {
+        writer: String::new(),
         segment_ordinal: 1,
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
