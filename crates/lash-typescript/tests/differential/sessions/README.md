@@ -27,9 +27,10 @@ which both this corpus and the generated sessions are answered through.
 Where a Rust caller starts `oracle.mjs` (writing the `generated/` tree,
 the longer live runs), the binary resolves as: `LASH_NODE` when set, else the
 mise-installed pinned Node at
-`~/.local/share/mise/installs/node/25.2.1/bin/node` when present, else a
-failure naming both — `kiln run`'s Bazel environment has no `node` on
-`PATH`.
+`~/.local/share/mise/installs/node/25.2.1/bin/node` when present (`kiln
+run`'s Bazel environment has no `node` on `PATH`), else `node` from `PATH`,
+which is how CI jobs provision it (`actions/setup-node`). The oracle refuses
+any Node other than the pinned one.
 
 ## The mapping
 
