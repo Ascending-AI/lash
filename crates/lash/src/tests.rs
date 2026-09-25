@@ -2457,6 +2457,13 @@ pub(crate) use harness::{
     run_async_test_on_stack_budget, run_async_test_on_stack_size, sqlite_queued_run_count,
     sqlite_queued_work_claims, sqlite_turn_input_states,
 };
+// The PREP-F twins the S5c batches move their fixtures onto (D1 §3.4); any
+// module's tests reach them here.
+#[allow(
+    unused_imports,
+    reason = "PREP-F twins: the S5c batches' fixture moves are their callers"
+)]
+pub(crate) use harness::{memory_store_backend, memory_store_set, restate_double};
 mod aborted_turn_groups;
 mod agent_scenarios;
 #[cfg(feature = "rlm")]
