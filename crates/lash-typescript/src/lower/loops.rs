@@ -1,6 +1,24 @@
 use super::*;
 
 impl Lowerer {
+    /// Lowers ECMA-262's ForStatement: any head (`let`, `const`, `var`, an
+    /// expression, or none), any condition (none reads as `true`) and any
+    /// update (none runs nothing).
+    ///
+    /// The loop lowers to `Block([init.., While(test, Block([body, update?]))])`.
+    /// A `continue` runs the update before it continues, and a `continue`
+    /// that would cross a `finally` to reach the update refuses, since the
+    /// update would otherwise run before the `finally` body (register entry
+    /// 23).
+    ///
+    /// A closure copies what it captures, so ECMA-262's per-iteration `let`
+    /// copies (CreatePerIterationEnvironment) are the capture ledger's to
+    /// judge. The head runs once, outside the loop, in the copy the first
+    /// iteration's copy is taken from, so the head's `let` bindings enter the
+    /// ledger again, inside the loop, once the head has lowered: a closure the
+    /// head creates keeps the head's values, and one the loop creates keeps
+    /// its iteration's. The update runs in the next iteration's copy, before
+    /// that iteration's test and body, so it is lowered ahead of both.
     pub(super) fn lower_classic_for(
         &mut self,
         init: Option<&Stmt>,
@@ -8,127 +26,106 @@ impl Lowerer {
         update: Option<&Expr>,
         body: &Stmt,
     ) -> Result<LashExpr, Diagnostic> {
-        if continue_under_finally(body, false, 0) {
+        if update.is_some() && continue_under_finally(body, false, 0) {
             return Err(Diagnostic::new(
                 DiagnosticCode::ForUnsupported,
-                "classic-for continue crossing a finally boundary is not supported in v1",
+                "a classic-for `continue` that crosses a `finally` is not supported: the loop's update would run before the `finally` body",
                 None,
             ));
         }
-        let Some(Stmt::Var { kind, declarations }) = init else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for requires `let i = start; i < end; i++` in v1",
-                None,
-            ));
-        };
-        if !matches!(kind, VarKind::Let | VarKind::Var) {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for requires `let` or `var` in v1",
-                None,
-            ));
-        }
-        let [declaration] = declarations.as_slice() else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for requires exactly one loop binding",
-                None,
-            ));
-        };
-        let Some(start) = declaration.init.as_ref() else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for loop binding requires an initializer",
-                None,
-            ));
-        };
-        let Some(Expr::Binary {
-            left,
-            op: BinaryOp::Less,
-            ..
-        }) = test
-        else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for condition must be `i < end`",
-                None,
-            ));
-        };
-        let Expr::Ident(condition_name, _) = left.as_ref() else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for condition must read its loop binding",
-                None,
-            ));
-        };
-        let Some(Expr::Update {
-            target: TsAssignTarget::Ident(update_name),
-            delta,
-            ..
-        }) = update
-        else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for update must be `i++`",
-                None,
-            ));
-        };
-        let Some(declaration_name) = single_pattern_name(&declaration.pattern) else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for requires one identifier binding",
-                None,
-            ));
-        };
-        if condition_name != declaration_name || update_name != declaration_name || *delta != 1.0 {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ForUnsupported,
-                "classic for binding, condition, and update must name the same identifier",
-                None,
-            ));
-        }
-
         self.scopes.push(Scope::default());
-        if *kind == VarKind::Let {
-            self.declare(declaration_name, BindingKind::Let, true, false)?;
-        } else {
-            // A `var` head names the binding its function (or the cell)
-            // hoisted — `function_var_names` collects the head's names — and
-            // its initializer is an assignment of that one binding, as a
-            // `var x = init` statement's is. The loop declares nothing.
-            let binding = self.binding(declaration_name)?.id;
-            self.record_write(binding);
-        }
-        let internal = self.binding(declaration_name)?.internal.clone();
-        let start = self.lower_expr(start)?;
+        let result = self.lower_classic_for_in_scope(init, test, update, body);
+        self.scopes.pop();
+        result
+    }
+
+    fn lower_classic_for_in_scope(
+        &mut self,
+        init: Option<&Stmt>,
+        test: Option<&Expr>,
+        update: Option<&Expr>,
+        body: &Stmt,
+    ) -> Result<LashExpr, Diagnostic> {
+        let mut per_iteration = Vec::new();
+        let mut output = match init {
+            Some(init) => {
+                if let Stmt::Var {
+                    kind: kind @ (VarKind::Let | VarKind::Const),
+                    declarations,
+                } = init.unlabeled()
+                {
+                    self.predeclare(std::slice::from_ref(init), false)?;
+                    if *kind == VarKind::Let {
+                        for declaration in declarations {
+                            pattern_names(&declaration.pattern, &mut per_iteration);
+                        }
+                    }
+                }
+                self.lower_stmt(init)?
+            }
+            None => Vec::new(),
+        };
+        let lowered_loop = self.in_loop_statement(|lowerer| {
+            for name in &per_iteration {
+                lowerer.begin_iteration_copy(name);
+            }
+            let update = update
+                .map(|update| lowerer.lower_for_update(update))
+                .transpose()?;
+            let condition = test
+                .map(|test| lowerer.lower_expr(test))
+                .transpose()?
+                .unwrap_or(LashExpr::Bool(true));
+            let body = lowerer.with_loop(|lowerer| {
+                lowerer.continue_epilogues.push(update.clone());
+                let body = lowerer.lower_stmt_block(body);
+                lowerer.continue_epilogues.pop();
+                body
+            })?;
+            let mut iteration = vec![body];
+            iteration.extend(update);
+            Ok(LashExpr::While {
+                condition: Box::new(condition),
+                body: Box::new(LashExpr::Block(iteration)),
+            })
+        })?;
+        output.push(lowered_loop);
+        Ok(LashExpr::Block(output))
+    }
+
+    /// Re-enters a head `let` binding into the capture ledger as the copy the
+    /// loop's iterations are taken from: ECMA-262 copies the binding before
+    /// the first test, so nothing the loop assigns reaches a closure the head
+    /// created.
+    fn begin_iteration_copy(&mut self, name: &str) {
+        let id = self.declare_in_ledger(name, BindingKind::Let);
         #[expect(
             clippy::expect_used,
-            reason = "the classic-for validation above refuses a loop without a condition"
+            reason = "the head's scope is the innermost one, and it declared this name"
         )]
-        let condition = self.lower_expr(test.expect("validated classic for condition"))?;
-        // The increment is lowered ahead of the body on purpose: it writes the
-        // next iteration's copy of the binding (ECMA-262's
-        // CreatePerIterationEnvironment runs before it), so for the capture
-        // ledger it precedes every closure the body creates.
-        let update = self.lower_update_statement(declaration_name, *delta)?;
-        let body = self.with_loop(|lowerer| {
-            lowerer.continue_epilogues.push(Some(update.clone()));
-            let body = lowerer.lower_stmt_block(body);
-            lowerer.continue_epilogues.pop();
-            body
-        })?;
-        self.scopes.pop();
-        Ok(LashExpr::Block(vec![
-            LashExpr::Assign {
-                target: AssignTarget::variable(internal.as_str().into()),
-                expr: Box::new(start),
-            },
-            LashExpr::While {
-                condition: Box::new(condition),
-                body: Box::new(LashExpr::Block(vec![body, update])),
-            },
-        ]))
+        let binding = self
+            .scopes
+            .last_mut()
+            .and_then(|scope| scope.bindings.get_mut(name))
+            .expect("a head binding lives in the loop's scope");
+        binding.id = id;
+    }
+
+    /// The update expression, run for its effect. `x++`, `++x`, `x--` and
+    /// `--x` on a binding lower to the one assignment `x = x - -1` (or
+    /// `x = x - 1`): a subtraction converts its operand with ToNumeric exactly
+    /// as the update operator does, and `x - -1` is `x + 1` for every Number,
+    /// so the old value needs no temporary. Any other update lowers as the
+    /// expression statement it is.
+    fn lower_for_update(&mut self, update: &Expr) -> Result<LashExpr, Diagnostic> {
+        match update {
+            Expr::Update {
+                target: TsAssignTarget::Ident(name),
+                delta,
+                ..
+            } => self.lower_update_statement(name, *delta),
+            update => self.lower_expr(update),
+        }
     }
 
     pub(super) fn lower_update_statement(
@@ -137,16 +134,13 @@ impl Lowerer {
         delta: f64,
     ) -> Result<LashExpr, Diagnostic> {
         let target = self.lower_assign_target(&TsAssignTarget::Ident(name.to_string()))?;
+        self.clear_process_handle_role(name)?;
         Ok(LashExpr::Assign {
             target,
             expr: Box::new(LashExpr::JavaScriptBinary {
                 left: Box::new(LashExpr::Variable(self.resolve(name)?.into())),
-                op: if delta > 0.0 {
-                    JavaScriptBinaryOp::Add
-                } else {
-                    JavaScriptBinaryOp::Subtract
-                },
-                right: Box::new(LashExpr::Number(delta.abs())),
+                op: JavaScriptBinaryOp::Subtract,
+                right: Box::new(LashExpr::Number(-delta)),
             }),
         })
     }

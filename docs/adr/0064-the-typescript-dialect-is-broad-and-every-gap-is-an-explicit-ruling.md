@@ -48,6 +48,17 @@ TS2300); and `TS_DELETE_NON_REFERENCE_UNSUPPORTED`, `delete` of an operand
 that is not a property reference (TS2703). An ECMA-262 early error in the
 same cell still reports first.
 
+Amended 2026-09-24 (FIG-3700, decision 42): method calls and `this` are ruled
+in. Object-literal methods were already accepted syntax; their `this` now
+binds exactly (member-call receivers, callback `thisArg`, JSON holders,
+lexical arrows, `undefined` for a plain call; see
+[ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md#status)),
+and a member call on a name that is not a built-in prototype method is a call
+of the receiver's own property rather than a `TS_METHOD_UNSUPPORTED` refusal.
+A built-in method outside the stdlib surface keeps its named refusal. Top-level
+`this` stays rejected; classes, constructors and prototype surgery are
+unchanged.
+
 Amended 2026-09-24 (FIG-3705): a refusal the pinned `tsc --strict` also
 issues is registered strictness, not a gap awaiting a ruling. The
 dialect-strictness register below cites the checker's diagnostic for each
@@ -128,6 +139,18 @@ than by construct list:
   explicit signature-table entry, with `ryu-js` at the single
   number-to-string choke point because Rust's native formatting is not
   ECMA-exact at the edges.
+- **Built-in methods are values** (FIG-3701). A read of an advertised
+  instance method that misses the value's own properties (`'x'.includes`,
+  `[].map`, `new Set().keys`) answers ECMA's one function object for it on
+  that value's prototype: `'a'.includes === 'b'.includes`,
+  `'a'.includes !== [].includes`, `new Set().keys === new Set().values`,
+  `typeof` is `"function"`, and its own `name` and `length` are node's. Field,
+  computed, optional and destructuring reads agree, and an own property wins.
+  A plain call passes `undefined` as the receiver and answers as node does: a
+  TypeError, except `Object.prototype.toString`. The value is a function, so
+  the closure boundary drops a binding that reaches one
+  (`TS_FUNCTION_NOT_PERSISTED`). Only advertised names are readable; an ECMA
+  method outside the call surface still reads `undefined`.
 - **Regex** is ECMA semantics on the published, fuel-instrumented
   `lash-regress` fork of the `regress` engine: every bytecode dispatch and
   backtrack transition is charged against a deterministic budget, because a backtracking engine

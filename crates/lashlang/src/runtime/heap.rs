@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+mod builtin_functions;
 mod closure_reach;
 mod id;
 mod javascript_exotics;
@@ -10,6 +11,7 @@ mod object;
 mod partition;
 mod projections;
 mod reference_assignment;
+mod structural_eq;
 mod summary;
 mod url_objects;
 mod validation;
@@ -38,6 +40,8 @@ pub(crate) use url_objects::{
     UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,
 };
 pub(crate) use validation::{PersistedRoots, ensure_value_depth};
+
+pub(crate) use crate::ecma_stdlib::{BuiltinFunction, BuiltinPrototype};
 
 use super::{
     CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, ProjectedValue, Record,
@@ -105,6 +109,10 @@ pub(crate) struct Heap {
     /// heap is built, so a heap rebuilt from a wire reads as entirely unlike
     /// any capture taken before, rather than as unwritten.
     base_revision: u64,
+    /// The one object each built-in function value lives in. It is an index
+    /// over `entries`, never state of its own: a wire rebuilds it from the
+    /// objects it carries, and a sweep drops what it collected.
+    builtin_functions: BTreeMap<BuiltinFunction, HeapId>,
 }
 
 /// The next write stamp; see [`Heap::revisions`].
@@ -139,6 +147,7 @@ impl Default for Heap {
             logical_byte_limit: DEFAULT_HEAP_LOGICAL_BYTE_LIMIT,
             revisions: FxHashMap::default(),
             base_revision: next_revision(),
+            builtin_functions: BTreeMap::new(),
         }
     }
 }
@@ -227,6 +236,7 @@ impl Heap {
         if heap.live_logical_bytes != wire.live_logical_bytes {
             return Err("heap live logical byte counter does not match its objects".to_string());
         }
+        heap.index_builtin_functions()?;
         for root in roots {
             heap.validate_resolvable_refs(root)?;
         }
@@ -667,7 +677,7 @@ impl Heap {
                     export_child(self, child, active)
                 })?
             }
-            HeapObject::Closure { .. } => {
+            HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
             object @ (HeapObject::RegExp(_)
@@ -877,7 +887,7 @@ impl Heap {
                     self.export_inner(child, active, depth + 1)
                 })?
             }
-            HeapObject::Closure { .. } => {
+            HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
             HeapObject::RegExp(_)
@@ -954,6 +964,11 @@ impl Heap {
                 if let Some(copy) = staging.mapping.get(id) {
                     return Ok(Value::Ref(*copy));
                 }
+                // A built-in function is immutable and has one object per
+                // heap; a copy would be a second function where ECMA has one.
+                if matches!(self.get(*id)?, HeapObject::BuiltinFunction(_)) {
+                    return Ok(Value::Ref(*id));
+                }
                 // Reserve before recursing so a cyclic graph terminates and both
                 // ends of the cycle name the same copy.
                 let copy = staging.reserve()?;
@@ -1021,6 +1036,7 @@ impl Heap {
                     .map(|value| self.stage_isolation(value, staging))
                     .transpose()?,
             },
+            HeapObject::BuiltinFunction(function) => HeapObject::BuiltinFunction(*function),
             HeapObject::RegExp(regexp) => HeapObject::RegExp(regexp.clone()),
             HeapObject::RegExpMatch(result) => HeapObject::RegExpMatch(RegExpMatchObject {
                 items: result
@@ -1364,6 +1380,7 @@ impl Heap {
             }
             HeapObject::Tuple(_) => return Err(RuntimeError::ImmutableTupleIndexes),
             object @ (HeapObject::Closure { .. }
+            | HeapObject::BuiltinFunction(_)
             | HeapObject::RegExp(_)
             | HeapObject::RegExpMatch(_)
             | HeapObject::Map(_)
@@ -1435,133 +1452,6 @@ impl Heap {
         Ok(value)
     }
 
-    pub(crate) fn structural_eq(&self, left: &Value, right: &Value) -> Result<bool, RuntimeError> {
-        self.structural_eq_inner(left, right, &mut BTreeSet::new())
-    }
-
-    fn structural_eq_inner(
-        &self,
-        left: &Value,
-        right: &Value,
-        visited: &mut BTreeSet<(HeapId, HeapId)>,
-    ) -> Result<bool, RuntimeError> {
-        let (Value::Ref(left_id), Value::Ref(right_id)) = (left, right) else {
-            return Ok(left == right);
-        };
-        if !visited.insert((*left_id, *right_id)) {
-            return Ok(true);
-        }
-        match (self.get(*left_id)?, self.get(*right_id)?) {
-            (HeapObject::Tuple(left), HeapObject::Tuple(right))
-            | (HeapObject::List(left), HeapObject::List(right)) => {
-                if left.len() != right.len() {
-                    return Ok(false);
-                }
-                for (left, right) in left.iter().zip(right) {
-                    if !self.structural_eq_inner(left, right, visited)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            (HeapObject::Record(left), HeapObject::Record(right)) => {
-                if left.len() != right.len() {
-                    return Ok(false);
-                }
-                for entry in &left.entries {
-                    let Some(right_value) = right.get_symbol(entry.symbol) else {
-                        return Ok(false);
-                    };
-                    if !self.structural_eq_inner(&entry.value, right_value, visited)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            (
-                HeapObject::Closure {
-                    function: left_function,
-                    captures: left,
-                    name: left_name,
-                    length: left_length,
-                },
-                HeapObject::Closure {
-                    function: right_function,
-                    captures: right,
-                    name: right_name,
-                    length: right_length,
-                },
-            ) => {
-                if left_function != right_function
-                    || left.len() != right.len()
-                    || left_name != right_name
-                    || left_length != right_length
-                {
-                    return Ok(false);
-                }
-                for (left, right) in left.iter().zip(right) {
-                    if !self.structural_eq_inner(left, right, visited)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            (HeapObject::RegExp(left), HeapObject::RegExp(right)) => Ok(left == right),
-            (HeapObject::Map(left), HeapObject::Map(right)) => {
-                if left.entries.len() != right.entries.len() {
-                    return Ok(false);
-                }
-                for ((left_key, left_value), (right_key, right_value)) in
-                    left.entries.iter().zip(&right.entries)
-                {
-                    if !self.structural_eq_inner(left_key, right_key, visited)?
-                        || !self.structural_eq_inner(left_value, right_value, visited)?
-                    {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            (HeapObject::Set(left), HeapObject::Set(right)) => {
-                if left.values.len() != right.values.len() {
-                    return Ok(false);
-                }
-                for (left, right) in left.values.iter().zip(&right.values) {
-                    if !self.structural_eq_inner(left, right, visited)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            (HeapObject::Date(left), HeapObject::Date(right)) => Ok(left == right),
-            (HeapObject::Error(left), HeapObject::Error(right)) => {
-                if left.kind != right.kind || left.message != right.message {
-                    return Ok(false);
-                }
-                match (&left.cause, &right.cause) {
-                    (Some(left), Some(right))
-                        if !self.structural_eq_inner(left, right, visited)? =>
-                    {
-                        return Ok(false);
-                    }
-                    (None, None) | (Some(_), Some(_)) => {}
-                    _ => return Ok(false),
-                }
-                match (&left.errors, &right.errors) {
-                    (Some(left), Some(right)) => self.structural_eq_inner(left, right, visited),
-                    (None, None) => Ok(true),
-                    _ => Ok(false),
-                }
-            }
-            (HeapObject::Url(left), HeapObject::Url(right)) => Ok(left.href == right.href
-                && self.structural_eq_inner(&left.search_params, &right.search_params, visited)?),
-            (HeapObject::UrlSearchParams(left), HeapObject::UrlSearchParams(right)) => {
-                Ok(left == right)
-            }
-            _ => Ok(false),
-        }
-    }
-
     pub(crate) fn collect<'a>(&mut self, roots: impl IntoIterator<Item = &'a Value>) {
         let mut marked = BTreeSet::new();
         let mut pending = Vec::new();
@@ -1591,6 +1481,7 @@ impl Heap {
         }
         self.entries.retain(|id, _| marked.contains(id));
         self.revisions.retain(|id, _| marked.contains(id));
+        self.builtin_functions.retain(|_, id| marked.contains(id));
         for (id, children, logical_bytes) in dead {
             self.retarget_parent_edges(id, &children, &[]);
             self.parents.remove(&id);
@@ -1696,6 +1587,7 @@ impl Clone for Heap {
             logical_byte_limit: self.logical_byte_limit,
             revisions: self.revisions.clone(),
             base_revision: self.base_revision,
+            builtin_functions: self.builtin_functions.clone(),
         }
     }
 }

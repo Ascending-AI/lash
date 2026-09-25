@@ -195,6 +195,7 @@ fn loop_control_outside_a_loop_is_a_typed_error_not_a_panic() {
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
                 js_name: None,
+                receiver: None,
                 params: Vec::new(),
                 captures: Vec::new(),
                 body: Box::new(Expr::Break),

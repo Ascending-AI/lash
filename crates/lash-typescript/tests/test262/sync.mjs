@@ -146,7 +146,7 @@ const typescriptNames = [
   // and writes as TS2339 (FIG-3705).
   "builtin-member-read",
   "builtin-member-write",
-  "classic-for-forms",
+  "classic-for-continue-across-finally",
   "closed-shape-field-guard",
   "comma-operator",
   // Arity past a constructor's signature: `new Map(1, 2)` refuses at run
@@ -188,6 +188,7 @@ const typescriptNames = [
   "tagged-templates",
   "temporal-dead-zone",
   "this",
+  "function-receivers",
   "unresolvable-references",
   "with",
   "source-size",

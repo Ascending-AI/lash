@@ -95,7 +95,9 @@ pub(super) fn instruction_heap_plan(
         | I::Intrinsic(IntrinsicOp::PushAssign(_))
         | I::MakeClosure { .. }
         | I::Call { .. }
+        | I::CallMethod { .. }
         | I::CallDynamic
+        | I::CallMethodDynamic
         | I::Map
         | I::AsyncMap
         | I::Return

@@ -74,6 +74,12 @@ fn a_closure_reading_a_binding_assigned_after_it_was_created_rejects() {
             "let x = 1; const f = () => x; for (x of [7]) { } finish(f());",
             "x",
         ),
+        // The store follows the value, which may create the closure.
+        // Answered 1; Node 2.
+        (
+            "let x = 1; const fs: any[] = []; x = fs.push(() => x) + 1; finish(fs[0]());",
+            "x",
+        ),
         // A closure made by another closure copies from that one's copy.
         // Answered 1; Node 2.
         (
@@ -121,6 +127,18 @@ fn a_closure_reading_a_binding_assigned_after_it_was_created_rejects() {
         (
             "const fs: any[] = []; for (let v of [1, 2]) { fs.push(() => v); v = 9; } finish(JSON.stringify(fs.map((f) => f())));",
             "v",
+        ),
+        // A classic `for` update runs in the next iteration's copy, so its
+        // own assignment follows a closure it creates. Node [1,2].
+        (
+            "const fs: any[] = []; for (let i = 0; i < 2; i = i + 1 + fs.push(() => i) - fs.length) { } finish(JSON.stringify(fs.map((f) => f())));",
+            "i",
+        ),
+        // The test runs in the iteration's copy, which the body then assigns.
+        // Node [1,2,2].
+        (
+            "const fs: any[] = []; for (let i = 0; fs.push(() => i) < 3; ) { i = i + 1; } finish(JSON.stringify(fs.map((f) => f())));",
+            "i",
         ),
         // A top-level `var` is a property of the global object, so a
         // `globalThis` write assigns it. Answered 1; Node 2.
@@ -221,6 +239,22 @@ fn captures_no_later_assignment_reaches_read_what_node_reads() {
         (
             "const fs: any[] = []; for (let i = 0; i < 3; i++) { let label = 'item'; label = label + i; fs.push(() => label); } finish(JSON.stringify(fs.map((f) => f())));",
             Value::String("[\"item0\",\"item1\",\"item2\"]".into()),
+        ),
+        // A classic `for` head runs once, in the copy the first iteration's
+        // is taken from: nothing the loop assigns reaches a closure the head
+        // made.
+        (
+            "let g: any = () => -1; for (let i = 0, f = () => i; i < 3; i++) { g = f; } finish(g());",
+            Value::Number(0.0),
+        ),
+        (
+            "const fs: any[] = []; for (let i = 0, f = () => i; i < 1; i++) { i = i + 0; fs.push(f); } finish(JSON.stringify(fs.map((f) => f())));",
+            Value::String("[0]".into()),
+        ),
+        // Each test runs in its iteration's copy, after the update wrote it.
+        (
+            "const fs: any[] = []; for (let i = 0; fs.push(() => i) <= 3; i++) { } finish(JSON.stringify(fs.map((f) => f())));",
+            Value::String("[0,1,2,3]".into()),
         ),
         // An accumulator read once the loop that assigns it is done.
         (

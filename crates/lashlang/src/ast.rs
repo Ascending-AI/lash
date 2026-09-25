@@ -6,8 +6,11 @@ use std::fmt;
 pub use crate::ast_string::AstString;
 use crate::span::Span;
 
+#[path = "ast_fold.rs"]
+mod fold;
 #[path = "ast_number.rs"]
 pub(crate) mod number;
+pub use fold::{ExprFolder, fold_expr_children};
 #[path = "ast_roles.rs"]
 mod roles;
 pub(crate) use roles::check_unique_declarations;
@@ -618,6 +621,28 @@ pub enum Expr {
         function: Box<Expr>,
         args: Vec<Expr>,
     },
+    /// Calls the function stored at a member of `receiver`, with the receiver
+    /// value as the callee's receiver.
+    ///
+    /// `receiver` is evaluated once, then `method` (and its key, when it is
+    /// computed), then the member is read, then `args`, and the call binds the
+    /// receiver into the callee's [`FunctionExpr::receiver`] slot. This is the
+    /// member call of a language with method receivers; a plain [`Expr::Call`]
+    /// binds `undefined`.
+    MethodCall {
+        receiver: Box<Expr>,
+        method: MethodKey,
+        args: Vec<Expr>,
+    },
+    /// Calls `function` with an explicit receiver: `this`, then `function`,
+    /// then `args` are evaluated in that order. A front end uses it where a
+    /// builtin passes a receiver of its choosing (a callback's `thisArg`, a
+    /// JSON replacer's holder).
+    ThisCall {
+        this: Box<Expr>,
+        function: Box<Expr>,
+        args: Vec<Expr>,
+    },
     /// Calls a declared [`FunctionDecl`] by name.
     ///
     /// The parser never produces this node: source spells a call to a declared
@@ -690,11 +715,26 @@ pub struct FunctionExpr {
     /// ECMA reports for a function no naming context reached.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub js_name: Option<AstString>,
+    /// The slot the call's receiver is bound to, for a function that reads
+    /// it. A call through [`Expr::MethodCall`] or [`Expr::ThisCall`] binds the
+    /// receiver it names; every other call binds `undefined`. A function
+    /// without one (an arrow, or one that never reads its receiver) ignores
+    /// the receiver entirely; an arrow reads its enclosing function's slot as
+    /// an ordinary capture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<AstString>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<AstString>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub captures: Vec<AstString>,
     pub body: Box<Expr>,
+}
+
+/// The member an [`Expr::MethodCall`] reads its callee from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub enum MethodKey {
+    Field(AstString),
+    Index(Box<Expr>),
 }
 
 /// The authored shape of an inline process body, as a dialect lowers it.
@@ -836,6 +876,26 @@ impl Expr {
                 buffer.push(function);
                 buffer.extend(args.iter());
             }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                buffer.push(receiver);
+                if let MethodKey::Index(key) = method {
+                    buffer.push(key);
+                }
+                buffer.extend(args.iter());
+            }
+            Expr::ThisCall {
+                this,
+                function,
+                args,
+            } => {
+                buffer.push(this);
+                buffer.push(function);
+                buffer.extend(args.iter());
+            }
             Expr::Map { items, function } => {
                 buffer.push(items);
                 buffer.push(function);
@@ -962,6 +1022,26 @@ impl Expr {
                 buffer.push(function);
                 buffer.extend(args.iter_mut());
             }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                buffer.push(receiver);
+                if let MethodKey::Index(key) = method {
+                    buffer.push(key);
+                }
+                buffer.extend(args.iter_mut());
+            }
+            Expr::ThisCall {
+                this,
+                function,
+                args,
+            } => {
+                buffer.push(this);
+                buffer.push(function);
+                buffer.extend(args.iter_mut());
+            }
             Expr::Map { items, function } => {
                 buffer.push(items);
                 buffer.push(function);
@@ -1064,238 +1144,6 @@ where
 {
     for child in expr.children() {
         visitor.visit_expr(child);
-    }
-}
-
-pub trait ExprFolder {
-    fn fold_expr(&mut self, expr: Expr) -> Expr {
-        fold_expr_children(self, expr)
-    }
-}
-
-pub fn fold_expr_children<F>(folder: &mut F, expr: Expr) -> Expr
-where
-    F: ExprFolder + ?Sized,
-{
-    match expr {
-        Expr::Block(expressions) => Expr::Block(
-            expressions
-                .into_iter()
-                .map(|expr| folder.fold_expr(expr))
-                .collect(),
-        ),
-        Expr::LabelAnnotated { label, expr } => Expr::LabelAnnotated {
-            label,
-            expr: Box::new(folder.fold_expr(*expr)),
-        },
-        Expr::Tuple(items) => Expr::Tuple(
-            items
-                .into_iter()
-                .map(|expr| folder.fold_expr(expr))
-                .collect(),
-        ),
-        Expr::List(items) => Expr::List(
-            items
-                .into_iter()
-                .map(|expr| folder.fold_expr(expr))
-                .collect(),
-        ),
-        Expr::ListComprehension { element, clauses } => Expr::ListComprehension {
-            element: Box::new(folder.fold_expr(*element)),
-            clauses: clauses
-                .into_iter()
-                .map(|clause| fold_list_comprehension_clause(folder, clause))
-                .collect(),
-        },
-        Expr::Record(entries) => Expr::Record(
-            entries
-                .into_iter()
-                .map(|(name, value)| (name, folder.fold_expr(value)))
-                .collect(),
-        ),
-        Expr::Assign { target, expr } => Expr::Assign {
-            target: fold_assign_target(folder, target),
-            expr: Box::new(folder.fold_expr(*expr)),
-        },
-        Expr::If {
-            condition,
-            then_block,
-            else_block,
-        } => Expr::If {
-            condition: Box::new(folder.fold_expr(*condition)),
-            then_block: Box::new(folder.fold_expr(*then_block)),
-            else_block: Box::new(folder.fold_expr(*else_block)),
-        },
-        Expr::For {
-            binding,
-            iterable,
-            bind,
-            body,
-        } => Expr::For {
-            binding,
-            iterable: Box::new(folder.fold_expr(*iterable)),
-            bind: bind.map(|bind| Box::new(folder.fold_expr(*bind))),
-            body: Box::new(folder.fold_expr(*body)),
-        },
-        Expr::Role { role, expr } => Expr::Role {
-            role,
-            expr: Box::new(folder.fold_expr(*expr)),
-        },
-        Expr::While { condition, body } => Expr::While {
-            condition: Box::new(folder.fold_expr(*condition)),
-            body: Box::new(folder.fold_expr(*body)),
-        },
-        Expr::ProcessRef { process } => Expr::ProcessRef { process },
-        Expr::HostDescriptorConstructor { type_name, input } => Expr::HostDescriptorConstructor {
-            type_name,
-            input: Box::new(folder.fold_expr(*input)),
-        },
-        Expr::ReceiverCall {
-            receiver,
-            operation,
-            args,
-        } => Expr::ReceiverCall {
-            receiver: Box::new(folder.fold_expr(*receiver)),
-            operation,
-            args: args
-                .into_iter()
-                .map(|expr| folder.fold_expr(expr))
-                .collect(),
-        },
-        Expr::Await(expr) => Expr::Await(Box::new(folder.fold_expr(*expr))),
-        Expr::SleepFor(expr) => Expr::SleepFor(Box::new(folder.fold_expr(*expr))),
-        Expr::SleepUntil(expr) => Expr::SleepUntil(Box::new(folder.fold_expr(*expr))),
-        Expr::ResultUnwrap(expr) => Expr::ResultUnwrap(Box::new(folder.fold_expr(*expr))),
-        Expr::Print(expr) => Expr::Print(Box::new(folder.fold_expr(*expr))),
-        Expr::Yield(expr) => Expr::Yield(Box::new(folder.fold_expr(*expr))),
-        Expr::Finish(expr) => Expr::Finish(Box::new(folder.fold_expr(*expr))),
-        Expr::Fail(expr) => Expr::Fail(Box::new(folder.fold_expr(*expr))),
-        Expr::BuiltinCall { name, args } => Expr::BuiltinCall {
-            name,
-            args: args
-                .into_iter()
-                .map(|expr| folder.fold_expr(expr))
-                .collect(),
-        },
-        Expr::FunctionCall { function, args } => Expr::FunctionCall {
-            function,
-            args: args
-                .into_iter()
-                .map(|expr| folder.fold_expr(expr))
-                .collect(),
-        },
-        Expr::Function(function) => Expr::Function(Box::new(FunctionExpr {
-            name: function.name,
-            js_name: function.js_name,
-            params: function.params,
-            captures: function.captures,
-            body: Box::new(folder.fold_expr(*function.body)),
-        })),
-        Expr::ProcessLiteral(literal) => Expr::ProcessLiteral(Box::new(ProcessLiteralExpr {
-            params: literal.params,
-            hidden_args: literal.hidden_args,
-            body: Box::new(folder.fold_expr(*literal.body)),
-        })),
-        Expr::Call { function, args } => Expr::Call {
-            function: Box::new(folder.fold_expr(*function)),
-            args: args
-                .into_iter()
-                .map(|expr| folder.fold_expr(expr))
-                .collect(),
-        },
-        Expr::Map { items, function } => Expr::Map {
-            items: Box::new(folder.fold_expr(*items)),
-            function: Box::new(folder.fold_expr(*function)),
-        },
-        Expr::Try(scope) => Expr::Try(Box::new(TryExpr {
-            body: Box::new(folder.fold_expr(*scope.body)),
-            catch: scope.catch.map(|catch| CatchClause {
-                binding: catch.binding,
-                body: Box::new(folder.fold_expr(*catch.body)),
-            }),
-            finally: scope
-                .finally
-                .map(|finally| Box::new(folder.fold_expr(*finally))),
-        })),
-        Expr::Throw(value) => Expr::Throw(Box::new(folder.fold_expr(*value))),
-        Expr::Return(value) => Expr::Return(Box::new(folder.fold_expr(*value))),
-        Expr::Field { target, field } => Expr::Field {
-            target: Box::new(folder.fold_expr(*target)),
-            field,
-        },
-        Expr::Index { target, index } => Expr::Index {
-            target: Box::new(folder.fold_expr(*target)),
-            index: Box::new(folder.fold_expr(*index)),
-        },
-        Expr::Unary { op, expr } => Expr::Unary {
-            op,
-            expr: Box::new(folder.fold_expr(*expr)),
-        },
-        Expr::Binary { left, op, right } => Expr::Binary {
-            left: Box::new(folder.fold_expr(*left)),
-            op,
-            right: Box::new(folder.fold_expr(*right)),
-        },
-        Expr::JavaScriptUnary { op, expr } => Expr::JavaScriptUnary {
-            op,
-            expr: Box::new(folder.fold_expr(*expr)),
-        },
-        Expr::JavaScriptBinary { left, op, right } => Expr::JavaScriptBinary {
-            left: Box::new(folder.fold_expr(*left)),
-            op,
-            right: Box::new(folder.fold_expr(*right)),
-        },
-        Expr::JavaScriptLogical { left, op, right } => Expr::JavaScriptLogical {
-            left: Box::new(folder.fold_expr(*left)),
-            op,
-            right: Box::new(folder.fold_expr(*right)),
-        },
-        leaf @ (Expr::Null
-        | Expr::Undefined
-        | Expr::Bool(_)
-        | Expr::Number(_)
-        | Expr::String(_)
-        | Expr::Variable(_)
-        | Expr::Break
-        | Expr::Continue
-        | Expr::ResourceRef(_)
-        | Expr::WaitSignal { .. }
-        | Expr::TypeLiteral(_)) => leaf,
-    }
-}
-
-fn fold_list_comprehension_clause<F>(
-    folder: &mut F,
-    clause: ListComprehensionClause,
-) -> ListComprehensionClause
-where
-    F: ExprFolder + ?Sized,
-{
-    match clause {
-        ListComprehensionClause::For { binding, iterable } => ListComprehensionClause::For {
-            binding,
-            iterable: folder.fold_expr(iterable),
-        },
-        ListComprehensionClause::If { condition } => ListComprehensionClause::If {
-            condition: folder.fold_expr(condition),
-        },
-    }
-}
-
-fn fold_assign_target<F>(folder: &mut F, target: AssignTarget) -> AssignTarget
-where
-    F: ExprFolder + ?Sized,
-{
-    AssignTarget {
-        root: target.root,
-        steps: target
-            .steps
-            .into_iter()
-            .map(|step| match step {
-                AssignPathStep::Field(field) => AssignPathStep::Field(field),
-                AssignPathStep::Index(index) => AssignPathStep::Index(folder.fold_expr(index)),
-            })
-            .collect(),
     }
 }
 

@@ -222,7 +222,7 @@ impl DiagnosticCode {
                 "only the Error family, `Map`, `Set`, `Date`, `RegExp`, `URL`, and `URLSearchParams` are constructible"
             }
             Self::ForUnsupported => {
-                "write `for (let i = 0; i < end; i++)`, or iterate with `for...of`"
+                "run the update in the body before a `continue` that leaves a `try` with a `finally`, and drop it from the loop head"
             }
             Self::ForOfUnsupported => "iterate a materialized array with plain `for...of`",
             Self::AwaitUnsupported => {
@@ -749,6 +749,10 @@ mod tests {
             ("lower/constructs.rs", include_str!("lower/constructs.rs")),
             ("lower/entry.rs", include_str!("lower/entry.rs")),
             ("lower/loops.rs", include_str!("lower/loops.rs")),
+            (
+                "lower/optional_chain.rs",
+                include_str!("lower/optional_chain.rs"),
+            ),
             ("lower/regex.rs", include_str!("lower/regex.rs")),
             ("lower/spans.rs", include_str!("lower/spans.rs")),
             (

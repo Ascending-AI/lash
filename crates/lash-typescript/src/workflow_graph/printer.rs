@@ -30,12 +30,19 @@
 
 use lashlang::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessLiteralExpr,
-    Program, ResourceRefExpr, StructuralRole, TypeExpr, UnaryOp,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, MethodKey, ProcessDecl,
+    ProcessLiteralExpr, Program, ResourceRefExpr, StructuralRole, TypeExpr, UnaryOp,
 };
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
+
+mod for_loop;
+mod templates;
+
+use for_loop::{classic_for, is_statement_body, var_initialization};
+use templates::{template_parts, template_text};
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -87,7 +94,7 @@ pub(super) fn program_print_count() -> usize {
 ///
 /// This is the textual form carried by editable workflow-graph node fields.
 pub fn typescript_expression_source(expression: &Expr) -> Printed {
-    Printer::PLAIN.statement_expression(expression)
+    Printer::plain().statement_expression(expression)
 }
 
 /// Print one statement as canonical TypeScript.
@@ -97,7 +104,7 @@ pub fn typescript_expression_source(expression: &Expr) -> Printed {
 /// opaque node, which owns a whole statement rather than one expression.
 pub fn typescript_statement_source(expression: &Expr, bound: &[String]) -> Printed {
     let mut bound = bound.to_vec();
-    Ok(Printer::PLAIN
+    Ok(Printer::plain()
         .statement(expression, 0, &mut bound, &BTreeSet::new())?
         .trim_end()
         .to_string())
@@ -105,7 +112,7 @@ pub fn typescript_statement_source(expression: &Expr, bound: &[String]) -> Print
 
 /// Print one assignment target as canonical TypeScript.
 pub fn typescript_assign_target_source(target: &AssignTarget) -> Printed {
-    Printer::PLAIN.assign_target(target)
+    Printer::plain().assign_target(target)
 }
 
 /// The printer, with the program's lifted process declarations in view: an
@@ -113,12 +120,24 @@ pub fn typescript_assign_target_source(target: &AssignTarget) -> Printed {
 /// reference prints back as the literal it was lifted from.
 struct Printer<'p> {
     lifted: BTreeMap<&'p str, &'p ProcessDecl>,
+    /// The update of each classic `for` whose body is being printed,
+    /// innermost last. A `continue` in such a body lowers to the update
+    /// followed by the jump, and prints back as the bare `continue`.
+    continue_epilogues: RefCell<Vec<Option<Expr>>>,
+    /// The receiver slots of the functions printed so far. A read of one is
+    /// the source's `this`: the function that owns it prints first, and an
+    /// arrow inside it reads the same slot as a capture.
+    receivers: RefCell<BTreeSet<String>>,
 }
 
 impl Printer<'static> {
-    const PLAIN: Self = Self {
-        lifted: BTreeMap::new(),
-    };
+    fn plain() -> Self {
+        Self {
+            lifted: BTreeMap::new(),
+            continue_epilogues: RefCell::new(Vec::new()),
+            receivers: RefCell::new(BTreeSet::new()),
+        }
+    }
 }
 
 impl<'p> Printer<'p> {
@@ -134,6 +153,8 @@ impl<'p> Printer<'p> {
                     _ => None,
                 })
                 .collect(),
+            continue_epilogues: RefCell::new(Vec::new()),
+            receivers: RefCell::new(BTreeSet::new()),
         }
     }
 
@@ -418,25 +439,36 @@ impl<'p> Printer<'p> {
                 ))
             }
             expression if let Some(classic) = classic_for(expression) => {
-                // A `var` head keeps its `var` (the binding is not one a bare
-                // `for (i = ..)` may have introduced), an already-bound name
-                // is assigned, and anything else is the loop's own `let`.
-                let declaration = if vars.contains(classic.binding) {
-                    "var "
-                } else if bound.iter().any(|name| name == classic.binding) {
-                    ""
-                } else {
-                    "let "
-                };
                 let mut inner = bound.clone();
-                inner.push(classic.binding.to_string());
+                let head = self.for_head(classic.init, &mut inner, vars)?;
+                let condition = match classic.condition {
+                    Expr::Bool(true) => String::new(),
+                    condition => format!(" {}", self.expression(condition)?),
+                };
+                let update = match classic.update {
+                    Some(update) => format!(" {}", self.for_update(update)?),
+                    None => String::new(),
+                };
+                self.continue_epilogues
+                    .borrow_mut()
+                    .push(classic.update.cloned());
+                let body = self.block(classic.body, level, &mut inner, vars);
+                self.continue_epilogues.borrow_mut().pop();
                 Ok(format!(
-                    "{prefix}for ({declaration}{binding} = {start}; {binding} < {end}; {binding}++) {}\n",
-                    self.block(classic.body, level, &mut inner, vars)?,
-                    binding = self.identifier("loop binding", classic.binding)?,
-                    start = self.expression(classic.start)?,
-                    end = self.expression(classic.end)?,
+                    "{prefix}for ({head};{condition};{update}) {}\n",
+                    body?
                 ))
+            }
+            // A classic-for `continue`: the loop's update, then the jump.
+            Expr::Block(items)
+                if let [epilogue, Expr::Continue] = items.as_slice()
+                    && self
+                        .continue_epilogues
+                        .borrow()
+                        .last()
+                        .is_some_and(|update| update.as_ref() == Some(epilogue)) =>
+            {
+                Ok(format!("{prefix}continue;\n"))
             }
             Expr::Block(_) => {
                 let mut inner = bound.clone();
@@ -621,6 +653,114 @@ impl<'p> Printer<'p> {
         }
     }
 
+    /// A classic `for` head, from the statements its initialization lowered
+    /// to: a `var` list assigns hoisted names, each closed by reading it back;
+    /// a `let` list assigns names not yet in scope, which it adds to `bound`;
+    /// and an expression head is the one expression statement.
+    fn for_head(&self, init: &[Expr], bound: &mut Vec<String>, vars: &BTreeSet<String>) -> Printed {
+        if init.is_empty() {
+            return Ok(String::new());
+        }
+        let var_list = init
+            .iter()
+            .map(|item| {
+                var_initialization(item).filter(|(target, _)| vars.contains(target.root.as_str()))
+            })
+            .collect::<Option<Vec<_>>>();
+        if let Some(declarations) = var_list {
+            let declarators = declarations
+                .into_iter()
+                .map(|(target, value)| {
+                    Ok(format!(
+                        "{} = {}",
+                        self.identifier("var binding", target.root.as_str())?,
+                        self.expression(value)?
+                    ))
+                })
+                .collect::<Result<Vec<_>, TypeScriptSourceError>>()?;
+            return Ok(format!("var {}", declarators.join(", ")));
+        }
+        let let_list = init
+            .iter()
+            .map(|item| match item {
+                Expr::Assign { target, expr }
+                    if target.is_simple()
+                        && !bound
+                            .iter()
+                            .any(|name| name.as_str() == target.root.as_str()) =>
+                {
+                    Some((target, expr.as_ref()))
+                }
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>();
+        if let Some(declarations) = let_list {
+            // The one binding form `let` cannot spell is a process's: a
+            // process literal lifts only from a `const` binding.
+            let keyword = if declarations.iter().any(|(_, value)| {
+                matches!(value, Expr::ProcessLiteral(_))
+                    || matches!(value, Expr::ProcessRef { process }
+                        if self.lifted.contains_key(process.as_str()))
+            }) {
+                "const"
+            } else {
+                "let"
+            };
+            let mut declarators = Vec::with_capacity(declarations.len());
+            for (target, value) in declarations {
+                let name = self.identifier("loop binding", target.root.as_str())?;
+                declarators.push(format!("{name} = {}", self.expression(value)?));
+                bound.push(target.root.to_string());
+            }
+            return Ok(format!("{keyword} {}", declarators.join(", ")));
+        }
+        match init {
+            [expression] if !matches!(expression, Expr::Assign { .. }) => {
+                self.head_expression(expression)
+            }
+            _ => Err(TypeScriptSourceError::Unrepresentable {
+                kind: "a classic for head that is neither one declaration list nor one expression",
+            }),
+        }
+    }
+
+    /// A classic `for` update. `x++` and `x--` lower to the one assignment
+    /// `x = x - -1` or `x = x - 1`, which print back as the update operator.
+    fn for_update(&self, update: &Expr) -> Printed {
+        if let Expr::Assign { target, expr } = update
+            && target.is_simple()
+            && let Expr::JavaScriptBinary {
+                left,
+                op: JavaScriptBinaryOp::Subtract,
+                right,
+            } = expr.as_ref()
+            && matches!(left.as_ref(), Expr::Variable(name) if name.as_str() == target.root.as_str())
+            && let Expr::Number(step) = right.as_ref()
+            && (*step == -1.0 || *step == 1.0)
+        {
+            return Ok(format!(
+                "{}{}",
+                self.identifier("loop binding", target.root.as_str())?,
+                if *step == -1.0 { "++" } else { "--" }
+            ));
+        }
+        self.head_expression(update)
+    }
+
+    /// An expression statement of a classic `for` head or update, with no
+    /// trailing semicolon. An assignment statement lowers to the assignment
+    /// closed by reading its target back, and prints as the assignment.
+    fn head_expression(&self, expression: &Expr) -> Printed {
+        if let Some((target, value)) = var_initialization(expression) {
+            return Ok(format!(
+                "{} = {}",
+                self.assign_target(target)?,
+                self.expression(value)?
+            ));
+        }
+        self.statement_expression(expression)
+    }
+
     /// One expression in statement position, with no trailing semicolon.
     fn statement_expression(&self, expression: &Expr) -> Printed {
         match expression {
@@ -649,6 +789,9 @@ impl<'p> Printer<'p> {
             Expr::Bool(value) => Ok(value.to_string()),
             Expr::Number(value) => number_literal(*value),
             Expr::String(value) => Ok(string_literal(value.as_str())),
+            Expr::Variable(name) if self.receivers.borrow().contains(name.as_str()) => {
+                Ok("this".to_string())
+            }
             Expr::Variable(name) => self.identifier("variable", name.as_str()),
             Expr::List(items) => {
                 let items = items
@@ -760,6 +903,32 @@ impl<'p> Printer<'p> {
                     args.join(", ")
                 ))
             }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.expression(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let receiver = self.member_target(receiver)?;
+                Ok(match method {
+                    MethodKey::Field(field) => format!(
+                        "{receiver}.{}({})",
+                        self.identifier("method", field.as_str())?,
+                        args.join(", ")
+                    ),
+                    MethodKey::Index(key) => {
+                        format!("{receiver}[{}]({})", self.expression(key)?, args.join(", "))
+                    }
+                })
+            }
+            // Only generated code passes an explicit receiver (a callback's
+            // `thisArg`); the dialect has no `Function.prototype.call`.
+            Expr::ThisCall { .. } => Err(TypeScriptSourceError::Unrepresentable {
+                kind: "a call with an explicit receiver",
+            }),
             Expr::Function(function) => self.arrow(function),
             // An inline process body prints back as the authored async arrow
             // in its argument position, which re-parses to the same literal.
@@ -997,6 +1166,27 @@ impl<'p> Printer<'p> {
         if let Some(name) = &function.name {
             return self.named_function(name.as_str(), function);
         }
+        // A function that reads its receiver is a `function` form: an arrow's
+        // `this` is its enclosing function's.
+        if let Some(receiver) = &function.receiver {
+            self.receivers.borrow_mut().insert(receiver.to_string());
+            let params = function
+                .params
+                .iter()
+                .map(|param| self.identifier("function parameter", param.as_str()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut bound = function.params.iter().map(ToString::to_string).collect();
+            return Ok(format!(
+                "{}function ({}) {}",
+                if awaits_in_own_body(&function.body) {
+                    "async "
+                } else {
+                    ""
+                },
+                params.join(", "),
+                self.rooted_block(&function.body, 0, &mut bound)?
+            ));
+        }
         let params = function
             .params
             .iter()
@@ -1027,6 +1217,9 @@ impl<'p> Printer<'p> {
     /// bound inside it, so an arrow (which has none) would lower to a
     /// different function.
     fn named_function(&self, name: &str, function: &FunctionExpr) -> Printed {
+        if let Some(receiver) = &function.receiver {
+            self.receivers.borrow_mut().insert(receiver.to_string());
+        }
         let params = function
             .params
             .iter()
@@ -1061,6 +1254,7 @@ impl<'p> Printer<'p> {
             | Expr::BuiltinCall { .. }
             | Expr::FunctionCall { .. }
             | Expr::Call { .. }
+            | Expr::MethodCall { .. }
             | Expr::Field { .. }
             | Expr::Index { .. } => self.expression(expression),
             _ => Ok(format!("({})", self.expression(expression)?)),
@@ -1184,164 +1378,6 @@ fn suppresses_named_evaluation(target: &AssignTarget, expr: &Expr) -> bool {
                 && function.js_name.as_deref() != Some(target.root.as_str()))
 }
 
-/// The `var name = init` shape: a completion list whose one visible statement
-/// assigns `name` and whose completion value reads `name` back.
-fn var_initialization(expression: &Expr) -> Option<(&AssignTarget, &Expr)> {
-    let Expr::Role {
-        role: StructuralRole::Completion,
-        expr,
-    } = expression
-    else {
-        return None;
-    };
-    let Expr::Block(items) = expr.as_ref() else {
-        return None;
-    };
-    let [Expr::Assign { target, expr: init }, Expr::Variable(name)] = items.as_slice() else {
-        return None;
-    };
-    (target.is_simple() && target.root.as_str() == name.as_str()).then_some((target, init))
-}
-
-/// A body position that holds statements rather than one value expression.
-fn is_statement_body(expression: &Expr) -> bool {
-    matches!(
-        expression,
-        Expr::Block(_)
-            | Expr::Role {
-                role: StructuralRole::Completion,
-                ..
-            }
-    )
-}
-
-/// The parts of the classic `for (let i = start; i < end; i++)` loop, from
-/// the block it lowers to: the binding's initialization, then a `while` over
-/// `i < end` whose body ends with the increment the lowering appends. An
-/// authored increment lowers to an assignment expression, never to that bare
-/// assignment, so the shape is the loop's own.
-struct ClassicFor<'a> {
-    binding: &'a str,
-    start: &'a Expr,
-    end: &'a Expr,
-    body: &'a Expr,
-}
-
-fn classic_for(expression: &Expr) -> Option<ClassicFor<'_>> {
-    let Expr::Block(items) = expression else {
-        return None;
-    };
-    let [
-        Expr::Assign {
-            target,
-            expr: start,
-        },
-        Expr::While { condition, body },
-    ] = items.as_slice()
-    else {
-        return None;
-    };
-    let binding = target.is_simple().then(|| target.root.as_str())?;
-    let Expr::JavaScriptBinary {
-        left,
-        op: JavaScriptBinaryOp::Less,
-        right: end,
-    } = condition.as_ref()
-    else {
-        return None;
-    };
-    let Expr::Block(parts) = body.as_ref() else {
-        return None;
-    };
-    let [
-        body,
-        Expr::Assign {
-            target: updated,
-            expr: update,
-        },
-    ] = parts.as_slice()
-    else {
-        return None;
-    };
-    let increments = matches!(
-        update.as_ref(),
-        Expr::JavaScriptBinary {
-            left,
-            op: JavaScriptBinaryOp::Add,
-            right,
-        } if matches!(left.as_ref(), Expr::Variable(name) if name.as_str() == binding)
-            && matches!(right.as_ref(), Expr::Number(step) if *step == 1.0)
-    );
-    (matches!(left.as_ref(), Expr::Variable(name) if name.as_str() == binding)
-        && updated.is_simple()
-        && updated.root.as_str() == binding
-        && increments)
-        .then_some(ClassicFor {
-            binding,
-            start,
-            end,
-            body,
-        })
-}
-
-/// A template literal's text and holes, from the chain it lowers to:
-/// `q0 + e0 + q1 + … + en + qn+1`, left-nested, a string at every even
-/// position. Printed back as the template, the chain lowers identically, and
-/// its nesting costs one level rather than one per term.
-fn template_parts(expression: &Expr) -> Option<(Vec<&str>, Vec<&Expr>)> {
-    let mut rights = Vec::new();
-    let mut current = expression;
-    while let Expr::JavaScriptBinary {
-        left,
-        op: JavaScriptBinaryOp::Add,
-        right,
-    } = current
-    {
-        rights.push(right.as_ref());
-        current = left;
-    }
-    let Expr::String(first) = current else {
-        return None;
-    };
-    if rights.is_empty() || rights.len() % 2 != 0 {
-        return None;
-    }
-    rights.reverse();
-    let mut quasis = vec![first.as_str()];
-    let mut holes = Vec::with_capacity(rights.len() / 2);
-    for pair in rights.chunks(2) {
-        let [hole, Expr::String(quasi)] = pair else {
-            return None;
-        };
-        holes.push(*hole);
-        quasis.push(quasi.as_str());
-    }
-    Some((quasis, holes))
-}
-
-/// A template literal's raw text for `value`: the characters whose raw form
-/// would read back differently (a backtick, a backslash, `${`, a carriage
-/// return and the other controls) are escaped.
-fn template_text(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut characters = value.chars().peekable();
-    while let Some(character) = characters.next() {
-        match character {
-            '`' => out.push_str("\\`"),
-            '\\' => out.push_str("\\\\"),
-            '$' if characters.peek() == Some(&'{') => out.push_str("\\$"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            control if control.is_control() => {
-                out.push_str(&format!("\\u{{{:x}}}", u32::from(control)));
-            }
-            other => out.push(other),
-        }
-    }
-    out
-}
-
 /// The authored target spelling, assignment operator (`=`, or `op=` for an
 /// update) and right-hand side of an attribute-assignment role.
 fn attribute_assignment(
@@ -1357,7 +1393,7 @@ fn attribute_assignment(
     let Some(parts) = lashlang::AttributeAssignParts::of(expr) else {
         return Ok(None);
     };
-    let printer = Printer::PLAIN;
+    let printer = Printer::plain();
     let object = printer.member_target(parts.object)?;
     let target = match parts.step {
         lashlang::AttributeStep::Field(field) => {

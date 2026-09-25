@@ -33,6 +33,7 @@ fn callback_program() -> CompiledProgram {
     let callback = Expr::Function(Box::new(FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: vec!["value".into(), "key".into(), "receiver".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
@@ -87,6 +88,7 @@ fn dynamic_call_program() -> CompiledProgram {
     let callback = Expr::Function(Box::new(FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: vec!["value".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
@@ -131,6 +133,7 @@ fn one_capture_program() -> CompiledProgram {
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
                 js_name: None,
+                receiver: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),

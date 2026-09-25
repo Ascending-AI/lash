@@ -265,6 +265,345 @@ pub const INSTANCE_STDLIB_SIGNATURES: &[StdlibSignature] = instance_signatures![
     ("toUTCString", "", On::NONE),
 ];
 
+/// The ECMA prototype objects whose advertised methods a value inherits.
+///
+/// The value model has no prototype objects (ADR 0062), but ECMA answers a
+/// property read that misses a value's own properties from its prototype
+/// chain, and that is where the advertised instance methods live. Each runtime
+/// value kind names its prototype here, so a read of `'x'.includes` answers
+/// `String.prototype.includes`: one function, whichever string it was read
+/// from (FIG-3701).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum BuiltinPrototype {
+    Object,
+    Function,
+    Array,
+    String,
+    Number,
+    Boolean,
+    Map,
+    Set,
+    Date,
+    RegExp,
+    Error,
+    Url,
+    UrlSearchParams,
+}
+
+impl BuiltinPrototype {
+    const ALL: [Self; 13] = [
+        Self::Object,
+        Self::Function,
+        Self::Array,
+        Self::String,
+        Self::Number,
+        Self::Boolean,
+        Self::Map,
+        Self::Set,
+        Self::Date,
+        Self::RegExp,
+        Self::Error,
+        Self::Url,
+        Self::UrlSearchParams,
+    ];
+
+    /// The constructor whose `prototype` this is, as ECMA and the wire spell it.
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Object => "Object",
+            Self::Function => "Function",
+            Self::Array => "Array",
+            Self::String => "String",
+            Self::Number => "Number",
+            Self::Boolean => "Boolean",
+            Self::Map => "Map",
+            Self::Set => "Set",
+            Self::Date => "Date",
+            Self::RegExp => "RegExp",
+            Self::Error => "Error",
+            Self::Url => "URL",
+            Self::UrlSearchParams => "URLSearchParams",
+        }
+    }
+
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|prototype| prototype.name() == name)
+    }
+
+    /// The next object on the chain: every one of these prototypes inherits
+    /// from `Object.prototype`, which inherits from nothing.
+    const fn parent(self) -> Option<Self> {
+        match self {
+            Self::Object => None,
+            _ => Some(Self::Object),
+        }
+    }
+}
+
+/// One built-in function object an advertised prototype carries.
+///
+/// ECMA gives each one identity: `'a'.includes === 'b'.includes`, while
+/// `'a'.includes !== [].includes`, since those are two functions on two
+/// prototypes. A function is therefore named by its prototype and its own
+/// `name`, never by the property key it was read through: `Set.prototype.keys`
+/// *is* `Set.prototype.values`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct BuiltinFunction(u16);
+
+struct BuiltinFunctionRow {
+    prototype: BuiltinPrototype,
+    name: &'static str,
+    /// ECMA's `length`: the count of required parameters the specification
+    /// states, which is not the arity the signature prose advertises.
+    length: u8,
+}
+
+macro_rules! builtin_functions {
+    ($(($prototype:expr, $name:literal, $length:literal)),+ $(,)?) => {
+        &[$(BuiltinFunctionRow {
+            prototype: $prototype,
+            name: $name,
+            length: $length,
+        }),+]
+    };
+}
+
+/// Every built-in function a value can read, restricted to the advertised
+/// instance methods: `name` and `length` are node v25's, per prototype.
+/// A method outside [`INSTANCE_STDLIB_SIGNATURES`] is not readable here, so
+/// the read surface cannot grow past the call surface.
+const BUILTIN_FUNCTIONS: &[BuiltinFunctionRow] = {
+    use BuiltinPrototype as P;
+    builtin_functions![
+        (P::Object, "hasOwnProperty", 1),
+        (P::Object, "toString", 0),
+        (P::Object, "valueOf", 0),
+        (P::Function, "toString", 0),
+        (P::Array, "at", 1),
+        (P::Array, "concat", 1),
+        (P::Array, "copyWithin", 2),
+        (P::Array, "entries", 0),
+        (P::Array, "every", 1),
+        (P::Array, "fill", 1),
+        (P::Array, "filter", 1),
+        (P::Array, "find", 1),
+        (P::Array, "findIndex", 1),
+        (P::Array, "findLast", 1),
+        (P::Array, "findLastIndex", 1),
+        (P::Array, "flat", 0),
+        (P::Array, "flatMap", 1),
+        (P::Array, "forEach", 1),
+        (P::Array, "includes", 1),
+        (P::Array, "indexOf", 1),
+        (P::Array, "join", 1),
+        (P::Array, "keys", 0),
+        (P::Array, "lastIndexOf", 1),
+        (P::Array, "map", 1),
+        (P::Array, "pop", 0),
+        (P::Array, "push", 1),
+        (P::Array, "reduce", 1),
+        (P::Array, "reduceRight", 1),
+        (P::Array, "reverse", 0),
+        (P::Array, "shift", 0),
+        (P::Array, "slice", 2),
+        (P::Array, "some", 1),
+        (P::Array, "sort", 1),
+        (P::Array, "splice", 2),
+        (P::Array, "toReversed", 0),
+        (P::Array, "toSorted", 1),
+        (P::Array, "toSpliced", 2),
+        (P::Array, "toString", 0),
+        (P::Array, "unshift", 1),
+        (P::Array, "values", 0),
+        (P::Array, "with", 2),
+        (P::String, "at", 1),
+        (P::String, "charAt", 1),
+        (P::String, "charCodeAt", 1),
+        (P::String, "codePointAt", 1),
+        (P::String, "concat", 1),
+        (P::String, "endsWith", 1),
+        (P::String, "includes", 1),
+        (P::String, "indexOf", 1),
+        (P::String, "lastIndexOf", 1),
+        (P::String, "match", 1),
+        (P::String, "matchAll", 1),
+        (P::String, "padEnd", 1),
+        (P::String, "padStart", 1),
+        (P::String, "repeat", 1),
+        (P::String, "replace", 2),
+        (P::String, "replaceAll", 2),
+        (P::String, "search", 1),
+        (P::String, "slice", 2),
+        (P::String, "split", 2),
+        (P::String, "startsWith", 1),
+        (P::String, "substring", 2),
+        (P::String, "toLowerCase", 0),
+        (P::String, "toString", 0),
+        (P::String, "toUpperCase", 0),
+        (P::String, "trim", 0),
+        (P::String, "trimEnd", 0),
+        (P::String, "trimStart", 0),
+        (P::String, "valueOf", 0),
+        (P::Number, "toExponential", 1),
+        (P::Number, "toFixed", 1),
+        (P::Number, "toPrecision", 1),
+        (P::Number, "toString", 1),
+        (P::Number, "valueOf", 0),
+        (P::Boolean, "toString", 0),
+        (P::Boolean, "valueOf", 0),
+        (P::Map, "clear", 0),
+        (P::Map, "delete", 1),
+        (P::Map, "entries", 0),
+        (P::Map, "forEach", 1),
+        (P::Map, "get", 1),
+        (P::Map, "has", 1),
+        (P::Map, "keys", 0),
+        (P::Map, "set", 2),
+        (P::Map, "values", 0),
+        (P::Set, "add", 1),
+        (P::Set, "clear", 0),
+        (P::Set, "delete", 1),
+        (P::Set, "difference", 1),
+        (P::Set, "entries", 0),
+        (P::Set, "forEach", 1),
+        (P::Set, "has", 1),
+        (P::Set, "intersection", 1),
+        (P::Set, "isDisjointFrom", 1),
+        (P::Set, "isSubsetOf", 1),
+        (P::Set, "isSupersetOf", 1),
+        (P::Set, "symmetricDifference", 1),
+        (P::Set, "union", 1),
+        (P::Set, "values", 0),
+        (P::Date, "getTime", 0),
+        (P::Date, "getUTCDate", 0),
+        (P::Date, "getUTCDay", 0),
+        (P::Date, "getUTCFullYear", 0),
+        (P::Date, "getUTCHours", 0),
+        (P::Date, "getUTCMilliseconds", 0),
+        (P::Date, "getUTCMinutes", 0),
+        (P::Date, "getUTCMonth", 0),
+        (P::Date, "getUTCSeconds", 0),
+        (P::Date, "toISOString", 0),
+        (P::Date, "toJSON", 1),
+        (P::Date, "toString", 0),
+        (P::Date, "toUTCString", 0),
+        (P::Date, "valueOf", 0),
+        (P::RegExp, "exec", 1),
+        (P::RegExp, "test", 1),
+        (P::RegExp, "toString", 0),
+        (P::Error, "toString", 0),
+        (P::Url, "toJSON", 0),
+        (P::Url, "toString", 0),
+        (P::UrlSearchParams, "append", 2),
+        (P::UrlSearchParams, "delete", 1),
+        (P::UrlSearchParams, "entries", 0),
+        (P::UrlSearchParams, "forEach", 1),
+        (P::UrlSearchParams, "get", 1),
+        (P::UrlSearchParams, "getAll", 1),
+        (P::UrlSearchParams, "has", 1),
+        (P::UrlSearchParams, "keys", 0),
+        (P::UrlSearchParams, "set", 2),
+        (P::UrlSearchParams, "sort", 0),
+        (P::UrlSearchParams, "toString", 0),
+        (P::UrlSearchParams, "values", 0),
+    ]
+};
+
+/// Property keys whose value is a function registered under another name.
+const BUILTIN_FUNCTION_ALIASES: &[(BuiltinPrototype, &str, &str)] =
+    &[(BuiltinPrototype::Set, "keys", "values")];
+
+const fn is_advertised_instance_method(method: &str) -> bool {
+    let mut i = 0;
+    while i < INSTANCE_STDLIB_SIGNATURES.len() {
+        if str_eq(INSTANCE_STDLIB_SIGNATURES[i].method, method) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+// A readable built-in the call surface does not advertise would be a method
+// value no member call can reach, so the table is held to the signatures at
+// compile time, alias keys included.
+const _: () = {
+    assert!(BUILTIN_FUNCTIONS.len() <= u16::MAX as usize);
+    let mut i = 0;
+    while i < BUILTIN_FUNCTIONS.len() {
+        assert!(
+            is_advertised_instance_method(BUILTIN_FUNCTIONS[i].name),
+            "a readable built-in function is not an advertised instance method"
+        );
+        i += 1;
+    }
+    let mut i = 0;
+    while i < BUILTIN_FUNCTION_ALIASES.len() {
+        assert!(
+            is_advertised_instance_method(BUILTIN_FUNCTION_ALIASES[i].1),
+            "a built-in alias key is not an advertised instance method"
+        );
+        i += 1;
+    }
+};
+
+impl BuiltinFunction {
+    fn row(self) -> &'static BuiltinFunctionRow {
+        &BUILTIN_FUNCTIONS[usize::from(self.0)]
+    }
+
+    pub(crate) fn prototype(self) -> BuiltinPrototype {
+        self.row().prototype
+    }
+
+    /// ECMA's `name` of the function object.
+    pub(crate) fn name(self) -> &'static str {
+        self.row().name
+    }
+
+    /// ECMA's `length` of the function object.
+    pub(crate) fn length(self) -> u8 {
+        self.row().length
+    }
+
+    /// The function `prototype` carries under its own `name`, which is how a
+    /// wire names one.
+    pub(crate) fn named(prototype: BuiltinPrototype, name: &str) -> Option<Self> {
+        BUILTIN_FUNCTIONS
+            .iter()
+            .position(|row| row.prototype == prototype && row.name == name)
+            .map(|index| Self(index as u16))
+    }
+
+    /// Whether any prototype carries a built-in under property key `key`: the
+    /// cheap question a read asks before it looks for the receiver's prototype.
+    pub(crate) fn is_method_key(key: &str) -> bool {
+        BUILTIN_FUNCTIONS.iter().any(|row| row.name == key)
+            || BUILTIN_FUNCTION_ALIASES
+                .iter()
+                .any(|(_, alias, _)| *alias == key)
+    }
+
+    /// The function a property read of `key` finds on the chain that starts
+    /// at `prototype`, once the value's own properties have missed.
+    pub(crate) fn inherited(prototype: BuiltinPrototype, key: &str) -> Option<Self> {
+        let mut prototype = Some(prototype);
+        while let Some(current) = prototype {
+            let name = BUILTIN_FUNCTION_ALIASES
+                .iter()
+                .find(|(owner, alias, _)| *owner == current && *alias == key)
+                .map_or(key, |(_, _, name)| *name);
+            if let Some(function) = Self::named(current, name) {
+                return Some(function);
+            }
+            prototype = current.parent();
+        }
+        None
+    }
+}
+
 /// The fixed positional arity a signature row declares, or `None` when the
 /// row is variadic (`...rest`).
 ///
@@ -311,6 +650,13 @@ const fn str_eq(left: &str, right: &str) -> bool {
         i += 1;
     }
     true
+}
+
+/// Whether `method` is an instance method of the advertised surface.
+pub(crate) fn is_instance_method(method: &str) -> bool {
+    INSTANCE_STDLIB_SIGNATURES
+        .iter()
+        .any(|signature| signature.method == method)
 }
 
 /// The declared arity of an instance method that takes a fixed number of
@@ -414,6 +760,38 @@ mod tests {
         ];
         for (arguments, arity) in cases {
             assert_eq!(signature_arity(arguments), *arity, "{arguments}");
+        }
+    }
+
+    /// Every advertised instance method is some prototype's function, so no
+    /// method the call surface names reads as `undefined`; and no two rows
+    /// name one function, since a function is its prototype and name.
+    #[test]
+    fn every_advertised_instance_method_is_a_readable_builtin() {
+        for signature in INSTANCE_STDLIB_SIGNATURES {
+            assert!(
+                BuiltinPrototype::ALL
+                    .into_iter()
+                    .any(
+                        |prototype| BuiltinFunction::inherited(prototype, signature.method)
+                            .is_some()
+                    ),
+                "{} is advertised but no prototype carries it",
+                signature.method
+            );
+        }
+        for (index, row) in BUILTIN_FUNCTIONS.iter().enumerate() {
+            assert_eq!(
+                BuiltinFunction::named(row.prototype, row.name),
+                Some(BuiltinFunction(index as u16)),
+                "{}.prototype.{} is listed twice",
+                row.prototype.name(),
+                row.name
+            );
+            assert_eq!(
+                BuiltinPrototype::from_name(row.prototype.name()),
+                Some(row.prototype)
+            );
         }
     }
 

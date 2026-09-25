@@ -241,6 +241,15 @@ const PROBES: &[Probe] = &[
             "finish(globalThis.twice);",
         ],
     ),
+    // A built-in method read as a value is a function too (FIG-3701).
+    session_probe(
+        17,
+        "TS_FUNCTION_NOT_PERSISTED",
+        &[
+            "const has = 'x'.includes; finish(has === 'y'.includes);",
+            "finish(typeof has);",
+        ],
+    ),
     // 13. String coercion of a value whose only string is a type tag.
     probe(13, "TS_OBJECT_STRING_COERCION", "finish('' + { a: 1 });"),
     // 23. A classic-loop `continue` across a `finally`.

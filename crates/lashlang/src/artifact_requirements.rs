@@ -393,6 +393,9 @@ impl<'program> RequirementsCollector<'program> {
                 if let Some(name) = &function.name {
                     function_scope.insert(name.to_string(), RequirementBinding::Value);
                 }
+                if let Some(receiver) = &function.receiver {
+                    function_scope.insert(receiver.to_string(), RequirementBinding::Value);
+                }
                 self.collect_expr(&function.body, &mut function_scope);
                 Some(RequirementBinding::Value)
             }
@@ -406,6 +409,32 @@ impl<'program> RequirementsCollector<'program> {
                 Some(RequirementBinding::Value)
             }
             Expr::Call { function, args } => {
+                self.collect_expr(function, scope);
+                for arg in args {
+                    self.collect_expr(arg, scope);
+                }
+                Some(RequirementBinding::Value)
+            }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                self.collect_expr(receiver, scope);
+                if let MethodKey::Index(key) = method {
+                    self.collect_expr(key, scope);
+                }
+                for arg in args {
+                    self.collect_expr(arg, scope);
+                }
+                Some(RequirementBinding::Value)
+            }
+            Expr::ThisCall {
+                this,
+                function,
+                args,
+            } => {
+                self.collect_expr(this, scope);
                 self.collect_expr(function, scope);
                 for arg in args {
                     self.collect_expr(arg, scope);

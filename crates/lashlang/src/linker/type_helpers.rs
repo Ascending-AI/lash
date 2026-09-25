@@ -337,15 +337,28 @@ pub(super) fn field_type(
             })
         }
         TypeExpr::Ref(_) => Ok(TypeExpr::Any),
-        TypeExpr::Object(fields) => fields
+        TypeExpr::Object(fields) => match fields
             .iter()
             .find(|candidate| candidate.name.as_str() == field)
-            .map(|field| field.ty.clone())
-            .ok_or_else(|| LinkError::UnknownObjectField {
+        {
+            Some(field) => Ok(field.ty.clone()),
+            // A closed shape still inherits `Object.prototype`, and tsc
+            // types `({ x: 1 }).toString` from it, so the guard must not
+            // refuse a read of an advertised inherited method (FIG-3701).
+            None if crate::runtime::BuiltinFunction::inherited(
+                crate::runtime::BuiltinPrototype::Object,
+                field,
+            )
+            .is_some() =>
+            {
+                Ok(TypeExpr::Any)
+            }
+            None => Err(LinkError::UnknownObjectField {
                 field: field.to_string(),
                 known: known_fields(std::slice::from_ref(target)),
                 span,
             }),
+        },
         TypeExpr::Union(items) => {
             let mut fields = Vec::new();
             let mut missing = false;

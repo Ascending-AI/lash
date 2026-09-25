@@ -27,6 +27,7 @@ pub(crate) fn function(name: Option<&str>, params: &[&str], captures: &[&str], b
     Expr::Function(Box::new(FunctionExpr {
         name: name.map(Into::into),
         js_name: None,
+        receiver: None,
         params: params.iter().map(|name| (*name).into()).collect(),
         captures: captures.iter().map(|name| (*name).into()).collect(),
         body: Box::new(body),

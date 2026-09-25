@@ -323,6 +323,34 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .heap
                 .allocate_error(ErrorKind::from(class), Some(message), None, None);
         }
+        if matches!(
+            error,
+            RuntimeError::CannotAssignField { actual, .. }
+                | RuntimeError::CannotAssignIndex { actual }
+                if matches!(actual.as_str(), "RegExp" | "Map" | "Set" | "Date" | "function")
+                    || ErrorKind::from_name(actual).is_some()
+        ) {
+            return self.heap.allocate_error(
+                ErrorKind::TypeError,
+                Some(error.to_string()),
+                None,
+                None,
+            );
+        }
+        // Calling a value without [[Call]] raises a TypeError in ECMA-262; the
+        // message keeps the substrate's naming ("attempted to call a
+        // non-function value") inside the guest-visible error.
+        if matches!(
+            error,
+            RuntimeError::NonFunctionCall { .. } | RuntimeError::IncompatibleReceiver { .. }
+        ) {
+            return self.heap.allocate_error(
+                ErrorKind::TypeError,
+                Some(error.to_string()),
+                None,
+                None,
+            );
+        }
         let mut details = record_with_capacity(3);
         details.insert(
             "kind".to_string(),

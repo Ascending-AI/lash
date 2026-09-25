@@ -184,6 +184,55 @@ pub(crate) fn read_javascript_field_direct(
     }
 }
 
+/// The built-in function a read of `key` on `value` inherits from its
+/// prototype chain, for a value held inline rather than on the heap.
+///
+/// `None` when the value has no prototype this model names (an image, a
+/// resource handle, a projection, `null`/`undefined`), when it has an own
+/// property `key` — an own property always wins, even one holding
+/// `undefined` — or when no prototype on its chain carries `key`.
+pub(crate) fn inline_inherited_builtin(value: &Value, key: &str) -> Option<BuiltinFunction> {
+    let prototype = match value {
+        Value::String(_) => BuiltinPrototype::String,
+        Value::Number(_) => BuiltinPrototype::Number,
+        Value::Bool(_) => BuiltinPrototype::Boolean,
+        Value::List(_) | Value::Tuple(_) => BuiltinPrototype::Array,
+        Value::Record(record) if record.get(key).is_none() => BuiltinPrototype::Object,
+        _ => return None,
+    };
+    BuiltinFunction::inherited(prototype, key)
+}
+
+/// [`inline_inherited_builtin`] for a heap object.
+pub(crate) fn heap_inherited_builtin(object: &HeapObject, key: &str) -> Option<BuiltinFunction> {
+    let prototype = match object {
+        HeapObject::Record(record) if record.get(key).is_none() => BuiltinPrototype::Object,
+        HeapObject::Record(_) => return None,
+        HeapObject::Tuple(_) | HeapObject::List(_) | HeapObject::RegExpMatch(_) => {
+            BuiltinPrototype::Array
+        }
+        HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) => BuiltinPrototype::Function,
+        HeapObject::RegExp(_) => BuiltinPrototype::RegExp,
+        HeapObject::Map(_) => BuiltinPrototype::Map,
+        HeapObject::Set(_) => BuiltinPrototype::Set,
+        HeapObject::Date(_) => BuiltinPrototype::Date,
+        HeapObject::Error(_) => BuiltinPrototype::Error,
+        HeapObject::Url(_) => BuiltinPrototype::Url,
+        HeapObject::UrlSearchParams(_) => BuiltinPrototype::UrlSearchParams,
+    };
+    BuiltinFunction::inherited(prototype, key)
+}
+
+/// A built-in function's own `name` and `length`: the only own properties
+/// ECMA gives one, both fixed.
+fn builtin_function_own_property(function: BuiltinFunction, key: &str) -> Option<Value> {
+    match key {
+        "name" => Some(Value::String(function.name().into())),
+        "length" => Some(Value::Number(f64::from(function.length()))),
+        _ => None,
+    }
+}
+
 pub(crate) fn read_javascript_index_direct(
     target: Value,
     index: Value,
@@ -400,6 +449,10 @@ pub(crate) fn read_javascript_heap_field(
         HeapObject::UrlSearchParams(params) if field.text.as_ref() == "size" => {
             Value::Number(params.entries.len() as f64)
         }
+        HeapObject::BuiltinFunction(function) => {
+            builtin_function_own_property(*function, field.text.as_ref())
+                .unwrap_or(Value::Undefined)
+        }
         _ => Value::Undefined,
     })
 }
@@ -464,6 +517,9 @@ pub(crate) fn read_javascript_heap_index(
         HeapObject::Url(_) => heap.url_property(id, &key)?.unwrap_or(Value::Undefined),
         HeapObject::UrlSearchParams(params) if key == "size" => {
             Value::Number(params.entries.len() as f64)
+        }
+        HeapObject::BuiltinFunction(function) => {
+            builtin_function_own_property(*function, &key).unwrap_or(Value::Undefined)
         }
         _ => Value::Undefined,
     })

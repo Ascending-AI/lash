@@ -82,6 +82,14 @@ impl Compiler {
             self.code.push(Instruction::CallDynamic);
             return;
         }
+        if let ("__typescript_call_method_dynamic", [receiver, function, arguments]) = (name, args)
+        {
+            self.compile_expr(receiver, &path.child(0));
+            self.compile_expr(function, &path.child(1));
+            self.compile_expr(arguments, &path.child(2));
+            self.code.push(Instruction::CallMethodDynamic);
+            return;
+        }
         if let ("__typescript_pending_tool", [call @ Expr::ReceiverCall { .. }]) = (name, args) {
             self.compile_awaitable_effect_expr(call, None, &path.child(0));
             let instruction = self.code.last_mut().expect("tool call instruction");
@@ -420,6 +428,53 @@ impl Compiler {
                 }
                 let instruction = self.code.len();
                 self.code.push(Instruction::Call { argc: args.len() });
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
+                    self.mark_lashlang_execution_site(instruction, site);
+                }
+            }
+            // The receiver stays on the stack under the callee it is read
+            // from, which is exactly the `[receiver, function, args..]` layout
+            // `CallMethod` consumes.
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                self.compile_expr(receiver, &path.child(0));
+                self.code.push(Instruction::Duplicate);
+                let first_arg = match method {
+                    MethodKey::Field(field) => {
+                        let field = self.push_name(field);
+                        self.code.push(Instruction::Field(field));
+                        1
+                    }
+                    MethodKey::Index(key) => {
+                        self.compile_expr(key, &path.child(1));
+                        self.code.push(Instruction::Index);
+                        2
+                    }
+                };
+                for (index, arg) in args.iter().enumerate() {
+                    self.compile_expr(arg, &path.child(index as u32 + first_arg));
+                }
+                let instruction = self.code.len();
+                self.code.push(Instruction::CallMethod { argc: args.len() });
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
+                    self.mark_lashlang_execution_site(instruction, site);
+                }
+            }
+            Expr::ThisCall {
+                this,
+                function,
+                args,
+            } => {
+                self.compile_expr(this, &path.child(0));
+                self.compile_expr(function, &path.child(1));
+                for (index, arg) in args.iter().enumerate() {
+                    self.compile_expr(arg, &path.child(index as u32 + 2));
+                }
+                let instruction = self.code.len();
+                self.code.push(Instruction::CallMethod { argc: args.len() });
                 if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }

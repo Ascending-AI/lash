@@ -78,6 +78,9 @@ and no wildcard.
   in-dialect. `harness-shim/unshimmable.tsv` names the capability for each
   case: an include that cannot be rendered, `program-size` (the test fits the
   64 KiB cell alone but not with the harness prepended) or `host-effects`.
+  A fourth qualifier, `instruction-cost`, is not an unshimmable capability:
+  it names a selected test whose full run exceeds the CI lane's cost bound,
+  registered in `harness-cost.tsv` (see below).
 
 The runner admits each test the way a cell is admitted: lowered, linked
 against a host environment, compiled from the linked artifact, then run under
@@ -112,6 +115,26 @@ writes each divergence's and refusal's evidence to the evidence file:
 - a divergence keeps its recorded owner;
 - a new one is recorded as `UNTRIAGED`, which the record checks refuse until a
   ticket owns it.
+
+## The cost register and the wall-clock backstop
+
+`harness-cost.tsv` registers the few selected tests whose full run exceeds
+the CI lane's cost bound. The runner records each as
+`harness instruction-cost` **without executing it**. The register's rules:
+
+- a test enters only with a ticket that owns making it affordable;
+- a test enters only when it exceeds the CI cost bound — never to hide a
+  wrong answer;
+- the register only shrinks: a registered path that is no longer selected, or
+  whose recorded outcome is no longer `harness instruction-cost`, fails the
+  record checks, so a test leaves the register by running inside the bound
+  again as the VM gets faster (FIG-3730), not by being edited out.
+
+Separately, a wall-clock backstop bounds any single test at 300 s. Worker
+threads cannot be killed once a test starts, so the orchestrating thread
+records each test's start time and, once the backstop passes, reports the
+unfinished tests by name and exits non-zero: the CI job fails fast with names
+instead of hanging.
 
 ## Harness
 

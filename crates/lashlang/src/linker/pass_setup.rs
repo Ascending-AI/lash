@@ -1114,6 +1114,8 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         | Expr::BuiltinCall { .. }
         | Expr::Function(_)
         | Expr::Call { .. }
+        | Expr::MethodCall { .. }
+        | Expr::ThisCall { .. }
         | Expr::FunctionCall { .. }
         | Expr::Map { .. }
         | Expr::Try(_)

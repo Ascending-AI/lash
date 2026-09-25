@@ -67,10 +67,15 @@
         "exec-code:cell-0:lk2:0000000002:child:0:attempt:1",
         "exec-code:cell-0:lk2:0000000002:timers-admitted",
         "exec-code:cell-0:lk2:~seal",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000000:child:0:env",
         "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000000:child:0:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000000:child:1:env",
         "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000000:child:1:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000001:child:0:env",
         "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000001:child:0:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000001:child:1:env",
         "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000001:child:1:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000002:child:0:env",
         "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000002:child:0:present"
       ],
       "group_keys": [
@@ -109,8 +114,8 @@
             },
             "tool": "app_a"
           },
-          "now": 1790267287226,
-          "roll": 0.7728307089039734,
+          "now": 1790304028807,
+          "roll": 0.7195180996895418,
           "second": {
             "args": {
               "after": 1,

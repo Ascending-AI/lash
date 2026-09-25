@@ -1,0 +1,12 @@
+# The Test262 cost register: selected tests whose full run exceeds the CI
+# lane's cost bound (FIG-3729). The runner records each as
+# `harness instruction-cost` without executing it. A test enters the register
+# only with a ticket, only when it exceeds the bound, and never to hide a
+# wrong answer; it leaves when the VM runs it inside the bound again.
+# test262-path	reason	ticket
+test/built-ins/decodeURI/S15.1.3.1_A2.4_T1.js	exhaustive UTF-8 sweep exceeds the CI cost bound; tracked by FIG-3730 (VM throughput)	FIG-3730
+test/built-ins/decodeURI/S15.1.3.1_A2.5_T1.js	exhaustive UTF-8 sweep exceeds the CI cost bound; tracked by FIG-3730 (VM throughput)	FIG-3730
+test/built-ins/decodeURIComponent/S15.1.3.2_A2.4_T1.js	exhaustive UTF-8 sweep exceeds the CI cost bound; tracked by FIG-3730 (VM throughput)	FIG-3730
+test/built-ins/decodeURIComponent/S15.1.3.2_A2.5_T1.js	exhaustive UTF-8 sweep exceeds the CI cost bound; tracked by FIG-3730 (VM throughput)	FIG-3730
+test/built-ins/encodeURI/S15.1.3.3_A2.3_T1.js	exhaustive UTF-8 sweep exceeds the CI cost bound; tracked by FIG-3730 (VM throughput)	FIG-3730
+test/built-ins/encodeURIComponent/S15.1.3.4_A2.3_T1.js	exhaustive UTF-8 sweep exceeds the CI cost bound; tracked by FIG-3730 (VM throughput)	FIG-3730

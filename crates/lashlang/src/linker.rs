@@ -29,6 +29,7 @@ mod errors;
 pub use errors::LinkError;
 mod pass_setup;
 use pass_setup::{Binding, Linker, function_signature};
+mod lower_calls;
 mod lower_expr;
 mod lower_javascript;
 mod module_resolution;

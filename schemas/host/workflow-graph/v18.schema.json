@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-graph/v17",
+  "$id": "https://lash.dev/schemas/workflow-graph/v18",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -754,6 +754,70 @@
         },
         {
           "additionalProperties": false,
+          "description": "Calls the function stored at a member of `receiver`, with the receiver value as the callee's receiver.\n\n`receiver` is evaluated once, then `method` (and its key, when it is computed), then the member is read, then `args`, and the call binds the receiver into the callee's [`FunctionExpr::receiver`] slot. This is the member call of a language with method receivers; a plain [`Expr::Call`] binds `undefined`.",
+          "properties": {
+            "MethodCall": {
+              "properties": {
+                "args": {
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "type": "array"
+                },
+                "method": {
+                  "$ref": "#/definitions/MethodKey"
+                },
+                "receiver": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "args",
+                "method",
+                "receiver"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "MethodCall"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Calls `function` with an explicit receiver: `this`, then `function`, then `args` are evaluated in that order. A front end uses it where a builtin passes a receiver of its choosing (a callback's `thisArg`, a JSON replacer's holder).",
+          "properties": {
+            "ThisCall": {
+              "properties": {
+                "args": {
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "type": "array"
+                },
+                "function": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "this": {
+                  "$ref": "#/definitions/Expr"
+                }
+              },
+              "required": [
+                "args",
+                "function",
+                "this"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "ThisCall"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Calls a declared [`FunctionDecl`] by name.\n\nThe parser never produces this node: source spells a call to a declared function exactly like a builtin call, and the linker is the resolver that rewrites the `BuiltinCall` whose name it recognises. Keeping the resolved shape distinct is what lets the compiler emit a static callee and lets every later pass tell a pure declared call apart from a first-class closure call.",
           "properties": {
             "FunctionCall": {
@@ -1070,6 +1134,13 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "receiver": {
+          "description": "The slot the call's receiver is bound to, for a function that reads it. A call through [`Expr::MethodCall`] or [`Expr::ThisCall`] binds the receiver it names; every other call binds `undefined`. A function without one (an arrow, or one that never reads its receiver) ignores the receiver entirely; an arrow reads its enclosing function's slot as an ordinary capture.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1199,6 +1270,35 @@
           },
           "required": [
             "If"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MethodKey": {
+      "description": "The member an [`Expr::MethodCall`] reads its callee from.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Field": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Index": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "Index"
           ],
           "type": "object"
         }
@@ -2819,7 +2919,7 @@
     },
     "schema_version": {
       "enum": [
-        17
+        18
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -2839,6 +2939,6 @@
   ],
   "title": "WorkflowGraph",
   "type": "object",
-  "x-lash-schema-version": 17,
+  "x-lash-schema-version": 18,
   "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
 }

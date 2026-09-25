@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lashlang::{
     AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, ProcessParam,
-    ResourceRefExpr, StructuralRole, TryExpr, TypeExpr,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, MethodKey,
+    ProcessParam, ResourceRefExpr, StructuralRole, TryExpr, TypeExpr,
 };
 
 use crate::adapter::{
@@ -30,6 +30,7 @@ mod entry;
 mod graph;
 mod json_replacer;
 mod loops;
+mod optional_chain;
 mod param_types;
 mod process_wrapper;
 mod regex;
@@ -61,6 +62,10 @@ pub(crate) fn accepted_instance_methods() -> &'static [&'static str] {
 /// reserves so a source identifier can never collide with one.
 pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
 
+/// The scope key of a non-arrow function's receiver binding. `this` is a
+/// keyword, so no authored binding can take the key.
+const RECEIVER_BINDING: &str = "this";
+
 /// A statement list closed by its completion value: `items`' last element is
 /// the value the list evaluates to, and every other element is a statement.
 pub(super) fn completion_list(items: Vec<LashExpr>) -> LashExpr {
@@ -73,6 +78,10 @@ pub(super) fn completion_list(items: Vec<LashExpr>) -> LashExpr {
 struct FunctionContext {
     id: usize,
     captures: BTreeSet<String>,
+    /// The function's receiver slot, named on the first read of `this` in
+    /// its body (or in an arrow inside it, which reads it lexically). A
+    /// function that never reads it declares no slot.
+    receiver: Option<String>,
     /// Where the enclosing frame creates this closure: the point its captures
     /// are copied at.
     creation: Site,
@@ -135,6 +144,10 @@ struct Lowerer {
     current_span: Option<SourceSpan>,
     module_authority_roots: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
+    /// Set while a parenthesized optional chain is lowered as a callee
+    /// (`(a?.b)()`): the slot its final member read stores its object in, so
+    /// the call keeps that object as its receiver.
+    optional_receiver_capture: Option<String>,
     /// Where each closure copies its captures and where each binding is
     /// assigned, judged once the program has lowered.
     capture_ledger: CaptureLedger,
@@ -204,6 +217,33 @@ impl Lowerer {
 
     fn current_function(&self) -> usize {
         self.functions.last().map_or(0, |function| function.id)
+    }
+
+    /// Names the receiver slot of the function whose `this` is in scope, on
+    /// its first read.
+    fn name_receiver(&mut self) -> Result<(), Diagnostic> {
+        let owner = self.binding(RECEIVER_BINDING)?.owner_function;
+        let Some(position) = self
+            .functions
+            .iter()
+            .position(|function| function.id == owner)
+        else {
+            return Ok(());
+        };
+        if self.functions[position].receiver.is_some() {
+            return Ok(());
+        }
+        let internal = self.generated_binding("this");
+        self.functions[position].receiver = Some(internal.clone());
+        if let Some(binding) = self
+            .scopes
+            .iter_mut()
+            .rev()
+            .find_map(|scope| scope.bindings.get_mut(RECEIVER_BINDING))
+        {
+            binding.internal = internal;
+        }
+        Ok(())
     }
 
     fn has_binding(&self, name: &str) -> bool {
@@ -664,9 +704,12 @@ impl Lowerer {
                 test,
                 update,
                 body,
-            } => vec![self.in_loop_statement(|lowerer| {
-                lowerer.lower_classic_for(init.as_deref(), test.as_ref(), update.as_ref(), body)
-            })?],
+            } => vec![self.lower_classic_for(
+                init.as_deref(),
+                test.as_ref(),
+                update.as_ref(),
+                body,
+            )?],
             Stmt::ForOf {
                 pattern,
                 kind,
@@ -841,6 +884,7 @@ impl Lowerer {
         self.functions.push(FunctionContext {
             id,
             captures: BTreeSet::new(),
+            receiver: None,
             creation,
         });
         // ECMA binds a function's own name inside its body. A declaration
@@ -878,6 +922,31 @@ impl Lowerer {
                     // A function expression's own name has never carried the
                     // async-helper fact: recursion inside the body is a plain
                     // call, and this change does not alter that.
+                    role: BindingRole::Plain,
+                },
+            );
+        }
+        // A non-arrow function binds its call's receiver (ECMA-262
+        // OrdinaryCallBindThis). The binding is keyed `this`, which no source
+        // identifier can spell, so a `this` in the body — or in an arrow inside
+        // it, whose `this` is lexical — resolves to it like any other name and
+        // an arrow captures it like any other `const`.
+        if !function.is_arrow {
+            let binding_id = self.declare_in_ledger(RECEIVER_BINDING, BindingKind::Const);
+            #[expect(
+                clippy::unwrap_used,
+                reason = "the function-name scope was pushed above"
+            )]
+            self.scopes.last_mut().unwrap().bindings.insert(
+                RECEIVER_BINDING.to_string(),
+                Binding {
+                    id: binding_id,
+                    // Named on first read, so a function that never reads its
+                    // receiver mints no generated name.
+                    internal: String::new(),
+                    kind: BindingKind::Const,
+                    initialized: true,
+                    owner_function: id,
                     role: BindingRole::Plain,
                 },
             );
@@ -980,6 +1049,7 @@ impl Lowerer {
             // else the name the enclosing NamedEvaluation/SetFunctionName
             // position assigned. `""` when no naming context applies.
             js_name: function.name.clone().or(inferred_name).map(Into::into),
+            receiver: context.receiver.map(Into::into),
             params,
             captures: context.captures.into_iter().map(Into::into).collect(),
             body: Box::new(body),
@@ -1080,11 +1150,14 @@ impl Lowerer {
                     None,
                 ));
             }
-            Expr::This if !self.functions.is_empty() => LashExpr::Undefined,
+            Expr::This if self.has_binding(RECEIVER_BINDING) => {
+                self.name_receiver()?;
+                LashExpr::Variable(self.resolve(RECEIVER_BINDING)?.into())
+            }
             Expr::This => {
                 return Err(Diagnostic::new(
                     DiagnosticCode::ThisUnsupported,
-                    "Unsupported: top-level this. Use explicit bindings; function this is undefined in the module dialect.",
+                    "Unsupported: top-level this, which an arrow outside every function also reads. Use explicit bindings; inside a function or method, this is the call's receiver.",
                     None,
                 ));
             }

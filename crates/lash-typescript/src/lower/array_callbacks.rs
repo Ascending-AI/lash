@@ -4,7 +4,7 @@
 //! continuation shape.
 
 use lashlang::{
-    AssignPathStep, AssignTarget, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp,
+    AssignPathStep, AssignTarget, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp, MethodKey,
     StructuralRole,
 };
 
@@ -70,21 +70,26 @@ impl Lowerer {
                 ),
             ),
         ]);
-        Ok(LashExpr::Block(vec![
+        let guard = may_be_plain_object(receiver_expr);
+        let search = self.temporary("replace_search");
+        let mut expressions = vec![
             assign(&receiver, self.lower_expr(receiver_expr)?),
+            assign(&search, self.lower_expr(needle_expr)?),
+            assign(&callback, self.lower_expr(callback_expr)?),
+        ];
+        // The built-in converts the pattern after both arguments are
+        // evaluated.
+        let builtin = LashExpr::Block(vec![
             assign(
                 &needle,
-                add(
-                    LashExpr::String(String::new().into()),
-                    self.lower_expr(needle_expr)?,
-                ),
+                add(LashExpr::String(String::new().into()), variable(&search)),
             ),
-            assign(&callback, self.lower_expr(callback_expr)?),
             assign(
                 &worker,
                 LashExpr::Function(Box::new(FunctionExpr {
                     name: None,
                     js_name: None,
+                    receiver: None,
                     params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                     captures: vec![
                         receiver.as_str().into(),
@@ -101,7 +106,27 @@ impl Lowerer {
                     function: Box::new(variable(&worker)),
                 }],
             ),
-        ]))
+        ]);
+        // A plain object has no string `replace`: its own member is called
+        // with the arguments as given, and the worker's generated string
+        // calls never see it.
+        expressions.push(if guard {
+            LashExpr::If {
+                condition: Box::new(stdlib(
+                    "Lash.OwnMethod",
+                    vec![variable(&receiver), LashExpr::String("replace".into())],
+                )),
+                then_block: Box::new(LashExpr::MethodCall {
+                    receiver: Box::new(variable(&receiver)),
+                    method: MethodKey::Field("replace".into()),
+                    args: vec![variable(&search), variable(&callback)],
+                }),
+                else_block: Box::new(builtin),
+            }
+        } else {
+            builtin
+        });
+        Ok(LashExpr::Block(expressions))
     }
 
     pub(super) fn lower_group_by(
@@ -213,6 +238,7 @@ impl Lowerer {
                 LashExpr::Function(Box::new(FunctionExpr {
                     name: None,
                     js_name: None,
+                    receiver: None,
                     params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                     captures: vec![
                         source_name.as_str().into(),
@@ -236,8 +262,9 @@ impl Lowerer {
         object: &Expr,
         args: &[Expr],
     ) -> Result<LashExpr, Diagnostic> {
+        let guard = may_be_plain_object(object);
         let receiver = self.lower_expr(object)?;
-        self.lower_array_callback_with_receiver(method, receiver, args)
+        self.lower_array_callback_with_receiver(method, receiver, args, guard)
     }
 
     pub(super) fn lower_array_from_mapping(
@@ -245,7 +272,7 @@ impl Lowerer {
         receiver: LashExpr,
         args: &[Expr],
     ) -> Result<LashExpr, Diagnostic> {
-        self.lower_array_callback_with_receiver("arrayFromMap", receiver, args)
+        self.lower_array_callback_with_receiver("arrayFromMap", receiver, args, false)
     }
 
     fn lower_array_callback_with_receiver(
@@ -253,6 +280,7 @@ impl Lowerer {
         method: &str,
         receiver_value: LashExpr,
         args: &[Expr],
+        own_method_guard: bool,
     ) -> Result<LashExpr, Diagnostic> {
         let Some(callback) = args.first() else {
             return Err(callback_arity(method, "a callback"));
@@ -269,16 +297,34 @@ impl Lowerer {
             assign(&receiver, receiver_value),
             assign(&callback_name, self.lower_expr(callback)?),
         ];
+        // The call's arguments as evaluated, in order: a plain object's own
+        // method receives exactly these.
+        let mut arguments = vec![callback_name.clone()];
         let initial_name = initial.map(|_| self.temporary("callback_initial"));
         if let (Some(value), Some(name)) = (initial, initial_name.as_deref()) {
             // Arguments are evaluated left-to-right: for reduce the initial
             // value precedes any excess arguments.
             setup.push(assign(name, self.lower_expr(value)?));
+            arguments.push(name.to_string());
         }
+        // The predicate family and `Array.from`'s mapper take a `thisArg`: the
+        // callback's receiver on every call (ECMA-262 `Call(callbackfn,
+        // thisArg, ...)`); without one the receiver is `undefined`.
+        let this_arg = if takes_this_arg(method)
+            && let Some(value) = args.get(1)
+        {
+            let name = self.temporary("callback_this");
+            setup.push(assign(&name, self.lower_expr(value)?));
+            arguments.push(name.clone());
+            Some(name)
+        } else {
+            None
+        };
         // ECMAScript evaluates excess arguments before the call and then
-        // ignores them. For the predicate family this also covers the optional
-        // `thisArg`; Lash functions deliberately have `this === undefined`.
-        let consumed = if matches!(method, "reduce" | "reduceRight") && initial.is_some() {
+        // ignores them.
+        let consumed = if matches!(method, "reduce" | "reduceRight") && initial.is_some()
+            || this_arg.is_some()
+        {
             2
         } else {
             1
@@ -286,16 +332,46 @@ impl Lowerer {
         for argument in args.iter().skip(consumed) {
             let ignored = self.temporary("callback_ignored_argument");
             setup.push(assign(&ignored, self.lower_expr(argument)?));
+            arguments.push(ignored);
         }
+        // A plain object has no array methods: `o.map(f)` calls `o`'s own
+        // `map`. Which one runs is decided at run time, after the arguments,
+        // and the built-in's generated code never sees a plain object.
+        let own_method = own_method_guard.then(|| {
+            stdlib(
+                "Lash.OwnMethod",
+                vec![variable(&receiver), LashExpr::String(method.into())],
+            )
+        });
+        let own_call = || LashExpr::MethodCall {
+            receiver: Box::new(variable(&receiver)),
+            method: MethodKey::Field(method.into()),
+            args: arguments.iter().map(|name| variable(name)).collect(),
+        };
         if method == "toSorted" {
+            let copy = stdlib("slice", vec![variable(&receiver)]);
             setup.push(assign(
                 &receiver,
-                stdlib("slice", vec![variable(&receiver)]),
+                match &own_method {
+                    Some(own) => LashExpr::If {
+                        condition: Box::new(own.clone()),
+                        then_block: Box::new(variable(&receiver)),
+                        else_block: Box::new(copy),
+                    },
+                    None => copy,
+                },
             ));
         }
         let initial = initial_name.as_deref().map(variable);
         let body = if matches!(method, "sort" | "toSorted") {
-            callback_body(method, &receiver, &callback_name, initial, self)?
+            callback_body(
+                method,
+                &receiver,
+                &callback_name,
+                this_arg.as_deref(),
+                initial,
+                self,
+            )?
         } else {
             // Every callback-taking method checks IsCallable after its
             // arguments are evaluated and before it visits an element, so a
@@ -315,6 +391,7 @@ impl Lowerer {
                     then_block: Box::new(LashExpr::Function(Box::new(FunctionExpr {
                         name: None,
                         js_name: None,
+                        receiver: None,
                         params: vec![identity.as_str().into()],
                         captures: Vec::new(),
                         body: Box::new(variable(&identity)),
@@ -326,18 +403,29 @@ impl Lowerer {
             };
             LashExpr::Block(vec![
                 assign(&callee, check),
-                callback_body(method, &receiver, &callee, initial, self)?,
+                callback_body(
+                    method,
+                    &receiver,
+                    &callee,
+                    this_arg.as_deref(),
+                    initial,
+                    self,
+                )?,
             ])
         };
         let mut captures = vec![receiver.as_str().into(), callback_name.as_str().into()];
         if let Some(name) = initial_name {
             captures.push(name.into());
         }
+        if let Some(name) = &this_arg {
+            captures.push(name.as_str().into());
+        }
         setup.push(assign(
             &worker,
             LashExpr::Function(Box::new(FunctionExpr {
                 name: None,
                 js_name: None,
+                receiver: None,
                 params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                 captures,
                 body: Box::new(body),
@@ -347,25 +435,38 @@ impl Lowerer {
             items: Box::new(LashExpr::List(vec![LashExpr::Undefined])),
             function: Box::new(variable(&worker)),
         };
-        if matches!(method, "sort" | "toSorted") {
-            setup.push(driven);
-            setup.push(variable(&receiver));
+        let builtin = if matches!(method, "sort" | "toSorted") {
+            LashExpr::Block(vec![driven, variable(&receiver)])
         } else if method == "forEach" {
             // A receiver not written as a collection (an alias, a field, a
             // call's result) is an array or a collection only at run time. A
             // `Map`, `Set` or `URLSearchParams` iterates by its own `forEach`,
             // with live cursors; walking it as an array visited nothing.
-            setup.push(LashExpr::If {
+            LashExpr::If {
                 condition: Box::new(stdlib("Array.isArray", vec![variable(&receiver)])),
                 then_block: Box::new(stdlib("__singleCallbackResult", vec![driven])),
                 else_block: Box::new(stdlib(
                     "forEach",
-                    vec![variable(&receiver), variable(&callback_name)],
+                    vec![
+                        variable(&receiver),
+                        match &this_arg {
+                            Some(this_arg) => bound_callback(&callback_name, this_arg, self),
+                            None => variable(&callback_name),
+                        },
+                    ],
                 )),
-            });
+            }
         } else {
-            setup.push(stdlib("__singleCallbackResult", vec![driven]));
-        }
+            stdlib("__singleCallbackResult", vec![driven])
+        };
+        setup.push(match own_method {
+            Some(own) => LashExpr::If {
+                condition: Box::new(own),
+                then_block: Box::new(own_call()),
+                else_block: Box::new(builtin),
+            },
+            None => builtin,
+        });
         Ok(LashExpr::Role {
             role: StructuralRole::CollectionTransform {
                 operation: method.into(),
@@ -375,10 +476,57 @@ impl Lowerer {
     }
 }
 
+/// Whether a member call's receiver, as written, may be a plain object at run
+/// time: anything but a primitive or array literal.
+pub(super) fn may_be_plain_object(object: &Expr) -> bool {
+    !matches!(
+        object,
+        Expr::String(_) | Expr::Number(_) | Expr::Bool(_) | Expr::Array(_)
+    )
+}
+
+/// Whether `method`'s callback takes a `thisArg` after it.
+fn takes_this_arg(method: &str) -> bool {
+    matches!(
+        method,
+        "map"
+            | "arrayFromMap"
+            | "filter"
+            | "flatMap"
+            | "forEach"
+            | "some"
+            | "every"
+            | "find"
+            | "findIndex"
+            | "findLast"
+            | "findLastIndex"
+    )
+}
+
+/// `(value, key, collection) => callback.call(thisArg, value, key,
+/// collection)`: a collection's own `forEach` calls it, so the callback runs
+/// with the `thisArg` receiver.
+fn bound_callback(callback: &str, this_arg: &str, lowerer: &mut Lowerer) -> LashExpr {
+    let params = ["value", "key", "collection"].map(|label| lowerer.temporary(label));
+    LashExpr::Function(Box::new(FunctionExpr {
+        name: None,
+        js_name: None,
+        receiver: None,
+        params: params.iter().map(|param| param.as_str().into()).collect(),
+        captures: vec![callback.into(), this_arg.into()],
+        body: Box::new(LashExpr::ThisCall {
+            this: Box::new(variable(this_arg)),
+            function: Box::new(variable(callback)),
+            args: params.iter().map(|param| variable(param)).collect(),
+        }),
+    }))
+}
+
 fn callback_body(
     method: &str,
     receiver: &str,
     callback: &str,
+    this_arg: Option<&str>,
     initial: Option<LashExpr>,
     lowerer: &mut Lowerer,
 ) -> Result<LashExpr, Diagnostic> {
@@ -414,9 +562,16 @@ fn callback_body(
         target: Box::new(variable(receiver)),
         index: Box::new(variable(&index)),
     };
-    let call = |arguments: Vec<LashExpr>| LashExpr::Call {
-        function: Box::new(variable(callback)),
-        args: arguments,
+    let call = |arguments: Vec<LashExpr>| match this_arg {
+        Some(this_arg) => LashExpr::ThisCall {
+            this: Box::new(variable(this_arg)),
+            function: Box::new(variable(callback)),
+            args: arguments,
+        },
+        None => LashExpr::Call {
+            function: Box::new(variable(callback)),
+            args: arguments,
+        },
     };
     let predicate = || {
         let mut arguments = vec![item.clone(), variable(&index)];

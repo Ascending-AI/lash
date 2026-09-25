@@ -133,7 +133,9 @@ impl<'a> ContinuationValidator<'a> {
             }
             HeapObject::RegExp(regexp) => self.validate_heap_regexp(id, regexp),
             HeapObject::RegExpMatch(result) => self.validate_heap_regexp_match(id, result),
-            HeapObject::Date(_) | HeapObject::UrlSearchParams(_) => Ok(()),
+            HeapObject::BuiltinFunction(_)
+            | HeapObject::Date(_)
+            | HeapObject::UrlSearchParams(_) => Ok(()),
             HeapObject::Error(error) => self.validate_heap_error(id, error),
             HeapObject::Url(url) => {
                 validate_value(&url.search_params, &format!("heap URL {} params", id.get()))?;

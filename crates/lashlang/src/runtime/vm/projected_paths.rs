@@ -20,6 +20,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Value::Undefined
     }
 
+    /// What a key a custom descriptor has no own answer for inherits: an
+    /// advertised method is the built-in function of the value the projection
+    /// stands for, so `result.items.map` reads as `[].map` does. Only such a
+    /// key materializes the projection, to learn which prototype it has.
+    async fn projected_inherited(
+        &mut self,
+        projected: &ProjectedValue,
+        key: &str,
+    ) -> Result<Value, RuntimeError> {
+        if !BuiltinFunction::is_method_key(key) {
+            return Ok(self.absent_value());
+        }
+        let value = projected.materialize_async().await?;
+        match inline_inherited_builtin(&value, key) {
+            Some(function) => self.heap.builtin_function(function),
+            None => Ok(self.absent_value()),
+        }
+    }
+
     /// Field access on a projected source.
     ///
     /// `ProjectedValue::get_field` can only fall back to the reference-blind
@@ -30,7 +49,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// property.
     ///
     /// The result keeps the projected wrapper either way, so a path expression
-    /// still carries "this came from a projected source".
+    /// still carries "this came from a projected source" — except a built-in
+    /// method, which is the heap's own function object and no data of the
+    /// projection's.
     pub(super) async fn read_projected_field(
         &mut self,
         projected: &ProjectedValue,
@@ -38,11 +59,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<Value, RuntimeError> {
         let inner = match projected.scalar_value() {
             Some(value) => self.read_dialect_field(value.clone(), field)?,
-            None => projected
-                .get_field(field)
-                .await?
-                .unwrap_or_else(|| self.absent_value()),
+            None => match projected.get_field(field).await? {
+                Some(value) => value,
+                None => self.projected_inherited(projected, &field.text).await?,
+            },
         };
+        if matches!(inner, Value::Ref(_)) {
+            return Ok(inner);
+        }
         Ok(ProjectedValue::propagate_field(
             projected.name(),
             &field.text,
@@ -61,11 +85,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<Value, RuntimeError> {
         let inner = match projected.scalar_value() {
             Some(value) => self.read_dialect_index(value.clone(), index.clone())?,
-            None => projected
-                .get_index(index)
-                .await?
-                .unwrap_or_else(|| self.absent_value()),
+            None => match projected.get_index(index).await? {
+                Some(value) => value,
+                None => {
+                    let key = self.heap.javascript_to_string(index)?;
+                    self.projected_inherited(projected, &key).await?
+                }
+            },
         };
+        if matches!(inner, Value::Ref(_)) {
+            return Ok(inner);
+        }
         Ok(ProjectedValue::propagate_index(
             projected.name(),
             index,

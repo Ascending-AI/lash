@@ -47,8 +47,10 @@ pub use projection::{
 /// operator, node ids come from canonical carrier paths, and non-finite
 /// numbers use the IR number encoding; v15 graph documents are refused.
 /// Version 17 (FIG-3655) adds `js_name` to `FunctionExpr` for the function's
-/// ECMAScript-inferred name; v16 graph documents are refused.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 17;
+/// ECMAScript-inferred name; v16 graph documents are refused. Version 18
+/// (FIG-3700) adds call receivers: `FunctionExpr.receiver`, `Expr::MethodCall`
+/// and `Expr::ThisCall`; v17 graph documents are refused.
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 18;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(

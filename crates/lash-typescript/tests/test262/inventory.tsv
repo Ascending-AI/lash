@@ -225,7 +225,7 @@ typescript	binding-reassignment
 typescript	builtin-arity
 typescript	builtin-member-read
 typescript	builtin-member-write
-typescript	classic-for-forms
+typescript	classic-for-continue-across-finally
 typescript	closed-shape-field-guard
 typescript	comma-operator
 typescript	constructor-arity
@@ -241,6 +241,7 @@ typescript	direct-eval
 typescript	enum
 typescript	exotic-own-properties
 typescript	function-constructor
+typescript	function-receivers
 typescript	function-redeclaration
 typescript	generics
 typescript	instanceof-arbitrary
@@ -256,6 +257,7 @@ typescript	non-null-assertion
 typescript	object-string-coercion
 typescript	private-names-outside-classes
 typescript	Promise.race
+typescript	regexp-nesting
 typescript	regexp-pattern-argument
 typescript	reserved-identifiers
 typescript	satisfies

@@ -64,7 +64,7 @@ impl Lowerer {
                     .get(1)
                     .map(|limit| self.lower_expr(limit))
                     .transpose()?
-                    .unwrap_or(LashExpr::Number(u32::MAX as f64));
+                    .unwrap_or(LashExpr::Undefined);
                 Ok(regexp_call(
                     method,
                     vec![self.lower_expr(object)?, self.lower_expr(&args[0])?, limit],
@@ -74,7 +74,7 @@ impl Lowerer {
                 let [search, replacement] = args else {
                     return Err(regex_arity(method, "search and replacement arguments"));
                 };
-                self.lower_regexp_replace(object, search, replacement, method == "replaceAll")
+                self.lower_regexp_replace(object, search, replacement, method)
             }
             _ => unreachable!(),
         }?;
@@ -86,8 +86,10 @@ impl Lowerer {
         input: &Expr,
         search: &Expr,
         replacement: &Expr,
-        all: bool,
+        method: &str,
     ) -> Result<LashExpr, Diagnostic> {
+        let all = method == "replaceAll";
+        let own_method_guard = super::array_callbacks::may_be_plain_object(input);
         let input_slot = self.temporary("replace_input");
         let search_slot = self.temporary("replace_search");
         let replacement_slot = self.temporary("replace_value");
@@ -106,6 +108,7 @@ impl Lowerer {
         let wrapper = LashExpr::Function(Box::new(FunctionExpr {
             name: None,
             js_name: None,
+            receiver: None,
             params: vec![entry_slot.as_str().into()],
             captures: vec![replacement_slot.as_str().into()],
             body: Box::new(LashExpr::Return(Box::new(js_add(
@@ -146,22 +149,45 @@ impl Lowerer {
                 LashExpr::Bool(all),
             ],
         );
+        let builtin = LashExpr::If {
+            condition: Box::new(LashExpr::JavaScriptBinary {
+                left: Box::new(js_unary(
+                    JavaScriptUnaryOp::TypeOf,
+                    variable(&replacement_slot),
+                )),
+                op: JavaScriptBinaryOp::StrictEqual,
+                right: Box::new(LashExpr::String("function".into())),
+            }),
+            then_block: Box::new(callback_branch),
+            else_block: Box::new(string_branch),
+        };
+        // A plain object has no string `replace`: its own member is called
+        // with the arguments as given, and the generated plan never sees it.
+        let call = if own_method_guard {
+            LashExpr::If {
+                condition: Box::new(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![
+                        LashExpr::String("Lash.OwnMethod".into()),
+                        variable(&input_slot),
+                        LashExpr::String(method.into()),
+                    ],
+                }),
+                then_block: Box::new(LashExpr::MethodCall {
+                    receiver: Box::new(variable(&input_slot)),
+                    method: MethodKey::Field(method.into()),
+                    args: vec![variable(&search_slot), variable(&replacement_slot)],
+                }),
+                else_block: Box::new(builtin),
+            }
+        } else {
+            builtin
+        };
         Ok(LashExpr::Block(vec![
             temp_assignment(&input_slot, self.lower_expr(input)?),
             temp_assignment(&search_slot, self.lower_expr(search)?),
             temp_assignment(&replacement_slot, self.lower_expr(replacement)?),
-            LashExpr::If {
-                condition: Box::new(LashExpr::JavaScriptBinary {
-                    left: Box::new(js_unary(
-                        JavaScriptUnaryOp::TypeOf,
-                        variable(&replacement_slot),
-                    )),
-                    op: JavaScriptBinaryOp::StrictEqual,
-                    right: Box::new(LashExpr::String("function".into())),
-                }),
-                then_block: Box::new(callback_branch),
-                else_block: Box::new(string_branch),
-            },
+            call,
         ]))
     }
 }

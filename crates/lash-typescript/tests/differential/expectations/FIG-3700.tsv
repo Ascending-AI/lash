@@ -1,0 +1,16 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3700	1	accept	"(() => { const o = { k: 1, f() { return this.k; } }; return o.f(); })()"	"1"	-
+FIG-3700	2	accept	"(() => { const o = { k: 2, f: function () { return this.k; } }; const m = 'f'; return o[m](); })()"	"2"	-
+FIG-3700	3	accept	"(() => { const o = { k: 3, f() { return [1, 2].map((x) => this.k + x).join(); } }; return o.f(); })()"	"4,5"	-
+FIG-3700	4	accept	"(() => { const o = { k: 4, f() { return this; } }; const g = o.f; return String(g()); })()"	"undefined"	-
+FIG-3700	5	accept	"(() => { const t = { k: 5 }; return [1, 2].map(function (x) { return this.k + x; }, t).join(); })()"	"6,7"	-
+FIG-3700	6	accept	"(() => { const a = { b() { return this.c; }, c: 6 }; return String((a?.b)()) + String(a.b?.()); })()"	"66"	-
+FIG-3700	7	accept	"JSON.stringify({ v: 'z', toJSON(key) { return this.v + key; } })"	"\"z\""	-
+FIG-3700	8	accept	"JSON.stringify({ a: 1 }, function (key, value) { return key === 'a' ? this.a + 1 : value; })"	"{\"a\":2}"	-
+FIG-3700	9	accept	"(() => { const o = { n: 0, inc() { this.n++; return this.n; } }; o.inc(); return o.inc(); })()"	"2"	-
+FIG-3700	10	accept	"JSON.stringify((() => { const o = { k: 2, map(f) { return f(this.k); }, filter() { return 'own'; }, some() { return 'own'; } }; return [o.map((x) => x + 1), o.filter((x) => x), o.some((x) => x)]; })())"	"[3,\"own\",\"own\"]"	-
+FIG-3700	11	accept	"({ k: 1, sort(c) { return this.k; } }).sort((a, b) => a - b)"	"1"	-
+FIG-3700	12	accept	"({ hasOwnProperty(k) { return 'own'; } }).hasOwnProperty('a')"	"own"	-
+FIG-3700	13	accept	"({ replace(a, fn) { return 'own:' + fn(); }, indexOf() { return 0; } }).replace('x', () => 'y')"	"own:y"	-
+FIG-3700	14	accept	"JSON.stringify((() => { const f = () => 1; const p = { forEach(cb, t) { return [typeof t, cb === f]; } }; return p.forEach(f, 7); })())"	"[\"number\",true]"	-
+FIG-3700	15	accept	"(() => { const o = { get: 5 }; try { o.get('a'); return 'no'; } catch (e) { return e instanceof TypeError; } })()"	"true"	-

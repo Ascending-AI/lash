@@ -544,6 +544,87 @@ fn classic_for_continue_crossing_finally_is_named_rejection() {
     assert_eq!(error.code, lash_typescript::DiagnosticCode::ForUnsupported);
 }
 
+/// ECMA-262's ForStatement in every head, condition and update form
+/// (FIG-3706). Each of these refused as `TS_FOR_UNSUPPORTED` while only
+/// `for (let i = start; i < end; i++)` was accepted; the answers are Node's.
+#[test]
+fn classic_for_runs_every_head_condition_and_update_form() {
+    let cases = [
+        // Other updates and conditions.
+        (
+            "let s = 0; for (let i = 10; i > 0; i -= 3) { s = s + i; } finish(s);",
+            Value::Number(22.0),
+        ),
+        (
+            "let s = 0; for (let i = 1; i <= 16; i = i * 2) { s = s + i; } finish(s);",
+            Value::Number(31.0),
+        ),
+        (
+            "let s = ''; for (let i = 3; i--; ) { s = s + i; } finish(s);",
+            Value::String("210".into()),
+        ),
+        (
+            "let s = 0; for (let i = 0, j = 10; i < j; i++) { j = j - 1; s = s + 1; } finish(s);",
+            Value::Number(5.0),
+        ),
+        (
+            "let s = 0; for (const k = 3; s < k; ) { s++; } finish(s);",
+            Value::Number(3.0),
+        ),
+        // An expression head, an empty head, and no condition at all.
+        (
+            "let i = 0; let s = 0; for (i = 5; i < 8; i++) { s = s + i; } finish(s * 10 + i);",
+            Value::Number(188.0),
+        ),
+        (
+            "let s = 0; let i = 0; for (; i < 4; i++) { s = s + i; } finish(s);",
+            Value::Number(6.0),
+        ),
+        (
+            "let n = 0; for (;;) { n++; if (n === 3) break; } finish(n);",
+            Value::Number(3.0),
+        ),
+        // A `var` head declares the enclosing function's binding, visible
+        // after the loop.
+        (
+            "let r = 0; for (var i = 7; ; ) { r = i; break; } finish(r * 10 + i);",
+            Value::Number(77.0),
+        ),
+        // `continue` runs the update first.
+        (
+            "let s = ''; for (let i = 0; i < 5; i++) { if (i % 2) continue; s = s + i; } finish(s);",
+            Value::String("024".into()),
+        ),
+        // With no update there is nothing to run before a `finally`.
+        (
+            "let s = ''; let i = 0; for (; i < 3; ) { i++; try { if (i === 2) continue; s = s + i; } finally { s = s + '.'; } } finish(s);",
+            Value::String("1..3.".into()),
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(finished(source), expected, "{source}");
+    }
+}
+
+/// `x++` in a classic `for` update converts its operand with ToNumeric. The
+/// canonical loop used to lower it to `x = x + 1`, which concatenates a
+/// string: this loop ran twice (`"0"`, `"01"`) where Node runs it three times.
+#[test]
+fn classic_for_update_converts_its_operand_to_a_number() {
+    assert_eq!(
+        finished(
+            "const start: any = '0'; let n = 0; for (let i: any = start; i < 3; i++) { n++; } finish(n);"
+        ),
+        Value::Number(3.0)
+    );
+    assert_eq!(
+        finished(
+            "const start: any = '5'; let s = ''; for (let i: any = start; i > 2; i--) { s = s + typeof i; } finish(s);"
+        ),
+        Value::String("stringnumbernumber".into())
+    );
+}
+
 #[test]
 fn length_and_standard_number_globals_are_available() {
     let cases = [
@@ -836,13 +917,19 @@ fn a_member_call_on_undefined_names_the_undefined_receiver() {
         "{error}"
     );
 
-    // A method that really is unsupported, on a receiver that really exists,
-    // still says so.
-    let error = execute("const holder: any = { a: 1 }; finish(holder.get('k'));")
-        .expect_err("an unsupported method on a record must refuse");
-    assert!(
-        error.to_string().contains("TS_METHOD_UNSUPPORTED"),
-        "{error}"
+    // A plain object has no `get`: calling a member it lacks is ECMA-262's
+    // TypeError, naming the method (FIG-3700).
+    assert_eq!(
+        finished(
+            "const holder: any = { a: 1 }; let r: any = 'no'; try { holder.get('k'); } catch (e) { r = [e instanceof TypeError, e.message]; } finish(r);"
+        ),
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::String("get is not a function".into())
+            ]
+            .into()
+        )
     );
 }
 
@@ -2152,5 +2239,128 @@ fn set_like_objects_with_guest_callbacks_stay_a_refusal() {
             "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set().isSubsetOf(o)+'|'+new Set().isDisjointFrom(o));"
         ),
         Value::String("true|true".into())
+    );
+}
+
+/// An advertised method read without a call is its ECMA function object
+/// (FIG-3701). It used to read `undefined`, so `typeof 'x'.includes` was
+/// `"undefined"` and `'word'.includes.length` threw.
+#[test]
+fn builtin_method_reads_are_identity_stable_functions() {
+    for source in [
+        // One function per built-in, whichever receiver it was read from.
+        "finish('a'.includes === 'b'.includes);",
+        "const f = 'x'.includes; const g = 'x'.includes; finish(f === g && Object.is(f, g));",
+        "finish(new Set([1]).keys === new Set().values);",
+        "finish([].hasOwnProperty === ({ a: 1 }).hasOwnProperty);",
+        "finish(new Date(0).getTime === new Date(5).getTime);",
+        "finish(/a/.test === /b/.test);",
+        "finish(new Error('x').toString === new TypeError('y').toString);",
+        // Distinct prototypes carry distinct functions.
+        "finish('a'.includes !== [].includes);",
+        "finish([].toString !== ({}).toString);",
+        "finish(new Map().keys !== new Map().values);",
+        // A variable, a computed and an optional read all find the same one.
+        "const s = 'word'; const k = 'includes'; finish(s[k] === s.includes && s?.includes === s.includes);",
+        "const { includes } = 'abc'; finish(includes === 'x'.includes);",
+        // An own property wins, even one holding `undefined`.
+        "finish(({ includes: 7 }).includes === 7);",
+        "finish(({ toString: undefined }).toString === undefined);",
+        // Identity holds wherever SameValue or SameValueZero asks.
+        "finish(new Set(['x'.includes]).has('y'.includes));",
+        "finish(['x'.includes].indexOf('z'.includes) === 0);",
+        "finish(new Map([['x'.includes, 1]]).get('y'.includes) === 1);",
+        // ECMA's function shape: typeof, own name and length, no enumerable keys.
+        "finish(typeof 'word'.includes === 'function' && typeof [].map === 'function');",
+        "finish('word'.includes.length === 1 && 'word'.includes.name === 'includes');",
+        "finish('x'.slice.length === 2 && 'x'.replace.length === 2 && [].flat.length === 0);",
+        "finish(new Set().keys.name === 'values' && (1).toFixed.length === 1);",
+        "finish(Object.hasOwn('x'.includes, 'length') && Object.hasOwn('x'.includes, 'name'));",
+        "finish(Object.keys('x'.includes).length === 0);",
+        "finish('x'.includes.toString === (() => 1).toString);",
+        // An unadvertised name still reads nothing.
+        "finish('x'.map === undefined);",
+    ] {
+        assert_eq!(finished(source), Value::Bool(true), "{source}");
+    }
+    assert_eq!(
+        finished("finish(String([].map) + '|' + ('x'.includes + ''));"),
+        Value::String(
+            "function map() { [native code] }|function includes() { [native code] }".into()
+        )
+    );
+    assert_eq!(
+        finished("finish(JSON.stringify({ f: 'x'.includes, a: [[].map], n: 1 }));"),
+        Value::String("{\"a\":[null],\"n\":1}".into())
+    );
+}
+
+/// A plain call passes `undefined` as the receiver, and the built-in answers
+/// as node's does: a TypeError, except `Object.prototype.toString`, which
+/// tags `undefined`. Argument steps ECMA orders ahead of the receiver check
+/// run first.
+#[test]
+fn a_detached_builtin_call_answers_as_node_does() {
+    let caught = |call: &str| {
+        finished(&format!(
+            "try {{ {call}; finish('returned'); }} catch (e) {{ finish(e instanceof TypeError ? e.message : 'not a TypeError'); }}"
+        ))
+    };
+    for (call, message) in [
+        (
+            "const f = 'x'.includes; f('x')",
+            "String.prototype.includes called on null or undefined",
+        ),
+        (
+            "const f = 'x'.valueOf; f()",
+            "String.prototype.valueOf requires that 'this' be a String",
+        ),
+        (
+            "const f = (1).toFixed; f(2)",
+            "Number.prototype.toFixed requires that 'this' be a Number",
+        ),
+        (
+            "const f = [].map; f((x: number) => x)",
+            "Array.prototype.map called on null or undefined",
+        ),
+        (
+            "const f = new Map().get; f(1)",
+            "Method Map.prototype.get called on incompatible receiver undefined",
+        ),
+        (
+            "const f = ({}).hasOwnProperty; f('a')",
+            "Cannot convert undefined or null to object",
+        ),
+        (
+            "const f = [].sort; f(1)",
+            "The comparison function must be either a function or undefined: 1",
+        ),
+        (
+            "const f = [].sort; f()",
+            "Cannot convert undefined or null to object",
+        ),
+        (
+            "const f = 'x'.trimEnd; f()",
+            "String.prototype.trimRight called on null or undefined",
+        ),
+        (
+            "const f = new Date(0).getTime; f()",
+            "this is not a Date object.",
+        ),
+    ] {
+        assert_eq!(caught(call), Value::String(message.into()), "{call}");
+    }
+    assert_eq!(
+        finished("const t = ({}).toString; finish(t());"),
+        Value::String("[object Undefined]".into())
+    );
+    // As a callback it is called the same way, once per element.
+    assert_eq!(
+        finished("finish(['a', 'b', 'c'].map(({}).toString).join());"),
+        Value::String("[object Undefined],[object Undefined],[object Undefined]".into())
+    );
+    assert_eq!(
+        caught("['a'].forEach('x'.trim)"),
+        Value::String("String.prototype.trim called on null or undefined".into())
     );
 }

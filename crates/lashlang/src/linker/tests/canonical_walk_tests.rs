@@ -113,6 +113,7 @@ fn canonical_walk_aligns_javascript_and_map_bindings_with_facets() {
             function: Box::new(Expr::Function(Box::new(crate::FunctionExpr {
                 name: None,
                 js_name: None,
+                receiver: None,
                 params: vec!["item".into()],
                 captures: Vec::new(),
                 body: Box::new(Expr::Variable("item".into())),

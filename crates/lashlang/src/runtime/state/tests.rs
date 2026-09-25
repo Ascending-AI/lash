@@ -16,6 +16,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
                 js_name: None,
+                receiver: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),
@@ -475,9 +476,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0xaa, 0x1d, 0x8f, 0x15, 0xae, 0x61, 0x4e, 0x71, 0x20, 0x1a, 0x5e, 0x8f, 0xfe, 0x0f,
-            0x85, 0xb4, 0xc7, 0x3c, 0xb4, 0x92, 0x43, 0x47, 0x73, 0x98, 0x17, 0x3b, 0x3b, 0xa4,
-            0x5d, 0x12, 0x6f, 0xfe,
+            0x99, 0x54, 0x0a, 0xfb, 0x45, 0x0b, 0xcd, 0x3c, 0x00, 0x20, 0x63, 0x37, 0xcc, 0x61,
+            0xe8, 0xdb, 0xb2, 0x28, 0x08, 0x93, 0x96, 0xe1, 0x44, 0xa2, 0x6a, 0x3b, 0x21, 0x6c,
+            0x4e, 0x29, 0x8a, 0xb3,
         ]
     );
 }
@@ -667,7 +668,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e0ba7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e0ca7676c6f62616c7390");
 }
 
 #[test]
@@ -1543,6 +1544,7 @@ fn a_restored_real_closure_does_not_reject_a_different_program() {
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
                 js_name: None,
+                receiver: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),
@@ -1920,5 +1922,95 @@ fn rebinding_projections_keeps_every_binding_on_the_same_object() {
         view["doc"],
         Value::Projected(live),
         "the view is re-derived from the rebound object"
+    );
+}
+
+/// Two heap objects for one built-in would make `===` answer false for one
+/// function, so a restored heap holding two is refused.
+#[test]
+fn a_heap_restoring_two_objects_for_one_builtin_is_refused() {
+    let includes = crate::runtime::BuiltinFunction::named(
+        crate::runtime::BuiltinPrototype::String,
+        "includes",
+    )
+    .expect("String.prototype.includes is advertised");
+    let mut heap = Heap::default();
+    let first = heap
+        .allocate(HeapObject::BuiltinFunction(includes))
+        .expect("allocate");
+    let second = heap
+        .allocate(HeapObject::BuiltinFunction(includes))
+        .expect("allocate");
+    let mut runtime_globals = Record::new();
+    runtime_globals.insert("first".to_string(), first);
+    runtime_globals.insert("second".to_string(), second);
+    let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
+        mode: StateMode::HeapBacked(Box::new(HeapBackedState {
+            runtime_globals,
+            projected: Record::new(),
+            heap,
+        })),
+    };
+    let bytes = snapshot.to_canonical_bytes().expect("encode");
+    let error = Snapshot::from_canonical_bytes(&bytes).expect_err("two objects for one built-in");
+    assert!(
+        error
+            .to_string()
+            .contains("String.prototype.includes is held by two heap objects"),
+        "{error}"
+    );
+}
+
+/// The canonical snapshot carries a built-in function object byte-stably, and
+/// the restored heap answers the next read of that built-in with it.
+#[test]
+fn a_snapshot_round_trips_a_builtin_function_object() {
+    let values =
+        crate::runtime::BuiltinFunction::named(crate::runtime::BuiltinPrototype::Set, "values")
+            .expect("Set.prototype.values is advertised");
+    let mut heap = Heap::default();
+    let function = heap.builtin_function(values).expect("allocate");
+    let mut runtime_globals = Record::new();
+    runtime_globals.insert("f".to_string(), function.clone());
+    let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
+        mode: StateMode::HeapBacked(Box::new(HeapBackedState {
+            runtime_globals,
+            projected: Record::new(),
+            heap,
+        })),
+    };
+    let bytes = snapshot.to_canonical_bytes().expect("encode");
+    // The object is `{kind: "builtin_function", prototype: "Set", name:
+    // "values"}`, in that declared order.
+    let object = [
+        &[0x83, 0xa4][..],
+        b"kind",
+        &[0xb0],
+        b"builtin_function",
+        &[0xa9],
+        b"prototype",
+        &[0xa3],
+        b"Set",
+        &[0xa4],
+        b"name",
+        &[0xa6],
+        b"values",
+    ]
+    .concat();
+    assert!(
+        bytes.windows(object.len()).any(|window| window == object),
+        "the canonical bytes spell the built-in by prototype and name"
+    );
+    let decoded = Snapshot::from_canonical_bytes(&bytes).expect("decode");
+    assert_eq!(decoded.to_canonical_bytes().expect("re-encode"), bytes);
+    let StateMode::HeapBacked(mut backed) = decoded.mode else {
+        panic!("a heap-backed snapshot decodes heap-backed");
+    };
+    assert_eq!(
+        backed.heap.builtin_function(values).expect("read again"),
+        function,
+        "the restored heap answers the built-in with the object it restored"
     );
 }

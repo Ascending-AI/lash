@@ -39,91 +39,6 @@ pub(super) fn single_pattern_name(pattern: &Pattern) -> Option<&str> {
     }
 }
 
-pub(super) fn function_var_names(statements: &[Stmt]) -> Vec<String> {
-    fn visit(statement: &Stmt, names: &mut Vec<String>) {
-        match statement {
-            Stmt::Spanned(_, stmt) | Stmt::Labeled { stmt, .. } => visit(stmt, names),
-            Stmt::Enum { name, .. } => names.push(name.clone()),
-            Stmt::Var {
-                kind: VarKind::Var,
-                declarations,
-            } => {
-                for declaration in declarations {
-                    pattern_names(&declaration.pattern, names);
-                }
-            }
-            Stmt::Block(statements) => statements.iter().for_each(|stmt| visit(stmt, names)),
-            Stmt::If {
-                consequent,
-                alternate,
-                ..
-            } => {
-                visit(consequent, names);
-                if let Some(alternate) = alternate {
-                    visit(alternate, names);
-                }
-            }
-            // A `var` loop head declares the enclosing function's (or the
-            // script's) one binding, which every iteration assigns.
-            Stmt::ForOf {
-                pattern,
-                kind: Some(VarKind::Var),
-                body,
-                ..
-            }
-            | Stmt::ForIn {
-                pattern,
-                kind: Some(VarKind::Var),
-                body,
-                ..
-            } => {
-                pattern_names(pattern, names);
-                visit(body, names);
-            }
-            // A classic `for` head's `var` also declares the hoisted binding.
-            Stmt::For { init, body, .. } => {
-                init.iter().for_each(|init| visit(init, names));
-                visit(body, names);
-            }
-            Stmt::While { body, .. }
-            | Stmt::DoWhile { body, .. }
-            | Stmt::ForOf { body, .. }
-            | Stmt::ForIn { body, .. } => visit(body, names),
-            Stmt::Switch { cases, .. } => {
-                for case in cases {
-                    case.consequent.iter().for_each(|stmt| visit(stmt, names));
-                }
-            }
-            Stmt::Try {
-                body,
-                catch,
-                finally,
-            } => {
-                body.iter().for_each(|stmt| visit(stmt, names));
-                if let Some(catch) = catch {
-                    catch.body.iter().for_each(|stmt| visit(stmt, names));
-                }
-                if let Some(finally) = finally {
-                    finally.iter().for_each(|stmt| visit(stmt, names));
-                }
-            }
-            Stmt::Function { .. }
-            | Stmt::Empty
-            | Stmt::Expr(_)
-            | Stmt::Return(_)
-            | Stmt::Break
-            | Stmt::Continue
-            | Stmt::Throw(_)
-            | Stmt::Var { .. } => {}
-        }
-    }
-    let mut names = Vec::new();
-    statements.iter().for_each(|stmt| visit(stmt, &mut names));
-    names.sort();
-    names.dedup();
-    names
-}
-
 impl Lowerer {
     /// A process body runs apart from the cell that starts it and sees only
     /// the values it was started with, so it has no session slot to read or
@@ -282,18 +197,18 @@ impl Lowerer {
         name
     }
 
-    fn temp_assignment(name: &str, value: LashExpr) -> LashExpr {
+    pub(super) fn temp_assignment(name: &str, value: LashExpr) -> LashExpr {
         LashExpr::Assign {
             target: AssignTarget::variable(name.into()),
             expr: Box::new(value),
         }
     }
 
-    fn variable(name: &str) -> LashExpr {
+    pub(super) fn variable(name: &str) -> LashExpr {
         LashExpr::Variable(name.into())
     }
 
-    fn nullish(value: LashExpr) -> LashExpr {
+    pub(super) fn nullish(value: LashExpr) -> LashExpr {
         LashExpr::JavaScriptLogical {
             left: Box::new(LashExpr::JavaScriptBinary {
                 left: Box::new(value.clone()),
@@ -333,6 +248,7 @@ impl Lowerer {
         LashExpr::Function(Box::new(FunctionExpr {
             name: None,
             js_name: Some(name.into()),
+            receiver: None,
             params: vec![value.into()],
             captures: Vec::new(),
             body: Box::new(body),
@@ -844,7 +760,9 @@ impl Lowerer {
             let named = target.named_evaluation();
             let target = self.lower_assign_target(target)?;
             let result = LashExpr::Variable(target.root.clone());
+            // NamedEvaluation: `f = function() {}` takes the assigned name.
             let value = self.lower_named_expr(value, named)?;
+            self.record_store(name)?;
             self.clear_process_handle_role(name)?;
             // The assignment statement, closed by the value an assignment
             // expression evaluates to.
@@ -973,6 +891,7 @@ impl Lowerer {
             }
         }
         if let Some(name) = assigned_name {
+            self.record_store(name)?;
             self.clear_process_handle_role(name)?;
         }
         Ok(LashExpr::Block(output))
@@ -1032,98 +951,6 @@ impl Lowerer {
             name: "__typescript_heap_delete_member".into(),
             args: vec![self.lower_expr(object)?, key],
         })
-    }
-
-    pub(super) fn lower_optional_chain(
-        &mut self,
-        base: &Expr,
-        operations: &[OptionalOperation],
-    ) -> Result<LashExpr, Diagnostic> {
-        let current = self.temporary("optional_chain");
-        let base = self.lower_expr(base)?;
-        let tail = self.lower_optional_operations(Self::variable(&current), operations)?;
-        Ok(LashExpr::Block(vec![
-            Self::temp_assignment(&current, base),
-            tail,
-        ]))
-    }
-
-    fn lower_optional_operations(
-        &mut self,
-        current: LashExpr,
-        operations: &[OptionalOperation],
-    ) -> Result<LashExpr, Diagnostic> {
-        let Some((operation, tail)) = operations.split_first() else {
-            return Ok(current);
-        };
-        let optional = match operation {
-            OptionalOperation::Member { optional, .. }
-            | OptionalOperation::Call { optional, .. } => *optional,
-        };
-        // `value?.method(args)` and `value?.a.method(args)` call a method of
-        // the chain's current value: lowered as the ordinary
-        // `receiver.method(args)` on that value, so a builtin method
-        // dispatches as it does outside a chain rather than being read as a
-        // field (which a string or array does not have) and called.
-        if let (
-            OptionalOperation::Member {
-                property: MemberProperty::Field(method),
-                ..
-            },
-            Some((
-                OptionalOperation::Call {
-                    args,
-                    optional: false,
-                },
-                rest,
-            )),
-        ) = (operation, tail.split_first())
-        {
-            let apply = self.lower_chain_method_call(&current, method, args)?;
-            let next = self.temporary("optional_value");
-            let continuation = LashExpr::Block(vec![
-                Self::temp_assignment(&next, apply),
-                self.lower_optional_operations(Self::variable(&next), rest)?,
-            ]);
-            return Ok(if optional {
-                LashExpr::If {
-                    condition: Box::new(Self::nullish(current)),
-                    then_block: Box::new(LashExpr::Undefined),
-                    else_block: Box::new(continuation),
-                }
-            } else {
-                continuation
-            });
-        }
-        let apply = match operation {
-            OptionalOperation::Member { property, .. } => match property {
-                MemberProperty::Field(field) => LashExpr::Field {
-                    target: Box::new(current.clone()),
-                    field: field.as_str().into(),
-                },
-                MemberProperty::Index(index) => LashExpr::Index {
-                    target: Box::new(current.clone()),
-                    index: Box::new(self.lower_expr(index)?),
-                },
-            },
-            OptionalOperation::Call { args, .. } => {
-                self.lower_dynamic_call_value(current.clone(), args)?
-            }
-        };
-        let next = self.temporary("optional_value");
-        let continuation = LashExpr::Block(vec![
-            Self::temp_assignment(&next, apply),
-            self.lower_optional_operations(Self::variable(&next), tail)?,
-        ]);
-        if optional {
-            Ok(LashExpr::If {
-                condition: Box::new(Self::nullish(current)),
-                then_block: Box::new(LashExpr::Undefined),
-                else_block: Box::new(continuation),
-            })
-        } else {
-            Ok(continuation)
-        }
     }
 
     pub(super) fn lower_dynamic_call_value(

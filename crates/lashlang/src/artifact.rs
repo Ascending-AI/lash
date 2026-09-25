@@ -24,7 +24,7 @@ use write_helpers::{
 };
 
 use crate::ast::{
-    AssignPathStep, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause,
+    AssignPathStep, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause, MethodKey,
     ProcessDecl, Program, ResourceRefExpr, TypeExpr, UnaryOp,
 };
 use crate::linker::{
@@ -40,7 +40,7 @@ pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// instruction pointer (`site`) or its per-instruction `occurrence`. A host
 /// keys an aggregate by the issue ordinal it mints when the batch leaves the
 /// VM, so nothing compiler-derived reaches a replay key.
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v12";
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v13";
 
 /// Durability tier established by the execution path's concrete store or host.
 #[derive(
@@ -1389,6 +1389,13 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
                 Some(name) => write_name(writer, name.as_str()),
                 None => writer.atom("unnamed"),
             }
+            match &function.receiver {
+                Some(receiver) => {
+                    writer.atom("receiver");
+                    write_name(writer, receiver.as_str());
+                }
+                None => writer.atom("no-receiver"),
+            }
             writer.usize(function.params.len());
             for param in &function.params {
                 write_name(writer, param.as_str());
@@ -1401,6 +1408,41 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
         }
         Expr::Call { function, args } => {
             writer.atom("function-call");
+            write_expr(writer, function);
+            writer.usize(args.len());
+            for arg in args {
+                write_expr(writer, arg);
+            }
+        }
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
+            writer.atom("method-call");
+            write_expr(writer, receiver);
+            match method {
+                MethodKey::Field(field) => {
+                    writer.atom("field");
+                    writer.atom(field.as_str());
+                }
+                MethodKey::Index(key) => {
+                    writer.atom("index");
+                    write_expr(writer, key);
+                }
+            }
+            writer.usize(args.len());
+            for arg in args {
+                write_expr(writer, arg);
+            }
+        }
+        Expr::ThisCall {
+            this,
+            function,
+            args,
+        } => {
+            writer.atom("this-call");
+            write_expr(writer, this);
             write_expr(writer, function);
             writer.usize(args.len());
             for arg in args {

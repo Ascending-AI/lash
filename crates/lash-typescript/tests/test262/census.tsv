@@ -226,7 +226,7 @@ typescript	binding-reassignment	rejected	TS_ASSIGN_CONST	const c = 1; c = 2; // 
 typescript	builtin-arity	rejected	TS_EXPRESSION_UNSUPPORTED	isNaN(1, 2);
 typescript	builtin-member-read	rejected	TS_METHOD_UNSUPPORTED	const x = Math.extra;
 typescript	builtin-member-write	rejected	TS_UNKNOWN_BINDING	Math.extra = 1;
-typescript	classic-for-forms	rejected	TS_FOR_UNSUPPORTED	for (let i = 0; i < 3; i += 2) { }
+typescript	classic-for-continue-across-finally	rejected	TS_FOR_UNSUPPORTED	for (let i = 0; i < 2; i++) { try { continue; } finally { } }
 typescript	closed-shape-field-guard	rejected	TS_LINK_ERROR	const o = { a: 1 }; const c = o.c;
 typescript	comma-operator	rejected	TS_SEQUENCE_UNSUPPORTED	const x = (1, 2);
 typescript	constructor-arity	rejected	TS_CONSTRUCTOR_UNSUPPORTED	new Map(1, 2);
@@ -242,6 +242,7 @@ typescript	direct-eval	rejected	TS_EVAL_UNSUPPORTED	eval('1');
 typescript	enum	accepted	-	-
 typescript	exotic-own-properties	rejected	TS_EXOTIC_PROPERTY_UNSUPPORTED	const m: any = new Map(); m.x = 1;
 typescript	function-constructor	rejected	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED	const f = Function('return 1');
+typescript	function-receivers	accepted	-	-
 typescript	function-redeclaration	rejected	TS_FUNCTION_REDECLARATION_UNSUPPORTED	function f() { } function f() { }
 typescript	generics	accepted	-	-
 typescript	instanceof-arbitrary	rejected	TS_INSTANCEOF_UNSUPPORTED	const b = 'a' instanceof String;
@@ -257,6 +258,7 @@ typescript	non-null-assertion	accepted	-	-
 typescript	object-string-coercion	rejected	TS_OBJECT_STRING_COERCION	const s = '' + { a: 1 };
 typescript	private-names-outside-classes	rejected	TS_PRIVATE_NAME_UNSUPPORTED	function f(o: any) { return #x in o; }
 typescript	Promise.race	accepted	-	-
+typescript	regexp-nesting	rejected	TS_REGEX_PATTERN_NESTING_LIMIT	const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;
 typescript	regexp-pattern-argument	rejected	TS_NEW_UNSUPPORTED	const r = new RegExp(null);
 typescript	reserved-identifiers	rejected	TS_RESERVED_IDENTIFIER	const __typescript_x = 1;
 typescript	satisfies	accepted	-	-

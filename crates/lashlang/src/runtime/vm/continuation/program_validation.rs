@@ -79,7 +79,13 @@ pub(super) fn validate_program_continuation(
         let return_site_matches = matches!(
             (call_instruction, &frame.return_target),
             (
-                Some(Instruction::Call { .. } | Instruction::CallDynamic),
+                Some(
+                    Instruction::Call { .. }
+                        | Instruction::CallMethod { .. }
+                        | Instruction::CallDynamic
+                        | Instruction::CallMethodDynamic
+                        | Instruction::Intrinsic(IntrinsicOp::JavaScriptStdlib(_))
+                ),
                 VmFrameReturnContinuation::Direct
             ) | (
                 Some(Instruction::AsyncMap),

@@ -1,0 +1,11 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3706	1	accept	"(() => { let s = 0; for (let i = 10; i > 0; i -= 3) { s = s + i; } return s; })()"	"22"	-
+FIG-3706	2	accept	"(() => { let s = ''; for (let i = 3; i--; ) { s = s + i; } return s; })()"	"210"	-
+FIG-3706	3	accept	"(() => { let n = 0; for (;;) { n++; if (n === 3) break; } return n; })()"	"3"	-
+FIG-3706	4	accept	"(() => { let i = 0; let s = 0; for (i = 5; i < 8; i++) { s = s + i; } return s * 10 + i; })()"	"188"	-
+FIG-3706	5	accept	"(() => { let r = 0; for (var i = 7; ; ) { r = i; break; } return r * 10 + i; })()"	"77"	-
+FIG-3706	6	accept	"(() => { let s = ''; for (let i = 0; i < 5; i++) { if (i % 2) continue; s = s + i; } return s; })()"	"024"	-
+FIG-3706	7	accept	"(() => { let n = 0; for (let i = String(0); i < 3; i++) { n++; } return n; })()"	"3"	-
+FIG-3706	8	accept	"(() => { const fs = []; for (let i = 0; i < 3; i++) { fs.push(() => i); } return fs.map((f) => f()); })()"	"0,1,2"	-
+FIG-3706	9	accept	"(() => { let g = () => -1; for (let i = 0, f = () => i; i < 3; i++) { g = f; } return g(); })()"	"0"	-
+FIG-3706	10	accept	"(() => { const fs = []; for (let i = 0; fs.push(() => i) <= 3; i++) { } return fs.map((f) => f()); })()"	"0,1,2,3"	-

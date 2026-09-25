@@ -310,8 +310,8 @@
           }
         },
         {
-          "source": "const x = x;\n",
-          "reject": "TS_TEMPORAL_DEAD_ZONE",
+          "source": "[1].map();\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -1916,8 +1916,8 @@
           }
         },
         {
-          "source": "Error.isError(new Error('x'));\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "const r = /a/v;\n",
+          "reject": "TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -3363,8 +3363,8 @@
           }
         },
         {
-          "source": "JSON.stringify('\\ud800');\n",
-          "reject": "TS_LONE_SURROGATE_LITERAL_UNSUPPORTED",
+          "source": "Error.isError(new Error('x'));\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5030,8 +5030,8 @@
           }
         },
         {
-          "source": "const m = import('mod');\n",
-          "reject": "TS_DYNAMIC_IMPORT_UNSUPPORTED",
+          "source": "for await (const x of [1]) { }\n",
+          "reject": "TS_FOR_OF_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5365,8 +5365,8 @@
           }
         },
         {
-          "source": "function f(o: any) { return #x in o; }\n",
-          "reject": "TS_PRIVATE_NAME_UNSUPPORTED",
+          "source": "outer: while (true) { break outer; }\n",
+          "reject": "TS_LABEL_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5635,8 +5635,8 @@
           }
         },
         {
-          "source": "const o: any = {}; o.__defineSetter__('x', (v: number) => v);\n",
-          "reject": "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
+          "source": "const r = /a/v;\n",
+          "reject": "TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5704,8 +5704,8 @@
           }
         },
         {
-          "source": "isNaN(1, 2);\n",
-          "reject": "TS_EXPRESSION_UNSUPPORTED",
+          "source": "RegExp.escape('a');\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -6514,8 +6514,8 @@
           }
         },
         {
-          "source": "function f(o: any) { return #x in o; }\n",
-          "reject": "TS_PRIVATE_NAME_UNSUPPORTED",
+          "source": "const b = delete 1;\n",
+          "reject": "TS_DELETE_NON_REFERENCE_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -7967,8 +7967,8 @@
           }
         },
         {
-          "source": "const r = /a/d;\n",
-          "reject": "TS_REGEX_INDICES_FLAG_UNSUPPORTED",
+          "source": "class A { static { } }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8604,8 +8604,8 @@
           }
         },
         {
-          "source": "const f = Function('return 1');\n",
-          "reject": "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED",
+          "source": "class A { }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8999,8 +8999,8 @@
           }
         },
         {
-          "source": "function f() { return new.target; }\n",
-          "reject": "TS_META_PROPERTY_UNSUPPORTED",
+          "source": "class A { static x = 1; }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9462,8 +9462,8 @@
           }
         },
         {
-          "source": "'a'.isWellFormed();\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "const x = x;\n",
+          "reject": "TS_TEMPORAL_DEAD_ZONE",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9554,8 +9554,8 @@
           }
         },
         {
-          "source": "Uint8Array.fromBase64('AAA=');\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "eval('1');\n",
+          "reject": "TS_EVAL_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -10015,8 +10015,8 @@
           }
         },
         {
-          "source": "eval('1');\n",
-          "reject": "TS_EVAL_UNSUPPORTED",
+          "source": "const x = Math.extra;\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -12231,6 +12231,25 @@
           "outcome": "normal",
           "prints": [
             "11"
+          ],
+          "probes": {}
+        }
+      ]
+    },
+    {
+      "name": "builtin-method-value",
+      "create": "const value = 'x'.includes;",
+      "uses": "console.log(typeof value, value.name, value.length, value === 'y'.includes, String(value));",
+      "node": [
+        {
+          "outcome": "normal",
+          "prints": [],
+          "probes": {}
+        },
+        {
+          "outcome": "normal",
+          "prints": [
+            "function includes 1 true function includes() { [native code] }"
           ],
           "probes": {}
         }

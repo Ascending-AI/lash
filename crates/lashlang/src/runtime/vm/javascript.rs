@@ -24,9 +24,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
         field: &Name,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
-            return read_javascript_heap_field(&self.heap, id, field);
+            let value = read_javascript_heap_field(&self.heap, id, field)?;
+            return self.or_inherited_builtin(value, &target, &field.text);
         }
-        read_javascript_field_direct(target, field)
+        let inherited = inline_inherited_builtin(&target, &field.text);
+        let value = read_javascript_field_direct(target, field)?;
+        self.or_builtin(value, inherited)
     }
 
     pub(super) fn read_dialect_index(
@@ -35,7 +38,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
         index: Value,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
-            return read_javascript_heap_index(&self.heap, id, &index);
+            let value = read_javascript_heap_index(&self.heap, id, &index)?;
+            if !matches!(value, Value::Undefined) {
+                return Ok(value);
+            }
+            let key = self.heap.javascript_to_string(&index)?;
+            return self.or_inherited_builtin(value, &target, &key);
         }
         // A `null` or `undefined` base throws before its key is converted, so
         // an object key's own `toString` never runs.
@@ -43,7 +51,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Err(nullish_property_read(&target, &index));
         }
         let key = self.heap.javascript_to_string(&index)?;
-        read_javascript_index_direct_with_key(target, &key)
+        let inherited = inline_inherited_builtin(&target, &key);
+        let value = read_javascript_index_direct_with_key(target, &key)?;
+        self.or_builtin(value, inherited)
     }
 
     pub(super) async fn iterable_values_for_dialect(
@@ -116,6 +126,32 @@ impl<H: ExecutionHost> Vm<'_, H> {
             && method.as_str() == "Lash.Apply"
         {
             values = self.applied_stdlib_arguments(values)?;
+        }
+        // An authored member call on a plain object: the object's own
+        // property is the method (ECMA-262 GetValue, then Call with the object
+        // as `this`). The lowerer calls a built-in method name through here
+        // only for an authored member call, and a generated helper never
+        // reaches a plain-object receiver: every lowering that runs one first
+        // routes a plain object to its own method (`Lash.OwnMethod`).
+        if let [Value::String(method), receiver, arguments @ ..] = values.as_slice()
+            && crate::ecma_stdlib::is_instance_method(method.as_str())
+            && let Some(resolved) = self.plain_object_method(receiver, method.as_str())?
+        {
+            let name = method.to_string();
+            let receiver = receiver.clone();
+            let arguments = arguments.to_vec();
+            return self.call_plain_object_method(resolved, &name, receiver, arguments);
+        }
+        // Whether a lowering that runs a built-in method as generated code must
+        // instead call the receiver's own member: see above.
+        if let [Value::String(selector), receiver, Value::String(method)] = values.as_slice()
+            && selector.as_str() == "Lash.OwnMethod"
+        {
+            let own = self
+                .plain_object_method(receiver, method.as_str())?
+                .is_some();
+            self.stack.push(Value::Bool(own));
+            return Ok(());
         }
         if let [Value::String(method), value] = values.as_slice()
             && method.as_str() == "__jsonContainerKind"
@@ -308,6 +344,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.stack.push(Value::List(result.into()));
             return Ok(());
         }
+        if self.object_is_by_reference(&values) {
+            return Ok(());
+        }
         if let [Value::String(method), Value::Ref(receiver), key] = values.as_slice()
             && method.as_str() == "Object.hasOwn"
         {
@@ -336,6 +375,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     "length" => length.is_some(),
                     _ => false,
                 },
+                // A built-in function's own properties are its `name` and
+                // `length`; its methods are `Function.prototype`'s.
+                HeapObject::BuiltinFunction(_) => matches!(key.as_str(), "name" | "length"),
                 _ => false,
             };
             self.stack.push(Value::Bool(has));

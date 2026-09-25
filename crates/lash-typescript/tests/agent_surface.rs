@@ -863,9 +863,8 @@ fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
         lash_typescript::DiagnosticCode::MethodUnsupported
     );
 
-    let bound_err =
-        lash_typescript::testing::compile("const x = { a: 1 }; finish(x.nonExistentMethod());")
-            .expect_err("unsupported method on bound receiver must refuse");
+    let bound_err = lash_typescript::testing::compile("const s = 'a'; finish(s.anchor('x'));")
+        .expect_err("a built-in method outside the surface must refuse on a bound receiver");
     assert_eq!(
         bound_err.code,
         lash_typescript::DiagnosticCode::MethodUnsupported
@@ -1816,13 +1815,13 @@ fn the_selected_rejection_is_replay_deterministic() {
 fn the_consumer_mode_moves_the_vm_abi_and_not_the_snapshot() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        11,
-        "snapshot v11 keeps property order, the dropped functions, error message presence and closure name/length; no aggregate state rides it"
+        12,
+        "snapshot v12 keeps property order, the dropped functions, error message presence, closure name/length and built-in method values; no aggregate state rides it"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v12",
-        "the aggregate consumer mode moved the VM ABI"
+        "lashlang-vm-abi-v13",
+        "the aggregate consumer mode moved the VM ABI, and call receivers (FIG-3700) moved it again"
     );
 }
 

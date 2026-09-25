@@ -251,6 +251,15 @@ impl Lowerer {
             if let Some(applied) = self.lower_builtin_spread_call(callee, args)? {
                 return Ok(applied);
             }
+            if let Expr::Member {
+                object, property, ..
+            } = callee
+                && !matches!(object.as_ref(), Expr::Ident(owner, _)
+                    if (owner == "globalThis" || is_ecma_global_namespace(owner))
+                        && !self.has_binding(owner))
+            {
+                return self.lower_method_spread_call(object, property, args);
+            }
             let callee = self.lower_expr(callee)?;
             return self.lower_dynamic_call_value(callee, args);
         };
@@ -531,8 +540,79 @@ impl Lowerer {
     }
 
     fn lower_dynamic_call(&mut self, callee: &Expr, args: &[Expr]) -> Result<LashExpr, Diagnostic> {
+        if let Expr::Member {
+            object,
+            property: MemberProperty::Index(key),
+            ..
+        } = callee
+            && !matches!(object.as_ref(), Expr::Ident(owner, _)
+                if (owner == "globalThis" || is_known_runtime_global(owner))
+                    && !self.has_binding(owner))
+        {
+            let receiver = self.lower_expr(object)?;
+            let key = self.lower_expr(key)?;
+            return self.lower_method_call(receiver, MethodKey::Index(Box::new(key)), args);
+        }
         Ok(LashExpr::Call {
             function: Box::new(self.lower_expr(callee)?),
+            args: args
+                .iter()
+                .map(|arg| self.lower_expr(arg))
+                .collect::<Result<_, _>>()?,
+        })
+    }
+
+    /// Whether `object.method(..)` calls a method of the program's own
+    /// objects: a name that is not a built-in prototype method, on a receiver
+    /// that is neither a module authority, an ECMA namespace nor a primitive
+    /// literal.
+    pub(super) fn is_own_method_call(&self, object: &Expr, method: &str) -> bool {
+        let module_root = module_path(object).and_then(|path| path.first().cloned());
+        let module_authority = module_root.as_ref().is_some_and(|root| {
+            !self.has_binding(root) && !is_ecma_global_namespace(root)
+                || self.has_binding(root) && self.module_authority_roots.contains(root)
+        });
+        // A session global from an earlier cell cannot hold a method: a value
+        // reaching a function does not survive its cell (ADR 0062 entry 17).
+        // Such a call keeps the method diagnostic, which the executor refines
+        // into the shadowed-module one when a module of that name exists.
+        let session_global = module_root
+            .as_deref()
+            .is_some_and(|root| self.is_session_global(root));
+        !module_authority
+            && !session_global
+            && !matches!(object, Expr::Ident(owner, _)
+                if (owner == "globalThis" || is_ecma_global_namespace(owner))
+                    && !self.has_binding(owner))
+            && (matches!(object, Expr::Object(_)) || !has_literal_stdlib_receiver(object))
+            && !is_instance_stdlib_method(method)
+            && !is_ecma_prototype_method(method)
+    }
+
+    /// Whether `name` resolves to a session global an earlier cell bound: the
+    /// immutable ambient scope beneath the program's root.
+    fn is_session_global(&self, name: &str) -> bool {
+        self.root_scope_depth > 1
+            && self
+                .scopes
+                .iter()
+                .rposition(|scope| scope.bindings.contains_key(name))
+                .is_some_and(|index| {
+                    index == 0 && self.scopes[0].bindings[name].kind == BindingKind::Const
+                })
+    }
+
+    /// A member call: the callee is read from the receiver, and the call binds
+    /// the receiver as the callee's `this` (ECMA-262 EvaluateCall).
+    fn lower_method_call(
+        &mut self,
+        receiver: LashExpr,
+        method: MethodKey,
+        args: &[Expr],
+    ) -> Result<LashExpr, Diagnostic> {
+        Ok(LashExpr::MethodCall {
+            receiver: Box::new(receiver),
+            method,
             args: args
                 .iter()
                 .map(|arg| self.lower_expr(arg))
@@ -839,6 +919,7 @@ impl Lowerer {
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
                             name: None,
                             js_name: None,
+                            receiver: None,
                             params: vec![pair.as_str().into()],
                             captures: Vec::new(),
                             body: Box::new(LashExpr::List(vec![at(1.0), at(0.0)])),
@@ -855,6 +936,7 @@ impl Lowerer {
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
                             name: None,
                             js_name: None,
+                            receiver: None,
                             params: vec![key.as_str().into()],
                             captures: Vec::new(),
                             body: Box::new(LashExpr::JavaScriptUnary {
@@ -960,14 +1042,50 @@ impl Lowerer {
                 )
                 .with_hint("use Object.hasOwn(object, key)"));
             };
-            return Ok(LashExpr::BuiltinCall {
+            let own_check = super::array_callbacks::may_be_plain_object(object);
+            let receiver = self.temporary("has_own_receiver");
+            let key_value = self.temporary("has_own_key");
+            let variable = |name: &str| LashExpr::Variable(name.into());
+            let builtin = LashExpr::BuiltinCall {
                 name: "__typescript_stdlib".into(),
                 args: vec![
                     LashExpr::String("Object.hasOwn".into()),
-                    self.lower_expr(object)?,
-                    self.lower_expr(key)?,
+                    variable(&receiver),
+                    variable(&key_value),
                 ],
-            });
+            };
+            // A plain object's own `hasOwnProperty` is its method.
+            let call = if own_check {
+                LashExpr::If {
+                    condition: Box::new(LashExpr::BuiltinCall {
+                        name: "__typescript_stdlib".into(),
+                        args: vec![
+                            LashExpr::String("Lash.OwnMethod".into()),
+                            variable(&receiver),
+                            LashExpr::String("hasOwnProperty".into()),
+                        ],
+                    }),
+                    then_block: Box::new(LashExpr::MethodCall {
+                        receiver: Box::new(variable(&receiver)),
+                        method: MethodKey::Field("hasOwnProperty".into()),
+                        args: vec![variable(&key_value)],
+                    }),
+                    else_block: Box::new(builtin),
+                }
+            } else {
+                builtin
+            };
+            return Ok(LashExpr::Block(vec![
+                LashExpr::Assign {
+                    target: AssignTarget::variable(receiver.as_str().into()),
+                    expr: Box::new(self.lower_expr(object)?),
+                },
+                LashExpr::Assign {
+                    target: AssignTarget::variable(key_value.as_str().into()),
+                    expr: Box::new(self.lower_expr(key)?),
+                },
+                call,
+            ]));
         }
         if !receiver_is_module_authority
             && method == "replace"
@@ -1017,6 +1135,7 @@ impl Lowerer {
         // shape short of the classification claim.
         if is_instance_stdlib_method(method)
             && has_literal_stdlib_receiver(object)
+            && !matches!(object, Expr::Object(_))
             && !literal_supports_instance_method(object, method)
         {
             return Err(Diagnostic::refusal(
@@ -1034,7 +1153,11 @@ impl Lowerer {
         {
             return self.lower_array_map(object, args);
         }
+        // A collection's own `forEach` takes no receiver argument; with a
+        // `thisArg` it goes through the array-callback lowering, whose
+        // collection branch binds the receiver.
         let receiver_is_callback_exotic = method == "forEach"
+            && args.len() < 2
             && match object {
                 Expr::New { constructor, .. } => {
                     IterableKind::from_constructor(constructor).is_some()
@@ -1101,6 +1224,15 @@ impl Lowerer {
                     .map(|arg| self.lower_expr(arg))
                     .collect::<Result<_, _>>()?,
             });
+        }
+
+        // A method of the program's own objects: any name that is not a
+        // built-in prototype method. A built-in name keeps the surface
+        // classification below, so an unsupported built-in stays a named
+        // refusal rather than a runtime TypeError.
+        if self.is_own_method_call(object, method) {
+            let receiver = self.lower_expr(object)?;
+            return self.lower_method_call(receiver, MethodKey::Field(method.into()), args);
         }
 
         // Classify by method name before the tool-call branch. A receiver
