@@ -163,6 +163,13 @@ REGISTRATION_BASELINES = {
     "crates/lash-restate/src/controller/effect_journal.rs:EFFECT_JOURNAL_VERSION": (
         "sha256:8b4c2577687f74745c963232314f93ea521212275a72e2a89a7b46e6ffc5c1ec"
     ),
+    # FIG-3600 (S5): the Restate session driver's handlers (LashSession,
+    # LashTurn) are new; their requests carry the generation of the commands
+    # their journals lead with (ADR 0105 section 12). A new surface, not a
+    # rename.
+    "crates/lash-restate/src/session_driver.rs:LASH_SESSION_DRIVE_VERSION": (
+        "sha256:9f0a37fcfe237079175f7d7acdc730e097eb4241ec3e7dc68715abe93c8c5c36"
+    ),
     # FIG-3588: the Restate process handler's leading journaled commands (the
     # segment admission verdict and start steps) are a new versioned surface,
     # registered once with the lead's approval (2026-09-24).
