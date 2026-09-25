@@ -356,6 +356,153 @@ impl LashRuntime {
             .await
     }
 
+    /// Restore the session's tool registry, plugin state and protocol session
+    /// (its code executor) from `durable_state`, the state that is about to
+    /// become resident.
+    ///
+    /// The resident session is more than `self.state`: a state adopted without
+    /// these components keeps the executor of whatever head was open before,
+    /// so a turn driven on it runs its cells over another head's heap. Every
+    /// adoption of a durable state as the resident one goes through here: the
+    /// reload gate's latest head and a redriven turn's admitted base alike
+    /// (FIG-3684).
+    pub(in crate::runtime) async fn restore_resident_session_components(
+        &mut self,
+        durable_state: &mut crate::RuntimeSessionState,
+        tracing: &crate::runtime::RuntimeTracingConfig,
+        clock: &dyn crate::Clock,
+    ) -> Result<Option<crate::ToolRestoreReport>, (ResidentReloadStage, RuntimeError)> {
+        let has_store = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+            .is_some();
+        let mut tool_restore = None;
+        let session = self.session.as_mut().ok_or_else(|| {
+            (
+                ResidentReloadStage::SessionAvailability,
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    "runtime session is unavailable while reloading invalidated resident state",
+                ),
+            )
+        })?;
+        session.invalidate_runtime_caches();
+        // A `PreservePersisted` open never installed its snapshot, so the
+        // reload does not reconcile it either (FIG-3353).
+        let preserve_persisted_tools = self.host.core.control.tool_surface_open_mode
+            == crate::ToolSurfaceOpenMode::PreservePersisted;
+        if !preserve_persisted_tools
+            && let Some(tool_state) = durable_state.tool_state_snapshot().cloned()
+        {
+            // The re-sync has no return value to hand the host, so the
+            // installer's delivery is the contract: trace evidence plus the
+            // typed report the runtime retains for
+            // `LashSession::tool_restore_report()` (FIG-3367).
+            let registry = session.plugins().tool_registry();
+            let report = crate::runtime::tool_restore::install_persisted_tool_state(
+                registry.as_ref(),
+                tool_state,
+                // A live runtime mid-turn: a source that went away
+                // degrades the session, it does not fail the reload
+                // (FIG-3367).
+                crate::runtime::tool_restore::ToolRestoreContext::for_live_install(
+                    &durable_state.session_id,
+                    crate::runtime::ToolRestoreSite::ResidentReload,
+                    tracing,
+                    clock,
+                ),
+            )
+            .map_err(|err| {
+                (
+                    ResidentReloadStage::ToolStateRestore,
+                    RuntimeError::new(
+                        RuntimeErrorCode::ResidentSessionReloadFailed,
+                        err.to_string(),
+                    ),
+                )
+            })?;
+            tool_restore = Some(report);
+        }
+        if !preserve_persisted_tools {
+            session.refresh_tool_catalog().await.map_err(|err| {
+                (
+                    ResidentReloadStage::ToolCatalogRefresh,
+                    RuntimeError::new(
+                        RuntimeErrorCode::ResidentSessionReloadFailed,
+                        err.to_string(),
+                    ),
+                )
+            })?;
+        }
+        if let Some(snapshot) = durable_state.plugin_state() {
+            session.plugins().hydrate_state(snapshot).map_err(|err| {
+                (
+                    ResidentReloadStage::PluginStateRestore,
+                    RuntimeError::new(
+                        RuntimeErrorCode::ResidentSessionReloadFailed,
+                        err.to_string(),
+                    ),
+                )
+            })?;
+        }
+        let protocol_session = Arc::clone(session.plugins().protocol_session());
+        let session_id = durable_state.session_id.clone();
+        protocol_session
+            .restore_session(
+                crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                crate::plugin::ProtocolSessionRestoreView::new(durable_state).map_err(|error| {
+                    (
+                        ResidentReloadStage::ProtocolSessionRestore,
+                        RuntimeError::new(
+                            RuntimeErrorCode::ResidentSessionReloadFailed,
+                            error.to_string(),
+                        ),
+                    )
+                })?,
+            )
+            .await
+            .map_err(|err| {
+                (
+                    ResidentReloadStage::ProtocolSessionRestore,
+                    RuntimeError::new(
+                        RuntimeErrorCode::ResidentSessionReloadFailed,
+                        err.to_string(),
+                    ),
+                )
+            })?;
+
+        if has_store {
+            durable_state.discard_runtime_snapshots();
+        } else {
+            durable_state.discard_runtime_snapshots_retaining_accepted_execution();
+        }
+        session
+            .plugins()
+            .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
+                crate::SessionReadView::from_persisted_state(durable_state).map_err(|error| {
+                    (
+                        ResidentReloadStage::SessionRestoredHook,
+                        RuntimeError::new(
+                            RuntimeErrorCode::ResidentSessionReloadFailed,
+                            error.to_string(),
+                        ),
+                    )
+                })?,
+            ))
+            .await
+            .map_err(|err| {
+                (
+                    ResidentReloadStage::SessionRestoredHook,
+                    RuntimeError::new(
+                        RuntimeErrorCode::ResidentSessionReloadFailed,
+                        err.to_string(),
+                    ),
+                )
+            })?;
+        Ok(tool_restore)
+    }
+
     pub(super) async fn reload_invalidated_resident_session_state_under_lease(
         &mut self,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
@@ -416,132 +563,12 @@ impl LashRuntime {
                 durable_head_revision = durable_state.head_revision;
             }
 
-            let session = self.session.as_mut().ok_or_else(|| {
-                (
-                    ResidentReloadStage::SessionAvailability,
-                    RuntimeError::new(
-                        RuntimeErrorCode::ResidentSessionReloadFailed,
-                        "runtime session is unavailable while reloading invalidated resident state",
-                    ),
-                )
-            })?;
-            session.invalidate_runtime_caches();
-            // A `PreservePersisted` open never installed its snapshot, so the
-            // reload does not reconcile it either (FIG-3353).
-            let preserve_persisted_tools = self.host.core.control.tool_surface_open_mode
-                == crate::ToolSurfaceOpenMode::PreservePersisted;
-            if !preserve_persisted_tools
-                && let Some(tool_state) = durable_state.tool_state_snapshot().cloned()
-            {
-                // The re-sync has no return value to hand the host, so the
-                // installer's delivery is the contract: trace evidence plus the
-                // typed report the runtime retains for
-                // `LashSession::tool_restore_report()` (FIG-3367).
-                let registry = session.plugins().tool_registry();
-                let report = crate::runtime::tool_restore::install_persisted_tool_state(
-                    registry.as_ref(),
-                    tool_state,
-                    // A live runtime mid-turn: a source that went away
-                    // degrades the session, it does not fail the reload
-                    // (FIG-3367).
-                    crate::runtime::tool_restore::ToolRestoreContext::for_live_install(
-                        &durable_state.session_id,
-                        crate::runtime::ToolRestoreSite::ResidentReload,
-                        &tracing,
-                        clock.as_ref(),
-                    ),
-                )
-                .map_err(|err| {
-                    (
-                        ResidentReloadStage::ToolStateRestore,
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            err.to_string(),
-                        ),
-                    )
-                })?;
-                reloaded_tool_restore = Some(report);
-            }
-            if !preserve_persisted_tools {
-                session.refresh_tool_catalog().await.map_err(|err| {
-                    (
-                        ResidentReloadStage::ToolCatalogRefresh,
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            err.to_string(),
-                        ),
-                    )
-                })?;
-            }
-            if let Some(snapshot) = durable_state.plugin_state() {
-                session.plugins().hydrate_state(snapshot).map_err(|err| {
-                    (
-                        ResidentReloadStage::PluginStateRestore,
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            err.to_string(),
-                        ),
-                    )
-                })?;
-            }
-            let protocol_session = Arc::clone(session.plugins().protocol_session());
-            let session_id = durable_state.session_id.clone();
-            protocol_session
-                .restore_session(
-                    crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                    crate::plugin::ProtocolSessionRestoreView::new(&durable_state).map_err(
-                        |error| {
-                            (
-                                ResidentReloadStage::ProtocolSessionRestore,
-                                RuntimeError::new(
-                                    RuntimeErrorCode::ResidentSessionReloadFailed,
-                                    error.to_string(),
-                                ),
-                            )
-                        },
-                    )?,
-                )
-                .await
-                .map_err(|err| {
-                    (
-                        ResidentReloadStage::ProtocolSessionRestore,
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            err.to_string(),
-                        ),
-                    )
-                })?;
-
-            if store.is_some() {
-                durable_state.discard_runtime_snapshots();
-            } else {
-                durable_state.discard_runtime_snapshots_retaining_accepted_execution();
-            }
-            session
-                .plugins()
-                .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
-                    crate::SessionReadView::from_persisted_state(&durable_state).map_err(
-                        |error| {
-                            (
-                                ResidentReloadStage::SessionRestoredHook,
-                                RuntimeError::new(
-                                    RuntimeErrorCode::ResidentSessionReloadFailed,
-                                    error.to_string(),
-                                ),
-                            )
-                        },
-                    )?,
-                ))
-                .await
-                .map_err(|err| {
-                    (
-                        ResidentReloadStage::SessionRestoredHook,
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            err.to_string(),
-                        ),
-                    )
-                })?;
+            reloaded_tool_restore = Box::pin(self.restore_resident_session_components(
+                &mut durable_state,
+                &tracing,
+                clock.as_ref(),
+            ))
+            .await?;
             self.state = durable_state;
             // The durable reload replaced the whole resident state; reassert
             // the per-open `PreservePersisted` claim from host configuration

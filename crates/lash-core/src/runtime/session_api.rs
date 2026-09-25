@@ -177,6 +177,8 @@ impl LashRuntime {
         }
         self.materialized_protocol_config_dirty |=
             self.state.protocol_turn_options.payload != recorded_options;
+        self.state
+            .open_unpersisted_initial_frame_under_settled_protocol_options();
         Ok(())
     }
 
@@ -384,7 +386,7 @@ impl LashRuntime {
             self.resident_session.mark_graph_head_current();
             return Ok(());
         };
-        self.adopt_session_read(read)
+        self.adopt_session_read(read).await
     }
 
     /// Adopt `base`, the head the running direct turn was admitted on, as the
@@ -420,17 +422,19 @@ impl LashRuntime {
             // is the one a runtime opens over an empty store, which has no
             // graph, frame, checkpoint or turn counters yet. Its first commit
             // opens the initial frame.
-            self.state.session_graph = crate::SessionGraph::default();
-            self.state.agent_frames.clear();
-            self.state.current_frame_node_id = None;
-            self.state.checkpoint_ref = None;
-            self.state.checkpoint_components =
-                crate::RuntimeSessionState::new(self.state.policy.clone()).checkpoint_components;
-            self.state.persisted_node_ids.clear();
-            self.state.head_revision = 0;
-            self.state.turn_index = 0;
-            self.state.token_usage = crate::TokenUsage::default();
-            self.state.last_prompt_usage = None;
+            let mut empty = self.state.clone();
+            empty.session_graph = crate::SessionGraph::default();
+            empty.agent_frames.clear();
+            empty.current_frame_node_id = None;
+            empty.checkpoint_ref = None;
+            empty.checkpoint_components =
+                crate::RuntimeSessionState::new(empty.policy.clone()).checkpoint_components;
+            empty.persisted_node_ids.clear();
+            empty.head_revision = 0;
+            empty.turn_index = 0;
+            empty.token_usage = crate::TokenUsage::default();
+            empty.last_prompt_usage = None;
+            Box::pin(self.adopt_resident_state(empty)).await?;
             self.resident_session.mark_graph_loaded();
             self.resident_session.mark_graph_head_current();
             return Ok(());
@@ -442,11 +446,11 @@ impl LashRuntime {
                 context: "failed to read the head the turn was admitted on".to_string(),
                 source,
             })?;
-        self.adopt_session_read(read)
+        self.adopt_session_read(read).await
     }
 
     /// Adopt a durable session read as the resident session, head-authoritatively.
-    fn adopt_session_read(
+    async fn adopt_session_read(
         &mut self,
         read: crate::store::PersistedSessionRead,
     ) -> Result<(), SessionError> {
@@ -473,22 +477,56 @@ impl LashRuntime {
         // provider resolver is also live-owned and is not part of the
         // durable head.
         let live_owned = crate::runtime::state::LiveOwnedSessionFacts::of(&self.state.policy);
-        crate::runtime::state::adopt_durable_head(
-            &mut self.state,
-            &head,
-            read.checkpoint,
-            live_owned,
-        )
-        .map_err(|source| SessionError::Store {
-            context: "failed to restore session checkpoint".to_string(),
-            source,
-        })?;
-        self.publish_plugin_tool_access();
+        let mut adopted = self.state.clone();
+        crate::runtime::state::adopt_durable_head(&mut adopted, &head, read.checkpoint, live_owned)
+            .map_err(|source| SessionError::Store {
+                context: "failed to restore session checkpoint".to_string(),
+                source,
+            })?;
+        Box::pin(self.adopt_resident_state(adopted)).await?;
         self.resident_session.mark_graph_head_current();
         // The adopted head is authoritative for usage too: rebuild the attempts
         // this session still owes usage for from the durable rows plus the
         // resident rows that have not been confirmed into them yet.
         self.rehydrate_unreported_usage_attempts();
+        Ok(())
+    }
+
+    /// Make `adopted` the resident session: its tool state, plugin state and
+    /// protocol session (the code executor) are restored from it before it
+    /// replaces `self.state`.
+    ///
+    /// A head adopted without its components leaves the executor on whatever
+    /// head was open before, so the next turn runs its cells over another
+    /// head's heap and commits an execution state no other execution of that
+    /// turn produces (FIG-3684).
+    ///
+    /// Callers box this future: the restore is large, and every refresh and
+    /// admitted-head adoption would otherwise inline it into the turn's stack
+    /// (a 2 MiB tokio worker overflowed in lash-perf without the box).
+    async fn adopt_resident_state(
+        &mut self,
+        mut adopted: crate::RuntimeSessionState,
+    ) -> Result<(), SessionError> {
+        let tracing = self.host.core.tracing.clone();
+        let clock = Arc::clone(&self.host.core.clock);
+        let tool_restore = Box::pin(self.restore_resident_session_components(
+            &mut adopted,
+            &tracing,
+            clock.as_ref(),
+        ))
+        .await
+        .map_err(|(_stage, error)| {
+            SessionError::Protocol(format!(
+                "failed to restore the adopted session head: {error}"
+            ))
+        })?;
+        self.state = adopted;
+        self.reapply_tool_state_preservation_marker();
+        self.publish_plugin_tool_access();
+        if tool_restore.is_some() {
+            self.tool_restore_report = tool_restore;
+        }
         Ok(())
     }
 

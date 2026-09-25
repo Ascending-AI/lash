@@ -1009,41 +1009,36 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
             turn_failure_settlements: Vec::new(),
         },
     );
-    let first = runtime.refresh_session_graph_from_store().await;
-    assert!(matches!(
-        first,
-        Err(SessionError::Store {
-            source: lash_core::StoreError::CheckpointTurnIndexOutOfRange { .. },
-            ..
-        })
-    ));
-    let second = runtime.refresh_session_graph_from_store().await;
-    assert!(second.is_ok());
-    eprintln!(
-        "STALE_REFRESH first={first:?} second={second:?} loads={} old_frame={old_frame:?} new_frame={:?} execution={:?}",
-        store.loads.load(Ordering::SeqCst),
-        runtime.state.current_frame_node_id,
-        runtime.state.execution_state_hydration()
-    );
-    eprintln!(
-        "STALE_CAPTURE {:?}",
-        runtime
-            .state
-            .checkpoint_components
-            .build_checkpoint(lash_core::PersistedTurnState::default())
-            .map(|c| c.components.keys().cloned().collect::<Vec<_>>())
-    );
-    assert!(
-        runtime.state.execution_state_hydration().unwrap().is_none(),
-        "failed checkpoint adoption retained the previous frame execution under the new head; retry skipped hydration"
-    );
-    assert!(matches!(
-        runtime
-            .state
-            .checkpoint_components
-            .build_checkpoint(lash_core::PersistedTurnState::default()),
-        Err(lash_core::StoreError::IncompleteCheckpointComponentSet)
-    ));
+    let old_head_revision = runtime.state.head_revision;
+    // A refused adoption leaves the resident session whole at its old head,
+    // so no new head is ever paired with the previous frame's execution, and
+    // a retry reads the durable head again rather than trusting a half-adopted
+    // resident one (FIG-3684).
+    for attempt in 1..=2 {
+        let refused = runtime.refresh_session_graph_from_store().await;
+        assert!(
+            matches!(
+                refused,
+                Err(SessionError::Store {
+                    source: lash_core::StoreError::CheckpointTurnIndexOutOfRange { .. },
+                    ..
+                })
+            ),
+            "attempt {attempt}: {refused:?}"
+        );
+        assert_eq!(store.loads.load(Ordering::SeqCst), attempt);
+        assert_eq!(runtime.state.head_revision, old_head_revision);
+        assert_eq!(runtime.state.current_frame_node_id, old_frame);
+        assert_eq!(
+            runtime
+                .state
+                .execution_state_hydration()
+                .unwrap()
+                .map(|state| state.root.to_vec()),
+            Some(b"old-frame-root".to_vec()),
+            "the old head keeps its own execution state"
+        );
+    }
 }
 
 // A turn commit whose reply is lost after the store applied it must not keep
