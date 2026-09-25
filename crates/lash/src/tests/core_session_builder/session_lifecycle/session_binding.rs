@@ -1,4 +1,6 @@
 use super::*;
+
+const SEED: u64 = 0x5c_f105;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The backend's effect host with its next journal retirement failing.
@@ -74,7 +76,8 @@ impl lash_core::EffectHost for FailOnceRetirementHost {
 #[tokio::test]
 async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identity() -> Result<()> {
     let owner = crate::testing::runtime_lease_owner();
-    let backend = memory_backend().await;
+    let source_double = restate_double(SEED).await;
+    let backend = source_double.lash_backend();
     let source_host = backend.effect_host();
     let source_catalog = backend.session_store_factory();
     let source = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -88,8 +91,9 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     ))
     .model(model_spec("resume-model", None, 200_000))
     .build(owner.clone())?;
+    let receiving_double = restate_double(SEED + 1).await;
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        receiving_double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider(
@@ -146,7 +150,8 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
 
 #[tokio::test]
 async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> {
-    let backend = DecoratedBackend::over(memory_backend().await)
+    let double = restate_double(SEED).await;
+    let backend = DecoratedBackend::over(double.lash_backend())
         .effect_host(|inner| Arc::new(FailOnceRetirementHost::over(inner)));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         Arc::new(backend),
@@ -186,8 +191,9 @@ async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> 
 /// that renames the parent is a typed refusal rather than silent absorption.
 #[tokio::test]
 async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> Result<()> {
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -266,10 +272,12 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     let session_id = "owner-services-preserved";
     let process_id = lash_core::ProcessId::from("owner-services-process");
 
-    let backend = memory_backend().await;
+    let source_double = restate_double(SEED).await;
+    let backend = source_double.lash_backend();
 
     let source_registry = backend.process_registry();
-    let receiving_backend = memory_backend().await;
+    let receiving_double = restate_double(SEED + 1).await;
+    let receiving_backend = receiving_double.lash_backend();
     let receiving_registry = receiving_backend.process_registry();
 
     let source = explicit_ephemeral_facets(LashCore::standard_builder(

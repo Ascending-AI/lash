@@ -20,6 +20,8 @@ use lash::tools::{
 use lash::{LashCore, PluginBinding};
 use serde_json::json;
 
+const SEED: u64 = 0x5c_f10b;
+
 fn assistant_prose(result: &lash::turn::TurnOutput) -> String {
     result
         .result
@@ -188,7 +190,9 @@ fn response_tool_call() -> LlmResponse {
     }
 }
 
-async fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
+async fn core_with_responses(
+    responses: Vec<LlmResponse>,
+) -> (LashCore, lash_restate_test::RestateTestBackend) {
     let responses = Arc::new(Mutex::new(responses.into_iter()));
     let provider = lash_core::testing::TestProvider::builder()
         .complete(move |_request| {
@@ -202,10 +206,8 @@ async fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
         })
         .build()
         .into_handle();
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open a memory backend");
-    LashCore::standard_builder(Arc::new(backend), lash::TurnBudget::Unbounded)
+    let double = crate::support::restate_double(SEED).await;
+    let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
         .model(
@@ -220,7 +222,8 @@ async fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
             "embed-plugins-test-worker",
             "embed-plugins-test-boot",
         ))
-        .expect("core")
+        .expect("core");
+    (core, double)
 }
 
 #[tokio::test]
@@ -232,7 +235,8 @@ async fn prompt_hook_and_tool_provider_read_typed_session_config() {
         prompt_seen: Arc::clone(&prompt_seen),
         tool_seen: Arc::clone(&tool_seen),
     };
-    let core = core_with_responses(vec![response_tool_call(), response_text("done")]).await;
+    let (core, _double) =
+        core_with_responses(vec![response_tool_call(), response_text("done")]).await;
     let session = core
         .session("typed-context")
         .plugin::<TestPlugin>(config)
@@ -256,7 +260,7 @@ async fn prompt_hook_and_tool_provider_read_typed_session_config() {
 
 #[tokio::test]
 async fn sessions_without_typed_plugin_install_do_not_get_inactive_fallback_tools() {
-    let core = core_with_responses(vec![response_text("done")]).await;
+    let (core, _double) = core_with_responses(vec![response_text("done")]).await;
     let session = core
         .session("without-typed-plugin")
         .open()

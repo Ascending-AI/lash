@@ -4,6 +4,8 @@
 
 use super::*;
 
+const SEED: u64 = 0x5c_f107;
+
 fn builder(backend: Arc<dyn lash_core::Backend>) -> crate::core::LashCoreBuilder {
     LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
@@ -21,7 +23,7 @@ fn installed(core: &LashCore) -> lash_core::facade_support::ContextSourceInstall
         .control
         .tool_children
         .as_ref()
-        .expect("a memory backend routes tool children")
+        .expect("the backend routes tool children")
         .install_context_source(&core.tool_child_context_source)
 }
 
@@ -36,7 +38,8 @@ fn installed(core: &LashCore) -> lash_core::facade_support::ContextSourceInstall
 #[tokio::test]
 async fn a_backend_rebuilds_tool_children_under_one_live_core() -> Result<()> {
     use lash_core::facade_support::ContextSourceInstall;
-    let backend: Arc<dyn lash_core::Backend> = memory_backend().await;
+    let double = restate_double(SEED).await;
+    let backend: Arc<dyn lash_core::Backend> = double.lash_backend();
     let first = builder(Arc::clone(&backend)).build(crate::testing::runtime_lease_owner())?;
     assert_eq!(installed(&first), ContextSourceInstall::Sole);
     let session = first.session("holds-the-source").open().await?;

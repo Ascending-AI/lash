@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5c_f108;
+
 struct DiscoveryTools {
     calls: Arc<StdMutex<Vec<String>>>,
 }
@@ -43,6 +45,7 @@ impl ToolProvider for DiscoveryTools {
 async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_native() -> Result<()>
 {
     for mode in ["rlm", "batch", "native"] {
+        let double = restate_double(SEED).await;
         let calls = Arc::new(StdMutex::new(Vec::new()));
         let first = if mode == "rlm" {
             text_response(&typescript_block("finish(await tools.hidden({}));"))
@@ -88,7 +91,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             .build()
             .into_handle();
         let builder = if mode == "rlm" {
-            let backend = memory_backend().await;
+            let backend = double.lash_backend();
             LashCore::rlm_builder(
                 backend.clone(),
                 crate::TurnBudget::Unbounded,
@@ -108,7 +111,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 ),
             )
         } else {
-            LashCore::standard_builder(memory_backend().await, crate::TurnBudget::Unbounded)
+            LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
                 .protocol_plugin(Arc::new(
                     lash_protocol_standard::StandardProtocolPluginFactory::with_config(
                         lash_protocol_standard::StandardProtocolConfig {

@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5c_f101;
+
 #[tokio::test]
 async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> Result<()> {
     const CONFIGURED_ROW_LIMIT: usize = 3;
@@ -8,8 +10,9 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .complete(|_request| async move { Ok(text_response("assistant response")) })
         .build()
         .into_handle();
+    let double = restate_double(SEED).await;
     let core = backend_work_facets_with_budget(
-        LashCore::standard_builder(memory_backend().await, crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::Unbounded,
             crate::CommitBudgetLimit::bounded(CONFIGURED_ROW_LIMIT),
