@@ -44,10 +44,10 @@ pub fn evaluate_trigger_mutation_with_incarnation(
     ))
 }
 
-/// Apply one trigger command to a subscription map keyed by subscription id.
+/// Apply one trigger mutation to a subscription map keyed by subscription id.
 /// This is the shared command semantics: durable stores reach it through
 /// [`evaluate_trigger_mutation`] with the one current row as the map.
-pub(super) fn apply_trigger_command(
+fn apply_trigger_command(
     subscriptions: &mut BTreeMap<String, TriggerSubscriptionRecord>,
     command: TriggerCommand,
     now: u64,
@@ -64,19 +64,11 @@ fn apply_trigger_command_with_incarnation(
     new_incarnation: &mut dyn FnMut() -> String,
 ) -> TriggerEffectResult {
     match command {
-        TriggerCommand::List {
-            owner_scope,
-            mut filter,
-        } => {
-            filter.registrant_scope_id = Some(owner_scope.namespace());
-            let mut records = subscriptions
-                .values()
-                .filter(|record| filter.matches(record))
-                .cloned()
-                .collect::<Vec<_>>();
-            records.sort_by(|left, right| left.subscription_key.cmp(&right.subscription_key));
-            Ok(TriggerCommandOutcome::List { records })
-        }
+        // The evaluators refuse a list before it gets here: a list reads the
+        // store's rows and is no mutation of one row.
+        TriggerCommand::List { .. } => Err(TriggerOperationError::Invalid {
+            message: "the trigger mutation evaluator received a list command".to_string(),
+        }),
         TriggerCommand::Prune {
             owner_scope,
             actor,

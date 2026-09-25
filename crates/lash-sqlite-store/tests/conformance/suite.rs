@@ -165,16 +165,25 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
 lash_conformance::attachment_adoption_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.session_store_factory();
-    (backend, factory)
+    let bytes_root = tempfile::tempdir().expect("attachment bytes root");
+    let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
+    ((backend, bytes_root), factory, make_bytes)
 });
 
 lash_conformance::attachment_condemnation_recovery_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.session_store_factory();
     let reopen = backend.clone();
-    (backend, factory, move || async move {
-        reopen.reopen().await.session_store_factory() as Arc<dyn SessionStoreFactory>
-    })
+    let bytes_root = tempfile::tempdir().expect("attachment bytes root");
+    let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
+    (
+        (backend, bytes_root),
+        factory,
+        make_bytes,
+        move || async move {
+            reopen.reopen().await.session_store_factory() as Arc<dyn SessionStoreFactory>
+        },
+    )
 });
 
 #[tokio::test]
@@ -221,13 +230,16 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
 
 lash_conformance::abandoned_attachment_recovery_tests!({
     let retained = Retained::default();
-    (retained.clone(), move || {
+    let bytes_root = Arc::new(tempfile::tempdir().expect("attachment bytes root"));
+    let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
+    ((retained.clone(), bytes_root), move || {
         let retained = retained.clone();
+        let make_bytes = Arc::clone(&make_bytes);
         async move {
             let backend = TestBackend::open(SUBSTRATE).await;
             retained.keep(&backend);
             let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
-            (factory, move || async move {
+            (factory, make_bytes, move || async move {
                 backend.reopen().await.session_store_factory() as Arc<dyn SessionStoreFactory>
             })
         }
@@ -242,7 +254,6 @@ fn sqlite_conformance_invocation(
     lash_conformance::ConformanceInvocation::new(
         live,
         execution_scope,
-        lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {
             controller.start_replay();
@@ -878,6 +889,7 @@ lash_conformance::runtime_persistence_state_machine_tests!({
             retained.keep(&backend);
             lash_conformance::RuntimePersistenceStateMachineHandles::create(
                 backend.session_store_factory(),
+                backend.attachment_store(),
                 true,
             )
             .await
@@ -917,7 +929,23 @@ lash_conformance::session_store_factory_tests!({
         make_retained.open_blocking().session_store_factory()
             as Arc<dyn ConformanceSessionStoreFactory>
     };
-    (retained, "sqlite", unbound, make)
+    let attached_retained = retained.clone();
+    let make_attached = move || {
+        let backend = attached_retained.open_blocking();
+        (
+            backend.session_store_factory() as Arc<dyn ConformanceSessionStoreFactory>,
+            backend.attachment_store() as Arc<dyn lash_core_execution::AttachmentStore>,
+        )
+    };
+    let effect_host = unbound_backend.effect_host() as Arc<dyn EffectHost>;
+    (
+        retained,
+        "sqlite",
+        unbound,
+        make,
+        make_attached,
+        effect_host,
+    )
 });
 
 lash_conformance::fresh_session_admission_tests!({
@@ -929,8 +957,8 @@ lash_conformance::fresh_session_admission_tests!({
 
 lash_conformance::observer_intent_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    (backend, factory)
+    let law_backend = backend.as_backend();
+    (backend, law_backend)
 });
 
 lash_conformance::session_graph_append_tests!({
@@ -980,14 +1008,13 @@ lash_conformance::attachment_owner_cold_replay_tests!({
         Arc::new(move |duration_ms| clock.advance(duration_ms)) as Arc<dyn Fn(u64) + Send + Sync>
     };
 
+    let attachment_store = backend.attachment_store();
     (
         backend,
         lash_conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
-            attachment_store: Arc::new(
-                lash_core_execution::facade_support::InMemoryAttachmentStore::new(),
-            ),
+            attachment_store,
             first_effect_controller: Some(first),
             reopen_effect_controller,
             clock,
@@ -1000,7 +1027,8 @@ lash_conformance::process_prune_session_store_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    (backend, factory, registry)
+    let effect_host = backend.effect_host() as Arc<dyn EffectHost>;
+    (backend, factory, registry, effect_host)
 });
 
 lash_conformance::runtime_persistence_clock_tests!({
@@ -1148,8 +1176,13 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     .expect("created SQLite conformance store exists");
                 (backend, open, reopen)
             });
+            let effect_host = backend.effect_host() as Arc<dyn EffectHost>;
             retained.keep(&backend);
-            ReopenableRuntimePersistence { open, reopen }
+            ReopenableRuntimePersistence {
+                open,
+                reopen,
+                effect_host,
+            }
         },
         lash_conformance::RuntimePersistenceLeaseTiming::controlled({
             let clock = Arc::clone(&clock);
@@ -1183,56 +1216,143 @@ lash_conformance::store_recovery_tests!({
     )
 });
 
+/// One journal for a crash law's scenarios: every turn a law drives, a
+/// drain turn included, binds the same turn-control authority, which is this
+/// journal's. Its effect leases lapse on the recovery timings, so a successor
+/// controller reclaims what a crashed one held.
+fn crash_journal() -> TestBackend {
+    sync_await(async move {
+        TestBackend::open_with(
+            SUBSTRATE,
+            with_lease_timings(
+                lash_core_execution::facade_support::LeaseTimings::new(
+                    std::time::Duration::from_millis(600),
+                    std::time::Duration::from_millis(100),
+                )
+                .expect("crash-law effect lease timings"),
+            ),
+            crate::backend_fixture::system_clock(),
+        )
+        .await
+    })
+}
+
+/// A journaled invocation over `journal`. Its redrive opens a successor
+/// controller over the same journal, the way a restarted process does: its
+/// own group-executor registration, the journal's completed effects replayed.
+fn journaled_crash_invocation(
+    journal: &TestBackend,
+    scope: ExecutionScope,
+) -> lash_conformance::ConformanceInvocation {
+    let open = {
+        let journal = journal.clone();
+        let scope = scope.clone();
+        move || {
+            let journal = journal.clone();
+            let scope = scope.clone();
+            sync_await(async move {
+                journal
+                    .open_effect_controller(scope)
+                    .await
+                    .expect("journaled crash controller")
+            })
+        }
+    };
+    let controller = open();
+    let faults = controller.effect_journal_faults();
+    lash_conformance::ConformanceInvocation::new(
+        Arc::new(controller) as Arc<dyn RuntimeEffectController>,
+        scope,
+        || {},
+        move || Arc::new(open()) as Arc<dyn RuntimeEffectController>,
+    )
+    .with_effect_journal_faults(faults)
+}
+
 lash_conformance::turn_crash_matrix_tests!({
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
     let retained = Retained::default();
+    let stores = retained.open_blocking().as_stores();
+    let journal = crash_journal();
+    // FIG-3524: the error-return sweep arms journal faults on its controller;
+    // the short renew interval lets a `renew` fault fire while the parked
+    // tool attempt is still open.
+    let error_journal = sync_await(async move {
+        TestBackend::open_with(
+            SUBSTRATE,
+            with_lease_timings(
+                lash_core_execution::facade_support::LeaseTimings::new(
+                    std::time::Duration::from_secs(60),
+                    std::time::Duration::from_millis(50),
+                )
+                .expect("error-return effect lease timings"),
+            ),
+            crate::backend_fixture::system_clock(),
+        )
+        .await
+    });
+    retained.keep(&journal);
+    retained.keep(&error_journal);
     (
-        retained.clone(),
+        retained,
+        stores,
         move |scenario: &str| scenarios.store(scenario),
-        |_: &str| lash_conformance::ConformanceInvocation::native(),
+        move |_: &str, scope: ExecutionScope| journaled_crash_invocation(&journal, scope),
         move |_: &str, scope: ExecutionScope| {
-            // FIG-3524: the error-return sweep needs the journaled controller
-            // so the claim/finalize/renew placements arm real journal faults.
-            // The short renew interval lets a `renew` fault fire while the
-            // parked tool attempt is still open.
-            let (backend, controller) = sync_await({
+            let controller = sync_await({
+                let error_journal = error_journal.clone();
                 let scope = scope.clone();
                 async move {
-                    let backend = TestBackend::open_with(
-                        SUBSTRATE,
-                        with_lease_timings(
-                            lash_core_execution::facade_support::LeaseTimings::new(
-                                std::time::Duration::from_secs(60),
-                                std::time::Duration::from_millis(50),
-                            )
-                            .expect("error-return effect lease timings"),
-                        ),
-                        crate::backend_fixture::system_clock(),
-                    )
-                    .await;
-                    let controller = backend
+                    error_journal
                         .open_effect_controller(scope)
                         .await
-                        .expect("journaled error-return controller");
-                    (backend, controller)
+                        .expect("journaled error-return controller")
                 }
             });
-            retained.keep(&backend);
             sqlite_conformance_invocation(controller.clone(), scope)
                 .with_effect_journal_faults(controller.effect_journal_faults())
         },
     )
 });
 
+// The level-one matrix simulates each crash in process. On the journaled
+// SQLite engine the crashed attempt's group child keeps running and renewing
+// its effect lease, which nothing in the process can stop, so the successor
+// waits on it forever. The native host this matrix ran on is gone; the real
+// SIGKILL matrix below covers this engine's crash recovery.
+lash_conformance::turn_crash_level_1_tests!(
+    #[ignore = "parked: an in-process crash cannot stop the journaled engine's attempt (FIG-3668)"]
+    {
+        let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
+        let retained = Retained::default();
+        let stores = retained.open_blocking().as_stores();
+        let journal = crash_journal();
+        retained.keep(&journal);
+        let error_journal = journal.clone();
+        (
+            retained,
+            stores,
+            move |scenario: &str| scenarios.store(scenario),
+            move |_: &str, scope: ExecutionScope| journaled_crash_invocation(&journal, scope),
+            move |_: &str, scope: ExecutionScope| journaled_crash_invocation(&error_journal, scope),
+        )
+    }
+);
+
 /// FIG-3571: a turn the pre-cutover build left in flight is refused, typed,
 /// before any effect when this build redrives it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_pre_cutover_generation_turn_redrive_is_refused_before_any_effect() {
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
+    let retained = Retained::default();
+    let stores = retained.open_blocking().as_stores();
+    let journal = crash_journal();
+    retained.keep(&journal);
     Box::pin(
         lash_conformance::pre_cutover_generation_turn_redrive_is_refused_before_any_effect(
+            stores,
             |scenario| scenarios.concrete_store(scenario),
-            |_| lash_conformance::ConformanceInvocation::native(),
+            |_, scope| journaled_crash_invocation(&journal, scope),
         ),
     )
     .await;
@@ -1243,10 +1363,15 @@ async fn sqlite_pre_cutover_generation_turn_redrive_is_refused_before_any_effect
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_pre_cutover_generation_turn_claim_is_refused_typed() {
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
+    let retained = Retained::default();
+    let stores = retained.open_blocking().as_stores();
+    let journal = crash_journal();
+    retained.keep(&journal);
     Box::pin(
         lash_conformance::pre_cutover_generation_turn_claim_is_refused_typed(
+            stores,
             |scenario| scenarios.concrete_store(scenario),
-            |_| lash_conformance::ConformanceInvocation::native(),
+            |_, scope| journaled_crash_invocation(&journal, scope),
         ),
     )
     .await;
@@ -1255,10 +1380,15 @@ async fn sqlite_pre_cutover_generation_turn_claim_is_refused_typed() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
+    let retained = Retained::default();
+    let stores = retained.open_blocking().as_stores();
+    let journal = crash_journal();
+    retained.keep(&journal);
     Box::pin(
         lash_conformance::held_turn_input_visibility_survives_claim_holder_crash(
+            stores,
             |scenario| scenarios.store(scenario),
-            |_| lash_conformance::ConformanceInvocation::native(),
+            |_, scope| journaled_crash_invocation(&journal, scope),
         ),
     )
     .await;
@@ -1470,9 +1600,11 @@ lash_conformance::effect_host_tests!({
 lash_conformance::turn_work_driver_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let host = backend.effect_host() as Arc<dyn EffectHost>;
+    let law_backend = backend.as_stores();
     (
         backend,
         host,
+        law_backend,
         lash_conformance::await_event_registration_observed,
     )
 });
@@ -1480,23 +1612,28 @@ lash_conformance::turn_work_driver_tests!({
 lash_conformance::effect_host_await_event_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let reopen = backend.clone();
+    let foreign = Retained::default();
     (
-        backend,
+        (backend, foreign.clone()),
         move || {
             let backend = reopen.clone();
             sync_await(async move { backend.reopen().await.effect_host() }) as Arc<dyn EffectHost>
         },
         lash_conformance::effect_host_journaled_wait_registration_witness,
+        // Another backend is another registry.
+        move || foreign.open_blocking().effect_host() as Arc<dyn EffectHost>,
     )
 });
 
 lash_conformance::tool_batch_parallelism_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let host = backend.effect_host() as Arc<dyn EffectHost>;
+    let law_backend = backend.as_stores();
     (
         backend,
         "sqlite",
         Arc::clone(&host),
+        law_backend,
         // The producers this crate reaches. `Promise.all` on the RLM bridge and
         // the Lashlang aggregate on the process bridge register the same law
         // from the crates that own them.
@@ -1537,7 +1674,8 @@ lash_conformance::effect_host_cold_await_event_tests!({
     )
     .expect("cold-instance conformance lease timings");
     let reopen = backend.clone();
-    (backend, move || {
+    let catalog = backend.clone();
+    let make = move || {
         let backend = reopen.clone();
         sync_await(async move {
             backend
@@ -1548,7 +1686,13 @@ lash_conformance::effect_host_cold_await_event_tests!({
                 .await
                 .effect_host()
         }) as Arc<dyn EffectHost>
-    })
+    };
+    let make_catalog = move || {
+        let backend = catalog.clone();
+        sync_await(async move { backend.reopen().await.session_store_factory() })
+            as Arc<dyn lash_core_execution::SessionStoreFactory>
+    };
+    (backend, make, make_catalog)
 });
 
 #[tokio::test]

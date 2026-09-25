@@ -379,8 +379,6 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectWrongOutcome => Terminal,
             // the process-local controller task closed; a restart repairs it.
             Self::RuntimeEffectControllerTaskClosed => Redrivable,
-            // the perf start gate asks for a retry.
-            Self::RuntimePerfStartGateRetry => Retryable,
             // store I/O failed.
             Self::RuntimeStore => Retryable,
             // durable state is corrupt or a counter is exhausted.
@@ -433,8 +431,6 @@ impl RuntimeErrorCode {
             Self::ToolCatalogResolutionFailed => Terminal,
             // the completion key names no call id.
             Self::ToolCompletionKeyMissingCallId => Terminal,
-            // the host issues no process-lifetime completion keys.
-            Self::ToolCompletionKeyProcessLifetime => Terminal,
             // the tool did not declare deferral.
             Self::ToolDeferralNotDeclared => Terminal,
             // the cancel watch failed transiently.

@@ -191,10 +191,11 @@ fn literal_outputs(turn: &crate::AssembledTurn) -> Vec<(String, serde_json::Valu
 pub async fn public_migrated_tools_redrive_to_literal_outcomes(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     orchestration: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
+    let registry = stores.process_registry();
     let session_id = SessionId::from(format!("{prefix}-session"));
     let turn_id = TurnId::from(format!("{prefix}-turn"));
     let target = ProcessId::from(format!("{prefix}-control-target"));
@@ -220,8 +221,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         .expect("register the cancel_process target");
 
     let (model, model_calls) = migrated_model(prefix, &target);
-    let mut host = crate::LawBackend::in_process()
-        .with_effect_host(Arc::clone(&effect_host))
+    let mut host = crate::LawBackend::over_stores(stores.as_ref(), Arc::clone(&effect_host))
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
@@ -254,7 +254,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         session_id: session_id.clone(),
         host,
         factories,
-        store: Arc::new(crate::InMemorySessionStore::new()),
+        store: crate::conformance::law_session_store(stores.as_ref(), &session_id).await,
         registry: Arc::clone(watched.registry()),
         process_work: runner.process_work(watched, worker),
     };

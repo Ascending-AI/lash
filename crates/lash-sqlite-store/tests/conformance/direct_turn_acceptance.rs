@@ -30,5 +30,6 @@ async fn sqlite_direct_turn_store(backend: &TestBackend) -> Arc<dyn RuntimePersi
 lash_conformance::direct_turn_acceptance_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let store = sqlite_direct_turn_store(&backend).await;
-    (backend, "sqlite", store)
+    let law_backend = backend.as_backend();
+    (backend, "sqlite", law_backend, store)
 });

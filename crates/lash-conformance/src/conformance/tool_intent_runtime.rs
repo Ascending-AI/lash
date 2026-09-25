@@ -51,7 +51,7 @@ impl crate::ToolProvider for SignalIntentProvider {
 }
 
 /// Runs a literal parked-signal law through a real provider, coordinator, and
-/// runtime turn over the supplied durable effect host and process registry.
+/// runtime turn over the supplied durable effect host and store set.
 /// The turn runs where the tier runs turns (`turn_runner`): scoped on the host
 /// in process, inside a handler on Restate.
 #[expect(
@@ -61,10 +61,11 @@ impl crate::ToolProvider for SignalIntentProvider {
 pub async fn public_signal_intent_wakes_parked_process(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     turn_runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
+    let registry = stores.process_registry();
     let session_id = SessionId::from(format!("{prefix}-session"));
     let turn_id = TurnId::from(format!("{prefix}-turn"));
     let process_id = ProcessId::from(format!("{prefix}-target"));
@@ -182,29 +183,28 @@ pub async fn public_signal_intent_wakes_parked_process(
     // Restate re-runs the turn's handler from the top on every replay, so
     // each execution builds its runtime afresh from these inputs, which
     // outlive it; the store is the durable state they share.
-    let store: Arc<dyn crate::RuntimePersistence> = Arc::new(crate::InMemorySessionStore::new());
+    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let admitted = admit(crate::ExecutionScope::turn(&session_id, &turn_id));
     let mut input = crate::TurnInput::text("signal the parked process");
     input.trace_turn_id = Some(turn_id);
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     let turn_parts = (
         Arc::clone(&effect_host),
-        Arc::clone(&registry),
+        Arc::clone(&stores),
         session_id.clone(),
     );
     turn_runner
         .run_turn(
             admitted,
             Arc::new(move |turn_scope| {
-                let (effect_host, registry, session_id) = turn_parts.clone();
+                let (effect_host, stores, session_id) = turn_parts.clone();
                 let store = Arc::clone(&store);
                 let model = model.clone();
                 let tool_plugin = Arc::clone(&tool_plugin);
                 let input = input.clone();
                 let turn_tx = turn_tx.clone();
                 Box::pin(async move {
-                    let mut host = crate::LawBackend::in_process()
-                        .with_effect_host(effect_host)
+                    let mut host = crate::LawBackend::over_stores(stores.as_ref(), effect_host)
                         .host_config(
                             crate::CommitBudget::bounded(1024 * 1024, 512),
                             crate::QueuedWorkBatchingConfig::new(1),
@@ -233,7 +233,7 @@ pub async fn public_signal_intent_wakes_parked_process(
                             )
                             .with_store(store)
                             .with_process_work(crate::testing::process_work_wiring_for_registry(
-                                registry,
+                                stores.process_registry(),
                             ))
                             .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
                             .build(),

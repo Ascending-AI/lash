@@ -19,8 +19,8 @@
 #                  ephemeral loopback ports, serves the probe endpoint from
 #                  the bin, registers the deployment, and counts the
 #                  invocation's `sys_journal` rows. Before FIG-3397 Restate
-#                  ran a batch serially (the since-deleted
-#                  `supports_concurrent_effects()` was hardcoded false), so a
+#                  ran a batch serially (its controller refused concurrent
+#                  effects, a flag FIG-3397 deleted), so a
 #                  pre-cutover leg records a serial baseline, not a defect.
 #
 # Evidence goes under `<archive-root>/<short-sha>/`: one JSONL per backend, a

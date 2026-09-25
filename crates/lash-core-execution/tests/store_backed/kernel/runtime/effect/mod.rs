@@ -108,7 +108,12 @@ mod tests {
     #[tokio::test]
     async fn resolver_defaults_refuse_turn_control_without_an_explicit_host() {
         struct UnsupportedResolver;
-        impl AwaitEventResolver for UnsupportedResolver {}
+        impl AwaitEventResolver for UnsupportedResolver {
+            /// A test double that mints keys under no durable authority.
+            fn await_event_authority_binding_id(&self) -> Option<String> {
+                None
+            }
+        }
 
         let resolver = UnsupportedResolver;
         let scope = ExecutionScope::turn("unsupported-session", "unsupported-turn");

@@ -10,12 +10,10 @@
 //! shared `await_event.rs` / `scope_fence.rs` SQL would then run against a
 //! column set it no longer matches (S14-A1, FIG-3260).
 
-/// Cancellation-only durable promises for Native sessions, shared by the
-/// durable-core and effect-replay databases.
-///
-/// In durable core they let a reopened session recover the same authority
-/// without migrating unrelated Native effects into the effect journal; in the
-/// effect journal they sit beside the effects that resolve them.
+/// The durable keyed promises of the effect-replay database, beside the
+/// effects that resolve them. The effect-replay database is their only
+/// carrier: FIG-3585 deleted the durable-core copy that store-delegated turn
+/// control used.
 pub(crate) const AWAIT_EVENT_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS await_event_meta (
     singleton       INTEGER PRIMARY KEY CONSTRAINT ck_await_event_meta_singleton CHECK (singleton = 1),

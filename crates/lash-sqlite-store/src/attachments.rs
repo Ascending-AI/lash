@@ -985,9 +985,6 @@ mod cross_database_plan_tests {
             .execute_batch(crate::schema::SCHEMA)
             .expect("apply the durable-core schema");
         connection
-            .execute_batch(crate::schema_fragments::AWAIT_EVENT_TABLES)
-            .expect("apply the shared await-event fragment");
-        connection
             .execute(
                 "ATTACH DATABASE ?1 AS process_registry",
                 params![registry_path.to_string_lossy().into_owned()],

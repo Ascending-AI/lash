@@ -41,9 +41,8 @@
 //! request did not record.
 //!
 //! The tier arrives as a host factory: two calls are two views of one
-//! substrate (for the SQL tiers, two connections over one store; for the
-//! in-memory reference host and for Restate, the same object, whose substrate
-//! is the process — one endpoint in Restate's case). Restate registers
+//! substrate (for the SQL tiers, two connections over one store; for Restate,
+//! the same object, whose substrate is one endpoint). Restate registers
 //! through the live e2e recipe (`conformance_and_poison.rs`) with `drain:
 //! None`: Restate redrives the child invocation itself and keeps no
 //! Lash-owned drain, so the laws take their open-time shape there.
@@ -119,11 +118,9 @@ pub struct ToolChildWorld {
     /// The effect host a law opens groups through.
     pub host: Arc<dyn crate::EffectHost>,
     /// The group drain over the same journal, where the tier keeps one. `None`
-    /// on the in-memory reference host, which journals nothing across a
-    /// process boundary and so has nothing to drain, and on Restate, which
-    /// redrives the child invocation itself and keeps no Lash-owned drain;
-    /// the recovery law reads this to decide which half of the routing
-    /// contract the tier can speak to.
+    /// on Restate, which redrives the child invocation itself and keeps no
+    /// Lash-owned drain; the recovery law reads this to decide which half of
+    /// the routing contract the tier can speak to.
     pub drain: Option<Arc<dyn crate::testing::conformance_support::StoreEffectGroupDrain>>,
 }
 
@@ -146,73 +143,29 @@ pub type ToolChildWorldFactory = Arc<
         + Sync,
 >;
 
-/// One scenario's process substrate: the registry its processes register in
-/// and the process-exec-env store its children's environments publish to.
-pub struct ToolChildProcesses {
-    pub registry: Arc<dyn crate::ProcessRegistry>,
-    pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-}
-
-/// Builds a fresh process substrate for one scenario, supplied by the tier.
+/// Builds a fresh process substrate for one scenario, supplied by the tier:
+/// the store set its processes register in, its children's environments
+/// publish to and its presentations retain attachments in.
 ///
 /// A factory rather than a handle because each scenario opens its own
 /// registry: a durable registry must not carry the previous scenario's rows.
 pub type ToolChildProcessesFactory = Arc<
-    dyn Fn() -> std::pin::Pin<Box<dyn Future<Output = ToolChildProcesses> + Send>> + Send + Sync,
+    dyn Fn() -> std::pin::Pin<Box<dyn Future<Output = Arc<dyn crate::StoreSet>> + Send>>
+        + Send
+        + Sync,
 >;
 
-/// What a tier supplies: a world factory over one substrate, a process
-/// registry factory, and the completion routing it would record for a
-/// deferrable child.
+/// What a tier supplies: a world factory over one substrate and a process
+/// registry factory. Every host journals, so a deferrable child is always
+/// recorded under durable completion routing (ADR 0102, D1).
 #[derive(Clone)]
 pub struct ToolChildLawFixture {
-    /// Two calls are two views of one substrate. On the SQL tiers each call
-    /// builds a fresh host over the shared store; on the in-memory reference
-    /// tier both calls return the same host, because the process *is* the
-    /// substrate there.
+    /// Two calls are two views of one substrate: on the SQL tiers each call
+    /// builds a fresh host over the shared store.
     pub make_world: ToolChildWorldFactory,
     /// A fresh process registry and process-exec-env store on the substrate
     /// the host factory serves.
     pub make_processes: ToolChildProcessesFactory,
-    /// The completion routing this tier would record for a deferrable child:
-    /// `Durable` where a resolution survives the worker, `ProcessLifetime`
-    /// where the host's keys die with the process (ADR 0099 §14).
-    pub deferrable_routing: ToolChildDeferrableRouting,
-}
-
-/// Which routing fact a tier records for a deferrable child.
-///
-/// A kind rather than the value itself because `ProcessLifetime` carries the
-/// issuing registry's identity, which is only known once the world is built —
-/// [`deferrable_routing`] resolves the kind against the host at group
-/// construction.
-#[derive(Clone, Copy, Debug)]
-pub enum ToolChildDeferrableRouting {
-    /// A completion resolution survives the worker that issued it.
-    Durable,
-    /// Completion keys die with the issuing process.
-    ProcessLifetime,
-}
-
-/// Resolves the tier's deferrable routing kind into the recorded fact, binding
-/// a process-lifetime key to this host's registry identity.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: a host mints a non-empty registry identity"
-)]
-fn deferrable_routing(
-    kind: ToolChildDeferrableRouting,
-    host: &Arc<dyn crate::EffectHost>,
-) -> ToolChildCompletionRouting {
-    match kind {
-        ToolChildDeferrableRouting::Durable => ToolChildCompletionRouting::Durable,
-        ToolChildDeferrableRouting::ProcessLifetime => {
-            ToolChildCompletionRouting::ProcessLifetime {
-                issuer: crate::runtime::TurnControlBindingId::new(host.turn_control_binding_id())
-                    .expect("a host's registry identity is a valid binding id"),
-            }
-        }
-    }
 }
 
 /// The lease window the lane law and the recovery law's live phases use:
@@ -1615,9 +1568,9 @@ fn child_envelope(
 
 /// The cancellation authority the opener records on a child at group
 /// formation: what this host derives for the child's admitted scope through
-/// the same `turn_control_binding` call the driver will re-derive — or `None`
-/// where the controller participates locally and no durable signal exists to
-/// record. Derived per host, because the recorded fact is this host's binding.
+/// the same `turn_control_binding` call the driver will re-derive. Every host
+/// journals, so every child records one. Derived per host, because the
+/// recorded fact is this host's binding.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1625,21 +1578,14 @@ fn child_envelope(
 async fn recorded_cancellation_authority(
     host: &Arc<dyn crate::EffectHost>,
     admitted: &crate::AdmittedScope,
-) -> Option<crate::TurnControlBindingId> {
+) -> crate::TurnControlBindingId {
     let scoped = host.scoped(admitted.clone()).expect("the scope binds");
-    if scoped.controller().effect_journaling()
-        != crate::runtime::effect::EffectJournaling::Journaled
-    {
-        return None;
-    }
     let binding = host
         .turn_control_binding(&scoped)
         .await
         .expect("a durable participant's binding derives");
-    Some(
-        crate::TurnControlBindingId::new(binding.binding_id().to_string())
-            .expect("the host's binding id is valid"),
-    )
+    crate::TurnControlBindingId::new(binding.binding_id().to_string())
+        .expect("the host's binding id is valid")
 }
 
 /// The request one leaf's child is admitted under.
@@ -1661,14 +1607,14 @@ fn leaf_request(
     routing: ToolChildCompletionRouting,
     env_ref: &crate::ProcessExecutionEnvRef,
     parent: &crate::RuntimeInvocation,
-    cancellation: Option<crate::TurnControlBindingId>,
+    cancellation: crate::TurnControlBindingId,
 ) -> crate::runtime::effect::ToolChildRequest {
     let crate::ExecutionScope::Turn { .. } = scope else {
         unreachable!("the law's children are admitted under a turn scope")
     };
     let admitted =
         crate::AdmittedScope::unpinned(scope.clone()).expect("a turn scope admits unpinned");
-    let mut request = crate::runtime::effect::ToolChildRequest::new(
+    crate::runtime::effect::ToolChildRequest::new(
         crate::PreparedToolCall::from_parts(
             call_id,
             crate::ToolId::from(tool_id),
@@ -1688,13 +1634,10 @@ fn leaf_request(
             session_id: session_id.clone(),
             agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
         },
+        cancellation,
         env_ref.clone(),
         routing,
-    );
-    if let Some(binding) = cancellation {
-        request = request.with_cancellation_authority(binding);
-    }
-    request
+    )
 }
 
 fn catalog_admission(tool_id: &str) -> crate::runtime::effect::ToolChildAdmission {
@@ -1806,6 +1749,8 @@ struct Scenario {
     provider: Arc<LawLeafProvider>,
     registry: Arc<dyn crate::ProcessRegistry>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    process_definitions: Arc<dyn crate::ProcessDefinitionRegistry>,
+    attachment_store: Arc<dyn crate::AttachmentStore>,
     env_ref: crate::ProcessExecutionEnvRef,
     intent_target: crate::ProcessId,
 }
@@ -1822,10 +1767,11 @@ async fn scenario(
     session_id: &crate::SessionId,
     start_metadata: serde_json::Value,
 ) -> Scenario {
-    let ToolChildProcesses {
-        registry,
-        process_env_store,
-    } = (fixture.make_processes)().await;
+    let stores = (fixture.make_processes)().await;
+    let registry = stores.process_registry();
+    let process_env_store = stores.process_env_store();
+    let process_definitions = stores.process_definition_registry();
+    let attachment_store = stores.attachment_store();
     let intent_target = crate::ProcessId::from(format!("{session_id}-intent-target"));
     registry
         .register_process_with_observers(
@@ -1863,6 +1809,8 @@ async fn scenario(
         observation,
         registry,
         process_env_store,
+        process_definitions,
+        attachment_store,
         env_ref,
         intent_target,
     }
@@ -1963,7 +1911,7 @@ fn single_leaf_group(
     env_ref: &crate::ProcessExecutionEnvRef,
     tool_id: &str,
     routing: ToolChildCompletionRouting,
-    cancellation: Option<crate::TurnControlBindingId>,
+    cancellation: crate::TurnControlBindingId,
 ) -> crate::RuntimeEffectGroup {
     let parent = parent_invocation(scope);
     let child = child_envelope(
@@ -2011,7 +1959,7 @@ async fn phase_env_store(
     make_processes: &ToolChildProcessesFactory,
     env_ref: &crate::ProcessExecutionEnvRef,
 ) -> Arc<dyn crate::ProcessExecutionEnvStore> {
-    let env_store = make_processes().await.process_env_store;
+    let env_store = make_processes().await.process_env_store();
     assert_eq!(
         &crate::testing::process_execution_env_fixture(env_store.as_ref()).await,
         env_ref,

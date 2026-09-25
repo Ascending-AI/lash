@@ -16,7 +16,6 @@
 #[doc(hidden)]
 pub use async_trait::async_trait;
 
-pub use crate::runtime::concrete_turn_cancellation_authority;
 pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
 pub use lash_core_execution::engine;
@@ -104,7 +103,6 @@ pub(crate) use lash_core_execution::trace;
 pub use lash_core_execution::triggers;
 
 pub mod facade_support {
-    pub use crate::runtime::effect::bind_store_turn_control_authority;
     pub use crate::runtime::effect::{
         LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry, ToolChildDriver, ToolChildHost,
         opener_for_execution_scope,
@@ -172,7 +170,6 @@ pub mod facade_support {
     pub use crate::attachments::AttachmentReclamationReport;
     pub use crate::attachments::EmptyRootSetPolicy;
     pub use crate::attachments::FileAttachmentStore;
-    pub use crate::attachments::InMemoryAttachmentStore;
     pub use crate::attachments::SessionAttachmentStore;
     pub use crate::attachments::reclaim_unreferenced_attachments;
     pub use crate::chronological::BorrowedChronologicalEntry;
@@ -271,14 +268,9 @@ pub mod facade_support {
     pub use crate::runtime::EventSink;
     pub use crate::runtime::InMemoryLiveReplayStore;
     pub use crate::runtime::InMemoryLiveReplayStoreConfig;
-    pub use crate::runtime::InMemoryProcessExecutionEnvStore;
-    pub use crate::runtime::InMemorySessionStore;
-    pub use crate::runtime::InMemorySessionStoreFactory;
     pub use crate::runtime::LashRuntime;
     pub use crate::runtime::LiveReplayGap;
-    pub use crate::runtime::NativeEffectHost;
     pub use crate::runtime::NativeQueuedWorkConfigError;
-    pub use crate::runtime::NativeRuntimeEffectController;
     pub use crate::runtime::NoopTurnActivitySink;
     pub use crate::runtime::ObservedProcess;
     pub use crate::runtime::ObservedProcessEvent;
@@ -362,7 +354,6 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancellationAuthority;
     pub use crate::runtime::TurnCancellationEvidence;
     pub use crate::runtime::TurnControlAttachment;
-    pub use crate::runtime::TurnControlAuthorityOwner;
     pub use crate::runtime::TurnExecutionMetrics;
     pub use crate::runtime::TurnInputAcceptanceReceipt;
     pub use crate::runtime::TurnIssue;
@@ -443,7 +434,6 @@ pub mod facade_support {
     pub use crate::tool_registry::ToolStateEntry;
     pub use crate::tool_registry::ToolSurfaceOpenMode;
     pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
-    pub use crate::triggers::InMemoryTriggerStore;
     pub use crate::triggers::TriggerDeliveryEmitOutcome;
     pub use crate::triggers::TriggerDeliveryEmitReceipt;
     pub use crate::triggers::TriggerEmitReport;
@@ -702,8 +692,6 @@ pub use runtime::ProcessEventLogTestSupport;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ProcessRegistryTestSupport;
 #[cfg(any(test, feature = "testing"))]
-pub use runtime::TestLocalProcessRegistry;
-#[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::fail_parent_end_once;
@@ -714,8 +702,8 @@ pub use runtime::{ObservationSource, drive_with_observations};
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
 pub use process_registry::{
-    InMemoryProcessDefinitionRegistry, ProcessDefinitionExpectation, ProcessDefinitionLifecycle,
-    ProcessDefinitionRecord, ProcessDefinitionRegistration, ProcessDefinitionRegistry,
+    ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
+    ProcessDefinitionRegistration, ProcessDefinitionRegistry,
 };
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AcceptedTurnInputDrive,
@@ -726,11 +714,10 @@ pub use runtime::{
     CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, DeclaredProcessIdentity,
     DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild, EffectAddress, EffectCommitState,
     EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalRetirement, EffectJournaling, EffectOpener, EffectOpenerError,
-    EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
-    GroupChildBinding, GroupDrainReport, GroupExecutors, GroupFinalizationReport,
-    GroupOnlyFinalization, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
-    InMemoryProcessExecutionEnvStore, IndependentEffectWork, InputItem, LedgerUsageDisposition,
+    EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate, ExecutionScope,
+    ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupDrainReport,
+    GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement,
+    GroupWakePolicy, HandleId, IndependentEffectWork, InputItem, LedgerUsageDisposition,
     LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
     LlmStreamRecord, LoserPolicy, NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError,
@@ -797,19 +784,18 @@ pub use runtime::{
     TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
     TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint,
     TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
-    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
-    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
-    TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-    TurnInputStateKind, UnreportedLedgerAttempt, UnsettledEffectGroup, UsageDispositionError,
-    WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy, admit_session_state_generation,
-    artifact_destination_owner_retired_error, artifact_owner_retired_error,
-    artifact_staging_edge_missing_error, artifact_store_plugin_error, effect_groups_unsupported,
-    ensure_process_lease_schema_version, tool_failure_code,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnEvent,
+    TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement,
+    TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
+    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
+    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, TurnInputStateKind,
+    UnreportedLedgerAttempt, UnsettledEffectGroup, UsageDispositionError, WaitKind, WaitState,
+    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
+    WorkerSweepPolicy, admit_session_state_generation, artifact_destination_owner_retired_error,
+    artifact_owner_retired_error, artifact_staging_edge_missing_error, artifact_store_plugin_error,
+    effect_groups_unsupported, ensure_process_lease_schema_version, tool_failure_code,
 };
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 #[allow(unused_imports)]

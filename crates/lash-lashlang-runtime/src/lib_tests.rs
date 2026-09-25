@@ -145,8 +145,6 @@ async fn real_process_sleep_until_emits_deadline_and_completion() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
-    use lash_core::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
-
     struct SignalSink {
         graph: Arc<TraceLashlangGraphStore>,
         waiting: tokio::sync::mpsc::UnboundedSender<()>,
@@ -235,7 +233,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
             "signal-fixture-env",
         )))
     };
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry = lash_core::Backend::process_registry(&memory_backend().await);
     registry
         .register_process(registration())
         .await
@@ -478,8 +476,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
     let expected_catalog = Arc::clone(&catalog);
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry = lash_core::Backend::process_registry(&backend);
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "batch-run")
         .bind_attempt(1);
     let process_events = durable_process_events(&registry, &registration, &authority).await;
@@ -739,7 +736,12 @@ fn test_child_max_attempts() -> std::num::NonZeroU32 {
 struct EveryNEffectsController(usize);
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for EveryNEffectsController {}
+impl lash_core::AwaitEventResolver for EveryNEffectsController {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for EveryNEffectsController {

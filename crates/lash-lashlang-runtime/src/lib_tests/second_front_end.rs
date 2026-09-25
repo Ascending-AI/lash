@@ -565,8 +565,7 @@ async fn run_worker(
         .build();
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry = lash_core::Backend::process_registry(&backend);
     let authority =
         lash_core::ProcessExecutionWriteAuthority::invocation(process_id, run).bind_attempt(1);
     let process_events = durable_process_events(&registry, &registration, &authority).await;

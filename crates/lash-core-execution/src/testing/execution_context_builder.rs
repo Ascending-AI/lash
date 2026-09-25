@@ -138,10 +138,6 @@ pub struct BuiltTestExecutionContext<'run> {
     /// through; kept here so [`into_runtime`](Self::into_runtime) can pin it
     /// to the context's lifetime.
     tool_child_guard: Option<crate::runtime::effect::LiveOpenerGuard>,
-    /// The issuer identity a group child records on a `ProcessLifetime`
-    /// completion route (ADR 0099 §14): the host's binding id, when the
-    /// context was built against a host.
-    tool_child_completion_issuer: Option<crate::TurnControlBindingId>,
     /// The host the tool-child resolver holds only weakly; pinned to the
     /// context's lifetime by [`into_runtime`](Self::into_runtime).
     tool_child_host: Option<Arc<dyn crate::EffectHost>>,
@@ -522,11 +518,9 @@ impl<'run> TestExecutionContextBuilder<'run> {
         } else {
             None
         };
-        let (tool_child_guard, tool_child_completion_issuer) = tool_child_host
+        let tool_child_guard = tool_child_host
             .as_ref()
-            .and_then(|host| wire_test_tool_children(&dispatch, &self.process_env_store, host))
-            .map(|(guard, issuer)| (Some(guard), issuer))
-            .unwrap_or((None, None));
+            .and_then(|host| wire_test_tool_children(&dispatch, &self.process_env_store, host));
 
         BuiltTestExecutionContext {
             dispatch,
@@ -536,7 +530,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
             runtime_parent_invocation: self.runtime_parent_invocation,
             protocol_iteration: self.protocol_iteration,
             tool_child_guard,
-            tool_child_completion_issuer,
             tool_child_host,
         }
     }
@@ -560,9 +553,6 @@ impl<'run> BuiltTestExecutionContext<'run> {
             .runtime_parent_invocation
             .unwrap_or_else(|| code_execution_invocation(&session_id, self.protocol_iteration));
         context = context.with_parent_invocation(parent_invocation);
-        if let Some(issuer) = self.tool_child_completion_issuer {
-            context = context.with_tool_child_completion_issuer(issuer);
-        }
         if let Some(guard) = self.tool_child_guard {
             context = context.with_live_opener_guard(Arc::new(guard));
         }
@@ -605,9 +595,8 @@ fn code_execution_invocation(
 /// registered in the host's live-opener registry so `context_for` answers for
 /// its children.
 ///
-/// Returns the live-opener guard (pin it to the context with
-/// `RuntimeExecutionContext::with_live_opener_guard`) and the host's
-/// turn-control binding id for `with_tool_child_completion_issuer`.
+/// Returns the live-opener guard; pin it to the context with
+/// `RuntimeExecutionContext::with_live_opener_guard`.
 ///
 /// The wiring is deliberately best-effort, mirroring production's
 /// registration sites: a controller that accepts no group-executor resolver,
@@ -618,10 +607,7 @@ pub fn wire_test_tool_children(
     dispatch: &Arc<crate::tool_dispatch::ToolDispatchContext<'_>>,
     process_env_store: &Arc<dyn crate::ProcessExecutionEnvStore>,
     host: &Arc<dyn crate::EffectHost>,
-) -> Option<(
-    crate::runtime::effect::LiveOpenerGuard,
-    Option<crate::TurnControlBindingId>,
-)> {
+) -> Option<crate::runtime::effect::LiveOpenerGuard> {
     let tool_children = host.install_tool_child_host(
         crate::runtime::effect::ToolChildHost::new(host, Arc::clone(process_env_store))
             .with_clock(Arc::clone(&dispatch.clock)),
@@ -637,8 +623,7 @@ pub fn wire_test_tool_children(
             tokio_util::sync::CancellationToken::new(),
         ),
     );
-    let issuer = crate::TurnControlBindingId::new(host.turn_control_binding_id()).ok();
-    Some((guard, issuer))
+    Some(guard)
 }
 
 /// The protocol factories a built context needs: under `cfg(test)` the

@@ -5,7 +5,7 @@ mod file_store;
 
 pub use file_store::FileAttachmentStore;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -1051,100 +1051,6 @@ fn within_grace(last_modified_epoch_ms: Option<u64>, now: u64, grace_period_ms: 
     last_modified_epoch_ms.is_some_and(|modified| now.saturating_sub(modified) < grace_period_ms)
 }
 
-struct InMemoryBlob {
-    stored: StoredAttachment,
-    stored_at_epoch_ms: u64,
-}
-
-#[derive(Default)]
-pub struct InMemoryAttachmentStore {
-    attachments: Mutex<HashMap<AttachmentId, InMemoryBlob>>,
-}
-
-impl InMemoryAttachmentStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Snapshot concrete blob bytes without calling the `AttachmentStore`
-    /// read path. Intended for cross-backend durable-state differentials.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn raw_blobs_for_testing(&self) -> Vec<(AttachmentId, Vec<u8>)> {
-        let mut rows = self
-            .attachments
-            .lock_recover()
-            .iter()
-            .map(|(id, blob)| (id.clone(), blob.stored.bytes.clone()))
-            .collect::<Vec<_>>();
-        rows.sort_by(|left, right| left.0.cmp(&right.0));
-        rows
-    }
-}
-
-#[async_trait::async_trait]
-impl AttachmentStore for InMemoryAttachmentStore {
-    async fn put(
-        &self,
-        bytes: Vec<u8>,
-        meta: AttachmentCreateMeta,
-    ) -> Result<AttachmentRef, AttachmentStoreError> {
-        let reference = stored_ref(&bytes, meta);
-        let now = now_epoch_ms();
-        let mut attachments = self.attachments.lock_recover();
-        match attachments.entry(reference.id.clone()) {
-            std::collections::hash_map::Entry::Occupied(mut existing) => {
-                // Dedup hit: refresh the freshness signal so a GC sweep that
-                // snapshotted the roots before this put cannot reclaim the
-                // now-freshly-referenced blob.
-                existing.get_mut().stored_at_epoch_ms = now;
-            }
-            std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(InMemoryBlob {
-                    stored: StoredAttachment { bytes },
-                    stored_at_epoch_ms: now,
-                });
-            }
-        }
-        Ok(reference)
-    }
-
-    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        self.attachments
-            .lock_recover()
-            .get(id)
-            .map(|blob| blob.stored.clone())
-            .ok_or_else(|| AttachmentStoreError::NotFound(id.clone()))
-    }
-
-    async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-        self.attachments.lock_recover().remove(id);
-        Ok(())
-    }
-
-    async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
-        Ok(self
-            .attachments
-            .lock_recover()
-            .iter()
-            .map(|(id, blob)| StoredBlobRef {
-                id: id.clone(),
-                last_modified_epoch_ms: Some(blob.stored_at_epoch_ms),
-            })
-            .collect())
-    }
-
-    async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
-        Ok(self
-            .attachments
-            .lock_recover()
-            .get(id)
-            .map(|blob| StoredBlobRef {
-                id: id.clone(),
-                last_modified_epoch_ms: Some(blob.stored_at_epoch_ms),
-            }))
-    }
-}
-
 /// No attachment port: a runtime or fixture with nowhere to keep attachment
 /// bytes. Every write is refused with a terminal backend failure, and reads
 /// find nothing, as they would in a store that never accepted a write.
@@ -1314,11 +1220,6 @@ impl SessionAttachmentStore {
     /// runtimes and tests with no durable reference store.
     pub fn ephemeral(backend: Arc<dyn AttachmentStore>) -> Self {
         Self::new(backend, Arc::new(NoopAttachmentManifest), String::new())
-    }
-
-    /// Ephemeral facade over a fresh in-memory backend.
-    pub fn in_memory() -> Self {
-        Self::ephemeral(Arc::new(InMemoryAttachmentStore::new()))
     }
 
     /// Ephemeral facade with no attachment port: every put is refused and
@@ -1704,16 +1605,6 @@ impl AttachmentManifest for PersistenceManifestAdapter {
     async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
         AttachmentManifest::list_all_refs(&*self.0).await
     }
-}
-
-fn stored_ref(bytes: &[u8], meta: AttachmentCreateMeta) -> AttachmentRef {
-    AttachmentRef::new(
-        content_id(bytes),
-        meta.media_type,
-        bytes.len() as u64,
-        meta.type_metadata,
-        meta.label,
-    )
 }
 
 pub async fn resolve_llm_request_attachments(

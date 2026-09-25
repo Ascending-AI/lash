@@ -37,7 +37,8 @@ async fn condemnation_enumeration_defaults_to_unsupported() {
 
 #[tokio::test]
 async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
-    let backend = InMemoryAttachmentStore::new();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let backend = FileAttachmentStore::new(temp.path());
     let reference = backend
         .put(
             b"fail-closed-live-blob".to_vec(),

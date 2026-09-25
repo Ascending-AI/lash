@@ -169,23 +169,30 @@ async fn run_turn_effect_loop(
         cancel_controller,
     } = context;
     // The start gate can change the handler's control flow before its first
-    // effect, so durable runtimes must observe it through the handler-scoped
-    // controller. That controller journals the observation and replays the
-    // same answer after an owner crash. The shared controller is intentionally
-    // reserved for the concurrent live watcher below: an out-of-band peek here
-    // could observe a cancel that arrived after the original attempt and make
-    // a replay take a different command path.
+    // effect, so it is observed through the handler-scoped controller, which
+    // journals the observation and replays the same answer after an owner
+    // crash. The shared controller is intentionally reserved for the
+    // concurrent live watcher below: an out-of-band peek here could observe a
+    // cancel that arrived after the original attempt and make a replay take a
+    // different command path.
+    //
+    // The observation is attempted once (FIG-3647): an error it returns is
+    // final. On Restate the peek is a call that surfaces only terminal
+    // errors, because Restate retries transient failures itself, and each
+    // further call would be a fresh peek of the same terminal cause. On the
+    // SQL engines the failure is sealed under the gate's replay key, so a
+    // second attempt would replay it. A fault outside the journal aborts the
+    // turn for the substrate to re-drive.
     let start_gate = crate::runtime::RuntimeNamedPhase::begin(
         driver.turn_phase_probe.clone(),
         "turn_cancel.start_gate",
     );
-    let pending_cancel = await_turn_cancellation_start_gate(clock.as_ref(), || {
-        turn_control.observe_pending_cancel(
+    let pending_cancel = turn_control
+        .observe_pending_cancel(
             cancel_controller,
             crate::runtime::turn_control::TurnCancelPeekIdentity::StartGate,
         )
-    })
-    .await?;
+        .await?;
     drop(start_gate);
     if pending_cancel.is_some() {
         cancellation.cancel();
@@ -226,50 +233,12 @@ const TURN_CANCEL_WATCH_RETRY_INITIAL: std::time::Duration = std::time::Duration
 
 const TURN_CANCEL_WATCH_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Keep the journaled turn-start observation bounded so a broken peek cannot
-/// pin one Restate invocation forever. Exhaustion fails closed: the error
-/// propagates and the turn fails without starting any effect (hosts classify
-/// it as non-retryable, so the invocation retires as a failed turn). Transient
-/// transport trouble does not reach this bound — a slow journaled peek stays
-/// pending inside one attempt; only genuine terminal errors (revoked or
-/// unknown keys) burn attempts.
-pub(super) const TURN_CANCEL_START_GATE_ATTEMPTS: usize = 3;
-
 /// Bound the live watcher to a useful transient-recovery window without letting
 /// a broken resolver outlive the turn indefinitely. Eight attempts traverse
 /// the whole exponential ladder through its one-second ceiling (2.575 seconds
 /// of injected sleep). Exhaustion fails closed through the same cancellation
 /// token that observed evidence uses, tearing down in-flight turn execution.
 pub const TURN_CANCEL_WATCH_MAX_ATTEMPTS: usize = 8;
-
-pub(super) async fn await_turn_cancellation_start_gate<F, C>(
-    clock: &dyn Clock,
-    mut watch: F,
-) -> Result<Option<TurnCancellationEvidence>, RuntimeError>
-where
-    F: FnMut() -> C,
-    C: std::future::Future<Output = Result<Option<TurnCancellationEvidence>, RuntimeError>>,
-{
-    let mut backoff = TURN_CANCEL_WATCH_RETRY_INITIAL;
-    for attempt in 1..=TURN_CANCEL_START_GATE_ATTEMPTS {
-        match watch().await {
-            Ok(observation) => return Ok(observation),
-            Err(err) if attempt == TURN_CANCEL_START_GATE_ATTEMPTS => return Err(err),
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    attempt,
-                    max_attempts = TURN_CANCEL_START_GATE_ATTEMPTS,
-                    retry_after_ms = backoff.as_millis(),
-                    "turn cancellation start gate failed; retrying before failing the invocation"
-                );
-                clock.sleep(backoff).await;
-                backoff = backoff.saturating_mul(2).min(TURN_CANCEL_WATCH_RETRY_MAX);
-            }
-        }
-    }
-    unreachable!("positive start-gate attempt limit")
-}
 
 pub(super) async fn await_turn_cancellation_with_retry<F, C>(
     clock: &dyn Clock,
@@ -476,10 +445,7 @@ impl LashRuntime {
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_binding =
             turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
-        let turn_control_resolver = match &turn_control_binding {
-            crate::TurnControlBinding::HostOwned { resolver, .. }
-            | crate::TurnControlBinding::RunScoped { resolver, .. } => *resolver,
-        };
+        let turn_control_resolver = turn_control_binding.resolver();
         let turn_control = Arc::new(
             ActiveTurnControl::new(
                 turn_control_resolver,
@@ -603,17 +569,7 @@ impl LashRuntime {
             })?;
         let cancel_state = cancel.clone();
         let finish_scoped_effect_controller = scoped_effect_controller.clone();
-        let (turn_cancel_peek_controller, observes_durable_cancel_after_llm) =
-            match &turn_control_binding {
-                crate::TurnControlBinding::HostOwned {
-                    resolver: _, peek, ..
-                } => (peek, false),
-                crate::TurnControlBinding::RunScoped {
-                    resolver: _,
-                    durable_cancel_after_llm,
-                    ..
-                } => (&finish_scoped_effect_controller, *durable_cancel_after_llm),
-            };
+        let turn_cancel_peek_controller = &finish_scoped_effect_controller;
         let session = self
             .session
             .take()
@@ -645,7 +601,6 @@ impl LashRuntime {
             runtime_lease_owner: self.runtime_lease_owner.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_control: Arc::clone(&turn_control),
-            observes_durable_cancel_after_llm,
             protocol_reply: Default::default(),
             live_opener: std::sync::Mutex::new(None),
             opener_state: crate::session::OpenerState::new(

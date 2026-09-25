@@ -530,11 +530,7 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
         .register_process(registration.clone())
         .await
         .expect("register sleeping process");
-    let worker = recovery_worker(
-        Arc::clone(&registry),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    )
-    .await;
+    let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),
         Arc::clone(&registry),
@@ -617,19 +613,13 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
 #[tokio::test]
 pub(super) async fn process_sleep_wake_verdict_failure_retries_before_settling_recorded_cancel() {
     let process_id = "sleep-cancel-read-retry";
-    let storage = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let registry = Arc::clone(&storage) as Arc<dyn ProcessRegistry>;
-    let continuations = Arc::clone(&storage) as Arc<dyn lash_core::ProcessContinuationStore>;
+    let (registry, continuations) = process_stores();
     let registration = sleeping_process_registration(&ProcessId::from(process_id)).await;
     registry
         .register_process(registration.clone())
         .await
         .expect("register sleeping process");
-    let worker = recovery_worker(
-        Arc::clone(&registry),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    )
-    .await;
+    let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),
         Arc::clone(&registry),
@@ -752,7 +742,7 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
         .expect("register sleeping post-wake-effect process");
     let worker = recovery_worker_with_plugins(
         Arc::clone(&registry),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        memory_session_store_factory().await,
         vec![snapshot_recovery_tool_factory()],
     )
     .await;
@@ -898,11 +888,7 @@ pub(super) async fn typescript_artifact_runs_through_process_engine_to_terminal(
         .await
         .expect("register TypeScript process");
 
-    let worker = recovery_worker(
-        Arc::clone(&registry),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    )
-    .await;
+    let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -1431,10 +1417,10 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
             registration,
             execution_context,
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                Arc::new(lash_core::testing::UnavailableEffectController),
                 durable_admission(&ExecutionScope::process("task-workflow")),
             )
-            .expect("native process scope"),
+            .expect("process scope"),
             0,
             None,
             pending_process_cancel_signal(),
@@ -1454,7 +1440,6 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
             wake_target_session_id: Some(SessionId::from("wake-session")),
             tool_effect_id: Some("tool-effect".to_string()),
             execution_scope_id: "task-workflow".to_string(),
-            effect_journaling: lash_core::EffectJournaling::Local,
         }]
     );
     assert_eq!(
@@ -1695,10 +1680,10 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                Arc::new(lash_core::testing::UnavailableEffectController),
                 durable_admission(&ExecutionScope::process("ob-restart")),
             )
-            .expect("native process scope"),
+            .expect("process scope"),
             0,
             None,
             pending_process_cancel_signal(),
@@ -1752,10 +1737,10 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                Arc::new(lash_core::testing::UnavailableEffectController),
                 durable_admission(&ExecutionScope::process("ob-fresh")),
             )
-            .expect("native process scope"),
+            .expect("process scope"),
             0,
             None,
             pending_process_cancel_signal(),

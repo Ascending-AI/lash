@@ -43,14 +43,17 @@ lash_conformance::attachment_owner_cold_replay_tests!({
         Arc::new(move |duration_ms| clock.advance(duration_ms)) as Arc<dyn Fn(u64) + Send + Sync>
     };
 
+    // PostgreSQL keeps no attachment bytes: a deployment pairs it with a byte
+    // store of its own, here a filesystem one.
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let attachment_store =
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path()));
     (
-        _database_lock,
+        (_database_lock, attachments),
         lash_conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
-            attachment_store: Arc::new(
-                lash_core_execution::facade_support::InMemoryAttachmentStore::new(),
-            ),
+            attachment_store,
             first_effect_controller: Some(first),
             reopen_effect_controller,
             clock,

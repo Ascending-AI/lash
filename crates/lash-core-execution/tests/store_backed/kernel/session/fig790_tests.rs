@@ -35,7 +35,12 @@ struct RecordingProcessEffectController {
 
 struct DeletedSessionProcessEffectController;
 
-impl crate::AwaitEventResolver for DeletedSessionProcessEffectController {}
+impl crate::AwaitEventResolver for DeletedSessionProcessEffectController {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for DeletedSessionProcessEffectController {
@@ -106,7 +111,12 @@ impl RecordingProcessEffectController {
     }
 }
 
-impl crate::AwaitEventResolver for RecordingProcessEffectController {}
+impl crate::AwaitEventResolver for RecordingProcessEffectController {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for RecordingProcessEffectController {

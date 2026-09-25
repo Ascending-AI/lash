@@ -62,7 +62,9 @@ async fn sqlite_effect_host_satisfies_cold_process_await_event_conformance() {
                 format!("cold-process-{nonce}-turn"),
             );
             let store_factory: Arc<dyn SessionStoreFactory> =
-                Arc::new(lash_core_execution::runtime::InMemorySessionStoreFactory::new());
+                Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                    dir.path().join(format!("sessions-{nonce}")),
+                ));
             store_factory
                 .create_store(&lash_core_execution::SessionStoreCreateRequest {
                     pending_observer_intents: Vec::new(),

@@ -13,5 +13,6 @@ lash_conformance::session_read_view_tests!({
     )
     .await;
     let factory = backend.session_store_factory();
-    (backend, factory, move || clock.advance(1))
+    let law_backend = backend.as_backend();
+    (backend, law_backend, factory, move || clock.advance(1))
 });

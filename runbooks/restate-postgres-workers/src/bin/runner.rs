@@ -6,9 +6,8 @@ use lash::sync::MutexExt;
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ScopedEffectController,
-    SessionCommitStore, TurnCancelDisposition, facade_support::NativeRuntimeEffectController,
-    facade_support::TurnAddress, facade_support::TurnCancelOutcome,
+    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, SessionCommitStore,
+    TurnCancelDisposition, facade_support::TurnAddress, facade_support::TurnCancelOutcome,
     facade_support::TurnCancelRequest, facade_support::TurnOutcome, facade_support::TurnStop,
     facade_support::TurnTerminal, facade_support::TurnWorkDriver,
 };

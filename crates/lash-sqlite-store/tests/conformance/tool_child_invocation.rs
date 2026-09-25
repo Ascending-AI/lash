@@ -4,7 +4,7 @@
 //! The laws live in `lash-conformance` so every tier answers one set; this
 //! file supplies the wiring — a host over one backend's journal built with
 //! the lease window the law asked for, the drain that host hands out over the
-//! same journal, and a fresh process registry per scenario.
+//! same journal, and a fresh store set per scenario.
 //!
 //! Its own module rather than a case in the suite body: the recovery law
 //! destroys a Tokio runtime on purpose, and a law that kills the runtime it is
@@ -13,10 +13,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_conformance::{
-    ToolChildDeferrableRouting, ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec,
-};
-use lash_core_execution::EffectHost;
+use lash_conformance::{ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec};
+use lash_core_execution::{EffectHost, StoreSet};
 
 use super::{Retained, SUBSTRATE, with_lease_timings};
 use crate::backend_fixture::{TestBackend, system_clock};
@@ -48,7 +46,7 @@ async fn world(backend: TestBackend, spec: ToolChildWorldSpec) -> ToolChildWorld
 
 /// The fixture both catalogues share: one backend per invocation (the
 /// macro evaluates the block per law), a world factory over its journal, and a
-/// fresh backend's process registry per scenario.
+/// fresh backend's store set per scenario.
 fn fixture() -> ((TestBackend, Retained), &'static str, ToolChildLawFixture) {
     let backend = TestBackend::blocking(SUBSTRATE);
     let worlds = backend.clone();
@@ -63,12 +61,7 @@ fn fixture() -> ((TestBackend, Retained), &'static str, ToolChildLawFixture) {
         Box::pin(async move {
             let backend = TestBackend::open(SUBSTRATE).await;
             registries.keep(&backend);
-            lash_conformance::ToolChildProcesses {
-                registry: backend.process_registry()
-                    as Arc<dyn lash_core_execution::ProcessRegistry>,
-                process_env_store: backend.process_env_store()
-                    as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
-            }
+            Arc::new(backend.stores().clone()) as Arc<dyn StoreSet>
         })
     });
     (
@@ -77,7 +70,6 @@ fn fixture() -> ((TestBackend, Retained), &'static str, ToolChildLawFixture) {
         ToolChildLawFixture {
             make_world,
             make_processes,
-            deferrable_routing: ToolChildDeferrableRouting::Durable,
         },
     )
 }

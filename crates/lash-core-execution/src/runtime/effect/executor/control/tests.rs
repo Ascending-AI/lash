@@ -6,6 +6,11 @@ struct CompletionKeyProbe {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for CompletionKeyProbe {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+
     async fn await_event_key(
         &self,
         _scope: &ExecutionScope,
@@ -14,7 +19,7 @@ impl AwaitEventResolver for CompletionKeyProbe {
         self.issue_calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Err(RuntimeError::new(
-            RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
+            RuntimeErrorCode::AwaitEventUnsupported,
             "probe must not issue a key",
         ))
     }
@@ -81,7 +86,12 @@ async fn completion_key_preparation_issues_nothing_when_deferral_is_impossible()
 
 struct TestResolver;
 
-impl AwaitEventResolver for TestResolver {}
+impl AwaitEventResolver for TestResolver {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for TestResolver {
@@ -123,7 +133,12 @@ struct EffectAdmissionProbe {
 }
 
 #[async_trait::async_trait]
-impl AwaitEventResolver for EffectAdmissionProbe {}
+impl AwaitEventResolver for EffectAdmissionProbe {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for EffectAdmissionProbe {
@@ -772,6 +787,11 @@ struct SelfParkingKeyProbe {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for SelfParkingKeyProbe {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+
     async fn await_event_key(
         &self,
         _scope: &ExecutionScope,
@@ -784,7 +804,7 @@ impl AwaitEventResolver for SelfParkingKeyProbe {
         .await;
         self.key_served.notify_one();
         Err(RuntimeError::new(
-            RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
+            RuntimeErrorCode::AwaitEventUnsupported,
             "the probe serves no key",
         ))
     }

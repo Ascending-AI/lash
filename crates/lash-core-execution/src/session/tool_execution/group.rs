@@ -223,8 +223,7 @@ impl RuntimeExecutionContext<'_> {
     /// Every refusal is typed and happens before `open_effect_group` is
     /// called, so a refused formation leaves no group row stranded: an
     /// administrative scope with no derivable opener, an environment publish
-    /// that refuses a retired owner, a `ProcessLifetime` routing with no known
-    /// issuer, and a `DurableJournaled` participant whose controller names no
+    /// that refuses a retired owner, and a controller that names no
     /// await-event authority all return
     /// [`crate::RuntimeErrorCode::RuntimeEffectGroupShape`].
     ///
@@ -233,11 +232,8 @@ impl RuntimeExecutionContext<'_> {
     /// `attempt_may_defer` seam, and the answer is *recorded* — a `NotNeeded`
     /// or `Unsupported` preparation records `Inline`, which forces the child's
     /// `may_defer` false so its attempt fails on a defer exactly as an
-    /// `Unsupported` key does today; an `Issued` preparation records `Durable`
-    /// for a durable-journaled controller and `ProcessLifetime { issuer }` for
-    /// a local one, where `issuer` is the effect host's
-    /// `turn_control_binding_id` threaded in through
-    /// `with_tool_child_completion_issuer`. The attempt-side honour check
+    /// `Unsupported` key does today; an `Issued` preparation records
+    /// `Durable`. The attempt-side honour check
     /// refuses a recorded arm the controller would not have issued, so a
     /// replayed formation under a different deployment cannot silently
     /// reinterpret the routing.
@@ -269,33 +265,25 @@ impl RuntimeExecutionContext<'_> {
             )
         })?;
 
-        let participation = controller.effect_journaling();
-        let cancellation_authority = match participation {
-            crate::EffectJournaling::Journaled => {
-                let authority = controller
-                    .await_event_authority_binding_id()
-                    .ok_or_else(|| {
-                        crate::RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                            "a durable-journaled tool-child group requires the controller to \
-                         name its await-event authority; without it the child records no \
-                         cancellation authority it can honour",
-                        )
-                    })?;
-                let binding_id =
-                    crate::runtime::turn_control_binding_id_for_scope(&authority, &scope)
-                        .map_err(crate::RuntimeEffectControllerError::from)?;
-                Some(
-                    crate::TurnControlBindingId::new(binding_id).map_err(|error| {
-                        crate::RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                            format!("the derived cancellation authority is not a binding: {error}"),
-                        )
-                    })?,
+        let authority = controller
+            .await_event_authority_binding_id()
+            .ok_or_else(|| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    "a tool-child group requires the controller to name its await-event \
+                     authority; without it the child records no cancellation authority it \
+                     can honour",
                 )
-            }
-            crate::EffectJournaling::Local => None,
-        };
+            })?;
+        let binding_id = crate::runtime::turn_control_binding_id_for_scope(&authority, &scope)
+            .map_err(crate::RuntimeEffectControllerError::from)?;
+        let cancellation_authority =
+            crate::TurnControlBindingId::new(binding_id).map_err(|error| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    format!("the derived cancellation authority is not a binding: {error}"),
+                )
+            })?;
 
         // The environment reference is a durable-owner publish retained inside
         // the request (ADR 0099 §3): a refusal here — a retired owner — is a
@@ -359,7 +347,6 @@ impl RuntimeExecutionContext<'_> {
                 .tool_child_completion_routing(
                     controller,
                     &scope,
-                    participation,
                     &leaf.call.call.tool_id,
                     leaf.admission.grant(),
                     &call_id,
@@ -378,14 +365,12 @@ impl RuntimeExecutionContext<'_> {
                     session_id: self.dispatch.session_id.clone(),
                     agent_frame_id: self.dispatch.agent_frame_id.clone(),
                 },
+                cancellation_authority.clone(),
                 execution_env.clone(),
                 completion_routing,
             );
             if let Some(process_ref) = opener.process_ref() {
                 request = request.with_enclosing_process(process_ref.clone());
-            }
-            if let Some(authority) = &cancellation_authority {
-                request = request.with_cancellation_authority(authority.clone());
             }
             envelopes.push(crate::RuntimeEffectEnvelope::new(
                 crate::RuntimeEffectInvocation::new(
@@ -426,7 +411,6 @@ impl RuntimeExecutionContext<'_> {
         &self,
         controller: &dyn crate::RuntimeEffectController,
         scope: &crate::ExecutionScope,
-        participation: crate::EffectJournaling,
         tool_id: &crate::ToolId,
         grant: Option<&crate::ToolExecutionGrant>,
         call_id: &str,
@@ -453,23 +437,7 @@ impl RuntimeExecutionContext<'_> {
                 // as infrastructure — the batch surface's host-control channel.
                 Ok(ToolChildCompletionRouting::Inline)
             }
-            crate::CompletionKeyPreparation::Issued(_) => match participation {
-                crate::EffectJournaling::Journaled => Ok(ToolChildCompletionRouting::Durable),
-                crate::EffectJournaling::Local => {
-                    let issuer = self.tool_child_completion_issuer.clone().ok_or_else(|| {
-                        crate::RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                            format!(
-                                "tool child `{call_id}` was issued a process-lifetime \
-                                 completion key, but this context knows no issuing registry; \
-                                 a ProcessLifetime route needs the host's turn-control \
-                                 binding id and is refused rather than downgraded to Inline"
-                            ),
-                        )
-                    })?;
-                    Ok(ToolChildCompletionRouting::ProcessLifetime { issuer })
-                }
-            },
+            crate::CompletionKeyPreparation::Issued(_) => Ok(ToolChildCompletionRouting::Durable),
         }
     }
 

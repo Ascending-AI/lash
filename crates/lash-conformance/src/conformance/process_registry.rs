@@ -807,14 +807,6 @@ fn assert_session_refusal<T>(result: Result<T, crate::PluginError>, expected: &s
     }
 }
 
-#[tokio::test]
-async fn process_registry_transition_refusals_are_backend_invariant() {
-    lifecycle_transition_refusals_are_backend_invariant(Arc::new(
-        crate::TestLocalProcessRegistry::default(),
-    ))
-    .await;
-}
-
 /// A terminal parent's ledger row survives the retention prune of its own
 /// process row: the ledger is keyed by scope, not by the parent row.
 pub async fn terminal_completion_atomically_retains_parent_end_plan(
@@ -2157,15 +2149,10 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
         await_output.into_tool_output().is_success(),
         "a retained tombstone await must render as information, not a tool failure"
     );
+    // A cancel names the process by its current reference; a pruned process
+    // has none to name, so the request reads as the tombstone.
     assert!(matches!(
-        crate::NativeRuntimeEffectController::request_process_cancel(
-            Arc::clone(&registry),
-            &process_id,
-            crate::CancelOrigin::OperatorRequested,
-            "test:cancel-after-prune".to_string(),
-            None,
-        )
-        .await,
+        registry.resolve_process_ref(&process_id).await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     assert!(matches!(

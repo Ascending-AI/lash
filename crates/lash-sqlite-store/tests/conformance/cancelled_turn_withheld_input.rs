@@ -29,5 +29,6 @@ async fn sqlite_withheld_input_store(backend: &TestBackend) -> Arc<dyn RuntimePe
 lash_conformance::cancelled_turn_withheld_input_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let store = sqlite_withheld_input_store(&backend).await;
-    (backend, "sqlite", store)
+    let law_backend = backend.as_backend();
+    (backend, "sqlite", law_backend, store)
 });

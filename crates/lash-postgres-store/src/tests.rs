@@ -1364,7 +1364,8 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         .create_store(&request)
         .await
         .expect("create live root authority");
-    let backend = lash_core_execution::attachments::InMemoryAttachmentStore::new();
+    let blobs = tempfile::tempdir().expect("attachment directory");
+    let backend = lash_core_execution::attachments::FileAttachmentStore::new(blobs.path());
     let attachment = lash_core_execution::AttachmentStore::put(
         &backend,
         b"postgres-live-committed-blob".to_vec(),

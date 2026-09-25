@@ -19,7 +19,7 @@ use super::*;
 /// *that* opener's session, frame and controller.
 ///
 /// On a durable tier the group journals and its children stay accepted while
-/// the recorded opener is elsewhere; on the in-memory tier the same gate is
+/// the recorded opener is elsewhere; on a drain-less tier the same gate is
 /// observable at open. Either way, when the recorded opener registers the
 /// child runs under its *recorded* session — which the leaf reports, so a
 /// child that ran under the foreign opener's context instead would be caught
@@ -48,10 +48,10 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
         .expect("a turn scope derives an opener");
     let group_key_a = format!("{prefix}-mismatch-group-a");
     let group_key_b = format!("{prefix}-mismatch-group-b");
-    let env_store = (fixture.make_processes)().await.process_env_store;
+    let env_store = (fixture.make_processes)().await.process_env_store();
     let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
     let observation = Arc::new(LawObservation::default());
-    let registry = (fixture.make_processes)().await.registry;
+    let registry = (fixture.make_processes)().await.process_registry();
 
     let provider = |session_id: &crate::SessionId| -> Arc<dyn crate::ToolProvider> {
         Arc::new(LawLeafProvider {
@@ -65,7 +65,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
     let group = |scope: &crate::ExecutionScope,
                  session_id: &crate::SessionId,
                  group_key: &str,
-                 cancellation: Option<crate::TurnControlBindingId>| {
+                 cancellation: crate::TurnControlBindingId| {
         single_leaf_group(
             scope,
             session_id,
@@ -93,6 +93,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
             (&scope_b, &session_b, &group_key_b, &opener_b),
         ] {
             crashed_world(fixture, {
+                let fixture_processes = Arc::clone(&fixture.make_processes);
                 let scope = scope.clone();
                 let session_id = session_id.clone();
                 let group_key = group_key.clone();
@@ -100,7 +101,6 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                 let env_ref = env_ref.clone();
                 let observation = Arc::clone(&observation);
                 let opener = opener.clone();
-                let routing_kind = fixture.deferrable_routing;
                 move |world| {
                     Box::pin(async move {
                         let _guard = register_opener(
@@ -113,7 +113,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                                 intent_target: crate::ProcessId::from("unused-in-mismatch"),
                                 start_metadata: serde_json::Value::Null,
                             }),
-                            Arc::new(crate::TestLocalProcessRegistry::default()),
+                            fixture_processes().await.process_registry(),
                             env_store,
                             opener,
                             tokio_util::sync::CancellationToken::new(),
@@ -130,7 +130,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                                 &group_key,
                                 &env_ref,
                                 LEAF_DEFERRED,
-                                deferrable_routing(routing_kind, &world.host),
+                                ToolChildCompletionRouting::Durable,
                                 recorded_cancellation_authority(
                                     &world.host,
                                     &crate::admit(scope.clone()),
@@ -282,7 +282,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
     }
 
     {
-        // The in-memory tier: the gate is the open itself, and a live foreign
+        // A drain-less tier: the gate is the open itself, and a live foreign
         // opener does not satisfy it in either direction.
         let host = world.host;
         let scoped_a = host

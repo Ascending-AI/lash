@@ -64,6 +64,8 @@ pub struct SessionDeleteBlobHandles {
     /// Integrator class (ADR 0051): **conformance-suite embedders** supply this
     /// handle for their backend.
     pub probe: Arc<dyn SessionDeleteBlobProbe>,
+    /// A fresh, empty attachment byte store the retention laws put through.
+    pub attachments: Arc<dyn crate::AttachmentStore>,
 }
 
 struct CommittedCheckpoint {
@@ -495,17 +497,6 @@ async fn session_delete_ignores_broken_factory_gc_scope(
     .await;
 }
 
-#[async_trait::async_trait]
-impl SessionDeleteBlobProbe for crate::InMemorySessionStoreFactory {
-    async fn blob_exists(&self, blob_ref: &crate::BlobRef) -> bool {
-        self.checkpoint_blob_exists_for_testing(blob_ref)
-    }
-
-    async fn fail_next_blob_delete(&self) {
-        self.fail_next_session_blob_delete_for_testing();
-    }
-}
-
 /// FIG-2501: fork and pin roots protect attachment bytes after owner deletion.
 #[expect(
     clippy::expect_used,
@@ -523,7 +514,7 @@ async fn attachment_prefix_retention(
         crate::SessionRelation::Root,
     );
     let store = handles.factory.create_store(&request).await.unwrap();
-    let bytes: Arc<dyn crate::AttachmentStore> = Arc::new(crate::InMemoryAttachmentStore::new());
+    let bytes = Arc::clone(&handles.attachments);
     let parent =
         crate::SessionAttachmentStore::new(bytes.clone(), store.clone(), &request.session_id);
     let reference = parent

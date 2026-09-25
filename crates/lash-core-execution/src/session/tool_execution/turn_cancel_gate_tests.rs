@@ -19,7 +19,12 @@ struct AwaitShapeRecorder {
     sleeps: std::sync::Mutex<Vec<(bool, Option<crate::ExecutionScope>)>>,
 }
 
-impl crate::AwaitEventResolver for AwaitShapeRecorder {}
+impl crate::AwaitEventResolver for AwaitShapeRecorder {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for AwaitShapeRecorder {

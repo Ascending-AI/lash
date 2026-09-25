@@ -77,21 +77,28 @@ pub struct DrainEndWorld {
     /// obligation is owed to a lease this runtime does not hold. `None` on a
     /// tier whose group seam is absent.
     pub group_host: Option<Arc<dyn EffectHost>>,
+    /// The store set under test: the ports the drain's runtimes take beside
+    /// the world's own host, catalog and registry.
+    pub stores: Arc<dyn crate::StoreSet>,
 }
 
 /// Wires a drain-end world's host: the product tool-child resolver, so the
 /// drain's tool calls form real effect groups, with the laws' settling
 /// resolver behind it for the synthetic groups the closing laws open. One
 /// controller carries one resolver, so the synthetic one sits behind the
-/// product one rather than beside it.
+/// product one rather than beside it. `process_env_store` is the store set's,
+/// where the tool children's execution environments are published.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: a fresh host has no resolver yet"
 )]
-pub fn install_drain_end_executors(host: Arc<dyn EffectHost>) -> Arc<dyn EffectHost> {
+pub fn install_drain_end_executors(
+    host: Arc<dyn EffectHost>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+) -> Arc<dyn EffectHost> {
     host.install_tool_child_host(crate::facade_support::ToolChildHost::new(
         &host,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        process_env_store,
     ))
     .expect("a fresh host takes the tool-child resolver")
     .with_law_fallback(
@@ -246,8 +253,7 @@ async fn drain_runtime(
 /// drain's effect host (its tool-child resolver already installed, so the
 /// drain's tool groups open there), its session catalog and its registry.
 fn world_backend(world: &DrainEndWorld) -> crate::LawBackend {
-    crate::LawBackend::in_process()
-        .with_effect_host(Arc::clone(&world.effect_host))
+    crate::LawBackend::over_stores(world.stores.as_ref(), Arc::clone(&world.effect_host))
         .with_session_store_factory(Arc::clone(&world.session_factory))
         .with_process_registry(Arc::clone(&world.registry))
 }

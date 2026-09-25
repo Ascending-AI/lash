@@ -35,6 +35,11 @@ pub(super) enum ErrorReturnPlacement {
     /// The effect-lease `renew` inside the tool attempt's execution loop
     /// returns it.
     EffectJournalRenew,
+    /// The journal's `finalize` for the turn's start-gate cancel peek returns
+    /// it (FIG-3647): a failure the deleted start-gate retry ladder
+    /// retried in-process. The start gate is observed once, so the error
+    /// stops the turn unretried.
+    StartGatePeekFinalize,
 }
 
 impl ErrorReturnPlacement {
@@ -49,6 +54,7 @@ impl ErrorReturnPlacement {
             Self::EffectJournalClaim => Some(EffectJournalFaultPoint::Claim),
             Self::EffectJournalFinalize => Some(EffectJournalFaultPoint::Finalize),
             Self::EffectJournalRenew => Some(EffectJournalFaultPoint::Renew),
+            Self::StartGatePeekFinalize => Some(EffectJournalFaultPoint::Finalize),
         }
     }
 
@@ -60,6 +66,7 @@ impl ErrorReturnPlacement {
             Self::EffectJournalClaim => "effect-journal-claim",
             Self::EffectJournalFinalize => "effect-journal-finalize",
             Self::EffectJournalRenew => "effect-journal-renew",
+            Self::StartGatePeekFinalize => "start-gate-peek-finalize",
         }
     }
 }
@@ -201,11 +208,15 @@ fn is_dispatch_seam(operation: &TurnSeamOperation) -> bool {
 /// attached on the SQL tiers, a native or foreign controller elsewhere. The
 /// journal placements run only where the invocation exposes a journal; the
 /// tool-attempt placement runs everywhere.
-pub async fn turn_crash_matrix_error_return_fail_stop<F, I>(make: F, make_error_invocation: I)
-where
+pub async fn turn_crash_matrix_error_return_fail_stop<F, I>(
+    stores: Arc<dyn crate::StoreSet>,
+    make: F,
+    make_error_invocation: I,
+) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
     I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
+    let stores = stores.as_ref();
     let rulings = error_return_rulings();
     validate_error_return_rulings(&rulings)
         .unwrap_or_else(|error| panic!("invalid error-return rulings: {error}"));
@@ -223,7 +234,7 @@ where
             continue;
         }
         Box::pin(run_error_return_case(
-            &make, invocation, ruling, &scenario, &identity,
+            stores, &make, invocation, ruling, &scenario, &identity,
         ))
         .await;
     }
@@ -232,6 +243,7 @@ where
 /// Run one scripted turn with `ruling.placement` armed, then hold the
 /// fail-stop oracle on what the turn did after the error returned.
 async fn run_error_return_case<F>(
+    stores: &dyn crate::StoreSet,
     make: &F,
     invocation: crate::ConformanceInvocation,
     ruling: &ErrorReturnRuling,
@@ -257,6 +269,7 @@ async fn run_error_return_case<F>(
         ..TraceTool::default()
     };
     let runtime = Box::pin(build_runtime(
+        stores,
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
@@ -278,20 +291,22 @@ async fn run_error_return_case<F>(
         );
     }
     let trace = control.trace();
-    let error_index = trace
-        .iter()
-        .position(|operation| {
-            matches!(
-                operation,
-                TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
-            )
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "{scenario} ({:?}): the tool-attempt seam was never reached",
-                ruling.placement
-            )
-        });
+    let faulted_seam = |operation: &TurnSeamOperation| match ruling.placement {
+        ErrorReturnPlacement::StartGatePeekFinalize => matches!(
+            operation,
+            TurnSeamOperation::Effect(EffectOperation::StartGatePeek)
+        ),
+        _ => matches!(
+            operation,
+            TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
+        ),
+    };
+    let error_index = trace.iter().position(faulted_seam).unwrap_or_else(|| {
+        panic!(
+            "{scenario} ({:?}): the faulted seam was never reached",
+            ruling.placement
+        )
+    });
     let continued = &trace[error_index + 1..];
     let injected_code = journal_faults
         .as_ref()
@@ -325,6 +340,16 @@ async fn run_error_return_case<F>(
             .as_ref()
             .is_some_and(|faults| faults.calls_after_fire() > 0),
     };
+    if ruling.placement == ErrorReturnPlacement::StartGatePeekFinalize {
+        // FIG-3647: the start gate is observed once. A retry inside the
+        // attempt would re-peek a gate the journal never sealed, and could
+        // take a command path the first attempt did not.
+        assert!(
+            !observation.retried,
+            "{scenario}: the failed start-gate observation was retried in-process \
+             (observation: {observation:?})"
+        );
+    }
     let violations = fail_stop_violations(&observation, expected_code);
     match &ruling.ticket {
         None => assert!(

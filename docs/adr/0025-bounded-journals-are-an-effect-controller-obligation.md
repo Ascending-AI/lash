@@ -16,8 +16,8 @@ durable-execution systems cap outright (Temporal kills at ~51k history events; I
 decided the reset is not the author's or the host's problem: **the `RuntimeEffectController`
 seam guarantees that executing a process never requires an unbounded single-invocation
 journal**, and each controller meets the guarantee with its backend's native mechanism. The
-inline controller already satisfies it (effects re-drive against lash persistence; there is no
-journal replay) (the inline tier is now the native tier; FIG-2225). `lash-restate` will segment
+inline controller satisfied it (effects re-drove against lash persistence; there was no
+journal replay); it became the native tier (FIG-2225) and FIG-3585 deleted it. `lash-restate` will segment
 a long process across chained invocations keyed by (process id, segment), carrying an
 effect-result checkpoint across the boundary. A future engine with native continue-as-new maps
 to that directly.
@@ -29,7 +29,7 @@ segment-boundary outcome on the effect-controller/run path that the process work
 an ordinary reschedule (the process stays running; never terminal), and promotion of the
 inline tier's effect-replay persistence to a controller-accessible seam so cross-segment
 replay reads durable outcomes instead of carrying an ever-growing checkpoint (the inline tier
-is now the native tier; FIG-2225). Boundary thresholds, next-segment self-submission, and
+became the native tier in FIG-2225 and was deleted in FIG-3585). Boundary thresholds, next-segment self-submission, and
 checkpoint mechanics stay inside the controller crate. Open for the implementation pass: once
 outcomes write through to the replay store, the engine journal stops being the replay source of
 record — deciding how far to lean into that (engine as scheduler over lash-persisted replay) is
@@ -55,15 +55,14 @@ We do not lean into "engine as scheduler over a lash-owned replay store." lash i
 engine-pluggable by design; taking on effect durability to dodge a journal that a proven
 engine already maintains would be re-implementing durable execution for a backend-specific
 symptom, with no reason that generalizes across engines. So: **the engine (Restate journal,
-Temporal history, or the native tier's own persistence) remains the source of record for
+Temporal history, or a SQL tier's effect-replay store) remains the source of record for
 effect durability inside a segment.** The only state that crosses a boundary is a bounded
 resumption snapshot (below), not an effect-replay ledger.
 
 This shrinks the second seam-expansion named above. "Promote the inline effect-replay
 persistence to a controller-accessible seam" is not needed for the engine tiers: cross-boundary
 resume rides the bounded continuation, and within-segment replay stays each engine's own
-concern (the engine journal; the native tier's `runtime_effect_replay` store for the
-engine-less case). We do not expose one tier's replay store to another.
+concern (the engine journal, or a SQL tier's `runtime_effect_replay` store). We do not expose one tier's replay store to another.
 
 ### 2. The boundary trigger is step-count, decided by the controller — never a durable wait
 
@@ -89,7 +88,7 @@ The trigger is a single controller-owned predicate the run loop consults at each
 post-effect point: **`wants_segment_boundary(progress) -> Option<BoundaryReason>`**. The
 controller alone knows its backend's real limit, so the engine decides:
 
-- native tier → always `None` (no journal; runs to completion in one incarnation, unchanged);
+- the SQL tiers → always `None` (the seam's default; their replay store is keyed per effect);
 - `lash-restate` → `Some(..)` as it approaches its replay-payload budget;
 - an engine with native continue-as-new → maps its own suggestion (e.g. Temporal
   `GetContinueAsNewSuggested`) onto the predicate;

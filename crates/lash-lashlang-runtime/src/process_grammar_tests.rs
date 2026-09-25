@@ -90,8 +90,7 @@ pub(crate) async fn run_sleep_process_started_under(
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
     let expected_catalog = Arc::clone(&catalog);
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry = lash_core::Backend::process_registry(&backend);
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "sleep-run")
         .bind_attempt(1);
     let process_events =

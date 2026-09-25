@@ -52,6 +52,10 @@ mod tests {
         )
     }
 
+    fn authority() -> TurnControlBindingId {
+        TurnControlBindingId::new("binding-7").expect("a valid binding id")
+    }
+
     fn env() -> ProcessExecutionEnvRef {
         ProcessExecutionEnvRef::new("env-ref")
     }
@@ -65,6 +69,7 @@ mod tests {
             },
             ToolAttemptEffectIdentity::Scalar { parent: None },
             scope(),
+            authority(),
             env(),
             ToolChildCompletionRouting::Durable,
         )
@@ -75,9 +80,7 @@ mod tests {
     /// the exact failure §3 retains input to prevent.
     #[test]
     fn a_request_round_trips_every_field_through_its_durable_bytes() {
-        let mut original = request().with_cancellation_authority(
-            TurnControlBindingId::new("binding-7").expect("a valid binding id"),
-        );
+        let mut original = request();
         // A consistent process-opener request: the enclosing incarnation is
         // the opener's own, which is the only pair `validate` admits.
         original.scope.opener = EffectOpener::process(process_ref("process-9", 3));
@@ -86,13 +89,7 @@ mod tests {
         let decoded: ToolChildRequest = serde_json::from_str(&json).expect("a request decodes");
         assert_eq!(decoded, original);
         assert_eq!(decoded.version, TOOL_CHILD_REQUEST_VERSION);
-        assert_eq!(
-            decoded
-                .cancellation_authority
-                .as_ref()
-                .map(TurnControlBindingId::as_str),
-            Some("binding-7")
-        );
+        assert_eq!(decoded.cancellation_authority.as_str(), "binding-7");
         assert_eq!(decoded.execution_env.as_str(), "env-ref");
         assert_eq!(
             decoded.enclosing_process,
@@ -200,6 +197,7 @@ mod tests {
             },
             ToolAttemptEffectIdentity::Scalar { parent: None },
             scope(),
+            authority(),
             env(),
             ToolChildCompletionRouting::Inline,
         );
@@ -388,6 +386,24 @@ mod tests {
         );
     }
 
+    /// Every child records the durable authority its opener's cooperative
+    /// signal is fenced on, so a request without one is a truncated record
+    /// rather than a legal one.
+    #[test]
+    fn a_request_without_a_cancellation_authority_does_not_decode() {
+        let mut value = serde_json::to_value(request()).expect("serializes");
+        value
+            .as_object_mut()
+            .expect("a request is a JSON object")
+            .remove("cancellation_authority");
+        let error = serde_json::from_value::<ToolChildRequest>(value)
+            .expect_err("a missing cancellation authority must be refused");
+        assert!(
+            error.to_string().contains("cancellation_authority"),
+            "the refusal must name the missing field, got {error}"
+        );
+    }
+
     /// The environment reference is required, so "no environment" is not a
     /// state the shape can hold. `captured_process_execution_env_ref` returns a
     /// reference or an error, never an absence, so a missing field is a
@@ -407,17 +423,13 @@ mod tests {
         );
     }
 
-    /// A process-lifetime key is a different fact from a durable one, and a reopen that
-    /// guessed would derive a key nothing resolves (ADR 0099 §14).
+    /// An inline child is a different fact from a deferring one, and a reopen
+    /// that guessed would derive a key nothing resolves (ADR 0099 §14).
     #[test]
     fn completion_routing_round_trips_every_mode() {
         for mode in [
             ToolChildCompletionRouting::Inline,
             ToolChildCompletionRouting::Durable,
-            ToolChildCompletionRouting::ProcessLifetime {
-                issuer: TurnControlBindingId::new("registry-identity-1")
-                    .expect("a valid binding id"),
-            },
         ] {
             let mut request = request();
             request.completion_routing = mode.clone();

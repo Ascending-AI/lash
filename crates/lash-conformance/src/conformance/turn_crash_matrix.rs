@@ -125,9 +125,7 @@ pub use pre_cutover_generation::{
     pre_cutover_generation_turn_redrive_is_refused_before_any_effect,
 };
 use pretty_assertions::assert_eq;
-pub(crate) use seam_controllers::{
-    CrashAfterCheckpointExecutionController, SeamEffectController, StoreOwnedTurnControlController,
-};
+pub(crate) use seam_controllers::{CrashAfterCheckpointExecutionController, SeamEffectController};
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
@@ -285,6 +283,9 @@ enum EffectOperation {
     /// ([`direct_turn_acceptance_crash_after_store_commit_admits_one_row`])
     /// crashes here.
     AcceptTurnInput,
+    /// The turn's start-gate cancel peek. It crosses the seam only when an
+    /// error return is armed on it, so the golden trace does not carry it.
+    StartGatePeek,
 }
 
 /// Crash placement relative to the matched semantic operation.
@@ -359,7 +360,6 @@ impl Level2Expectation {
 struct TurnCrashOutcome {
     point: TurnCrashPoint,
     outcome: String,
-    effect_executions_l1: usize,
     #[serde(default)]
     level_2: Option<Level2Expectation>,
 }
@@ -656,109 +656,6 @@ struct SeamStore {
     control: SeamControl,
 }
 
-#[derive(Clone)]
-struct SeamTurnControlResolver {
-    inner: Arc<dyn crate::AwaitEventResolver>,
-    control: SeamControl,
-}
-
-#[async_trait::async_trait]
-impl crate::AwaitEventResolver for SeamTurnControlResolver {
-    async fn prepare_completion_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
-        self.inner
-            .prepare_completion_key(scope, wait, may_defer)
-            .await
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        resolution: crate::Resolution,
-    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
-        match turn_control_resolution_operation(key) {
-            Some(operation) => {
-                self.control
-                    .around(operation, self.inner.resolve_await_event(key, resolution))
-                    .await
-            }
-            None => self.inner.resolve_await_event(key, resolution).await,
-        }
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
-        self.inner.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<crate::Resolution, crate::RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
-    }
-
-    async fn retire_await_events_for_scope(
-        &self,
-        scope: &crate::ExecutionScope,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.retire_await_events_for_scope(scope).await
-    }
-
-    async fn retire_await_events_for_scope_if_quiescent(
-        &self,
-        scope: &crate::ExecutionScope,
-    ) -> Result<bool, crate::RuntimeError> {
-        self.inner
-            .retire_await_events_for_scope_if_quiescent(scope)
-            .await
-    }
-
-    async fn reinstate_await_event_scope(
-        &self,
-        scope: &crate::ExecutionScope,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.reinstate_await_event_scope(scope).await
-    }
-
-    async fn await_event_scope_is_retired(
-        &self,
-        scope: &crate::ExecutionScope,
-    ) -> Result<bool, crate::RuntimeError> {
-        self.inner.await_event_scope_is_retired(scope).await
-    }
-}
-
 impl SeamStore {
     fn wrap(
         inner: Arc<dyn RuntimePersistence>,
@@ -772,22 +669,6 @@ impl SeamStore {
 impl crate::store::RuntimePersistenceDecorator for SeamStore {
     fn inner(&self) -> &(dyn RuntimePersistence + '_) {
         self.inner.as_ref()
-    }
-
-    fn turn_cancellation_authority(
-        &self,
-    ) -> Option<Arc<dyn crate::store::StoreTurnCancellationAuthority>> {
-        self.inner.turn_cancellation_authority().map(|handle| {
-            let authority = crate::concrete_turn_cancellation_authority(&handle);
-            crate::TurnCancellationAuthority::new(
-                authority.binding_id(),
-                Arc::new(SeamTurnControlResolver {
-                    inner: authority.resolver(),
-                    control: self.control.clone(),
-                }),
-            )
-            .into_store_authority()
-        })
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
@@ -1504,7 +1385,14 @@ fn scoped_controller(
     .expect("valid reference turn scope")
 }
 
+/// The execution scope the reference turn runs under: the scope a
+/// journaled invocation for that turn must be opened on.
+fn reference_turn_scope(identity: &ReferenceIdentity) -> crate::ExecutionScope {
+    crate::ExecutionScope::queue_drain(&identity.session_id, identity.turn_id.as_str())
+}
+
 async fn build_runtime(
+    stores: &dyn crate::StoreSet,
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
@@ -1512,6 +1400,7 @@ async fn build_runtime(
     trace_tool: TraceTool,
 ) -> crate::LashRuntime {
     build_runtime_with_lease_timings(
+        stores,
         store,
         control,
         effect_controller,
@@ -1527,6 +1416,7 @@ async fn build_runtime(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn build_runtime_with_lease_timings(
+    stores: &dyn crate::StoreSet,
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
@@ -1535,6 +1425,7 @@ async fn build_runtime_with_lease_timings(
     lease_timings: crate::LeaseTimings,
 ) -> crate::LashRuntime {
     Box::pin(try_build_runtime_with_lease_timings(
+        stores,
         store,
         control,
         effect_controller,
@@ -1548,11 +1439,8 @@ async fn build_runtime_with_lease_timings(
 
 /// Build the reference runtime, returning the builder's refusal instead of
 /// panicking on it: session admission runs inside `build`.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn try_build_runtime_with_lease_timings(
+    stores: &dyn crate::StoreSet,
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
@@ -1561,29 +1449,16 @@ async fn try_build_runtime_with_lease_timings(
     lease_timings: crate::LeaseTimings,
 ) -> Result<crate::LashRuntime, crate::SessionError> {
     super::bind_conformance_session(&store, &identity.session_id).await;
-    // The live host watcher must share the turn controller's await-event registry.
-    let effect_host: Arc<dyn crate::EffectHost> = match effect_controller.effect_journaling() {
-        crate::EffectJournaling::Local => {
-            lash_core::facade_support::bind_store_turn_control_authority(
-                Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller))),
-                store.as_ref(),
-            )
-            .expect("bind crash fixture cancellation authority")
-        }
-        crate::EffectJournaling::Journaled => {
-            assert!(
-                effect_controller
-                    .await_event_authority_binding_id()
-                    .is_some(),
-                "durable crash fixture identifies its promise authority"
-            );
-            Arc::new(InvocationEffectHost {
-                inner: Arc::clone(&effect_controller),
-            })
-        }
-    };
-    let mut host = crate::LawBackend::in_process()
-        .with_effect_host(effect_host)
+    assert!(
+        effect_controller
+            .await_event_authority_binding_id()
+            .is_some(),
+        "durable crash fixture identifies its promise authority"
+    );
+    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(InvocationEffectHost {
+        inner: Arc::clone(&effect_controller),
+    });
+    let mut host = crate::LawBackend::over_stores(stores, effect_host)
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
@@ -1725,23 +1600,30 @@ fn golden_trace() -> Vec<TurnSeamOperation> {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn turn_crash_trace_drift_check<F>(make: F)
-where
+pub async fn turn_crash_trace_drift_check<F, I>(
+    stores: Arc<dyn crate::StoreSet>,
+    make: F,
+    make_invocation: I,
+) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    I: Fn(&str, crate::ExecutionScope) -> super::ConformanceInvocation,
 {
+    let stores = stores.as_ref();
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let raw = make("trace-drift");
     let identity = ReferenceIdentity::for_scenario("trace-drift");
     seed_reference_ingress(&raw, &identity, "trace-drift").await;
     let decorated = SeamStore::wrap(raw, control.clone());
+    let invocation = make_invocation("trace-drift", reference_turn_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::NativeRuntimeEffectController::default()),
+        inner: invocation.controller_handle(),
         control: control.clone(),
         executions,
         journal_faults: None,
     });
     let runtime = Box::pin(build_runtime_with_lease_timings(
+        stores,
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
@@ -1758,6 +1640,7 @@ where
         .await
         .expect("reference turn succeeds")
         .expect("reference ingress produces a turn");
+    invocation.end();
     assert_eq!(turn.assistant_output.safe_text, "trace turn complete");
     assert_eq!(
         control.trace(),
@@ -1896,15 +1779,25 @@ fn pending_input_text(read: &crate::PendingTurnInputRead) -> String {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn turn_crash_matrix_level_1<F, I>(make: F, make_invocation: I)
-where
+pub async fn turn_crash_matrix_level_1<F, I>(
+    stores: Arc<dyn crate::StoreSet>,
+    make: F,
+    make_invocation: I,
+) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> super::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> super::ConformanceInvocation,
 {
-    Box::pin(turn_crash_trace_drift_check(&make)).await;
+    Box::pin(turn_crash_trace_drift_check(
+        Arc::clone(&stores),
+        &make,
+        &make_invocation,
+    ))
+    .await;
+    let stores = stores.as_ref();
     for entry in turn_crash_matrix_outcomes() {
         let scenario = point_key(&entry.point);
         Box::pin(run_crash_matrix_case(
+            stores,
             &make,
             &make_invocation,
             &entry,
@@ -1925,6 +1818,7 @@ where
         .expect("generated matrix contains the renewal-boundary crash point");
     let starved_scenario = format!("{}:starved-renewal", point_key(&renewal_boundary.point));
     Box::pin(run_crash_matrix_case(
+        stores,
         &make,
         &make_invocation,
         &renewal_boundary,

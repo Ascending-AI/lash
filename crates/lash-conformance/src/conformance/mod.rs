@@ -2,9 +2,8 @@
 //!
 //! Each suite is parameterized over a factory that produces a *fresh* backend
 //! instance and asserts the trait's contract invariants. Run the same suite
-//! against every implementation (the production backend and any in-memory test
-//! double) so the contract has one executable source of truth and the doubles
-//! can't drift from production behavior.
+//! against every implementation so the contract has one executable source of
+//! truth.
 //!
 //! Reopen and recovery laws use distinct outer handles over one substrate.
 //! The runtime-persistence recovery laws certify store behavior only across
@@ -27,7 +26,7 @@ pub use lash_core::testing::coordinate_tool_provider_with_services;
 
 mod attachment_adoption;
 pub use attachment_adoption::{
-    abandoned_attachment_write_recovery_after_cold_reopen,
+    AttachmentBytesFactory, abandoned_attachment_write_recovery_after_cold_reopen,
     attachment_condemnation_delete_crash_survives_cold_reopen,
     attachment_condemnation_enumeration_conformance,
     attachment_owner_identity_round_trips_conformance, cross_owner_attachment_adoption_conformance,
@@ -39,7 +38,7 @@ mod attachment_store;
 mod await_event_cold;
 mod backend;
 mod law_backend;
-pub(crate) use law_backend::LawBackend;
+pub(crate) use law_backend::{LawBackend, StoreLawBackend, law_session_store};
 mod cancelled_turn_withheld_input;
 mod cell_binding_drift;
 pub mod cold_process_turn_parent;

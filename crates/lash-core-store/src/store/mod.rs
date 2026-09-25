@@ -1268,15 +1268,6 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
 /// completed atomically by [`SessionCommitStore::commit_runtime_state`].
 #[async_trait::async_trait]
 pub trait TurnInputStore: Send + Sync {
-    /// Reopenable authority for the reserved cancellation promises, when this
-    /// store provides one. Native execution delegates only turn-control waits
-    /// here; durable/custom effect hosts keep their declared owner.
-    fn turn_cancellation_authority(
-        &self,
-    ) -> Option<std::sync::Arc<dyn crate::StoreTurnCancellationAuthority>> {
-        None
-    }
-
     /// Persist or validate the one cancellation authority selected for this
     /// session and, for a Process or runtime-operation controller, its physical
     /// journal scope. Session-bound turns keep their exact canonical address in

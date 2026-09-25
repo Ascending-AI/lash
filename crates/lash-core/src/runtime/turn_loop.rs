@@ -31,10 +31,7 @@ pub(in crate::runtime) use execute::PreparedTurnExecuteContext;
 pub use execute::TURN_CANCEL_WATCH_MAX_ATTEMPTS;
 use execute::TurnDriverRemainder;
 #[cfg(test)]
-use execute::{
-    TURN_CANCEL_START_GATE_ATTEMPTS, await_turn_cancellation_start_gate,
-    await_turn_cancellation_with_retry,
-};
+use execute::await_turn_cancellation_with_retry;
 use lease::DriveClaimToBind;
 use post_commit::PostCommitDelivery;
 pub(in crate::runtime) use prepare::TurnPrepareContext;
@@ -535,8 +532,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::{
-        ActiveTurnControl, TURN_CANCEL_START_GATE_ATTEMPTS, TURN_CANCEL_WATCH_MAX_ATTEMPTS,
-        agent_frame_follow_turn_id, await_turn_cancellation_start_gate,
+        ActiveTurnControl, TURN_CANCEL_WATCH_MAX_ATTEMPTS, agent_frame_follow_turn_id,
         await_turn_cancellation_with_retry, publish_terminal_after_commit,
     };
     use crate::{
@@ -607,6 +603,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AwaitEventResolver for RejectTerminalPublication {
+        fn await_event_authority_binding_id(&self) -> Option<String> {
+            self.inner.await_event_authority_binding_id()
+        }
+
         async fn await_event_key(
             &self,
             scope: &ExecutionScope,
@@ -739,38 +739,6 @@ mod tests {
             "the live cancellation watcher must exhaust its retry budget before teardown"
         );
         assert_eq!(clock.sleeps().len(), TURN_CANCEL_WATCH_MAX_ATTEMPTS - 1);
-    }
-
-    #[tokio::test]
-    async fn cancellation_start_gate_fails_after_bounded_retries() {
-        let clock = RecordingTestClock::new();
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let observed_attempts = Arc::clone(&attempts);
-        let err = await_turn_cancellation_start_gate(&clock, move || {
-            observed_attempts.fetch_add(1, Ordering::SeqCst);
-            async {
-                Err(RuntimeError::new(
-                    crate::RuntimeErrorCode::CancelStartGateUnavailable,
-                    "temporary ingress failure",
-                ))
-            }
-        })
-        .await
-        .expect_err("start gate must fail closed after its retry budget");
-
-        assert_eq!(
-            attempts.load(Ordering::SeqCst),
-            TURN_CANCEL_START_GATE_ATTEMPTS
-        );
-        assert_eq!(err.code.to_string(), "cancel_start_gate_unavailable");
-        assert_eq!(
-            clock.sleeps(),
-            vec![
-                std::time::Duration::from_millis(25),
-                std::time::Duration::from_millis(50),
-            ],
-            "start-gate retries must sleep on the injected clock"
-        );
     }
 
     #[tokio::test]

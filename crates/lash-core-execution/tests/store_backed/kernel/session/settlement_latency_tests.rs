@@ -300,11 +300,8 @@ fn probe_context_with(
         crate::TurnContext::default(),
     );
     context = context.with_tool_child_host(host);
-    if let Some((guard, issuer)) = wiring {
+    if let Some(guard) = wiring {
         context = context.with_live_opener_guard(Arc::new(guard));
-        if let Some(issuer) = issuer {
-            context = context.with_tool_child_completion_issuer(issuer);
-        }
     }
     context
 }

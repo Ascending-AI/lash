@@ -36,10 +36,6 @@ mod error;
 mod observation_publisher;
 use lash_core_execution::runtime::host;
 #[cfg(feature = "testing")]
-pub use lash_core_execution::runtime::in_memory_store;
-#[cfg(not(feature = "testing"))]
-pub(crate) use lash_core_execution::runtime::in_memory_store;
-#[cfg(feature = "testing")]
 pub use lash_core_store::input_normalization as io;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::input_normalization as io;
@@ -205,11 +201,10 @@ pub use effect::{
     CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet, ChildDrainOutcome,
     CommandJournalGuard, CompletionKeyPreparation, DrainedChild, EffectAddress,
     EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, EffectJournaling, EffectOpener,
-    EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildBinding,
-    GroupDrainReport, GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen,
-    GroupSettlement, GroupWakePolicy, IndependentEffectWork, LlmRequestSpec, LlmStreamRecord,
-    LoserPolicy, NativeEffectHost, NativeRuntimeEffectController, OpenerFinalizationSteps,
+    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
+    ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupDrainReport, GroupExecutors,
+    GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement, GroupWakePolicy,
+    IndependentEffectWork, LlmRequestSpec, LlmStreamRecord, LoserPolicy, OpenerFinalizationSteps,
     ProcessCommand, ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver,
     ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
     QueuedLaneHolder, QueuedLaneProbe, RankedGroupSettlement, RecordedJournal, RecordedKeyFence,
@@ -225,10 +220,9 @@ pub use effect::{
     ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolChildDriver, ToolIntentOutcomeSink,
     ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    UnsettledEffectGroup, concrete_turn_cancellation_authority, effect_groups_unsupported,
-    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, UnsettledEffectGroup,
+    effect_groups_unsupported, refuse_unhonored_group_membership,
+    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 #[cfg(feature = "testing")]
 pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
@@ -246,9 +240,6 @@ pub use host::{
     RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeHostConfig, RuntimePromptConfig,
     RuntimeProviderConfig, RuntimeTracingConfig,
 };
-#[cfg(any(test, feature = "testing"))]
-pub use in_memory_store::RawSessionExecutionLeaseRow;
-pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;
 pub use lash_core_execution::runtime::DirectCompletionClient;
 pub use lash_core_execution::runtime::EffectOpenerError;
@@ -282,63 +273,62 @@ pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, ArtifactOwner,
-    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, HandleId,
-    InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent,
-    ObservedProcessEventLite, ObservedProcessEventPage, ObservedProcessEventReadOutcome,
-    ObservedWorkItem, ObservedWorkItemState, OnParentEnd, PARENT_SCOPE_STORAGE_PAYLOAD_VERSION,
-    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
-    PROCESS_LEASE_SCHEMA_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndPlan, ParentScope,
-    ParentScopeStorageError, PersistedSegmentHandover, ProcessArtifactCleanup,
-    ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessDefinitionRef,
-    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionValue,
-    ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
-    ProcessEffectOutcomeClass, ProcessEffectSummary, ProcessEffectSummaryError,
-    ProcessEffectSummaryOccurrence, ProcessEngine, ProcessEngineAdmission, ProcessEngineKind,
-    ProcessEngineProcessContext, ProcessEngineRegistration, ProcessEngineRegistry,
-    ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEvent,
-    ProcessEventAppendPlan, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
-    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink,
-    ProcessEventSinkRegistration, ProcessEventType, ProcessExecutionContext,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
-    ProcessIdentity, ProcessIncarnation, ProcessInfraError, ProcessInput, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeaseSchemaVersionError,
-    ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
-    ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance,
-    ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef, ProcessRegistrar,
-    ProcessRegistration, ProcessRegistrationDisposition, ProcessRegistrationOutcome,
-    ProcessRegistrationProbe, ProcessRegistrationRefusal, ProcessRegistry, ProcessRegistryBinding,
-    ProcessResumeRefusal, ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts,
-    ProcessSegmentKey, ProcessService, ProcessSessionDeleteReport, ProcessSignature,
-    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
-    ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone, ProcessToolIntents,
-    ProcessToolVisibilityFilter, ProcessTransition, ProcessTransitionPlan, ProcessValueSelector,
-    ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeOutbox,
-    ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot, ProcessWorklistCursor,
-    ProcessWorklistPage, ProjectionWatermark, RecoveryContract, SegmentHandover,
-    SegmentStartMarker, SessionId, SessionObserverIntentSource, SessionScope, SessionScopeId,
-    StoreRealization, UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind,
-    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, allocate_process_event_sequence,
-    apply_process_event_projection, apply_process_status_projection,
-    artifact_destination_owner_retired_error, artifact_owner_is_permanently_retired,
-    artifact_owner_retired_error, artifact_staging_edge_missing_error,
-    artifact_staging_owner_edge_is_missing, artifact_store_plugin_error, current_epoch_ms,
-    ensure_process_lease_schema_version, fold_process_record, load_process_execution_env,
-    materialize_process_event_semantics, prepare_process_event_append,
-    prepare_process_registration, prepare_process_start, prepare_process_transition,
-    process_registration_fingerprint, process_runtime_session_ids, process_signal_event_type,
-    process_signal_name_from_event_type, process_signal_wait_key, process_wake_delivery,
-    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
-    publish_process_execution_env, reconcile_pruned_trigger_deliveries,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, HandleId, ObservedProcess,
+    ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
+    ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState, OnParentEnd,
+    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_EFFECT_OCCURRENCE_CAP,
+    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_LEASE_SCHEMA_VERSION,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndPlan, ParentScope, ParentScopeStorageError,
+    PersistedSegmentHandover, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
+    ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEffectNodeSummary,
+    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
+    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
+    ProcessEngineAdmission, ProcessEngineKind, ProcessEngineProcessContext,
+    ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
+    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEvent, ProcessEventAppendPlan,
+    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHistoryRetention,
+    ProcessEventLite, ProcessEventLog, ProcessEventPage, ProcessEventPageEvents,
+    ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemantics,
+    ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventSinkRegistration, ProcessEventType,
+    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation, ProcessInfraError,
+    ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
+    ProcessLeaseSchemaVersionError, ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy,
+    ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
+    ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter,
+    ProcessOutcome, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef,
+    ProcessRegistrar, ProcessRegistration, ProcessRegistrationDisposition,
+    ProcessRegistrationOutcome, ProcessRegistrationProbe, ProcessRegistrationRefusal,
+    ProcessRegistry, ProcessRegistryBinding, ProcessResumeRefusal, ProcessRetention,
+    ProcessRunOutcome, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService,
+    ProcessSessionDeleteReport, ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration,
+    ProcessStartOptions, ProcessStartOutcome, ProcessStartPlan, ProcessStartRequest,
+    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSemantics,
+    ProcessTerminalSpec, ProcessTombstone, ProcessToolIntents, ProcessToolVisibilityFilter,
+    ProcessTransition, ProcessTransitionPlan, ProcessValueSelector, ProcessWake,
+    ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeOutbox, ProcessWakeSpec,
+    ProcessWorkObserver, ProcessWorkSnapshot, ProcessWorklistCursor, ProcessWorklistPage,
+    ProjectionWatermark, RecoveryContract, SegmentHandover, SegmentStartMarker, SessionId,
+    SessionObserverIntentSource, SessionScope, SessionScopeId, StoreRealization,
+    UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, allocate_process_event_sequence, apply_process_event_projection,
+    apply_process_status_projection, artifact_destination_owner_retired_error,
+    artifact_owner_is_permanently_retired, artifact_owner_retired_error,
+    artifact_staging_edge_missing_error, artifact_staging_owner_edge_is_missing,
+    artifact_store_plugin_error, current_epoch_ms, ensure_process_lease_schema_version,
+    fold_process_record, load_process_execution_env, materialize_process_event_semantics,
+    prepare_process_event_append, prepare_process_registration, prepare_process_start,
+    prepare_process_transition, process_registration_fingerprint, process_runtime_session_ids,
+    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
+    process_wake_delivery, process_wake_input_from_event_payload, process_wake_turn_cause,
+    process_wake_turn_text, publish_process_execution_env, reconcile_pruned_trigger_deliveries,
     reconcile_session_process_observer_intents, require_event_replay,
     settle_started_process_engine_artifacts, settle_started_process_execution_env,
     terminal_append_request, terminal_event_type_name, tool_failure_code,
@@ -348,9 +338,8 @@ pub use process::{
 #[cfg(any(test, feature = "testing"))]
 pub use process::{
     ConformanceProcessRegistry, EffectSummaryAppendFaults, PROCESS_REFUSAL_FIXTURE_PROCESS_ID,
-    ProcessEventLogTestSupport, ProcessRegistryTestSupport, TestLocalProcessRegistry,
-    TestProcessRegistryWriteExt, accepted_process_registration, fail_parent_end_once,
-    refused_process_registrations,
+    ProcessEventLogTestSupport, ProcessRegistryTestSupport, TestProcessRegistryWriteExt,
+    accepted_process_registration, fail_parent_end_once, refused_process_registrations,
 };
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{
@@ -557,6 +546,3 @@ pub struct LashRuntime {
     /// another driver answered them, so committing would answer them twice.
     pub(crate) journaled_drive_claims: std::collections::BTreeSet<String>,
 }
-
-#[cfg(any(test, feature = "testing"))]
-pub use in_memory_store::in_memory_lineage_handles;

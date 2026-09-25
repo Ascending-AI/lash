@@ -45,4 +45,7 @@ rmp-serde.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+# The store-contract self-tests replay their cases against a real store: a
+# SQLite memory store set.
+lash-sqlite-store.workspace = true
 tempfile.workspace = true

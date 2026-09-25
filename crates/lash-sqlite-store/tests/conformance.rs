@@ -178,22 +178,6 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
 }
 
 #[test]
-fn conformance_invocation_lifecycle_control_is_consumable_cross_crate() {
-    use lash_conformance::{ConformanceEffectRedrive, ConformanceInvocation};
-
-    let invocation = ConformanceInvocation::native();
-    assert_eq!(
-        ConformanceInvocation::effect_redrive(&invocation),
-        ConformanceEffectRedrive::ReexecutesUncommitted
-    );
-    let _journaled_redrive = ConformanceEffectRedrive::ReplaysJournal;
-    let _controller = ConformanceInvocation::controller(&invocation);
-    let _controller_handle = ConformanceInvocation::controller_handle(&invocation);
-    let successor = ConformanceInvocation::redrive(invocation);
-    ConformanceInvocation::end(successor);
-}
-
-#[test]
 fn trigger_subscription_owner_filter_is_pushed_down() {
     lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
         "SQLite",

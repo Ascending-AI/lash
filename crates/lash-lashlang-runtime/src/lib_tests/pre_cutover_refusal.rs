@@ -24,7 +24,12 @@ struct CrossingCounter {
     crossings: AtomicUsize,
 }
 
-impl lash_core::AwaitEventResolver for CrossingCounter {}
+impl lash_core::AwaitEventResolver for CrossingCounter {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for CrossingCounter {
@@ -183,8 +188,7 @@ async fn run_counted(
         lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone()).build();
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry = lash_core::Backend::process_registry(&crate::lib_tests::memory_backend().await);
     let authority =
         lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "pre-cutover-run")
             .bind_attempt(1);

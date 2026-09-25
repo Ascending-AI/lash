@@ -199,6 +199,10 @@ fn tool_request(scope: &ExecutionScope) -> lash_core::runtime::effect::ToolChild
             session_id: SessionId::from(SESSION),
             agent_frame_id: lash_core::FrameNodeId::new("frame").expect("a valid frame id"),
         },
+        // The child is refused at the session gate, before any authority is
+        // consulted.
+        lash_core::TurnControlBindingId::new("restate-session-gate-law")
+            .expect("a valid binding id"),
         lash_core::ProcessExecutionEnvRef::new("env"),
         lash_core::runtime::effect::ToolChildCompletionRouting::Durable,
     )

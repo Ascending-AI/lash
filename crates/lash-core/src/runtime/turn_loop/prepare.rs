@@ -146,10 +146,7 @@ impl LashRuntime {
                 let turn_control_binding =
                     turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller)
                         .await?;
-                let turn_control_resolver = match &turn_control_binding {
-                    crate::TurnControlBinding::HostOwned { resolver, .. }
-                    | crate::TurnControlBinding::RunScoped { resolver, .. } => *resolver,
-                };
+                let turn_control_resolver = turn_control_binding.resolver();
                 let turn_control = ActiveTurnControl::new(
                     turn_control_resolver,
                     TurnAddress::new(&self.state.session_id, &trace_turn_id),

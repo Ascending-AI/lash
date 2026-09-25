@@ -60,10 +60,9 @@ observation.
 ## Where a durability test stands
 
 A test about durability enters above the emission point, through the public API,
-against a host that actually replays. `NativeEffectHost` never replays; it is
-the right choice for tests about something else and the wrong choice for tests
-about durability. It is currently the overwhelming default, and changing that is
-a migration, not a preference — see Consequences.
+against a host that actually replays. Every effect host now journals and
+replays: FIG-3585 deleted `NativeEffectHost`, which never replayed and had been
+the overwhelming default test host (ADR 0102 D1, kept by ADR 0104).
 
 ## What is not a test
 

@@ -17,9 +17,11 @@ lash_conformance::direct_turn_acceptance_tests!({
         return;
     };
     reset(storage.pool()).await;
+    let (attachments, backend) = super::pg_law_backend(&storage);
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres",
+        backend,
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
     )
 });

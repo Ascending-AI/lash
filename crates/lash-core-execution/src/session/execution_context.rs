@@ -82,15 +82,6 @@ pub struct RuntimeExecutionContext<'run> {
     /// finalizes through. `None` on Restate, whose engine-side group index is
     /// the twin, and wherever no host wired one.
     pub(crate) group_closing: Option<Arc<dyn crate::StoreEffectGroupClosing>>,
-    /// The turn-control binding id of the host the runtime's tool children
-    /// resolve on, recorded onto a group child's `ProcessLifetime` completion
-    /// routing (ADR 0099 §14). That is the host `install_tool_child_host`
-    /// registered — a bound session may re-bind `control.effect_host` to a
-    /// store authority, which must not be mistaken for the issuer. `None`
-    /// where no host was in scope at context construction; a leaf that then
-    /// needs the issuer is a typed formation refusal, never a silent `Inline`
-    /// downgrade.
-    pub(crate) tool_child_completion_issuer: Option<crate::TurnControlBindingId>,
     /// Keeps this context's live-opener registration alive for the context's
     /// lifetime: a `LiveOpenerGuard` deregisters on drop, and a test context
     /// that opened a tool-child group while its guard was already dropped
@@ -499,7 +490,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             issuing_language_node_id: None,
             batch_parent_call_id: None,
             process_work: None,
-            tool_child_completion_issuer: None,
             #[cfg(any(test, feature = "testing"))]
             live_opener_guard: None,
             #[cfg(any(test, feature = "testing"))]
@@ -536,7 +526,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             opener_groups: Arc::clone(&self.opener_groups),
             group_closing: self.group_closing.clone(),
-            tool_child_completion_issuer: self.tool_child_completion_issuer.clone(),
             #[cfg(any(test, feature = "testing"))]
             live_opener_guard: self.live_opener_guard.clone(),
             #[cfg(any(test, feature = "testing"))]
@@ -721,19 +710,6 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn with_parent_invocation(mut self, metadata: crate::RuntimeInvocation) -> Self {
         self.parent_invocation = Some(metadata);
-        self
-    }
-
-    /// The issuer identity recorded onto a group child's `ProcessLifetime`
-    /// completion routing (ADR 0099 §14): the `turn_control_binding_id` of
-    /// the host tool children resolve on (`ToolChildHost::
-    /// tool_child_completion_issuer`), threaded in where the context is built
-    /// with a host in scope.
-    pub fn with_tool_child_completion_issuer(
-        mut self,
-        issuer: crate::TurnControlBindingId,
-    ) -> Self {
-        self.tool_child_completion_issuer = Some(issuer);
         self
     }
 

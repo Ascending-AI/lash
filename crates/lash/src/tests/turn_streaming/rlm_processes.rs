@@ -472,18 +472,13 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
             .expect("open the SQLite backend"),
     );
     let store_factory = backend.session_store_factory();
-    let controller = Arc::new(RecordingDurableEffectController::default());
-    let effect_host = Arc::new(DurableNoopEffectHost {
-        controller: Arc::clone(&controller),
-        ..Default::default()
-    });
-    let scoped_effect_controller = ScopedEffectController::borrowed(
-        controller.as_ref(),
-        lash_core::AdmittedScope::turn(session_id, root_turn_id),
-    )
-    .expect("scoped durable effect controller");
-    let backend = DecoratedBackend::over(backend).effect_host(move |_| effect_host);
-    let core = LashCore::standard_builder(Arc::new(backend), crate::TurnBudget::Unbounded)
+    let controller = EffectRecorder::default();
+    let backend = controller.layered_over(backend);
+    let scoped_effect_controller = lash_core::Backend::effect_host(backend.as_ref())
+        .scoped_static(lash_core::AdmittedScope::turn(session_id, root_turn_id))
+        .expect("scope the root turn")
+        .expect("the backend host lends a static controller");
+    let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(agent_frame_switch_provider())
         .model(mock_model_spec())

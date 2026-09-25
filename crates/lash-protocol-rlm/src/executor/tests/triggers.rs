@@ -98,7 +98,7 @@ async fn execute_with_deferred_trigger(
         &mut state,
         lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
             crate::testing::memory_backend_ports().await,
-            Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+            crate::testing::memory_trigger_store().await,
             crate::testing::memory_process_registry().await,
             lash_core::testing::exec_code_invocation(
                 "session",
@@ -295,7 +295,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
                 crate::testing::memory_backend_ports().await,
-                Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+                crate::testing::memory_trigger_store().await,
                 crate::testing::memory_process_registry().await,
                 lash_core::testing::exec_code_invocation(
                     "session",
@@ -476,7 +476,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
     let mut state = RlmExecutionState::new();
     let ctx = lash_core::testing::code_execution_context_with_trigger_store(
         crate::testing::ports_over_host(capture.effect_host().await).await,
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+        crate::testing::memory_trigger_store().await,
         crate::testing::memory_process_registry().await,
     );
     let surface = LashlangSurface::new(
@@ -651,7 +651,7 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
 #[test]
 pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store() {
     block_on(async {
-        let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+        let store = crate::testing::memory_trigger_store().await;
         let capture = TriggerEffectCapture::default();
         let ctx = lash_core::testing::code_execution_context_with_trigger_store(
             crate::testing::ports_over_host(capture.effect_host().await).await,
@@ -840,7 +840,7 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
 #[test]
 pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregister() {
     block_on(async {
-        let trigger_store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+        let trigger_store = crate::testing::memory_trigger_store().await;
         let artifact_store = crate::testing::fresh_memory_artifact_store().await;
         let surface = LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
@@ -1863,7 +1863,7 @@ async fn execute_typescript_with_capturing_trigger_effects(
         &mut state,
         lash_core::testing::code_execution_context_with_trigger_store(
             crate::testing::ports_over_host(capture.effect_host().await).await,
-            Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+            crate::testing::memory_trigger_store().await,
             crate::testing::memory_process_registry().await,
         ),
         ExecRequest {

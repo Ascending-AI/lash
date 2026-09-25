@@ -9,6 +9,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn run_crash_matrix_case<F, I>(
+    stores: &dyn crate::StoreSet,
     make: &F,
     make_invocation: &I,
     entry: &TurnCrashOutcome,
@@ -16,7 +17,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
     pressure: RenewalPressure,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> super::super::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> super::super::ConformanceInvocation,
 {
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = make(scenario);
@@ -24,8 +25,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
-    let invocation = make_invocation(scenario);
-    let effect_redrive = invocation.effect_redrive();
+    let invocation = make_invocation(scenario, reference_turn_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -33,6 +33,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
         journal_faults: None,
     });
     let runtime = Box::pin(build_runtime(
+        stores,
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),
@@ -82,6 +83,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
             journal_faults: None,
         });
     let successor = Box::pin(build_runtime_with_lease_timings(
+        stores,
         Arc::clone(&successor_store),
         successor_control.clone(),
         Arc::clone(&successor_effect_controller),
@@ -100,7 +102,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
         &identity,
     ))
     .await;
-    let starved_reexecution = if pressure == RenewalPressure::Starved {
+    if pressure == RenewalPressure::Starved {
         let error = recovered.expect_err("a lapsed lane cannot commit the admitted run");
         assert_eq!(error.code, crate::RuntimeErrorCode::QueuedRunPending);
         assert!(
@@ -135,6 +137,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
             journal_faults: None,
         });
         let runtime = Box::pin(build_runtime_with_lease_timings(
+            stores,
             SeamStore::wrap(make(scenario), control.clone()),
             control,
             Arc::clone(&controller),
@@ -147,16 +150,11 @@ pub(super) async fn run_crash_matrix_case<F, I>(
             .await
             .unwrap_or_else(|error| panic!("starved run redrive failed for {scenario}: {error}"));
         redrive.end();
-        usize::from(matches!(
-            effect_redrive,
-            super::super::ConformanceEffectRedrive::ReexecutesUncommitted
-        ))
     } else {
         recovered
             .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
         successor_invocation.end();
-        0
-    };
+    }
 
     let reader = make(scenario);
     super::super::bind_conformance_session(&reader, &identity.session_id).await;
@@ -189,6 +187,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
     let drain_turns = usize::from(!deferred_texts.is_empty());
     if drain_turns == 1 {
         Box::pin(drive_drain_turn(
+            stores,
             make,
             make_invocation,
             scenario,
@@ -254,15 +253,13 @@ pub(super) async fn run_crash_matrix_case<F, I>(
         "{scenario} ({entry:?}): recovery settles durable queued-run ownership"
     );
     let effect_count = executions.load(std::sync::atomic::Ordering::SeqCst);
-    let expected_effect_count = match effect_redrive {
-        super::super::ConformanceEffectRedrive::ReplaysJournal => {
-            usize::from(matches!(
-                entry.point.placement,
-                CrashPlacement::AfterExternalEffectBeforeOutcome
-            )) + 1
-        }
-        super::super::ConformanceEffectRedrive::ReexecutesUncommitted => entry.effect_executions_l1,
-    } + starved_reexecution
+    // The successor replays every effect its predecessor completed from the
+    // journal; only an effect whose outcome was lost after it ran externally
+    // executes a second time.
+    let expected_effect_count = usize::from(matches!(
+        entry.point.placement,
+        CrashPlacement::AfterExternalEffectBeforeOutcome
+    )) + 1
         + drain_turns * DRAIN_TURN_EFFECT_EXECUTIONS;
     assert_eq!(
         effect_count, expected_effect_count,
@@ -274,6 +271,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
 /// Drive one further clean turn to absorb inputs the recovered turn deferred to
 /// the next turn.
 async fn drive_drain_turn<F, I>(
+    stores: &dyn crate::StoreSet,
     make: &F,
     make_invocation: &I,
     scenario: &str,
@@ -281,7 +279,7 @@ async fn drive_drain_turn<F, I>(
     executions: &Arc<std::sync::atomic::AtomicUsize>,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> super::super::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> super::super::ConformanceInvocation,
 {
     // The drain turn is a new turn, not a recovery of the crashed one, so it
     // gets its own turn identity: reusing the recovered turn's id would collide
@@ -293,7 +291,7 @@ async fn drive_drain_turn<F, I>(
     let identity = &identity;
     let control = SeamControl::default();
     let store = SeamStore::wrap(make(scenario), control.clone());
-    let invocation = make_invocation(&identity.turn_id);
+    let invocation = make_invocation(&identity.turn_id, reference_turn_scope(identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -301,6 +299,7 @@ async fn drive_drain_turn<F, I>(
         journal_faults: None,
     });
     let runtime = Box::pin(build_runtime_with_lease_timings(
+        stores,
         store,
         control.clone(),
         Arc::clone(&effect_controller),

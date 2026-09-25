@@ -2280,7 +2280,8 @@ pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    effect_host: Arc<dyn crate::EffectHost>,
 ) {
     const OTHER_BINDING_ID: &str = "lash-conformance-turn-cancel-v1-impostor";
     let request = session_store_request(
@@ -2348,13 +2349,13 @@ pub(super) async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
     // Authorize: the authorization carrying the other binding is refused
     // before the one carrying the session's binding is accepted — an oracle
     // that only checks refusal would pass a store that refused everything.
-    // The honest authorization carries real await keys minted by the store's
-    // own resolver, so the settle phase's control is a *successful* closure,
-    // not a downstream error dressed as one.
-    let authority = crate::concrete_turn_cancellation_authority(
-        &store
-            .turn_cancellation_authority()
-            .expect("the store exposes a cancellation authority"),
+    // The honest authorization carries real await keys minted by the
+    // substrate's effect host, which owns turn cancellation, so the settle
+    // phase's control is a *successful* closure, not a downstream error
+    // dressed as one.
+    let authority = crate::TurnCancellationAuthority::new(
+        TURN_CANCEL_BINDING_ID,
+        Arc::clone(&effect_host) as Arc<dyn crate::AwaitEventResolver>,
     );
     let resolver = authority.resolver();
     let authorized = crate::TurnCancelClosureAuthorization::new(

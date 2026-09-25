@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Effect promise semantics and native await-event storage for the Lash runtime kernel."
+description = "Effect promise semantics for the Lash runtime kernel."
 keywords = ["lash", "agent", "runtime", "async", "ai"]
 categories = ["asynchronous", "api-bindings"]
 
@@ -35,9 +35,6 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
-hmac = { workspace = true }
-sha2 = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash-core-ids = { workspace = true, features = ["testing"] }

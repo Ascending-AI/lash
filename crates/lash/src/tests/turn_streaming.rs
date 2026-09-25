@@ -2,7 +2,6 @@ use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
-use lash_core::AwaitEventResolver as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::{LockResultExt, MutexExt};
@@ -398,154 +397,6 @@ struct DurableEffectInvocation {
     replay_key: Option<String>,
 }
 
-#[derive(Default)]
-struct RecordingDurableEffectController {
-    invocations: StdMutex<Vec<DurableEffectInvocation>>,
-    native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
-}
-
-impl RecordingDurableEffectController {
-    fn invocations(&self) -> Vec<DurableEffectInvocation> {
-        self.invocations.lock_recover().clone()
-    }
-}
-
-#[async_trait]
-impl lash_core::AwaitEventResolver for RecordingDurableEffectController {
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> std::result::Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.native.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> std::result::Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(format!("recording-durable-controller:{:p}", self))
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> std::result::Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-}
-
-#[async_trait]
-impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
-        lash_core::EffectJournaling::Journaled
-    }
-
-    async fn execute_effect(
-        &self,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
-    {
-        self.invocations
-            .lock_recover()
-            .push(DurableEffectInvocation {
-                kind: envelope.command.kind(),
-                execution_scope: envelope.invocation.execution_scope().clone(),
-                turn_id: envelope.invocation.attribution.turn_id.clone(),
-                replay_key: Some(envelope.invocation.replay_key().to_owned()),
-            });
-        if matches!(
-            &envelope.command,
-            lash_core::RuntimeEffectCommand::PeekAwaitEvent { .. }
-        ) {
-            return Ok(lash_core::RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
-        }
-        local_executor.execute(envelope).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
-    {
-        self.native.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.native.native_effect_groups_substrate()
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
-    {
-        self.native.await_next_settlement(handle, cancel).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.close_effect_group(handle, disposition).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> std::result::Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.commit_group_child_final(commit).await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.read_group_settlement(group_key, rank).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
-    }
-}
-
 /// Records every effect envelope that crosses the effect boundary, and the
 /// outcome of each one that ran.
 #[derive(Clone, Default)]
@@ -588,9 +439,18 @@ impl EffectRecorder {
     /// A fresh SQLite memory backend whose effect host has this recorder
     /// layered over every controller it lends.
     async fn backend(&self) -> Arc<DecoratedBackend> {
+        self.layered_over(memory_backend().await)
+    }
+
+    /// `backend`, with this recorder layered over every controller its
+    /// effect host lends.
+    fn layered_over(
+        &self,
+        backend: Arc<lash_sqlite_store::SqliteBackend>,
+    ) -> Arc<DecoratedBackend> {
         let layer = Arc::new(self.clone());
         Arc::new(
-            DecoratedBackend::over_sqlite(memory_backend().await).effect_host(move |inner| {
+            DecoratedBackend::over_sqlite(backend).effect_host(move |inner| {
                 Arc::new(lash_core::testing::LayeredEffectHost::new(inner, layer))
             }),
         )
@@ -615,320 +475,38 @@ impl lash_core::testing::EffectLayer for EffectRecorder {
     }
 }
 
-/// A bare controller for the explicit-effects entry points, which take a
-/// controller rather than a host: it records into an [`EffectRecorder`] and
-/// runs each effect locally.
-#[derive(Default)]
-struct RecordingNativeEffectController {
-    recorder: EffectRecorder,
-    native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
-}
-
-impl RecordingNativeEffectController {
-    fn invocations(&self) -> Vec<DurableEffectInvocation> {
-        self.recorder.invocations()
-    }
-}
-
-#[async_trait]
-impl lash_core::AwaitEventResolver for RecordingNativeEffectController {
-    async fn await_event_key(
+impl EffectRecorder {
+    /// A controller over `core`'s own effect host, scoped to `scope`, with
+    /// this recorder layered over it: the controller an explicit-effects entry
+    /// point runs under, whose scope is the one that entry point admits.
+    fn controller_for(
         &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> std::result::Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> std::result::Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.native.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> std::result::Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<(), lash_core::RuntimeError> {
-        self.native
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<(), lash_core::RuntimeError> {
-        self.native
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait]
-impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
-    async fn execute_effect(
-        &self,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
-    {
-        self.recorder.record_invocation(&envelope);
-        if matches!(
-            &envelope.command,
-            lash_core::RuntimeEffectCommand::PeekAwaitEvent { .. }
-        ) {
-            return Ok(lash_core::RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
-        }
-        let outcome = local_executor.execute(envelope).await;
-        if let Ok(outcome) = &outcome {
-            self.recorder.record_outcome(outcome);
-        }
-        outcome
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
-    {
-        self.native.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.native.native_effect_groups_substrate()
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
-    {
-        self.native.await_next_settlement(handle, cancel).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.close_effect_group(handle, disposition).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> std::result::Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.commit_group_child_final(commit).await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.read_group_settlement(group_key, rank).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
-    }
-}
-
-#[derive(Default)]
-struct DurableNoopEffectHost {
-    selected_scopes: StdMutex<Vec<lash_core::ExecutionScope>>,
-    controller: Arc<RecordingDurableEffectController>,
-    /// The installed `ToolChildHost` this host owns: it must live here because
-    /// a child's recorded cancellation
-    /// authority is derived from *this* host's `turn_control_binding_id` (the
-    /// recorder's durable-journaled authority) and the child-run check
-    /// re-derives it from the host the executors route through.
-    tool_children: std::sync::OnceLock<Arc<lash_core::facade_support::ToolChildHost>>,
-}
-
-impl DurableNoopEffectHost {
-    fn selected_scopes(&self) -> Vec<lash_core::ExecutionScope> {
-        self.selected_scopes.lock_recover().clone()
-    }
-
-    fn scoped_for<'run>(
-        &self,
-        scope: lash_core::AdmittedScope,
-    ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
-        self.selected_scopes
-            .lock_recover()
-            .push(scope.scope().clone());
-        let controller: Arc<dyn lash_core::RuntimeEffectController> = self.controller.clone();
-        lash_core::ScopedEffectController::shared(controller, scope)
-    }
-}
-
-#[async_trait]
-impl lash_core::AwaitEventResolver for DurableNoopEffectHost {
-    async fn await_event_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.controller.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> std::result::Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.controller.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> std::result::Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.controller.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> std::result::Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.controller
-            .await_await_event(key, cancel, deadline)
-            .await
-    }
-
-    async fn prepare_completion_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> std::result::Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
-        self.controller
-            .prepare_completion_key(scope, wait, may_defer)
-            .await
-    }
-}
-
-#[async_trait]
-impl lash_core::EffectHost for DurableNoopEffectHost {
-    fn turn_control_binding_id(&self) -> String {
-        self.controller
-            .await_event_authority_binding_id()
-            .expect("controller authority")
-    }
-
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
-        self
-    }
-
-    async fn prepare_tool_intent(
-        &self,
-        _sink: &dyn lash_core::ToolIntentOutcomeSink,
-        _identity: &lash_core::ToolIntentIdentity,
-        _intent: lash_core::ToolIntent,
-    ) -> std::result::Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
-        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
-    }
-
-    async fn record_tool_intent_outcome(
-        &self,
-        sink: &dyn lash_core::ToolIntentOutcomeSink,
-        identity: &lash_core::ToolIntentIdentity,
-        submitted: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> std::result::Result<(), lash_core::RuntimeError> {
-        sink.retain_in_journal(identity, submitted, outcome).await
-    }
-
-    fn scoped<'run>(
-        &'run self,
-        scope: lash_core::AdmittedScope,
-    ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
-        self.scoped_for(scope)
-    }
-
-    fn scoped_static(
-        &self,
-        scope: lash_core::AdmittedScope,
-    ) -> std::result::Result<
-        Option<lash_core::ScopedEffectController<'static>>,
-        lash_core::RuntimeError,
-    > {
-        Ok(Some(self.scoped_for(scope)?))
-    }
-
-    fn scoped_for_group_child(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        _binding: lash_core::GroupChildBinding,
-    ) -> std::result::Result<
-        Option<lash_core::ScopedEffectController<'static>>,
-        lash_core::RuntimeError,
-    > {
-        // The child must be bound to the recorder, not a native-bound
-        // controller: formation recorded a durable cancellation authority
-        // (the recorder reports DurableJournaled), and a Local participant
-        // bound controller would make that recorded authority unhonourable.
-        // The recorder forwards every group operation to the same native
-        // substrate the group opened on.
-        Ok(Some(ScopedEffectController::shared(
-            Arc::clone(&self.controller) as Arc<dyn lash_core::RuntimeEffectController>,
-            admitted,
-        )?))
-    }
-
-    fn install_tool_child_host(
-        &self,
-        candidate: Arc<lash_core::facade_support::ToolChildHost>,
-    ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
-        let installed = self.tool_children.get_or_init(|| candidate);
-        lash_core::RuntimeEffectController::register_group_executors(
-            self.controller.as_ref(),
-            Arc::clone(installed) as Arc<dyn lash_core::GroupExecutors>,
+        core: &LashCore,
+        scope: lash_core::ExecutionScope,
+    ) -> Arc<dyn lash_core::RuntimeEffectController> {
+        let host = lash_core::testing::LayeredEffectHost::new(
+            core.backend().effect_host(),
+            Arc::new(self.clone()),
+        );
+        lash_core::EffectHost::scoped_static(
+            &host,
+            lash_core::AdmittedScope::unpinned(scope).expect("an unpinned scope"),
         )
-        .ok()?;
-        Some(Arc::clone(installed))
+        .expect("scope the recorded controller")
+        .expect("the backend host lends a static controller")
+        .owned_controller()
+        .expect("a static controller is shared")
+    }
+
+    /// The scopes this recorder's effects ran under, in first-seen order.
+    fn scopes(&self) -> Vec<lash_core::ExecutionScope> {
+        let mut scopes = Vec::new();
+        for invocation in self.invocations() {
+            if !scopes.contains(&invocation.execution_scope) {
+                scopes.push(invocation.execution_scope);
+            }
+        }
+        scopes
     }
 }
 

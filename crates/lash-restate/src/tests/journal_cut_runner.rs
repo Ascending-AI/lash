@@ -147,10 +147,12 @@ mod on_the_server_double {
         let host = harness.endpoint_host();
         let prefix: &'static str =
             Box::leak(format!("restate-binding-drift-{}", harness.run_nonce()).into_boxed_str());
+        let stores = harness.law_stores();
         (
             harness,
             prefix,
             host,
+            stores,
             runner,
             vec![super::super::conformance_and_poison::drift_law_rlm_factory()],
         )
@@ -209,7 +211,7 @@ mod served_only_outside_a_run {
         let server = harness
             .server_double()
             .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
-        let registry = harness.process_registry();
+        let registry = harness.law_stores().process_registry();
         let nonce = harness.run_nonce();
         let session_id = SessionId::from(format!("served-only-{nonce}"));
         let turn_id = TurnId::from("served-only-turn");

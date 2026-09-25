@@ -111,7 +111,7 @@ impl lash_lashlang_runtime::LashlangArtifactBackend for PerfBackend {
 
 /// A fresh Restate test backend for the in-process lane: lash-restate's
 /// engine on a new server double over a new SQLite memory store set.
-pub(super) async fn restate_backend() -> anyhow::Result<lash_restate_test::RestateTestBackend> {
+pub(crate) async fn restate_backend() -> anyhow::Result<lash_restate_test::RestateTestBackend> {
     lash_restate_test::backend(RESTATE_SEED, lash_restate_test::ServerConfig::default())
         .await
         .map_err(|err| anyhow::anyhow!(err.to_string()))

@@ -29,5 +29,6 @@ async fn sqlite_restored_claim_cede_store(backend: &TestBackend) -> Arc<dyn Runt
 lash_conformance::restored_claim_cede_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let store = sqlite_restored_claim_cede_store(&backend).await;
-    (backend, "sqlite", store)
+    let law_backend = backend.as_backend();
+    (backend, "sqlite", law_backend, store)
 });

@@ -13,8 +13,8 @@ use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
 use super::super::group::{
     EffectGroupHandle, GroupSettlement, LoserPolicy, RankedGroupSettlement, RuntimeEffectGroup,
 };
+use super::TurnControlBinding;
 use super::await_event_support::await_event_scope_not_retirable;
-use super::{EffectJournaling, TurnControlAuthorityOwner, TurnControlBinding};
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancelWait};
 
 mod handle;
@@ -39,9 +39,6 @@ pub trait EffectHost: AwaitEventResolver {
     /// turn-control promises. Implementors must preserve it across client or
     /// handler recreation for as long as issued keys remain recoverable.
     fn turn_control_binding_id(&self) -> String;
-    fn turn_control_authority_owner(&self) -> TurnControlAuthorityOwner {
-        TurnControlAuthorityOwner::EffectHost
-    }
 
     /// List the registered, unresolved await-event keys owned by `session_id`.
     ///
@@ -65,7 +62,8 @@ pub trait EffectHost: AwaitEventResolver {
     }
 
     /// Project the terminal attachment owned by this same effect deployment.
-    /// Durable hosts override this projection; native hosts use keyed promises through the host.
+    /// A host with a dedicated attach transport overrides this projection;
+    /// otherwise a caller attaches through the run's keyed promises.
     fn turn_attach(&self) -> Option<Arc<dyn crate::TurnAttach>> {
         None
     }
@@ -88,8 +86,7 @@ pub trait EffectHost: AwaitEventResolver {
     /// the child's nested attempts, its intents' sinks — *under* `binding`'s
     /// recorded child, fenced by the substrate's own arbitration: the SQL
     /// claim refuses the insert once the minting replay row's cancel
-    /// disposition has committed, the native controller serializes admission
-    /// against the group mutex, and the Restate handler asks the serialized
+    /// disposition has committed, and the Restate handler asks the serialized
     /// group index. A bound controller is the only controller a group child's
     /// nested work may run through: an unbound one would admit semantic writes
     /// whose minting child was already cancel-decided.
@@ -117,8 +114,7 @@ pub trait EffectHost: AwaitEventResolver {
     /// `None` on a tier that keeps no group row — Restate answers the same
     /// lifecycle through its engine-side `EffectGroupIndex` `Closed`/`Retired`
     /// states, which are the twin of this seam, so there is nothing to hand
-    /// out. The SQL hosts answer with the shared driver's closing object, and
-    /// the native controller answers with its in-memory twin.
+    /// out. The SQL hosts answer with the shared driver's closing object.
     fn effect_group_closing(
         &self,
     ) -> Option<Arc<dyn super::super::group_closing::StoreEffectGroupClosing>> {
@@ -160,45 +156,30 @@ pub trait EffectHost: AwaitEventResolver {
             &self.turn_control_binding_id(),
             scoped.execution_scope(),
         )?;
-        match scoped.controller().effect_journaling() {
-            EffectJournaling::Local => {
-                let resolver = self.await_event_resolver();
-                Ok(TurnControlBinding::host_owned(
-                    binding_id,
-                    resolver,
-                    self.scoped(scoped.admitted_scope().clone())?,
-                    self.turn_attach(),
-                ))
-            }
-            EffectJournaling::Journaled => {
-                let resolver = scoped.controller();
-                let Some(controller_authority_id) = resolver.await_event_authority_binding_id()
-                else {
-                    return Err(RuntimeError::new(
-                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                        "durable turn-control controller does not identify its await-event authority",
-                    ));
-                };
-                let controller_binding_id = super::turn_control_binding_id_for_scope(
-                    &controller_authority_id,
-                    scoped.execution_scope(),
-                )?;
-                if controller_binding_id != binding_id {
-                    return Err(RuntimeError::new(
-                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                        format!(
-                            "turn-control host authority `{binding_id}` does not match controller authority `{controller_binding_id}`"
-                        ),
-                    ));
-                }
-                Ok(TurnControlBinding::run_scoped(
-                    binding_id,
-                    resolver,
-                    true,
-                    self.turn_attach(),
-                ))
-            }
+        let resolver = scoped.controller();
+        let Some(controller_authority_id) = resolver.await_event_authority_binding_id() else {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                "durable turn-control controller does not identify its await-event authority",
+            ));
+        };
+        let controller_binding_id = super::turn_control_binding_id_for_scope(
+            &controller_authority_id,
+            scoped.execution_scope(),
+        )?;
+        if controller_binding_id != binding_id {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                format!(
+                    "turn-control host authority `{binding_id}` does not match controller authority `{controller_binding_id}`"
+                ),
+            ));
         }
+        Ok(TurnControlBinding::run_scoped(
+            binding_id,
+            resolver,
+            self.turn_attach(),
+        ))
     }
 
     async fn prepare_tool_intent(
@@ -389,12 +370,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         false
     }
 
-    /// Whether this controller journals its effects durably. Only durable
-    /// replay engines answer `Journaled`; forwarding wrappers forward it.
-    fn effect_journaling(&self) -> EffectJournaling {
-        EffectJournaling::Local
-    }
-
     /// Drives independent pieces of work that each issue effects on this
     /// controller, every one to completion, one at a time in the given order.
     ///
@@ -526,17 +501,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 
-    /// The native group table this controller's group operations land on,
-    /// when it is — or delegates every group operation to — a native
-    /// controller. Erased as `Any` because the table is crate-internal: a host
-    /// uses it to arbitrate bound-child admission against the same state the
-    /// group wrote, and a foreign controller — or a double that answers groups
-    /// itself — honestly answers `None`.
-    #[doc(hidden)]
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        None
-    }
-
     /// The bound group-child controller for hosts that are thin projections
     /// over this controller and own no scope-minting surface of their own:
     /// the substrate answers with the same controller
@@ -644,9 +608,8 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// recovery needs to finish the drain and projection rather than re-run
     /// the attempt — as **one decision under the substrate's own
     /// serialization**. Store backends run it inside a transaction fenced on
-    /// the claiming lease; the native controller runs it under the per-group
-    /// mutex; the Restate substrate runs it inside the serialized group index
-    /// handler. There is deliberately **no read-then-write on this side of
+    /// the claiming lease; the Restate substrate runs it inside the serialized
+    /// group index handler. There is deliberately **no read-then-write on this side of
     /// the boundary**: the substrate's serialization is the fence, so a
     /// cancel decision can never slip between an advisory read and the commit
     /// it was supposed to guard.
@@ -706,26 +669,19 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// commands the journal already holds, so that nothing is dispatched live
     /// while a recorded entry at or beyond the current command still exists.
     ///
-    /// The default answers from [`effect_journaling`](Self::effect_journaling):
-    /// a controller that journals nothing durably has recorded nothing, so it
-    /// answers an empty set; a durable controller that does not override this
-    /// refuses, because an empty answer from a journal that does hold rows is
-    /// exactly the hole the fence exists to close. Forwarding wrappers forward.
+    /// The default refuses: every controller journals its effects, and an
+    /// empty answer from a journal that does hold rows is exactly the hole
+    /// the fence exists to close. Forwarding wrappers forward.
     async fn read_recorded_journal(
         &self,
         range: &super::super::effect_replay_driver::RecordedKeyRange,
     ) -> Result<RecordedJournal, RuntimeEffectControllerError> {
         let _ = range;
-        match self.effect_journaling() {
-            EffectJournaling::Local => Ok(RecordedJournal::Keys(
-                super::super::effect_replay_driver::RecordedKeys::default(),
-            )),
-            EffectJournaling::Journaled => Err(RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RecordedJournalReadUnsupported,
-                "this durable effect controller does not answer the recorded-frontier read; a \
-                 replayed language runtime cannot know which of its commands the journal holds",
-            )),
-        }
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RecordedJournalReadUnsupported,
+            "this effect controller does not answer the recorded-frontier read; a replayed \
+             language runtime cannot know which of its commands the journal holds",
+        ))
     }
 }
 

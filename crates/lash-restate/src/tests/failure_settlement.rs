@@ -71,10 +71,9 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
     );
     host.durability.attachment_store = Arc::new(
         lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
-            DurableMemoryAttachmentStore::default(),
+            lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
         )),
     );
-    host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(
         lash_sqlite_store::Store::open(&dir.path().join("session.db"))
             .await

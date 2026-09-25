@@ -46,7 +46,7 @@ pub(super) struct SurfaceState {
     /// successor reconstructs the group's children from.
     pub(super) effect_group_children: Vec<serde_json::Value>,
     /// The outcome every grouped op recorded, in operation order. Compared
-    /// SQLite vs PostgreSQL only: the memory runner exercises no groups.
+    /// SQLite vs PostgreSQL.
     pub(super) group_outcomes: Vec<serde_json::Value>,
     /// `turn_parks`, normalized: the session's parked-turn record (FIG-3586).
     pub(super) turn_parks: Vec<serde_json::Value>,

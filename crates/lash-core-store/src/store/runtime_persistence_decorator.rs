@@ -45,7 +45,6 @@ macro_rules! persistence_operations {
                 fn load_turn_park(&self, session_id: &SessionId) -> Result<Option<crate::store::TurnPark>, StoreError>;
             }
             TurnInputStore {
-                sync fn turn_cancellation_authority(&self) -> Option<std::sync::Arc<dyn crate::StoreTurnCancellationAuthority>>;
                 fn turn_is_committed(&self, address: &crate::TurnAddress) -> Result<bool, StoreError>;
                 fn reconcile_turn_cancel_winner(&self, address: &crate::TurnAddress, observed: &crate::TurnCancelIntentSnapshot, evidence: &crate::TurnCancellationEvidence) -> Result<bool, StoreError>;
                 fn record_turn_cancel_request(&self, request: crate::TurnCancelRequest) -> Result<crate::TurnCancelRequestRecord, StoreError>;
@@ -111,9 +110,6 @@ macro_rules! emit_decorator_trait {
     ($(
         $component:ident {
             $(
-                sync fn $sync_name:ident(&self) -> $sync_ret:ty;
-            )*
-            $(
                 $(#[$meta:meta])*
                 fn $name:ident(&self $(, $arg:ident: $arg_ty:ty)*) -> $ret:ty;
             )*
@@ -134,12 +130,6 @@ macro_rules! emit_decorator_trait {
             fn inner(&self) -> &(dyn RuntimePersistence + '_);
 
             $($(
-                fn $sync_name(&self) -> $sync_ret {
-                    self.inner().$sync_name()
-                }
-            )*)*
-
-            $($(
                 $(#[$meta])*
                 async fn $name(&self $(, $arg: $arg_ty)*) -> $ret {
                     self.inner().$name($($arg),*).await
@@ -153,9 +143,6 @@ macro_rules! emit_component_impls {
     ($(
         $component:ident {
             $(
-                sync fn $sync_name:ident(&self) -> $sync_ret:ty;
-            )*
-            $(
                 $(#[$meta:meta])*
                 fn $name:ident(&self $(, $arg:ident: $arg_ty:ty)*) -> $ret:ty;
             )*
@@ -167,12 +154,6 @@ macro_rules! emit_component_impls {
             where
                 T: RuntimePersistenceDecorator + ?Sized,
             {
-                $(
-                    fn $sync_name(&self) -> $sync_ret {
-                        RuntimePersistenceDecorator::$sync_name(self)
-                    }
-                )*
-
                 $(
                     $(#[$meta])*
                     async fn $name(&self $(, $arg: $arg_ty)*) -> $ret {

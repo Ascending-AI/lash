@@ -226,10 +226,19 @@ pub(super) async fn emit_button_event(
         fail_once: false,
     })?;
     let source_key = empty_trigger_source_key(BUTTON_SOURCE_TYPE)?;
-    let scoped = ScopedEffectController::shared(
-        Arc::new(NativeRuntimeEffectController::default()),
-        lash_core::AdmittedScope::runtime_operation("e2e-button-trigger"),
-    )?;
+    // The runner emits from outside a Restate handler, so the emission
+    // journals through the PostgreSQL deployment's own effect host.
+    let emit_backend = lash_postgres_store::PostgresBackend::new(
+        storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            std::env::temp_dir().join("lash-e2e-button-trigger"),
+        )),
+    );
+    let scoped = lash::Backend::effect_host(&emit_backend)
+        .scoped_static(lash_core::AdmittedScope::runtime_operation(
+            "e2e-button-trigger",
+        ))?
+        .context("the PostgreSQL effect host lends a static controller")?;
     let report = core
         .triggers()
         .emit(

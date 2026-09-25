@@ -15,7 +15,12 @@ use super::*;
 struct GrouplessEffectController;
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for GrouplessEffectController {}
+impl lash_core::AwaitEventResolver for GrouplessEffectController {
+    /// An out-of-tree host that names no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for GrouplessEffectController {
@@ -75,7 +80,12 @@ struct GroupSupportingEffectController {
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for GroupSupportingEffectController {}
+impl lash_core::AwaitEventResolver for GroupSupportingEffectController {
+    /// An out-of-tree host that names no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for GroupSupportingEffectController {

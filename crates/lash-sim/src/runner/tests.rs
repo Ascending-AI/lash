@@ -184,9 +184,13 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
 
 #[tokio::test]
 async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {
-    lash_conformance::attachment_reference_lifecycle(std::sync::Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
+    let memory = crate::backend::memory_backend()
+        .await
+        .expect("SQLite memory backend");
+    lash_conformance::attachment_reference_lifecycle_with_store(
+        memory.session_store_factory(),
+        memory.attachment_store(),
+    )
     .await;
 
     let tmp = tempfile::tempdir().expect("tempdir");

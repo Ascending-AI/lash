@@ -43,7 +43,7 @@ use super::harness::{
     build_runtime_with_postgres_store, build_runtime_with_sqlite_store,
     durable_postgres_session_store_factory_without_commit_measurement,
     durable_sqlite_session_store_factory_without_commit_measurement, memory_perf_store,
-    memory_stores, seed_runtime_state, validate_runtime_perf_turn,
+    memory_stores, restate_backend, seed_runtime_state, validate_runtime_perf_turn,
 };
 use super::prompt::benchmark_prompt;
 use super::scenarios::RuntimePerfScenario;

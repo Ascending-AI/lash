@@ -29,15 +29,10 @@ fn request(address: TurnAddress, request_id: &str) -> TurnCancelRequest {
 
 async fn driver_for_session(
     host: Arc<dyn EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
     address: &TurnAddress,
 ) -> (Arc<dyn EffectHost>, TurnWorkDriver) {
-    let authority = crate::TurnCancellationAuthority::new(
-        host.turn_control_binding_id(),
-        Arc::clone(&host) as Arc<dyn crate::AwaitEventResolver>,
-    );
-    let store = Arc::new(
-        crate::InMemorySessionStore::new().with_turn_cancellation_authority_for_testing(authority),
-    ) as Arc<dyn crate::RuntimePersistence>;
+    let store = super::law_session_store(stores.as_ref(), &address.session_id).await;
     super::bind_conformance_session(&store, &address.session_id).await;
     let driver = TurnWorkDriver::for_session(Arc::clone(&host), address.session_id.clone(), store);
     (host, driver)
@@ -73,18 +68,19 @@ pub async fn await_event_registration_observed(
 /// a keyed-promise adapter.
 pub async fn turn_work_driver<RegistrationBarrier, RegistrationBarrierFuture>(
     host: Arc<dyn EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
     registration_barrier: RegistrationBarrier,
 ) where
     RegistrationBarrier:
         FnOnce(Arc<dyn EffectHost>, SessionId, AwaitEventKey) -> RegistrationBarrierFuture,
     RegistrationBarrierFuture: std::future::Future<Output = ()>,
 {
-    cancel_before_start_duplicate_replay_and_terminal_attach(Arc::clone(&host)).await;
-    completion_seal_vs_cancel_is_first_writer_wins(Arc::clone(&host)).await;
-    exact_scope_and_session_sweep_isolation(Arc::clone(&host), registration_barrier).await;
-    after_step_request_defers_until_immediate_escalates_it(Arc::clone(&host)).await;
-    after_step_request_is_honoured_at_the_step_boundary(Arc::clone(&host)).await;
-    session_deletion_revokes_control_promises(host).await;
+    cancel_before_start_duplicate_replay_and_terminal_attach(Arc::clone(&host), &stores).await;
+    completion_seal_vs_cancel_is_first_writer_wins(Arc::clone(&host), &stores).await;
+    exact_scope_and_session_sweep_isolation(Arc::clone(&host), &stores, registration_barrier).await;
+    after_step_request_defers_until_immediate_escalates_it(Arc::clone(&host), &stores).await;
+    after_step_request_is_honoured_at_the_step_boundary(Arc::clone(&host), &stores).await;
+    session_deletion_revokes_control_promises(host, &stores).await;
 }
 
 /// An after-step request rides the same gate as an immediate one but is not
@@ -95,9 +91,12 @@ pub async fn turn_work_driver<RegistrationBarrier, RegistrationBarrierFuture>(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn EffectHost>) {
+async fn after_step_request_defers_until_immediate_escalates_it(
+    host: Arc<dyn EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
+) {
     let address = address("escalation");
-    let (host, driver) = driver_for_session(host, &address).await;
+    let (host, driver) = driver_for_session(host, stores, &address).await;
     let peek = host
         .scoped(admit(address.execution_scope()))
         .expect("scoped peek controller");
@@ -212,9 +211,12 @@ async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn Ef
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn EffectHost>) {
+async fn after_step_request_is_honoured_at_the_step_boundary(
+    host: Arc<dyn EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
+) {
     let address = address("boundary");
-    let (host, driver) = driver_for_session(host, &address).await;
+    let (host, driver) = driver_for_session(host, stores, &address).await;
     let peek = host
         .scoped(admit(address.execution_scope()))
         .expect("scoped peek controller");
@@ -308,9 +310,12 @@ async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn Effec
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn EffectHost>) {
+async fn cancel_before_start_duplicate_replay_and_terminal_attach(
+    host: Arc<dyn EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
+) {
     let address = address("before-start");
-    let (host, driver) = driver_for_session(host, &address).await;
+    let (host, driver) = driver_for_session(host, stores, &address).await;
     let first = driver
         .request_cancel(request(address.clone(), "request-1"))
         .await
@@ -408,9 +413,12 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn 
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost>) {
+async fn completion_seal_vs_cancel_is_first_writer_wins(
+    host: Arc<dyn EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
+) {
     let address = address("race");
-    let (host, driver) = driver_for_session(host, &address).await;
+    let (host, driver) = driver_for_session(host, stores, &address).await;
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("active control");
@@ -472,6 +480,7 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost
 )]
 async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, RegistrationBarrierFuture>(
     host: Arc<dyn EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
     registration_barrier: RegistrationBarrier,
 ) where
     RegistrationBarrier:
@@ -479,7 +488,7 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
     RegistrationBarrierFuture: std::future::Future<Output = ()>,
 {
     let address_a = address("scope");
-    let (host, driver) = driver_for_session(host, &address_a).await;
+    let (host, driver) = driver_for_session(host, stores, &address_a).await;
     let address_b = TurnAddress::new(&address_a.session_id, "turn-b");
     let address_future = TurnAddress::new(&address_a.session_id, "turn-future");
 
@@ -564,9 +573,12 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_deletion_revokes_control_promises(host: Arc<dyn EffectHost>) {
+async fn session_deletion_revokes_control_promises(
+    host: Arc<dyn EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
+) {
     let address = address("revoke");
-    let (host, driver) = driver_for_session(host, &address).await;
+    let (host, driver) = driver_for_session(host, stores, &address).await;
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("create reserved control promises");

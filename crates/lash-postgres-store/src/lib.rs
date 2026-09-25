@@ -507,7 +507,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `attempts` — and adds `lash_turn_park_clock`, the feed's sequence row, and
 // `lash_turn_park_events`, the durable ledger of park transitions.
 // Component-127 and older catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 128;
+// Version 129 (FIG-3585) drops `runtime_perf_start_gate_retry` and
+// `tool_completion_key_process_lifetime` from the durable error-code
+// vocabulary. No relation changes; component-128 catalogs are rejected and
+// recreated.
+const SCHEMA_VERSION: i32 = 129;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -544,7 +548,6 @@ pub struct PostgresSessionStore {
     #[cfg(feature = "testing")]
     fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
-    await_event_signing_secret: Arc<[u8]>,
     clock: Arc<dyn lash_core_execution::Clock>,
     session_id: SessionId,
     turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
@@ -1031,7 +1034,6 @@ impl PostgresStorage {
     pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
-            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             session_id: session_id.into(),
             turn_cancel_closure_owner: None,

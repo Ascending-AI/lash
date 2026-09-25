@@ -24,8 +24,8 @@ use super::*;
 /// the same answer. The key never reappears among the session's outstanding
 /// waits, and the deferred body never runs again. On a durable tier the
 /// reopen serves rank 0 as the cancelled terminal the close committed — the
-/// late completion did not become the child's outcome. On the in-memory and
-/// Restate tiers a closed group's ranks are unreadable by contract, so the
+/// late completion did not become the child's outcome. On the drain-less
+/// Restate tier a closed group's ranks are unreadable by contract, so the
 /// typed refusal and the untouched executions are the evidence.
 #[expect(
     clippy::expect_used,
@@ -68,7 +68,7 @@ pub async fn a_late_completion_after_a_cancel_decision_is_refused(
             &group_key,
             &scenario.env_ref,
             LEAF_DEFERRED,
-            deferrable_routing(fixture.deferrable_routing, &host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
         )
     };

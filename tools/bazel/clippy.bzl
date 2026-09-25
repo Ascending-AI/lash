@@ -165,7 +165,6 @@ lash_clippy_aspect = aspect(
                 Label("//crates/lash-core:clippy.toml"),
                 Label("//crates/lash-core-effect:clippy.toml"),
                 Label("//crates/lash-core-execution:clippy.toml"),
-                Label("//crates/lash-core-memory:clippy.toml"),
                 Label("//crates/lash-core-store:clippy.toml"),
                 Label("//crates/lash-core-worker:clippy.toml"),
                 Label("//crates/lash-perf:clippy.toml"),

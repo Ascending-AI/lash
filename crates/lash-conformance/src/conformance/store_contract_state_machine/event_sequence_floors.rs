@@ -88,16 +88,27 @@ impl EventSequenceStep {
 #[cfg(test)]
 mod floor_tests {
     use super::*;
-    use crate::ProcessQuery as _;
     use pretty_assertions::assert_eq;
+
+    /// The store-contract handles over a fresh SQLite memory store set, which
+    /// the caller keeps alive for the case.
+    async fn memory_handles() -> (lash_sqlite_store::SqliteStoreSet, StoreContractHandles) {
+        let backend = lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("memory backend");
+        let handles = StoreContractHandles {
+            registry: backend.process_registry() as Arc<dyn crate::ProcessRegistry>,
+            runtime: Arc::new(backend.open_store().await.expect("durable-core store"))
+                as Arc<dyn crate::RuntimePersistence>,
+        };
+        (backend, handles)
+    }
 
     #[tokio::test]
     async fn first_event_after_process_reuse_jumps_past_retained_sender_floor() {
-        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-        let mut scenario = StoreContractScenario::new(StoreContractHandles {
-            registry: registry.clone(),
-            runtime: Arc::new(crate::InMemorySessionStore::default()),
-        });
+        let (_backend, handles) = memory_handles().await;
+        let registry = Arc::clone(&handles.registry);
+        let mut scenario = StoreContractScenario::new(handles);
         let register = StoreContractOp::Register {
             process: 0,
             disposition: 0,
@@ -168,10 +179,7 @@ mod floor_tests {
     }
     #[tokio::test]
     async fn prune_removes_settled_process_wakes_but_preserves_floor() {
-        let handles = StoreContractHandles {
-            registry: Arc::new(crate::TestLocalProcessRegistry::default()),
-            runtime: Arc::new(crate::InMemorySessionStore::default()),
-        };
+        let (_backend, handles) = memory_handles().await;
         replay_case(
             handles,
             &[
@@ -212,10 +220,7 @@ mod floor_tests {
     }
     #[tokio::test]
     async fn repeated_observer_and_retarget_operations_replay_their_audit_events() {
-        let handles = StoreContractHandles {
-            registry: Arc::new(crate::TestLocalProcessRegistry::default()),
-            runtime: Arc::new(crate::InMemorySessionStore::default()),
-        };
+        let (_backend, handles) = memory_handles().await;
         replay_case(
             handles,
             &[

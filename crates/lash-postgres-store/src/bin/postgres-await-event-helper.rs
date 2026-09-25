@@ -161,7 +161,17 @@ async fn run_turn_action(
             drain_budget: Default::default(),
         },
     ));
-    lash_conformance::cold_process_real_turn_driver(store, controller, nonce, action, marker).await;
+    // Every port the law does not certify, over the same database; the turn
+    // writes no attachment bytes.
+    let attachments = std::env::temp_dir().join(format!("lash-cold-process-attachments-{nonce}"));
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments)),
+    )) as Arc<dyn lash_core_execution::StoreSet>;
+    lash_conformance::cold_process_real_turn_driver(
+        stores, store, controller, nonce, action, marker,
+    )
+    .await;
     Ok(())
 }
 

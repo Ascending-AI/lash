@@ -98,10 +98,12 @@ mod sqlite_memory {
         let host = backend.effect_host() as Arc<dyn EffectHost>;
         let cell_factories = cell_bridge_factories(&backend);
         let process_factories = process_bridge_factories(&backend);
+        let law_stores: Arc<dyn lash_core::StoreSet> = Arc::new(backend.stores().clone());
         (
             backend,
             "sqlite-memory",
             Arc::clone(&host),
+            law_stores,
             vec![
                 lash_conformance::rlm_promise_all_producer(cell_factories),
                 // Each scenario opens its own session, so it also opens its
@@ -149,6 +151,9 @@ mod sqlite {
             dir,
             "sqlite",
             Arc::clone(&host),
+            // The law's runtime takes its storage from the artifact backend's
+            // store set.
+            Arc::new(artifacts.stores().clone()) as Arc<dyn lash_core::StoreSet>,
             vec![
                 lash_conformance::rlm_promise_all_producer(cell_bridge_factories(&artifacts)),
                 lash_conformance::lashlang_process_aggregate_producer(

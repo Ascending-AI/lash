@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::ToolDefinitionBindingExt as _;
-use lash_core::store::SessionCommitStore as _;
 use lash_sansio::{SessionId, TurnId};
 
 const CELL: &str =
@@ -101,6 +100,7 @@ impl crate::ToolProvider for ProbeTool {
 #[derive(Clone)]
 struct DriftWorld {
     effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
     rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     model_calls: Arc<AtomicUsize>,
     executions: Arc<AtomicUsize>,
@@ -132,12 +132,12 @@ async fn build_runtime(
             }
         })
         .build();
-    let mut host = crate::LawBackend::in_process()
-        .with_effect_host(Arc::clone(&world.effect_host))
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let mut host =
+        crate::LawBackend::over_stores(world.stores.as_ref(), Arc::clone(&world.effect_host))
+            .host_config(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            );
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let factories = world
@@ -181,14 +181,14 @@ fn attempt(
     world: &DriftWorld,
     session_id: &SessionId,
     turn_id: &TurnId,
-    store: &Arc<crate::InMemorySessionStore>,
+    store: &Arc<dyn crate::RuntimePersistence>,
     probe: Probe,
     answers: Option<tokio::sync::mpsc::UnboundedSender<Answer>>,
 ) -> crate::ConformanceTurnAttempt {
     let world = world.clone();
     let session_id = session_id.clone();
     let turn_id = turn_id.clone();
-    let store = Arc::clone(store) as Arc<dyn crate::RuntimePersistence>;
+    let store = Arc::clone(store);
     Arc::new(move |scope| {
         let world = world.clone();
         let session_id = session_id.clone();
@@ -247,7 +247,7 @@ async fn first_attempt_key(
         session_id.as_str().len(),
         "same-length session ids"
     );
-    let store = Arc::new(crate::InMemorySessionStore::new());
+    let store = crate::conformance::law_session_store(world.stores.as_ref(), probe_session).await;
     let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
     let probe = attempt(
         world,
@@ -287,11 +287,13 @@ async fn first_attempt_key(
 pub async fn redriven_cell_links_against_its_journaled_binding_set(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
     let world = DriftWorld {
         effect_host,
+        stores,
         rlm,
         model_calls: Arc::new(AtomicUsize::new(0)),
         executions: Arc::new(AtomicUsize::new(0)),
@@ -308,7 +310,7 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
         let probe_session = SessionId::from(format!("{prefix}-{case}-prob"));
         let attempt_key =
             first_attempt_key(&world, &runner, &probe_session, &session_id, &turn_id).await;
-        let store = Arc::new(crate::InMemorySessionStore::new());
+        let store = crate::conformance::law_session_store(world.stores.as_ref(), &session_id).await;
         let cut = if recorded {
             crate::JournalCut {
                 replay_key: attempt_key.replace(":lk2:0000000000:attempt:1", ":lk2:~seal"),
@@ -421,7 +423,7 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
     let probe_session = SessionId::from(format!("{prefix}-live-dsc-prob"));
     let attempt_key =
         first_attempt_key(&world, &runner, &probe_session, &session_id, &turn_id).await;
-    let store = Arc::new(crate::InMemorySessionStore::new());
+    let store = crate::conformance::law_session_store(world.stores.as_ref(), &session_id).await;
     let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
     runner
         .run_cut_then_redriven_turn(

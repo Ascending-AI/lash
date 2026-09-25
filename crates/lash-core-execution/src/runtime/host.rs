@@ -304,11 +304,10 @@ impl RuntimeHostConfig {
 
     /// Replace the effect host, keeping the tool-child wiring coherent: when
     /// the new host accepts an install the resolver — and with it the opener
-    /// registry and `ProcessLifetime` issuer — binds to it; when it answers
-    /// `None` it is a delegating wrapper whose `scoped` forwards to the host
-    /// already carrying the resolver (the store turn-control authority a
-    /// `BoundSession` substitutes), so the existing wiring is kept. A bare
-    /// `control.effect_host` write strands both cases.
+    /// registry — binds to it; when it answers `None` it is a delegating
+    /// wrapper whose `scoped` forwards to the host already carrying the
+    /// resolver, so the existing wiring is kept. A bare `control.effect_host`
+    /// write strands both cases.
     pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
         if let Some(tool_children) =
             effect_host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(

@@ -32,7 +32,12 @@ lash_conformance::attachment_owner_degraded_tests!({
     let dir = tempfile::tempdir().unwrap();
     let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
         as Arc<dyn lash_core_execution::SessionStoreFactory>;
-    (dir, factory)
+    let attachments = Arc::new(
+        lash_core_execution::facade_support::FileAttachmentStore::new(
+            dir.path().join("attachments"),
+        ),
+    ) as Arc<dyn lash_core_execution::AttachmentStore>;
+    (dir, factory, attachments)
 });
 
 #[tokio::test]

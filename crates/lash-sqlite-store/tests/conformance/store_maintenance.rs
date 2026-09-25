@@ -43,9 +43,19 @@ impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedMani
 
 lash_conformance::store_maintenance_tests!({
     let retained = Retained::default();
-    (retained.clone(), "sqlite", move || {
-        retained.open_blocking().session_store_factory() as Arc<dyn SessionStoreFactory>
-    })
+    let make_retained = retained.clone();
+    let bytes_retained = retained.clone();
+    (
+        retained,
+        "sqlite",
+        move || {
+            make_retained.open_blocking().session_store_factory() as Arc<dyn SessionStoreFactory>
+        },
+        move || {
+            bytes_retained.open_blocking().attachment_store()
+                as Arc<dyn lash_core_execution::AttachmentStore>
+        },
+    )
 });
 
 lash_conformance::store_maintenance_fault_tests!({

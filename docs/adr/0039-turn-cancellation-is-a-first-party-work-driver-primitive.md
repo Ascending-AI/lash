@@ -37,12 +37,12 @@ loss. The final commit remains governed by the session-head CAS and any claim-ow
 (ADR 0029), after the owner reads and settles the pre-commit cancellation gate;
 lease loss alone does not reject a current-head commit.
 
-The cancellation receipt reports only the outcome of addressing the keyed promise. Persistent
-Native sessions delegate the three reserved turn-control aliases to the session store's SQL
-promise coordinator; Native effects and all other waits remain process-local. Reopening the same
-SQLite catalog or PostgreSQL database therefore recovers the same cancellation keys. A configured
-durable effect host such as Restate retains ownership of its own turn-control authority and its
-journaled observations.
+The cancellation receipt reports only the outcome of addressing the keyed promise. The configured
+effect host owns the turn-control authority: the three reserved turn-control aliases resolve
+through its durable await-event resolver, and its observations are journaled, so the same
+cancellation keys survive owner-process loss. No store answers for them. FIG-3585 deleted the
+store-delegated turn control that let a native session route the aliases to the session store's
+SQL promise coordinator.
 
 Closing those promises is a crash-completable protocol. Before resolving either gate, the current
 session-execution holder persists one exact, non-overwritable closure authorization for the turn.
@@ -75,8 +75,8 @@ request gate. A host with a known origin can supply its own vocabulary, such as 
 
 Turn cancellation has three operational layers:
 
-1. `TurnWorkDriver::request_cancel` is the cooperative foreground-turn primitive. Its native tier
-   is process-local; its durable tier survives owner-process loss and replay. It can unwind
+1. `TurnWorkDriver::request_cancel` is the cooperative foreground-turn primitive. Every effect
+   host journals it, so it survives owner-process loss and replay. It can unwind
    cancellable provider/tool waits, but it cannot guarantee that detached tasks, subprocesses, or
    non-cooperative providers have stopped.
 2. Runtime Process cancellation remains the existing process event and worker-recovery protocol.
@@ -101,8 +101,6 @@ authoritative promise row after a missed notification; intent and projection
 rows are never polled as a stop signal. A live owner does hold an
 engine-native keyed-promise observation; Restate implements that observation
 through `LashDurableWaitWorkflow` ingress with bounded retry, not its Admin API.
-The inline registry drains live gate/terminal entries after terminal publication
-and keeps only bounded recent completion and session-revocation caches.
 
 Vacuum does not remove pending closure authorizations. Session deletion and Process-scope retirement
 inspect the durable session-to-scope pins first and refuse destructive cleanup while any matching

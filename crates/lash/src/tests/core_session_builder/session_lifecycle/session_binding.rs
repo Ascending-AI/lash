@@ -18,6 +18,10 @@ impl FailOnceRetirementHost {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for FailOnceRetirementHost {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn revoke_await_events_for_session(
         &self,
         session_id: &lash_core::SessionId,

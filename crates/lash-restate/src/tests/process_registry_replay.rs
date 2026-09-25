@@ -754,7 +754,6 @@ pub(super) struct RecordedProcessRun {
     pub(super) wake_target_session_id: Option<SessionId>,
     pub(super) tool_effect_id: Option<String>,
     pub(super) execution_scope_id: String,
-    pub(super) effect_journaling: lash_core::EffectJournaling,
 }
 
 #[derive(Default)]
@@ -781,7 +780,6 @@ impl RestateProcessRunner for RecordingRunner {
         _handover: Option<lash_core::SegmentHandover>,
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        let effect_journaling = scoped_effect_controller.controller().effect_journaling();
         self.ran.lock_recover().push(RecordedProcessRun {
             process_id: registration.id.clone(),
             wake_target_session_id: registration.wake_session_id.clone(),
@@ -789,7 +787,6 @@ impl RestateProcessRunner for RecordingRunner {
                 .causal_invocation
                 .and_then(|invocation| invocation.effect_id().map(str::to_string)),
             execution_scope_id: scoped_effect_controller.scope_id().to_string(),
-            effect_journaling,
         });
         if self.stay_live.load(Ordering::SeqCst) {
             return Err(PluginError::Runtime(lash_core::RuntimeError::new(
@@ -1148,14 +1145,15 @@ impl RestateProcessRunner for SegmentedRecordingRunner {
     }
 }
 
-pub(super) fn native_process_scope(
-    process_id: &ProcessId,
-) -> lash_core::ScopedEffectController<'static> {
+/// The scoped controller a test runner receives for `process_id`'s workflow
+/// run. These runners record their scope and run no effect, so the controller
+/// refuses every effect.
+pub(super) fn process_scope(process_id: &ProcessId) -> lash_core::ScopedEffectController<'static> {
     lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+        Arc::new(lash_core::testing::UnavailableEffectController),
         durable_admission(&ExecutionScope::process(process_id.to_string())),
     )
-    .expect("native process scope")
+    .expect("process scope")
 }
 
 pub(super) async fn pending_process_cancel_signal() -> Result<(), HandlerError> {
@@ -1193,7 +1191,7 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
                 .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default(),
-                    native_process_scope(&ProcessId::from("prompt-cancel")),
+                    process_scope(&ProcessId::from("prompt-cancel")),
                     0,
                     None,
                     cancellation_signal,
@@ -1270,7 +1268,7 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
                 .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default(),
-                    native_process_scope(&ProcessId::from("cancel-cleanup-failure")),
+                    process_scope(&ProcessId::from("cancel-cleanup-failure")),
                     0,
                     None,
                     async move {
@@ -1365,7 +1363,7 @@ pub(super) async fn session_turn_runner_failure_after_completion_stays_recoverab
         .run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
-            native_process_scope(&ProcessId::from("cancel-after-failure")),
+            process_scope(&ProcessId::from("cancel-after-failure")),
             0,
             None,
             pending_process_cancel_signal(),
@@ -1415,7 +1413,7 @@ pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure(
                 .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default(),
-                    native_process_scope(&ProcessId::from("non-session-cancel-failure")),
+                    process_scope(&ProcessId::from("non-session-cancel-failure")),
                     0,
                     None,
                     async move {
@@ -1507,7 +1505,7 @@ pub(super) async fn cancel_watch_reissues_after_attach_ceiling_until_segment_com
         workflow.run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
-            native_process_scope(&ProcessId::from("ceiling-reissues")),
+            process_scope(&ProcessId::from("ceiling-reissues")),
             0,
             None,
             workflow.cancellation_signal(&ProcessId::from("ceiling-reissues"), 0),
@@ -1548,7 +1546,7 @@ pub(super) async fn non_timeout_cancel_watch_error_fails_the_segment() {
         .run_registration_for_test(
             rerunnable_registration("broken-cancel-watch"),
             ProcessExecutionContext::default(),
-            native_process_scope(&ProcessId::from("broken-cancel-watch")),
+            process_scope(&ProcessId::from("broken-cancel-watch")),
             0,
             None,
             workflow.cancellation_signal(&ProcessId::from("broken-cancel-watch"), 0),
@@ -1598,7 +1596,7 @@ pub(super) async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_in
         .run_registration_for_test(
             rerunnable_registration("unregistered-cancel-watch"),
             ProcessExecutionContext::default(),
-            native_process_scope(&ProcessId::from("unregistered-cancel-watch")),
+            process_scope(&ProcessId::from("unregistered-cancel-watch")),
             0,
             None,
             workflow.cancellation_signal(&ProcessId::from("unregistered-cancel-watch"), 0),
@@ -1706,7 +1704,7 @@ pub(super) async fn transient_cancel_registry_read_error_cannot_fall_through_to_
                 .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default(),
-                    native_process_scope(&ProcessId::from("transient-cancel-read")),
+                    process_scope(&ProcessId::from("transient-cancel-read")),
                     0,
                     None,
                     async move {
@@ -2069,7 +2067,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
                 .run_registration_for_test(
                     registration.clone(),
                     ProcessExecutionContext::default(),
-                    native_process_scope(&ProcessId::from(process_id.clone())),
+                    process_scope(&ProcessId::from(process_id.clone())),
                     ordinal,
                     input_handover.take(),
                     pending_process_cancel_signal(),

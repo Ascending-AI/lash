@@ -118,13 +118,12 @@ impl TriggerIntentCutoverReplay for TriggerIntentCutoverReplayImpl {
     }
 }
 
-async fn trigger_intent_cutover_endpoint() -> (
-    Endpoint,
-    Arc<lash_core::facade_support::InMemoryTriggerStore>,
-) {
-    let registry: Arc<dyn ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+async fn trigger_intent_cutover_endpoint() -> (Endpoint, Arc<dyn TriggerStore>) {
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("open a SQLite memory store set");
+    let registry: Arc<dyn ProcessRegistry> = stores.process_registry();
+    let store: Arc<dyn TriggerStore> = stores.trigger_store();
     let draft = lash_core::TriggerSubscriptionDraft::for_process(
         "test/trigger-intent-cutover",
         lash_core::ProcessExecutionEnvRef::new("process-env:trigger-intent-cutover"),
@@ -150,13 +149,10 @@ async fn trigger_intent_cutover_endpoint() -> (
         .expect("execute trigger subscription command")
         .expect("register trigger subscription");
     let router = lash_core::facade_support::TriggerRouter::new(
-        Arc::clone(&store) as Arc<dyn TriggerStore>,
+        Arc::clone(&store),
         lash_core::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
     );
-    let process_env_store = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open trigger-cutover process-exec-env backend")
-        .process_env_store();
+    let process_env_store = stores.process_env_store();
     let endpoint = Endpoint::builder()
         .bind(
             TriggerIntentCutoverReplayImpl {

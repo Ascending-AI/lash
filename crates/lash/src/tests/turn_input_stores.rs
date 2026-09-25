@@ -14,24 +14,6 @@ impl lash_core::TurnInputStore for SnapshotStore {
         Ok(lash_core::TurnCancelIntentSnapshot::Absent)
     }
 
-    fn turn_cancellation_authority(
-        &self,
-    ) -> Option<Arc<dyn lash_core::store::StoreTurnCancellationAuthority>> {
-        Some(
-            self.turn_cancellation_authority
-                .get_or_init(|| {
-                    lash_core::TurnCancellationAuthority::new(
-                        format!("snapshot-store:{}", uuid::Uuid::new_v4()),
-                        Arc::new(
-                            lash_core::facade_support::NativeRuntimeEffectController::default(),
-                        ),
-                    )
-                })
-                .clone()
-                .into_store_authority(),
-        )
-    }
-
     async fn validate_turn_cancellation_binding(
         &self,
         _session_id: &SessionId,
@@ -256,24 +238,6 @@ impl lash_core::TurnInputStore for SnapshotStore {
 
 #[async_trait]
 impl lash_core::TurnInputStore for BoundSessionStore {
-    fn turn_cancellation_authority(
-        &self,
-    ) -> Option<Arc<dyn lash_core::store::StoreTurnCancellationAuthority>> {
-        Some(
-            self.turn_cancellation_authority
-                .get_or_init(|| {
-                    lash_core::TurnCancellationAuthority::new(
-                        format!("bound-store:{}", uuid::Uuid::new_v4()),
-                        Arc::new(
-                            lash_core::facade_support::NativeRuntimeEffectController::default(),
-                        ),
-                    )
-                })
-                .clone()
-                .into_store_authority(),
-        )
-    }
-
     async fn validate_turn_cancellation_binding(
         &self,
         _session_id: &SessionId,

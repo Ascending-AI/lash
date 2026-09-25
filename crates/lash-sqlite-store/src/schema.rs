@@ -73,7 +73,7 @@ impl SqliteDatabase {
             Self::DurableCore => SqliteDatabaseDefinition {
                 name: "durable core",
                 schema: SCHEMA,
-                fragments: &[AWAIT_EVENT_TABLES, SESSION_INGRESS_TABLE],
+                fragments: &[SESSION_INGRESS_TABLE],
                 version: SCHEMA_VERSION,
             },
             Self::ProcessRegistry => SqliteDatabaseDefinition {
@@ -557,9 +557,6 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
 
--- The await-event tables this database shares with the effect journal are
--- applied from the shared AWAIT_EVENT_TABLES fragment.
-
 -- The named process-definition registry (FIG-2995, ADR 0095): owner scope,
 -- name, revision, pinned definition fingerprint, lifecycle tombstone and
 -- change sequence, unique on owner scope and name. Written only by the
@@ -894,7 +891,13 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `attempts` — and the catalog gains `turn_park_clock`, the feed's sequence
 /// row, and `turn_park_events`, the durable ledger of park transitions. A
 /// pre-87 database is rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 87;
+/// Bumped to 88 for FIG-3585: the durable `RuntimeErrorCode` vocabulary drops
+/// `runtime_perf_start_gate_retry` and `tool_completion_key_process_lifetime`,
+/// and the durable core no longer carries the await-event tables that
+/// store-delegated turn control used (the effect-replay database keeps its
+/// own). A pre-88 database is rejected at open and recreated; it is not
+/// migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 88;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -1808,24 +1811,13 @@ mod check_constraint_tests {
     /// invariant the two copy-pasted declarations silently assumed.
     #[test]
     fn shared_fragment_tables_carry_identical_ddl_in_every_carrier_database() {
-        let carriers: &[(&[&str], &[SqliteDatabase])] = &[
-            (
-                &[
-                    "await_event_meta",
-                    "await_event_waits",
-                    "idx_await_event_waits_session",
-                    "await_event_revoked_sessions",
-                ],
-                &[SqliteDatabase::DurableCore, SqliteDatabase::EffectReplay],
-            ),
-            (
-                &["effect_scope_retirements"],
-                &[
-                    SqliteDatabase::ProcessRegistry,
-                    SqliteDatabase::EffectReplay,
-                ],
-            ),
-        ];
+        let carriers: &[(&[&str], &[SqliteDatabase])] = &[(
+            &["effect_scope_retirements"],
+            &[
+                SqliteDatabase::ProcessRegistry,
+                SqliteDatabase::EffectReplay,
+            ],
+        )];
         for &(objects, databases) in carriers {
             for &object in objects {
                 let mut rendered = Vec::new();
