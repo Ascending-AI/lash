@@ -414,7 +414,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
     async fn park_process_with_authority(
         &self,
         process_id: &ProcessId,
-        reason: lash_core_execution::store::ParkReason,
+        park: lash_core_execution::store::ProcessParkWrite,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
@@ -424,7 +424,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             .await?;
         let request = match lash_core_execution::runtime::prepare_process_transition(
             &record,
-            ProcessTransition::Park(reason),
+            ProcessTransition::Park(park),
         )? {
             ProcessTransitionPlan::Unchanged => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;

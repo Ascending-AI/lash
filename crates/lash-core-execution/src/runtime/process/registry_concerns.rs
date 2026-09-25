@@ -733,7 +733,7 @@ pub trait ProcessLifecycle: Send + Sync {
     async fn park_process_with_authority(
         &self,
         process_id: &ProcessId,
-        reason: crate::store::ParkReason,
+        park: crate::store::ProcessParkWrite,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
 

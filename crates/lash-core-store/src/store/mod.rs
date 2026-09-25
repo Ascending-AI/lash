@@ -110,9 +110,10 @@ pub use maintenance::{
     MaintenanceStop, MaintenanceSweep, SessionBlobReclaimReport, VacuumReport,
 };
 pub use park::{
-    ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId,
-    ParkReason, ParkReasonCode, ParkSummary, ProcessPark, ProcessParkKey, ProcessParkQuery,
-    TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause, UnsettledTurnCounts,
+    EnginePark, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
+    ParkId, ParkReason, ParkReasonCode, ParkSummary, ProcessPark, ProcessParkKey, ProcessParkQuery,
+    ProcessParkWrite, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause,
+    UnsettledTurnCounts,
 };
 pub use preflight::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,

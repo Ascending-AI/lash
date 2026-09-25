@@ -193,6 +193,7 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     segment_effect_budget: super::SegmentEffectBudget,
+    retry_max_attempts: u64,
     cancel_ingress: Option<RestateIngressClient>,
     authority_id: crate::RestateAuthorityId,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
@@ -246,6 +247,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             registry,
             continuations,
             segment_effect_budget: Arc::new(|_| 10_000),
+            retry_max_attempts: super::PROCESS_HANDLER_MAX_ATTEMPTS,
             cancel_ingress,
             authority_id,
             trace_sink: None,
@@ -264,6 +266,19 @@ impl<R> LashProcessWorkflowImpl<R> {
         self.trace_sink = Some(sink);
         self.trace_context = context;
         self
+    }
+
+    /// Stop retrying a segment after `max_attempts` attempts and pause its
+    /// invocation (FIG-3675): the process parks through the park reconcile
+    /// instead of burning retries forever.
+    pub(crate) fn with_retry_max_attempts(mut self, max_attempts: u64) -> Self {
+        self.retry_max_attempts = max_attempts;
+        self
+    }
+
+    /// The attempts a segment's `run` invocation makes before it pauses.
+    pub(crate) fn retry_max_attempts(&self) -> u64 {
+        self.retry_max_attempts
     }
 
     pub(crate) fn with_segment_effect_budget(
@@ -752,7 +767,7 @@ where
                 self.registry
                     .park_process_with_authority(
                         process_id,
-                        reason,
+                        reason.into(),
                         &park_authority(&record, started),
                     )
                     .await

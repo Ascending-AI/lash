@@ -164,6 +164,18 @@ pub enum ParkReason {
         /// The refusal message, naming both generations.
         message: String,
     },
+    /// The engine ran out of attempts on work that kept failing live and
+    /// stopped retrying it, keeping its execution for an operator to resume
+    /// (FIG-3675). Nothing was settled: the work holds its claims, and a
+    /// resume under a fixed deployment retries it where it stopped.
+    EngineRetryExhausted {
+        /// The attempts the engine made before it stopped.
+        attempts: u32,
+        /// The engine's code for the last failure, when it named one.
+        last_failure_code: Option<String>,
+        /// The last failure as the engine recorded it.
+        message: String,
+    },
 }
 
 /// The reason a park carries, as a plain code: the metric label and the query
@@ -182,6 +194,8 @@ pub enum ParkReasonCode {
     EffectReplayDivergence,
     /// See [`ParkReason::SessionStateGenerationRefused`].
     SessionStateGenerationRefused,
+    /// See [`ParkReason::EngineRetryExhausted`].
+    EngineRetryExhausted,
 }
 
 impl ParkReasonCode {
@@ -193,6 +207,7 @@ impl ParkReasonCode {
         Self::BindingDrift,
         Self::EffectReplayDivergence,
         Self::SessionStateGenerationRefused,
+        Self::EngineRetryExhausted,
     ];
 
     /// The serde tag the matching [`ParkReason`] arm serializes under, and
@@ -205,6 +220,7 @@ impl ParkReasonCode {
             Self::BindingDrift => "binding_drift",
             Self::EffectReplayDivergence => "effect_replay_divergence",
             Self::SessionStateGenerationRefused => "session_state_generation_refused",
+            Self::EngineRetryExhausted => "engine_retry_exhausted",
         }
     }
 
@@ -217,6 +233,7 @@ impl ParkReasonCode {
             "binding_drift" => Some(Self::BindingDrift),
             "effect_replay_divergence" => Some(Self::EffectReplayDivergence),
             "session_state_generation_refused" => Some(Self::SessionStateGenerationRefused),
+            "engine_retry_exhausted" => Some(Self::EngineRetryExhausted),
             _ => None,
         }
     }
@@ -322,6 +339,7 @@ impl ParkReason {
             Self::SessionStateGenerationRefused { .. } => {
                 ParkReasonCode::SessionStateGenerationRefused
             }
+            Self::EngineRetryExhausted { .. } => ParkReasonCode::EngineRetryExhausted,
         }
     }
 
@@ -343,7 +361,8 @@ impl ParkReason {
             | Self::RetiredGeneration { message, .. }
             | Self::BindingDrift { message }
             | Self::EffectReplayDivergence { message, .. }
-            | Self::SessionStateGenerationRefused { message, .. } => message,
+            | Self::SessionStateGenerationRefused { message, .. }
+            | Self::EngineRetryExhausted { message, .. } => message,
         }
     }
 }
@@ -603,6 +622,29 @@ impl<Target> Default for ParkFeedPage<Target> {
     }
 }
 
+/// The engine's own handle on parked work: what its redrive and release find
+/// the stopped execution by (an engine-owned, opaque id).
+///
+/// Opaque to lash: stored beside the park as the engine wrote it and handed
+/// back to the same engine, never parsed outside it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct EnginePark(String);
+
+impl EnginePark {
+    /// The engine's handle `value`.
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The handle as the engine wrote it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// The parked state a process record carries (NOW-B).
 ///
 /// A process parks when its body refuses to replay its journal: nothing is
@@ -629,6 +671,29 @@ pub struct ProcessPark {
     /// process's next start from its attempt budget, so a rerun that gets
     /// past replay and then fails live spends its budget as usual.
     pub refusing: bool,
+    /// The engine's handle on the stopped execution, when the engine parked
+    /// the process itself (an exhausted retry loop, FIG-3675).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<EnginePark>,
+}
+
+/// What a process park write records: the refusal, and the engine's handle
+/// on the stopped execution when the engine parked the work itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessParkWrite {
+    /// Why the process parked.
+    pub reason: ParkReason,
+    /// The engine's handle on the stopped execution, if any.
+    pub engine: Option<EnginePark>,
+}
+
+impl From<ParkReason> for ProcessParkWrite {
+    fn from(reason: ParkReason) -> Self {
+        Self {
+            reason,
+            engine: None,
+        }
+    }
 }
 
 /// The filter a `list_parked_processes` read applies.

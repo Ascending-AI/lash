@@ -93,7 +93,7 @@ pub enum ProcessTransition {
     /// `since_ms` and `park_id` and counting the attempt. A park whose latest
     /// run already refused is unchanged, so a retried write never counts one
     /// refusal twice.
-    Park(crate::store::ParkReason),
+    Park(crate::store::ProcessParkWrite),
     /// A rerun of a parked process began: the park stays, and stops
     /// exempting the process's starts from the attempt budget until the
     /// rerun refuses again. Unchanged on a process with no refusing park.
@@ -314,12 +314,12 @@ pub fn prepare_process_transition(
             };
             ProcessEventAppendRequest::wait_cleared(&record.id, wait)
         }
-        ProcessTransition::Park(reason) => {
+        ProcessTransition::Park(park) => {
             if record.is_refusing_park() {
                 return Ok(ProcessTransitionPlan::Unchanged);
             }
             let mut append =
-                ProcessEventAppendRequest::parked(&record.id, &reason, record.last_event_sequence);
+                ProcessEventAppendRequest::parked(&record.id, &park, record.last_event_sequence);
             if record.is_terminal() || record.status == ProcessStatus::CallerDeparted {
                 route_transition_refusal_to_fold(&mut append)?;
             }
@@ -572,9 +572,23 @@ pub fn apply_process_event_projection(
                 )));
             }
             let reason: crate::store::ParkReason = lifecycle_payload(event, "reason")?;
+            let engine: Option<crate::store::EnginePark> = event
+                .payload
+                .get("engine")
+                .map(|engine| serde_json::from_value(engine.clone()))
+                .transpose()
+                .map_err(|error| {
+                    PluginError::Session(format!(
+                        "process event `{}` has an invalid engine park handle: {error}",
+                        event.event_type
+                    ))
+                })?;
             match record.park.as_deref_mut() {
                 Some(park) => {
                     park.reason = reason;
+                    if engine.is_some() {
+                        park.engine = engine;
+                    }
                     park.last_refused_ms = event.occurred_at;
                     park.attempts = park.attempts.saturating_add(1);
                     park.refusing = true;
@@ -587,6 +601,7 @@ pub fn apply_process_event_projection(
                         last_refused_ms: event.occurred_at,
                         attempts: 1,
                         refusing: true,
+                        engine,
                     }));
                 }
             }

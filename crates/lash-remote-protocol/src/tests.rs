@@ -2196,6 +2196,7 @@ fn remote_process_record() -> RemoteProcessRecord {
             last_refused_ms: 2,
             attempts: 2,
             refusing: true,
+            engine: None,
         }),
         status: RemoteProcessStatus::Running,
         outcome: None,

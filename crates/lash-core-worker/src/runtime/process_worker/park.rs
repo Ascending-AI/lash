@@ -22,7 +22,7 @@ impl DurableProcessWorker {
         let parked = self
             .config
             .process_registry()
-            .park_process_with_authority(process_id, reason, park_authority)
+            .park_process_with_authority(process_id, reason.into(), park_authority)
             .await?;
         lash_core_ids::operational_metrics::record_work_parked("process", code.as_str());
         tracing::warn!(

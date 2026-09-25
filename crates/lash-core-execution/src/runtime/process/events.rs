@@ -896,12 +896,16 @@ impl ProcessEventAppendRequest {
     /// same refusal coalesces onto it.
     pub fn parked(
         process_id: &ProcessId,
-        reason: &crate::store::ParkReason,
+        park: &crate::store::ProcessParkWrite,
         after_event_sequence: u64,
     ) -> Self {
-        Self::new("process.parked", serde_json::json!({ "reason": reason })).with_replay_key(
-            format!("process:{process_id}:parked:after:{after_event_sequence}"),
-        )
+        let payload = match &park.engine {
+            Some(engine) => serde_json::json!({ "reason": park.reason, "engine": engine }),
+            None => serde_json::json!({ "reason": park.reason }),
+        };
+        Self::new("process.parked", payload).with_replay_key(format!(
+            "process:{process_id}:parked:after:{after_event_sequence}"
+        ))
     }
 
     /// Builds the fact that a rerun of a parked process began (NOW-B): the

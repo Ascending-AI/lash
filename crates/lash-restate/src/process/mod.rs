@@ -9,10 +9,14 @@
 
 use lash_sansio::ProcessId;
 mod admission;
+mod park_reconcile;
 mod workflow;
 
 pub use admission::{RESTATE_PROCESS_JOURNAL_VERSION, SegmentStarted};
 pub(crate) use admission::{SegmentAdmission, admit_segment, handover_digest};
+pub use park_reconcile::{
+    ProcessParkReconcileReport, reconcile_process_parks, resume_parked_process,
+};
 
 use std::sync::Arc;
 
@@ -38,6 +42,12 @@ use crate::ingress::{RestateConnection, RestateIngressClient};
 pub(crate) use workflow::{
     LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,
 };
+
+/// Attempts a process segment's `run` invocation makes before it pauses, by
+/// default: the same bound a turn handler has
+/// ([`TURN_HANDLER_MAX_ATTEMPTS`](crate::TURN_HANDLER_MAX_ATTEMPTS)). A
+/// deployment sets its own with [`RestateProcessServing::with_retry_max_attempts`].
+pub const PROCESS_HANDLER_MAX_ATTEMPTS: u64 = crate::TURN_HANDLER_MAX_ATTEMPTS;
 
 pub(crate) const PROCESS_CANCEL_PROMISE_KEY: &str = "process_cancel_requested";
 /// Wall-clock epoch milliseconds for terminal evidence written at the Restate
@@ -429,7 +439,12 @@ pub struct RestateProcessIngressRunner {
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     event_sink: Option<Arc<dyn ProcessEventSink>>,
+    park_reconciler: ParkReconciler,
 }
+
+/// The admin client a deployment's sweep reconciles engine-paused segments
+/// into process parks through, once the host installs one.
+type ParkReconciler = Arc<std::sync::OnceLock<crate::RestateAdminClient>>;
 
 impl RestateProcessIngressRunner {
     pub fn new(
@@ -442,7 +457,13 @@ impl RestateProcessIngressRunner {
             registry,
             continuations,
             event_sink: None,
+            park_reconciler: ParkReconciler::default(),
         }
+    }
+
+    fn with_park_reconciler(mut self, reconciler: ParkReconciler) -> Self {
+        self.park_reconciler = reconciler;
+        self
     }
 
     /// `RestateProcessDeployment::new_with_sink` installs the host's sink here,
@@ -617,6 +638,17 @@ impl RestateProcessIngressRunner {
 
 impl RestateProcessIngressRunner {
     async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError> {
+        // Engine-paused segments become process parks before the pass reads
+        // its worklist (FIG-3675). A failed reconcile is reported and retried
+        // by the next pass; it never stops this one.
+        if let Some(admin) = self.park_reconciler.get()
+            && let Err(error) = reconcile_process_parks(admin, &self.registry).await
+        {
+            tracing::warn!(
+                error = %error,
+                "restate process park reconcile failed; the next sweep retries it"
+            );
+        }
         let mut report = ProcessAdmissionReport::default();
         let limit = std::num::NonZeroUsize::MIN.saturating_add(255);
         let mut continuation = None;
@@ -821,6 +853,7 @@ pub struct RestateProcessDeployment {
     ingress: RestateIngressClient,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     authority_id: crate::RestateAuthorityId,
+    park_reconciler: ParkReconciler,
 }
 
 impl RestateProcessDeployment {
@@ -862,6 +895,7 @@ impl RestateProcessDeployment {
     ) -> Self {
         let connection = connection.into();
         let fault_sink = sink.clone();
+        let park_reconciler = ParkReconciler::default();
         let watched = watch_process_registry_with_sink(registry, sink);
         let registry = Arc::clone(watched.registry());
         let ingress_runner = Arc::new(
@@ -870,7 +904,8 @@ impl RestateProcessDeployment {
                 Arc::clone(&registry),
                 Arc::clone(&continuations),
             )
-            .with_event_sink(fault_sink),
+            .with_event_sink(fault_sink)
+            .with_park_reconciler(Arc::clone(&park_reconciler)),
         );
         let process_work = ingress_runner;
         let port: Arc<dyn ProcessWorkSubstrate> = process_work.clone();
@@ -883,7 +918,15 @@ impl RestateProcessDeployment {
             ingress: RestateIngressClient::new(connection),
             continuations,
             authority_id,
+            park_reconciler,
         }
+    }
+
+    /// Reconcile engine-paused process segments into process parks on every
+    /// admission sweep, reading Restate's admin API through `admin`
+    /// (FIG-3675). Installed once; a second call keeps the first client.
+    pub fn install_park_reconciler(&self, admin: crate::RestateAdminClient) {
+        let _ = self.park_reconciler.set(admin);
     }
 
     #[cfg(test)]
@@ -925,6 +968,7 @@ impl RestateProcessDeployment {
         let RestateProcessServing {
             worker,
             segment_effect_budget,
+            retry_max_attempts,
         } = serving;
         let mut workflow = LashProcessWorkflowImpl::new(
             Arc::new(RestateCoreProcessRunner { worker }),
@@ -936,7 +980,7 @@ impl RestateProcessDeployment {
         if let Some(selector) = segment_effect_budget {
             workflow = workflow.with_segment_effect_budget(selector);
         }
-        workflow
+        workflow.with_retry_max_attempts(retry_max_attempts)
     }
 }
 
@@ -948,6 +992,7 @@ impl RestateProcessDeployment {
 pub struct RestateProcessServing {
     worker: ProcessWorkerSource,
     segment_effect_budget: Option<SegmentEffectBudget>,
+    retry_max_attempts: u64,
 }
 
 /// Picks a process's completed-effect budget per segment from its
@@ -971,6 +1016,7 @@ impl RestateProcessServing {
         Self {
             worker,
             segment_effect_budget: None,
+            retry_max_attempts: PROCESS_HANDLER_MAX_ATTEMPTS,
         }
     }
 
@@ -978,6 +1024,16 @@ impl RestateProcessServing {
     /// registration data. This is primarily useful for conformance/e2e pairs
     /// that run the same artifact with and without forced segmentation; the
     /// production default remains 10,000 completed effects per incarnation.
+    /// Pause a segment's `run` invocation after `max_attempts` attempts
+    /// instead of the default [`PROCESS_HANDLER_MAX_ATTEMPTS`]. A paused
+    /// segment's process is parked by the park reconcile
+    /// ([`RestateProcessDeployment::install_park_reconciler`]) with
+    /// `ParkReason::EngineRetryExhausted`, and a resume retries it.
+    pub fn with_retry_max_attempts(mut self, max_attempts: u64) -> Self {
+        self.retry_max_attempts = max_attempts.max(1);
+        self
+    }
+
     pub fn with_segment_effect_budget_selector(
         mut self,
         selector: impl Fn(&ProcessRegistration) -> u64 + Send + Sync + 'static,
