@@ -480,7 +480,6 @@ async fn main() -> Result<()> {
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-            .wall_clock(lash::rlm::WallClockBound::secs(45))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
         backend.as_ref(),

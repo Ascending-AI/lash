@@ -408,7 +408,6 @@ impl ExecutionHost for BudgetedHost {
     fn execution_bounds(&self) -> lashlang::ExecutionBounds {
         lashlang::ExecutionBounds::new(
             lashlang::ExecutionBound::Bounded(self.instructions),
-            lashlang::ExecutionBound::Unbounded,
             lashlang::ExecutionBound::Bounded(lashlang::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
         )
     }

@@ -12,7 +12,7 @@ use lash::plugins::{
 use lash::rlm::{
     InstructionBound, LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
     LashlangLanguageFeatures, LashlangSurfaceContribution, MemoryBound, NamedDataType, RlmChannel,
-    RlmProtocolPluginConfig, TypeExpr, TypeField, WallClockBound,
+    RlmProtocolPluginConfig, TypeExpr, TypeField,
 };
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
@@ -506,7 +506,6 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         RlmProtocolPluginConfig::builder()
             .channel(RlmChannel::Cell)
             .instruction_limit(InstructionBound::instructions(1_000_000))
-            .wall_clock(WallClockBound::secs(30))
             .memory_limit(MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(LashlangAbilities::default().with_sleep()),

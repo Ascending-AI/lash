@@ -595,7 +595,6 @@ pub(crate) fn run(relative: &str) -> Observed {
     let environment = ExecutionEnvironment::new(&host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(INSTRUCTION_BUDGET),
         ExecutionBound::Unbounded,
-        ExecutionBound::Unbounded,
     ));
     let result =
         futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &environment));

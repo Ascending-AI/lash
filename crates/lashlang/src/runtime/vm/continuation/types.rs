@@ -50,7 +50,6 @@ impl<'de> Deserialize<'de> for VmContinuation {
             profile: Option<VmProfileContinuation>,
             pending_error_span: Option<Span>,
             instructions_executed: u64,
-            active_execution_elapsed: std::time::Duration,
             #[serde(deserialize_with = "continuation_serde::deserialize_heap")]
             heap: VmHeapContinuation,
         }
@@ -76,7 +75,6 @@ impl<'de> Deserialize<'de> for VmContinuation {
             profile: wire.profile,
             pending_error_span: wire.pending_error_span,
             instructions_executed: wire.instructions_executed,
-            active_execution_elapsed: wire.active_execution_elapsed,
             heap: wire.heap,
         };
         validate_continuation(&continuation).map_err(serde::de::Error::custom)?;
@@ -339,8 +337,6 @@ pub enum ContinuationError {
     InstructionBudgetExceeded { limit: u64 },
     #[error("lashlang frame depth limit of {limit} frames was already exceeded")]
     FrameDepthExceeded { limit: u64 },
-    #[error("lashlang active-execution deadline of {limit_ms}ms was already exceeded")]
-    ExecutionDeadlineExceeded { limit_ms: u128 },
     #[error(
         "lashlang logical memory limit of {limit} bytes was already exceeded by {live} live bytes"
     )]
@@ -353,7 +349,6 @@ impl ContinuationError {
             self,
             Self::InstructionBudgetExceeded { .. }
                 | Self::FrameDepthExceeded { .. }
-                | Self::ExecutionDeadlineExceeded { .. }
                 | Self::MemoryLimitExceeded { .. }
         )
     }

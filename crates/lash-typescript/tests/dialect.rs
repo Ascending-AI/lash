@@ -286,12 +286,7 @@ fn suspended_typescript_run(stress_gc: bool) -> (Vec<u8>, ExecutionOutcome) {
         );
         let continuation = vm.suspend().expect("capture TypeScript continuation");
         let wire_bytes = serde_json::to_vec(&continuation).expect("encode continuation");
-        let mut canonical = serde_json::to_value(&continuation).expect("canonicalize continuation");
-        canonical
-            .as_object_mut()
-            .expect("continuation object")
-            .remove("active_execution_elapsed");
-        let bytes = serde_json::to_vec(&canonical).expect("encode deterministic continuation");
+        let bytes = wire_bytes.clone();
         let restored =
             serde_json::from_slice(&wire_bytes).expect("decode in a fresh process image");
         let mut resumed = Vm::resume_from(restored, &program, &host).expect("resume TypeScript");
@@ -371,12 +366,7 @@ fn normalized_continuation_bytes(
             VmRunOutcome::EffectCompleted
         );
         let continuation = vm.suspend().expect("capture continuation");
-        let mut canonical = serde_json::to_value(continuation).expect("canonicalize continuation");
-        canonical
-            .as_object_mut()
-            .expect("continuation object")
-            .remove("active_execution_elapsed");
-        serde_json::to_vec(&canonical).expect("encode deterministic continuation")
+        serde_json::to_vec(&continuation).expect("encode deterministic continuation")
     })
 }
 

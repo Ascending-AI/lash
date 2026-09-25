@@ -224,7 +224,6 @@ pub struct VmContinuation {
     pub profile: Option<VmProfileContinuation>,
     pub pending_error_span: Option<Span>,
     pub instructions_executed: u64,
-    pub active_execution_elapsed: std::time::Duration,
     #[serde(
         serialize_with = "continuation_serde::serialize_heap",
         deserialize_with = "continuation_serde::deserialize_heap"
@@ -1142,7 +1141,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             validation_plans: FxHashMap::default(),
             pending_error_span: None,
             instructions_executed: 0,
-            active_execution_elapsed: std::time::Duration::ZERO,
             heap: Self::new_heap(host),
             heap_initialized: false,
             pending_tools: PendingToolMap::new(),
@@ -1322,7 +1320,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }),
             pending_error_span: self.pending_error_span,
             instructions_executed: self.instructions_executed,
-            active_execution_elapsed: self.active_execution_elapsed,
             heap: VmHeapContinuation::new(self.heap.clone()),
         };
         if validate_continuation(&continuation).is_err() {
@@ -1403,13 +1400,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             && continuation.instructions_executed > limit.get()
         {
             return Err(ContinuationError::InstructionBudgetExceeded { limit: limit.get() });
-        }
-        if let ExecutionBound::Bounded(limit) = bounds.deadline
-            && continuation.active_execution_elapsed > limit
-        {
-            return Err(ContinuationError::ExecutionDeadlineExceeded {
-                limit_ms: limit.as_millis(),
-            });
         }
         if let ExecutionBound::Bounded(limit) = bounds.memory_limit
             && continuation.heap.live_logical_bytes() > limit.get()
@@ -1537,7 +1527,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             validation_plans: FxHashMap::default(),
             pending_error_span: continuation.pending_error_span,
             instructions_executed: continuation.instructions_executed,
-            active_execution_elapsed: continuation.active_execution_elapsed,
             heap: {
                 let mut heap = continuation.heap.into_heap();
                 let limit = match bounds.memory_limit {

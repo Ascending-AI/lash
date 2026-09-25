@@ -318,7 +318,6 @@ fn program_bounds_bypass_guest_catch_and_finally() {
     let environment = ExecutionEnvironment::new(&host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(32),
         ExecutionBound::Unbounded,
-        ExecutionBound::Unbounded,
     ));
     let error =
         futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &environment))

@@ -1,5 +1,4 @@
 use std::num::NonZeroU64;
-use std::time::Duration;
 
 /// Serialized shape shared by every execution bound: an explicit finite limit
 /// or an explicit opt-out. Bounds are distinct Rust types so that an
@@ -140,110 +139,17 @@ impl MemoryBound {
 
 nonzero_bound_serde!(MemoryBound);
 
-/// How much active VM execution time an execution may consume.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WallClockBound(Option<Duration>);
-
-impl WallClockBound {
-    /// A finite execution deadline, in milliseconds.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `milliseconds` is zero: an execution that may run for no
-    /// time at all is a configuration mistake, not a deadline. Use
-    /// [`WallClockBound::unbounded`] for the explicit opt-out.
-    pub const fn millis(milliseconds: u64) -> Self {
-        match NonZeroU64::new(milliseconds) {
-            Some(_) => Self(Some(Duration::from_millis(milliseconds))),
-            None => panic!("wall-clock deadline must be non-zero"),
-        }
-    }
-
-    /// A finite execution deadline, in seconds.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `seconds` is zero.
-    pub const fn secs(seconds: u64) -> Self {
-        match NonZeroU64::new(seconds) {
-            Some(_) => Self(Some(Duration::from_secs(seconds))),
-            None => panic!("wall-clock deadline must be non-zero"),
-        }
-    }
-
-    /// An explicit opt-out: the execution is not stopped on elapsed time.
-    pub const fn unbounded() -> Self {
-        Self(None)
-    }
-
-    /// The finite deadline, or `None` when unbounded.
-    pub const fn limit(self) -> Option<Duration> {
-        self.0
-    }
-
-    fn into_engine(self) -> lashlang::ExecutionBound<Duration> {
-        match self.0 {
-            Some(value) => lashlang::ExecutionBound::Bounded(value),
-            None => lashlang::ExecutionBound::Unbounded,
-        }
-    }
-}
-
-impl serde::Serialize for WallClockBound {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self.0 {
-            Some(value) => {
-                let milliseconds =
-                    u64::try_from(value.as_millis()).map_err(serde::ser::Error::custom)?;
-                ExecutionBoundWire::Bounded(milliseconds).serialize(serializer)
-            }
-            None => ExecutionBoundWire::<u64>::Unbounded.serialize(serializer),
-        }
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for WallClockBound {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(
-            match ExecutionBoundWire::<u64>::deserialize(deserializer)? {
-                // A zero deadline is rejected rather than accepted as an
-                // instant timeout, matching the constructors; decoding must
-                // report it, never panic.
-                ExecutionBoundWire::Bounded(0) => {
-                    return Err(serde::de::Error::custom(
-                        "wall-clock deadline must be non-zero",
-                    ));
-                }
-                ExecutionBoundWire::Bounded(milliseconds) => Self::millis(milliseconds),
-                ExecutionBoundWire::Unbounded => Self::unbounded(),
-            },
-        )
-    }
-}
-
-/// The three independent bounds every RLM execution must choose explicitly.
+/// The two independent bounds every RLM execution must choose explicitly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutionBounds {
     pub instruction_limit: InstructionBound,
-    pub wall_clock: WallClockBound,
     pub memory_limit: MemoryBound,
 }
 
 impl ExecutionBounds {
-    pub const fn new(
-        instruction_limit: InstructionBound,
-        wall_clock: WallClockBound,
-        memory_limit: MemoryBound,
-    ) -> Self {
+    pub const fn new(instruction_limit: InstructionBound, memory_limit: MemoryBound) -> Self {
         Self {
             instruction_limit,
-            wall_clock,
             memory_limit,
         }
     }
@@ -254,17 +160,12 @@ impl ExecutionBounds {
     }
 
     pub const fn unbounded() -> Self {
-        Self::new(
-            InstructionBound::unbounded(),
-            WallClockBound::unbounded(),
-            MemoryBound::unbounded(),
-        )
+        Self::new(InstructionBound::unbounded(), MemoryBound::unbounded())
     }
 
     pub(crate) fn into_engine(self) -> lashlang::ExecutionBounds {
         lashlang::ExecutionBounds::new(
             self.instruction_limit.into_engine(),
-            self.wall_clock.into_engine(),
             self.memory_limit.into_engine(),
         )
     }
@@ -351,17 +252,11 @@ mod tests {
     #[test]
     fn protocol_owned_types_preserve_the_engine_wire_shape() {
         let instruction_limit = InstructionBound::instructions(1_000_000);
-        let wall_clock = WallClockBound::millis(30_000);
         let memory_limit = MemoryBound::mebibytes(64);
         assert_eq!(
             serde_json::to_value(instruction_limit).expect("protocol instruction budget"),
             serde_json::to_value(lashlang::ExecutionBound::instructions(1_000_000))
                 .expect("engine instruction budget")
-        );
-        assert_eq!(
-            serde_json::to_value(wall_clock).expect("protocol deadline"),
-            serde_json::to_value(lashlang::ExecutionBound::millis(30_000))
-                .expect("engine deadline")
         );
         // Spelled in bytes on both sides (FIG-1979). The engine's bound type is
         // one type for two axes, so `instructions(..)` would produce an equal
@@ -406,25 +301,16 @@ mod tests {
             MemoryBound::logical_bytes(64 * 1024 * 1024)
         );
         assert_eq!(MemoryBound::unbounded().limit(), None);
-
-        assert_eq!(
-            WallClockBound::secs(30).limit(),
-            Some(Duration::from_secs(30))
-        );
-        assert_eq!(WallClockBound::secs(30), WallClockBound::millis(30_000));
-        assert_eq!(WallClockBound::unbounded().limit(), None);
     }
 
     #[test]
     fn execution_bounds_keep_each_limit_on_its_own_axis() {
         let bounds = ExecutionBounds::new(
             InstructionBound::instructions(7),
-            WallClockBound::secs(11),
             MemoryBound::mebibytes(13),
         );
 
         assert_eq!(bounds.instruction_limit.limit(), NonZeroU64::new(7));
-        assert_eq!(bounds.wall_clock.limit(), Some(Duration::from_secs(11)));
         assert_eq!(
             bounds.memory_limit.limit(),
             NonZeroU64::new(13 * 1024 * 1024)
@@ -454,12 +340,6 @@ mod tests {
             ("memory limit must be non-zero", || {
                 MemoryBound::mebibytes(0);
             }),
-            ("wall-clock deadline must be non-zero", || {
-                WallClockBound::millis(0);
-            }),
-            ("wall-clock deadline must be non-zero", || {
-                WallClockBound::secs(0);
-            }),
         ] {
             let panic = std::panic::catch_unwind(construct).expect_err(label);
             let message = panic
@@ -469,17 +349,5 @@ mod tests {
                 .expect("panic payload");
             assert_eq!(message, label);
         }
-    }
-
-    #[test]
-    fn a_zero_wall_clock_wire_value_decodes_to_an_error_not_a_panic() {
-        let error = serde_json::from_value::<WallClockBound>(serde_json::json!({ "bounded": 0 }))
-            .expect_err("zero deadline must be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("wall-clock deadline must be non-zero"),
-            "unexpected error: {error}"
-        );
     }
 }

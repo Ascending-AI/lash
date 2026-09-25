@@ -201,7 +201,7 @@ pub use lash_lashlang_runtime::{
 pub use lash_protocol_rlm::{
     ExecutionBounds, InstructionBound, MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,
     RlmChannel, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
-    RlmSessionConfigDecodeError, TypeExpr, TypeField, UnsetBound, WallClockBound, format_type_expr,
+    RlmSessionConfigDecodeError, TypeExpr, TypeField, UnsetBound, format_type_expr,
 };
 /// Projection vocabulary: register lazy host projections on a
 /// [`ProjectionRegistry`] or bind projected values to the active session via

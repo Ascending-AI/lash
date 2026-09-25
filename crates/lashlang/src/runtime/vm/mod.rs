@@ -1,7 +1,7 @@
 //! Bytecode executor for compiled chunks, host effects, and trace/profile data.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
 use crate::span::Span;
@@ -257,7 +257,6 @@ pub struct Vm<'a, H> {
     validation_plans: FxHashMap<usize, (Arc<Record>, ValidationPlan)>,
     pending_error_span: Option<Span>,
     instructions_executed: u64,
-    active_execution_elapsed: Duration,
     pub(crate) heap: Heap,
     heap_initialized: bool,
     pending_tools: std::collections::BTreeMap<lash_sansio::handle::HandleId, Option<Value>>,

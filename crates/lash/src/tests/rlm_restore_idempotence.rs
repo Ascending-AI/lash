@@ -46,7 +46,7 @@ use lash_core::{
 };
 use lash_protocol_rlm::{
     InstructionBound, MemoryBound, RlmProtocolPluginConfig, RlmProtocolPluginFactory, RlmSeed,
-    WallClockBound, rlm_seed_initial_nodes,
+    rlm_seed_initial_nodes,
 };
 use lash_sansio::sync::MutexExt;
 
@@ -220,7 +220,6 @@ async fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> P
             RlmProtocolPluginConfig::builder()
                 .channel(crate::rlm::RlmChannel::Cell)
                 .instruction_limit(InstructionBound::instructions(1_000_000))
-                .wall_clock(WallClockBound::secs(30))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
             crate::tests::memory_backend().await.as_ref(),
@@ -1096,7 +1095,6 @@ async fn storeless_runtime(
             RlmProtocolPluginConfig::builder()
                 .channel(crate::rlm::RlmChannel::Cell)
                 .instruction_limit(InstructionBound::instructions(1_000_000))
-                .wall_clock(WallClockBound::secs(30))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
             crate::tests::memory_backend().await.as_ref(),

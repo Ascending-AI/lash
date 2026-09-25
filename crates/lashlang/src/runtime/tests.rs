@@ -183,7 +183,6 @@ async fn instruction_budget_exhaustion_is_typed_and_caret_rendered() {
         .with_execution_bounds(ExecutionBounds::new(
             ExecutionBound::instructions(1),
             ExecutionBound::Unbounded,
-            ExecutionBound::Unbounded,
         ));
     let mut state = State::new();
     let error = execute_program(&program, &mut state, &env)
@@ -204,7 +203,6 @@ async fn effect_free_terminal_segment_enforces_tiny_instruction_budget() {
     let program = builders::program(vec![builders::assign("value", builders::num(1.0))]);
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(1),
-        ExecutionBound::Unbounded,
         ExecutionBound::Unbounded,
     ));
     let mut state = State::new();
@@ -233,7 +231,6 @@ async fn effect_free_intrinsic_dispatch_enforces_bounds_before_later_runtime_err
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(10),
         ExecutionBound::Unbounded,
-        ExecutionBound::Unbounded,
     ));
     let mut state = State::new();
     assert!(matches!(
@@ -255,7 +252,6 @@ async fn shaping_collection_work_consumes_instruction_budget() {
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(10),
         ExecutionBound::Unbounded,
-        ExecutionBound::Unbounded,
     ));
     let mut state = State::new();
     assert!(matches!(
@@ -264,10 +260,13 @@ async fn shaping_collection_work_consumes_instruction_budget() {
     ));
 }
 
+/// FIG-3672 P2c: nothing in a run reads the wall clock, so the time a host
+/// takes to answer an awaited tool changes neither the outcome nor the
+/// instruction the run ends on.
 #[tokio::test(flavor = "current_thread")]
-async fn deadline_excludes_awaited_tool_time() {
+async fn tool_wait_speed_changes_neither_outcome_nor_instruction_count() {
     // `value = tools.echo({ value: 1 })` / a hundred-step loop / `finish value`
-    let program = builders::program(vec![
+    let program = compile_program_for_tests(builders::program(vec![
         builders::assign(
             "value",
             builders::receiver_call(
@@ -279,35 +278,26 @@ async fn deadline_excludes_awaited_tool_time() {
         builders::assign("i", builders::num(0.0)),
         counting_loop(100.0),
         builders::finish(builders::var("value")),
-    ]);
-    let env = ExecutionEnvironment::new(&SlowToolHost).with_execution_bounds(ExecutionBounds::new(
-        ExecutionBound::Unbounded,
-        ExecutionBound::millis(20),
-        ExecutionBound::Unbounded,
-    ));
-    let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &env)
+    ]));
+    let mut slow_state = State::new();
+    let mut slow_vm =
+        Vm::from_state(&program, &mut slow_state, &SlowToolHost).expect("state should install");
+    let slow_outcome = slow_vm
+        .run_for_mode()
         .await
-        .expect("the tool's 50ms wait must not consume the 20ms VM deadline");
-    assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn deadline_exhaustion_is_a_typed_runtime_error() {
-    let program = long_counting_loop_program();
-    let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
-        ExecutionBound::Unbounded,
-        ExecutionBound::Bounded(std::time::Duration::from_nanos(1)),
-        ExecutionBound::Unbounded,
-    ));
-    let mut state = State::new();
-    let error = execute_program(&program, &mut state, &env)
+        .expect("the slow-tool run finishes");
+    let mut fast_state = State::new();
+    let mut fast_vm =
+        Vm::from_state(&program, &mut fast_state, &Host).expect("state should install");
+    let fast_outcome = fast_vm
+        .run_for_mode()
         .await
-        .expect_err("loop must exhaust its VM deadline");
-    assert!(matches!(
-        error,
-        RuntimeError::ExecutionDeadlineExceeded { .. }
-    ));
+        .expect("the instant-tool run finishes");
+    assert_eq!(slow_outcome, fast_outcome);
+    assert_eq!(
+        slow_vm.instructions_executed(),
+        fast_vm.instructions_executed()
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -98,7 +98,6 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                         .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
                             1_000_000,
                         ))
-                        .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                         .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                         .build()
                         .with_discovery(lash_core::ToolDiscovery {

@@ -1,7 +1,7 @@
 error[E0308]: mismatched types
-  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:17:23
+  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:16:23
    |
-17 |         .memory_limit(InstructionBound::instructions(64 * 1024 * 1024))
+16 |         .memory_limit(InstructionBound::instructions(64 * 1024 * 1024))
    |          ------------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `MemoryBound`, found `InstructionBound`
    |          |
    |          arguments to this method are incorrect
@@ -13,9 +13,9 @@ note: method defined here
    |            ^^^^^^^^^^^^
 
 error[E0308]: mismatched types
-  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:24:28
+  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:23:28
    |
-24 |         .instruction_limit(MemoryBound::mebibytes(64))
+23 |         .instruction_limit(MemoryBound::mebibytes(64))
    |          ----------------- ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `InstructionBound`, found `MemoryBound`
    |          |
    |          arguments to this method are incorrect
@@ -27,26 +27,24 @@ note: method defined here
    |            ^^^^^^^^^^^^^^^^^
 
 error[E0308]: arguments to this function are incorrect
-  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:31:13
+  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:29:13
    |
-31 |     let _ = ExecutionBounds::new(
+29 |     let _ = ExecutionBounds::new(
    |             ^^^^^^^^^^^^^^^^^^^^
-32 |         MemoryBound::mebibytes(64),
+30 |         MemoryBound::mebibytes(64),
    |         -------------------------- expected `InstructionBound`, found `MemoryBound`
-33 |         WallClockBound::secs(30),
-34 |         InstructionBound::instructions(1_000_000),
+31 |         InstructionBound::instructions(1_000_000),
    |         ----------------------------------------- expected `MemoryBound`, found `InstructionBound`
    |
 note: associated function defined here
   --> $WORKSPACE/crates/lash-protocol-rlm/src/plugin/config_types.rs
    |
-   |     pub const fn new(
+   |     pub const fn new(instruction_limit: InstructionBound, memory_limit: MemoryBound) -> Self {
    |                  ^^^
 help: swap these arguments
    |
-31 ~     let _ = ExecutionBounds::new(
-32 +         InstructionBound::instructions(1_000_000),
-33 +         WallClockBound::secs(30),
-34 +         MemoryBound::mebibytes(64),
-35 ~     );
+29 ~     let _ = ExecutionBounds::new(
+30 +         InstructionBound::instructions(1_000_000),
+31 +         MemoryBound::mebibytes(64),
+32 ~     );
    |
