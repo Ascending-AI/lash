@@ -31,8 +31,8 @@ impl lashlang::ExecutionHost for ParkedCellHost<'_> {
         lashlang::ExecutionMode::Process
     }
 
-    async fn yield_now(&self) {
-        self.bridge.yield_now().await;
+    async fn cancel_checkpoint(&self, checkpoint: u64) {
+        self.bridge.cancel_checkpoint(checkpoint).await;
     }
 }
 

@@ -48,7 +48,6 @@ crates/lash-core/src/runtime/turn_driver/streaming/terminal.rs  |  call_id: crat
 crates/lash-core/src/runtime/turn_driver/tools.rs  |  let (turn_event_tx, mut turn_event_rx) = tokio::sync::mpsc::channel::<TurnActivity>(64);  |  2  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/tools.rs  |  tokio::sync::mpsc::channel::<SessionStreamEvent>(64);  |  2  # UNMAPPED
 crates/lash-core/src/runtime/turn_loop/commit.rs  |  let mut seen = std::collections::HashSet::new();  |  1  # LZ29
-crates/lash-core/src/runtime/turn_loop/execute.rs  |  tokio::select! {  |  1  # AC1
 crates/lash-core/src/runtime/turn_loop/resident_session.rs  |  uuid::Uuid::new_v4()  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/lib.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/process.rs  |  Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB3
@@ -57,7 +56,6 @@ crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  Pin<Box<dyn Future<Outp
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  active_nodes: std::sync::Arc<Mutex<HashSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,  |  1  # UNMAPPED
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  let mut seen = HashSet::new();  |  1  # IO57
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  seen: &'a mut HashSet<String>,  |  1  # IO57
-crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  tokio::task::yield_now().await;  |  1  # AC37
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  use std::collections::{BTreeMap, HashSet};  |  1  # UNMAPPED
 crates/lash-protocol-rlm/src/executor/mod.rs  |  let start = std::time::Instant::now();  |  1  # UNMAPPED
 crates/lash-protocol-rlm/src/projection/bindings.rs  |  let key = uuid::Uuid::new_v4().to_string();  |  1  # CR23
@@ -75,7 +73,7 @@ crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output
 crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupProbeResponse, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
 crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupReadRankResponse, TerminalError>> + Send + 'run>>  |  1  # UNMAPPED
 crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Json<T>, TerminalError>> + Send + 'run>>  |  2  # LZ11 SB30
-crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>  |  4  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
 crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
 crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<usize>, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
 crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
@@ -90,8 +88,8 @@ crates/lash-restate/src/controller/context.rs  |  dyn Future<Output = Result<Eff
 crates/lash-restate/src/controller/context.rs  |  dyn Future<Output = Result<RestateDurableWaitResolveResponse, TerminalError>> + Send + 'run,  |  1  # UNMAPPED
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = JournaledEffectRecord> + Send + 'run>>,  |  1  # SB30
 crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = RecordedRuntimeEffect> + Send + 'run>>,  |  1  # SB30
-crates/lash-restate/src/controller/mod.rs  |  &lash_core::facade_support::SystemClock,  |  1  # UNMAPPED
 crates/lash-restate/src/controller/mod.rs  |  let clock = lash_core::facade_support::SystemClock;  |  1  # CR12
+crates/lash-restate/src/controller/turn_cancel_request.rs  |  &lash_core::facade_support::SystemClock,  |  1  # UNMAPPED
 crates/lash-restate/src/durable_wait.rs  |  ) -> tokio::sync::oneshot::Receiver<RestateDurableWaitRegistration> {  |  1  # UNMAPPED
 crates/lash-restate/src/durable_wait.rs  |  deadline.remaining(lash_core::facade_support::SystemClock.timestamp_ms())?;  |  1  # CR13
 crates/lash-restate/src/durable_wait.rs  |  let (send, receive) = tokio::sync::oneshot::channel();  |  1  # UNMAPPED

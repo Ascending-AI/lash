@@ -152,7 +152,9 @@ async fn immediate_during_a_parked_sleep_still_aborts_at_wake() {
         error.code,
         lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled
     );
-    assert!(cancellation.is_cancelled());
+    // The verdict rides the recorded outcome; no controller writes it back
+    // into the waiting execution's token (FIG-3672 P9).
+    assert!(!cancellation.is_cancelled());
 }
 
 #[tokio::test]
@@ -201,7 +203,9 @@ async fn escalating_a_deferred_stop_aborts_the_parked_sleep() {
         error.code,
         lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled
     );
-    assert!(cancellation.is_cancelled());
+    // The verdict rides the recorded outcome; no controller writes it back
+    // into the waiting execution's token (FIG-3672 P9).
+    assert!(!cancellation.is_cancelled());
 }
 
 #[tokio::test]

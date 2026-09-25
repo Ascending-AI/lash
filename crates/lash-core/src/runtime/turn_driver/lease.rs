@@ -22,7 +22,6 @@ impl<'run> RuntimeTurnDriver<'run> {
         &mut self,
         machine: &mut TurnMachine,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
         envelope: RuntimeEffectEnvelope,
         decode: impl FnOnce(RuntimeEffectOutcome) -> Result<T, RuntimeEffectControllerError>,
     ) -> Result<T, RuntimeEffectControllerError> {
@@ -35,7 +34,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 self,
                 machine,
                 event_tx.clone(),
-                cancel.clone(),
                 task_controller,
             );
             scoped_effect_controller
@@ -52,7 +50,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 self,
                 machine,
                 event_tx.clone(),
-                cancel.clone(),
                 task_controller,
             );
             crate::runtime::effect::drive_effect_controller_task(

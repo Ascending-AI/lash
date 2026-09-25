@@ -337,14 +337,12 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         checkpoint: CheckpointKind,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<crate::CheckpointDelivery, RuntimeEffectControllerError> {
         let invocation = self.turn_effect_invocation(machine, id, RuntimeEffectKind::Checkpoint)?;
         let (result, claims) = self
             .execute_typed_turn_effect(
                 machine,
                 event_tx,
-                cancel,
                 RuntimeEffectEnvelope::new(
                     invocation,
                     RuntimeEffectCommand::Checkpoint { checkpoint },
@@ -407,7 +405,6 @@ impl RuntimeTurnDriver<'_> {
         response: LlmResponse,
         stream_hook_states: Vec<crate::runtime::AssistantStreamHookState>,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<LlmResponse, RuntimeEffectControllerError> {
         // Rebuilt rather than threaded through: phase 1's invocation is a pure
         // function of the same turn identity, so this is the identical parent
@@ -423,7 +420,6 @@ impl RuntimeTurnDriver<'_> {
             .execute_typed_turn_effect(
                 machine,
                 event_tx,
-                cancel,
                 RuntimeEffectEnvelope::new(
                     invocation,
                     RuntimeEffectCommand::AssistantResponseHooks {
@@ -451,7 +447,6 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<crate::runtime::effect::ServedExecutionEnvironmentSync, RuntimeEffectControllerError>
     {
         let invocation =
@@ -459,7 +454,6 @@ impl RuntimeTurnDriver<'_> {
         self.execute_typed_turn_effect(
             machine,
             event_tx,
-            cancel,
             RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::SyncExecutionEnvironment),
             RuntimeEffectOutcome::into_sync_execution_environment,
         )
@@ -473,13 +467,11 @@ impl RuntimeTurnDriver<'_> {
         language: String,
         code: String,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<Result<crate::ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError>
     {
         self.execute_typed_turn_effect(
             machine,
             event_tx,
-            cancel,
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::ExecCode { language, code },
@@ -694,7 +686,6 @@ impl RuntimeTurnDriver<'_> {
         cell_replay_grammar: Option<u32>,
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,
-        cancellation: &CancellationToken,
     ) -> Result<
         Result<crate::ExecResponse, crate::ExecCodeFailure>,
         crate::RuntimeEffectControllerError,
@@ -749,7 +740,6 @@ impl RuntimeTurnDriver<'_> {
             .with_tracing(self.execution_tracing(protocol_iteration))
             .with_code_block_graph_key(code_block_graph_key);
         let context = context.with_parent_invocation(invocation);
-        let context = context.with_cancellation_token(cancellation.clone());
         let result = match code_executor {
             Some(code_executor) => code_executor
                 .execute_code(

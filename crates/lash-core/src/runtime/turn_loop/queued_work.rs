@@ -371,7 +371,7 @@ impl LashRuntime {
                     while self
                         .drain_next_session_command_with_cancellation(
                             &fence,
-                            opts.cancel.clone(),
+                            opts.local_stop().immediate_token(),
                             controller.controller(),
                         )
                         .await?
@@ -532,9 +532,6 @@ impl LashRuntime {
         if selected.is_some() {
             input.turn_context.mark_selected_queued_work_drain();
         }
-        if let Some(hint) = opts.local_cancel_origin_hint() {
-            input.turn_context.set_local_cancel_origin_hint(hint);
-        }
         let mut lease = Some(lease);
         let mut result = self
             .drive_logical_turn(
@@ -542,7 +539,7 @@ impl LashRuntime {
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
                 opts.scoped_effect_controller(),
-                opts.cancel.clone(),
+                opts.local_stop().clone(),
                 claims,
                 &mut lease,
                 TurnStopwatch::start(self.host.core.clock.as_ref()),

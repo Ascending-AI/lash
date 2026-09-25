@@ -511,36 +511,11 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
         )
         .await
         .expect("follow-on turn-cancel gate key");
-    let root_gate = host
-        .await_event_key(
-            &ExecutionScope::turn(&session_id, &root_turn_id),
-            AwaitEventWaitIdentity::TurnCancelGate,
-        )
-        .await
-        .expect("root turn-cancel gate key");
-    let outstanding = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let outstanding = host
-                .list_outstanding_await_event_keys(&session_id)
-                .await
-                .expect("list outstanding waits");
-            if outstanding.contains(&follow_gate) || turn.is_finished() {
-                break outstanding;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the pending child registers its turn-cancel gate");
-    assert!(
-        outstanding.contains(&follow_gate),
-        "the durable cancel gate follows the follow-on physical turn: {outstanding:?}"
-    );
-    assert!(
-        !outstanding.contains(&root_gate),
-        "the pending child does not wait under the root turn's gate: {outstanding:?}"
-    );
-
+    // Which gate the pending child races is its engine's journal fact (a
+    // Restate awakeable registration, a SQL wait inside the recorded
+    // execution), not an outstanding durable wait a law can list: since
+    // FIG-3672 P9 nothing waits on a turn's gate outside a recorded step. The
+    // per-engine suites pin the follow-on scope; this law pins the outcome.
     assert_eq!(
         host.resolve_await_event(
             &completion_key,

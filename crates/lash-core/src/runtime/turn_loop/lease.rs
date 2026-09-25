@@ -161,7 +161,11 @@ impl LashRuntime {
             timings: self.host.core.control.lease_timings,
             clock: Arc::clone(&self.host.core.clock),
         });
-        match opts.source.acquire_lane(lane, opts.cancel.clone()).await? {
+        match opts
+            .source
+            .acquire_lane(lane, opts.local_stop.immediate_token())
+            .await?
+        {
             crate::QueuedLaneAcquisition::Acquired(guard) => Ok(Some(guard.into_inner())),
             crate::QueuedLaneAcquisition::NotAcquired => Ok(None),
         }
@@ -487,7 +491,7 @@ impl LashRuntime {
             )
             .await?;
             let settlement = control
-                .settle_authorized(turn_control_resolver, &authorization)
+                .settle_authorized(turn_control_resolver, &authorization, None)
                 .await?;
             loop {
                 let observed = store
@@ -547,7 +551,7 @@ impl LashRuntime {
                             ),
                             fence,
                             observed.clone(),
-                            true,
+                            None,
                             Some(request.evidence()),
                         )?;
                         match store
@@ -561,7 +565,7 @@ impl LashRuntime {
                             }
                         }
                         let settlement = control
-                            .settle_authorized(turn_control_resolver, &authorization)
+                            .settle_authorized(turn_control_resolver, &authorization, None)
                             .await?;
                         Some(settlement)
                     }
@@ -723,11 +727,9 @@ impl LashRuntime {
                     }
                 }
             }
-            let (cancelled, evidence) = match observed_decision {
-                crate::TurnCancelRepairDecision::CancellationWon(evidence) => {
-                    (true, Some(evidence))
-                }
-                crate::TurnCancelRepairDecision::CancellationDidNotWin => (false, None),
+            let evidence = match observed_decision {
+                crate::TurnCancelRepairDecision::CancellationWon(evidence) => Some(evidence),
+                crate::TurnCancelRepairDecision::CancellationDidNotWin => None,
                 crate::TurnCancelRepairDecision::NoCancellationIntent => unreachable!(
                     "no-intent teardown repair returned before cancellation closure authorization"
                 ),
@@ -753,7 +755,7 @@ impl LashRuntime {
                 ),
                 fence,
                 observed.clone(),
-                cancelled,
+                None,
                 evidence,
             ) {
                 Ok(authorization) => authorization,
@@ -774,7 +776,7 @@ impl LashRuntime {
                 }
             }
             let settlement = match control
-                .settle_authorized(turn_control_resolver, &authorization)
+                .settle_authorized(turn_control_resolver, &authorization, None)
                 .await
             {
                 Ok(settlement) => settlement,

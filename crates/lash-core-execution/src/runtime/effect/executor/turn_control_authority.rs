@@ -72,7 +72,7 @@ impl TurnCancellationAuthority {
             Err(error) => return Err(error),
         };
         control
-            .settle_authorized(self.resolver.as_ref(), authorization)
+            .settle_authorized(self.resolver.as_ref(), authorization, None)
             .await
     }
 }

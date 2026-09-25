@@ -1343,9 +1343,10 @@ async fn a_child_runs_under_the_opener_that_admitted_it_not_the_one_reoffering_i
     assert!(
         tokio::time::timeout(
             ABSENCE_BUDGET,
-            scoped_b
-                .controller()
-                .await_next_settlement(&mut handle_b, CancellationToken::new()),
+            scoped_b.controller().await_next_settlement(
+                &mut handle_b,
+                lash_core::TurnCancelWait::unobserved(CancellationToken::new())
+            ),
         )
         .await
         .is_err(),
@@ -1440,9 +1441,10 @@ async fn a_child_runs_under_the_opener_that_admitted_it_not_the_one_reoffering_i
     for rank in 0..ARITY - 1 {
         let settlement = tokio::time::timeout(
             SETTLE_BUDGET,
-            scoped_c
-                .controller()
-                .await_next_settlement(&mut handle, CancellationToken::new()),
+            scoped_c.controller().await_next_settlement(
+                &mut handle,
+                lash_core::TurnCancelWait::unobserved(CancellationToken::new()),
+            ),
         )
         .await
         .unwrap_or_else(|_| panic!("settlement for rank {rank} never arrived"))
@@ -1455,9 +1457,10 @@ async fn a_child_runs_under_the_opener_that_admitted_it_not_the_one_reoffering_i
     assert!(
         tokio::time::timeout(
             ABSENCE_BUDGET,
-            scoped_c
-                .controller()
-                .await_next_settlement(&mut handle, CancellationToken::new()),
+            scoped_c.controller().await_next_settlement(
+                &mut handle,
+                lash_core::TurnCancelWait::unobserved(CancellationToken::new())
+            ),
         )
         .await
         .is_err(),
@@ -1466,9 +1469,10 @@ async fn a_child_runs_under_the_opener_that_admitted_it_not_the_one_reoffering_i
     coop_a.cancel();
     let gate_settlement = tokio::time::timeout(
         SETTLE_BUDGET,
-        scoped_c
-            .controller()
-            .await_next_settlement(&mut handle, CancellationToken::new()),
+        scoped_c.controller().await_next_settlement(
+            &mut handle,
+            lash_core::TurnCancelWait::unobserved(CancellationToken::new()),
+        ),
     )
     .await
     .expect("cancelling A's cooperative token settles the gate child")
@@ -1740,9 +1744,10 @@ async fn the_oracle_goes_red_when_offered_executors_match_by_key_alone() {
     );
     let settlement = tokio::time::timeout(
         SETTLE_BUDGET,
-        scoped_b
-            .controller()
-            .await_next_settlement(&mut handle, CancellationToken::new()),
+        scoped_b.controller().await_next_settlement(
+            &mut handle,
+            lash_core::TurnCancelWait::unobserved(CancellationToken::new()),
+        ),
     )
     .await;
     assert!(

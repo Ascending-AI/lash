@@ -137,7 +137,12 @@ pub async fn a_late_completion_after_a_cancel_decision_is_refused(
                 .expect("the identical group reopens");
             match scoped
                 .controller()
-                .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new())
+                .await_next_settlement(
+                    &mut handle,
+                    lash_core::TurnCancelWait::unobserved(
+                        tokio_util::sync::CancellationToken::new(),
+                    ),
+                )
                 .await
             {
                 Ok(settlement) => break settlement,

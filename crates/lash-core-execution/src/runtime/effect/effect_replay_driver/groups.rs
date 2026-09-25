@@ -808,7 +808,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     pub async fn await_next_group_settlement(
         &self,
         handle: &mut EffectGroupHandle,
-        cancel: CancellationToken,
+        cancel: crate::runtime::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.group_executors()?;
         let state = self
@@ -828,6 +828,12 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 group_key: handle.group_key(),
             })
             .await;
+        // The engine races the rank wait against the turn's cancellation gate
+        // itself (FIG-3672 P9), as it races any wait the turn observes: the
+        // caller's token is only its execution's own cooperative cancel.
+        let turn_stop = self.turn_stop(cancel.observed_scope());
+        tokio::pin!(turn_stop);
+        let cancel = cancel.cancellation().clone();
         loop {
             // Both enabled *before* the journal read, so a sibling that
             // settles between the read and the park is caught rather than
@@ -852,6 +858,10 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             }
             tokio::select! {
                 () = cancel.cancelled() => {
+                    return Err(await_cancelled_error(handle.group_key(), rank));
+                }
+                stop = &mut turn_stop => {
+                    stop?;
                     return Err(await_cancelled_error(handle.group_key(), rank));
                 }
                 _ = armed.park(&*self.clock, None) => {}

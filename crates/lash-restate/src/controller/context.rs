@@ -290,12 +290,17 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run;
 
-    /// Race a sleep against cancellation.
+    /// A durable timer, raced against the turn's cancellation gate when
+    /// `turn_cancel` names one; then nothing live races it. A sleep that
+    /// observes no turn (a process-scope sleep) still races the process
+    /// drive's own `process_stop` token: that is the process workflow's cancel
+    /// delivery, which the process drive (FIG-3672 P16) replaces with a
+    /// recorded one.
     fn sleep_or_turn_cancel<'run>(
         &'run self,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        cancellation: tokio_util::sync::CancellationToken,
+        process_stop: tokio_util::sync::CancellationToken,
     ) -> TurnCancelRaceFuture<'run, ()>
     where
         'ctx: 'run;
@@ -366,12 +371,13 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run;
 
+    /// A durable await, raced against the turn's cancellation gate when
+    /// `turn_cancel` names one; nothing live races it.
     fn await_event_or_turn_cancel<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        cancellation: tokio_util::sync::CancellationToken,
     ) -> TurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run;
@@ -674,12 +680,15 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         unregistered_group_index("EffectGroupIndex/drain_blockers")
     }
 
+    /// Await an effect group's wait (its readiness or one of its ranks),
+    /// raced against the turn's cancellation gate when `turn_cancel` names
+    /// one, exactly as a durable wait is (FIG-3672 P9).
     fn await_effect_group_wait<'run>(
         &'run self,
         _request: RestateDurableWaitAwaitRequest,
         _replay_key: String,
-        _cancellation: tokio_util::sync::CancellationToken,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
+        _turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    ) -> TurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
     {
@@ -759,7 +768,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     duration: Duration,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                    cancellation: tokio_util::sync::CancellationToken,
+                    process_stop: tokio_util::sync::CancellationToken,
                 ) -> TurnCancelRaceFuture<'run, ()>
                 where
                     'ctx: 'run,
@@ -772,7 +781,7 @@ macro_rules! impl_restate_controller_context {
                             let timer = guard_restate_context_future(
                                 restate_sdk::context::ContextTimers::sleep(self, duration),
                             );
-                            let cancelled = cancellation.cancelled();
+                            let cancelled = process_stop.cancelled();
                             tokio::pin!(timer);
                             tokio::pin!(cancelled);
                             return std::future::poll_fn(|cx| {
@@ -1008,7 +1017,6 @@ macro_rules! impl_restate_controller_context {
                     request: RestateDurableWaitAwaitRequest,
                     replay_key: String,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                    cancellation: tokio_util::sync::CancellationToken,
                 ) -> TurnCancelRaceFuture<'run, Resolution>
                 where
                     'ctx: 'run,
@@ -1016,7 +1024,11 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let Some(turn_cancel) = turn_cancel else {
                             return self
-                                .await_event(request, replay_key, cancellation)
+                                .await_event(
+                                    request,
+                                    replay_key,
+                                    tokio_util::sync::CancellationToken::new(),
+                                )
                                 .await
                                 .map(RestateTurnCancelRaceOutcome::Completed);
                         };
@@ -1518,8 +1530,8 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     request: RestateDurableWaitAwaitRequest,
                     replay_key: String,
-                    cancellation: tokio_util::sync::CancellationToken,
-                ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
+                    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+                ) -> TurnCancelRaceFuture<'run, Resolution>
                 where
                     'ctx: 'run,
                 {
@@ -1528,23 +1540,43 @@ macro_rules! impl_restate_controller_context {
                         let call = self
                             .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
                             .await_resolution(Json(request.into()))
-                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-                            .call();
-                        let wait = guard_restate_context_future(call);
-                        let cancelled = cancellation.cancelled();
-                        tokio::pin!(wait);
-                        tokio::pin!(cancelled);
-                        std::future::poll_fn(|cx| {
-                            match wait.as_mut().poll(cx) {
-                                Poll::Ready(result) => Poll::Ready(result.map(|Json(value)| Some(value))),
-                                Poll::Pending if wait.as_ref().get_ref().is_fused() => Poll::Pending,
-                                Poll::Pending => match cancelled.as_mut().poll(cx) {
-                                    Poll::Ready(()) => Poll::Ready(Ok(None)),
-                                    Poll::Pending => Poll::Pending,
-                                },
-                            }
-                        })
-                        .await
+                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
+                        let Some(turn_cancel) = turn_cancel else {
+                            let Json(resolution) =
+                                guard_restate_context_future(call.call()).await?;
+                            return Ok(RestateTurnCancelRaceOutcome::Completed(resolution));
+                        };
+                        let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
+                        else {
+                            return Err(TerminalError::new(
+                                "turn cancellation gate is missing its session id",
+                            ));
+                        };
+                        // The rank wait's CallCommand, then the gate's
+                        // awakeable, then its registration: the geometry every
+                        // guarded durable wait already has.
+                        let wait = erase_gate_wait(call.call());
+                        Ok(
+                            match race_turn_cancel_gate(
+                                self,
+                                &SessionId::from(session_id),
+                                turn_cancel,
+                                || gate_awakeable(self),
+                                move || wait,
+                            )
+                            .await?
+                            {
+                                RestateTurnCancelRaceOutcome::Completed(Json(resolution)) => {
+                                    RestateTurnCancelRaceOutcome::Completed(resolution)
+                                }
+                                RestateTurnCancelRaceOutcome::TurnCancelled => {
+                                    RestateTurnCancelRaceOutcome::TurnCancelled
+                                }
+                                RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
+                                    RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
+                                }
+                            },
+                        )
                     })
                 }
 

@@ -72,13 +72,11 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         request: Arc<LlmRequest>,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
         let invocation = self.turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)?;
         self.execute_typed_turn_effect(
             machine,
             event_tx,
-            cancel,
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::LlmCall {

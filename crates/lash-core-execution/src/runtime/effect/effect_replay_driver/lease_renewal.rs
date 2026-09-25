@@ -155,8 +155,9 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         claim: &ClaimedEffect,
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
+        races_turn_gate: bool,
     ) -> ClaimedExecution {
-        let effect = self.execute_claimed_effect(claim, envelope, local_executor);
+        let effect = self.execute_claimed_effect(claim, envelope, local_executor, races_turn_gate);
         // Renewal runs beside the effect, never in place of polling it, and
         // returns only once the lease can no longer be held; losing that race
         // drops the effect future.

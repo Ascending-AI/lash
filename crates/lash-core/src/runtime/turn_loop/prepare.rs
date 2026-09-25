@@ -13,7 +13,7 @@ pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
     pub(in crate::runtime) input: TurnInput,
     pub(in crate::runtime) sinks: TurnSinks<'sinks>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
-    pub(in crate::runtime) cancel: CancellationToken,
+    pub(in crate::runtime) local_stop: LocalTurnStop,
     pub(in crate::runtime) queued_claims: Vec<crate::QueuedWorkClaim>,
     pub(in crate::runtime) turn_input_claims: Vec<crate::TurnInputClaim>,
     pub(in crate::runtime) materialize_initial_claims: bool,
@@ -68,7 +68,7 @@ impl LashRuntime {
             mut input,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
-            cancel,
+            local_stop,
             queued_claims,
             mut turn_input_claims,
             materialize_initial_claims,
@@ -176,8 +176,7 @@ impl LashRuntime {
                     turn_control_resolver,
                     TurnAddress::new(&self.state.session_id, &trace_turn_id),
                 )
-                .await?
-                .with_local_cancel_origin(input.turn_context.local_cancel_origin_hint());
+                .await?;
                 let messages = crate::MessageSequence::from_base(
                     self.state
                         .read_model()
@@ -208,7 +207,7 @@ impl LashRuntime {
                     },
                     claims: &claims,
                     scoped_effect_controller: &scoped_effect_controller,
-                    cancel_state: &cancel,
+                    honoured_cancel: None,
                     lease: TurnLeaseScope {
                         guard: session_execution_lease,
                         release_policy: session_execution_lease_release_policy,
@@ -450,7 +449,7 @@ impl LashRuntime {
                 },
                 sinks: TurnSinks { observer },
                 scoped_effect_controller,
-                cancel,
+                local_stop,
                 initial_queue_claims: queued_claims,
                 initial_turn_input_claims: turn_input_claims,
                 lease: TurnLeaseScope {

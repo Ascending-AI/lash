@@ -315,7 +315,7 @@ impl RecordingEffectController {
         }
     }
 
-    pub(crate) async fn wait_for_cancel_watch_exhaustion(&self) {
+    pub(crate) async fn wait_for_cancel_watch_failure(&self) {
         match &self.cancel_watch {
             CancelWatchBehavior::Delegate => {
                 panic!("cancel-watch exhaustion is unavailable in delegate mode")
@@ -326,9 +326,7 @@ impl RecordingEffectController {
                 ..
             } => loop {
                 let notified = exhausted.notified();
-                if attempts.load(Ordering::SeqCst)
-                    >= lash_core::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS
-                {
+                if attempts.load(Ordering::SeqCst) >= 1 {
                     return;
                 }
                 notified.await;
@@ -423,10 +421,8 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                 }
                 released.await;
             }
-            let attempts = attempts.fetch_add(1, Ordering::SeqCst) + 1;
-            if attempts == lash_core::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS {
-                exhausted.notify_one();
-            }
+            attempts.fetch_add(1, Ordering::SeqCst);
+            exhausted.notify_one();
             return Err(RuntimeError::new(
                 lash_core::RuntimeErrorCode::TransientCancelWatch,
                 "cancel resolver remains unavailable",
@@ -718,15 +714,12 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     resolution: inner.peek_await_event(&key).await?,
                 })
             }
-            RuntimeEffectCommand::PeekAwaitEvent { key }
-                if matches!(self.cancel_watch, CancelWatchBehavior::AlwaysError { .. }) =>
-            {
+            // A peek reads the real gate: since FIG-3672 P9 the turn learns a
+            // cancellation only from its peeks and its steps' outcomes.
+            RuntimeEffectCommand::PeekAwaitEvent { key } => {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent {
                     resolution: inner.peek_await_event(&key).await?,
                 })
-            }
-            RuntimeEffectCommand::PeekAwaitEvent { .. } => {
-                Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None })
             }
             RuntimeEffectCommand::LanguageRuntimeValue { operation } => {
                 local_executor

@@ -114,7 +114,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(
     assert_eq!(stop_evidence.mode, TurnCancelMode::AfterStep);
     assert_eq!(stop_evidence.honoured_after_step, None);
 
-    // Mid-model-call observation: remembered as deferred, never effective.
+    // Mid-model-call observation: deferred, never honoured.
     let observed = active
         .observe_pending_cancel(
             &peek,
@@ -125,8 +125,6 @@ async fn after_step_request_defers_until_immediate_escalates_it(
         .await
         .expect("peek after llm");
     assert_eq!(observed, None);
-    assert_eq!(active.evidence(), None);
-    assert_eq!(active.deferred_evidence(), Some(stop_evidence.clone()));
 
     let same_strength = driver
         .request_cancel(request(address.clone(), "stop-2").mode(TurnCancelMode::AfterStep))
@@ -167,7 +165,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(
         .expect("peek after escalation");
     assert_eq!(observed, Some(abort_evidence.clone()));
     let settled = active
-        .settle_before_commit(host.as_ref(), true, None)
+        .settle_before_commit(host.as_ref(), observed.as_ref(), None)
         .await
         .expect("settle")
         .expect("escalated abort is what commits");
@@ -262,9 +260,8 @@ async fn after_step_request_is_honoured_at_the_step_boundary(
             ..requested.clone()
         }
     );
-    assert_eq!(active.evidence(), Some(honoured.clone()));
     let settled = active
-        .settle_before_commit(host.as_ref(), false, None)
+        .settle_before_commit(host.as_ref(), Some(&honoured), None)
         .await
         .expect("settle")
         .expect("honoured stop commits");
@@ -344,7 +341,7 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
         .await
         .expect("recreate active control");
     let observed = recovered
-        .settle_before_commit(host.as_ref(), false, None)
+        .settle_before_commit(host.as_ref(), None, None)
         .await
         .expect("settle recovered turn")
         .expect("pending cancellation survives replay");
@@ -423,7 +420,7 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(
         .await
         .expect("active control");
     let (seal, cancel) = tokio::join!(
-        active.settle_before_commit(host.as_ref(), false, None),
+        active.settle_before_commit(host.as_ref(), None, None),
         driver.request_cancel(request(address.clone(), "race-request")),
     );
     let terminal = match (seal.expect("seal"), cancel.expect("cancel").outcome) {
@@ -501,7 +498,7 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
     let waiter_active = Arc::clone(&active);
     let cancel_wait = crate::task::spawn(async move {
         waiter_active
-            .await_cancel(waiter_host.as_ref(), CancellationToken::new())
+            .watch_immediate(waiter_host.await_event_resolver(), CancellationToken::new())
             .await
     });
     tokio::task::yield_now().await;
@@ -604,7 +601,7 @@ async fn session_deletion_revokes_control_promises(
     );
     assert!(
         active
-            .settle_before_commit(host.as_ref(), false, None)
+            .settle_before_commit(host.as_ref(), None, None)
             .await
             .is_err(),
         "session deletion left the reserved cancellation gate live"

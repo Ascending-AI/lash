@@ -45,7 +45,13 @@ use serde::{Deserialize, Serialize};
 /// index in its journaled drive outcome, and the acceptance names no turn index
 /// read from the live head, so a replay after the turn's own commit rebuilds
 /// the turn from its recorded base (FIG-3682).
-pub const EFFECT_JOURNAL_VERSION: u32 = 6;
+/// 7: cancellation is an engine event (FIG-3672 P9). A turn-observing
+/// effect-group rank wait races the turn's durable cancellation gate (the
+/// gate's awakeable and registration now precede its wake); a code cell
+/// journals a gate peek at each instruction checkpoint it reaches, and after
+/// a cell that stopped on the host; and the post-abort peek follows only an
+/// abort a recorded outcome typed as the turn's cancellation.
+pub const EFFECT_JOURNAL_VERSION: u32 = 7;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

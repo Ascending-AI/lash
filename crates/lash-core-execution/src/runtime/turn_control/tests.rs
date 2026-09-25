@@ -174,49 +174,6 @@ fn cancel_request_without_disposition_fails_decode() {
 }
 
 #[test]
-fn local_cancel_origin_hint_preserves_first_origin() {
-    let hint = TurnCancelOriginHint::default();
-    assert!(!hint.was_set());
-    hint.set(Some("shutdown".to_string()));
-    hint.set(Some("user".to_string()));
-
-    assert!(hint.was_set());
-    assert_eq!(hint.get().as_deref(), Some("shutdown"));
-}
-
-#[test]
-fn local_cancel_origin_hint_preserves_explicit_absence() {
-    let hint = TurnCancelOriginHint::default();
-    assert!(!hint.was_set());
-    hint.set(None);
-    hint.set(Some("user".to_string()));
-
-    assert!(hint.was_set());
-    assert_eq!(hint.get(), None);
-}
-
-#[test]
-fn installed_originless_token_does_not_block_a_later_registry_origin() {
-    let hint = TurnCancelOriginHint::default();
-    hint.configure_local_token(None);
-
-    assert!(!hint.was_set());
-
-    hint.set(Some("user".to_string()));
-    assert_eq!(hint.get().as_deref(), Some("user"));
-}
-
-#[test]
-fn observed_registry_origin_wins_over_configured_token_origin() {
-    let hint = TurnCancelOriginHint::default();
-    hint.configure_local_token(Some("shutdown".to_string()));
-    assert_eq!(hint.get().as_deref(), Some("shutdown"));
-
-    hint.set(Some("user".to_string()));
-    assert_eq!(hint.get().as_deref(), Some("user"));
-}
-
-#[test]
 fn terminal_success_has_no_cancellation_evidence() {
     let terminal = TurnTerminal::Committed {
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
@@ -323,5 +280,42 @@ fn peek_identities_are_replay_deterministic_and_name_their_escalation() {
         }
         .escalation_causal_identity(),
         "turn_cancel.escalation.after_llm.0"
+    );
+}
+
+/// FIG-3672 P9: a code cell's checkpoints and its after-cell peek are their
+/// own journaled identities, unique per cell and checkpoint, and none of them
+/// honours an `AfterStep` request: a cell stops mid-run only on an immediate
+/// request or an escalation.
+#[test]
+fn code_cell_peeks_have_their_own_identities_and_defer_after_step() {
+    let checkpoint = TurnCancelPeekIdentity::CellCheckpoint {
+        cell: "turn:1:0:exec_code:3".to_string(),
+        checkpoint: 2,
+    };
+    assert_eq!(
+        checkpoint.causal_identity(),
+        "turn_cancel.cell_checkpoint.2.turn:1:0:exec_code:3"
+    );
+    assert_eq!(
+        checkpoint.escalation_causal_identity(),
+        "turn_cancel.escalation.cell_checkpoint.2.turn:1:0:exec_code:3"
+    );
+    assert_eq!(checkpoint.honours_after_step(), None);
+    let after_cell = TurnCancelPeekIdentity::AfterCell {
+        cell: "turn:1:0:exec_code:3".to_string(),
+    };
+    assert_eq!(
+        after_cell.causal_identity(),
+        "turn_cancel.after_cell.turn:1:0:exec_code:3"
+    );
+    assert_eq!(after_cell.honours_after_step(), None);
+    assert_ne!(
+        TurnCancelPeekIdentity::CellCheckpoint {
+            cell: "turn:1:0:exec_code:3".to_string(),
+            checkpoint: 3,
+        }
+        .causal_identity(),
+        checkpoint.causal_identity()
     );
 }

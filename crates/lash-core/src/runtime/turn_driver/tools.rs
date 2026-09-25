@@ -58,7 +58,6 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         calls: Vec<crate::sansio::PendingToolCall>,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<Vec<crate::sansio::CompletedToolCall>, RuntimeEffectControllerError> {
         let (tool_event_tx, mut tool_event_rx) =
             tokio::sync::mpsc::channel::<SessionStreamEvent>(64);
@@ -88,8 +87,7 @@ impl RuntimeTurnDriver<'_> {
                 )
             })?
             .with_turn_event_sender(turn_event_tx.clone())
-            .with_tracing(self.execution_tracing(machine.protocol_iteration()))
-            .with_cancellation_token(cancel.clone());
+            .with_tracing(self.execution_tracing(machine.protocol_iteration()));
         let call_count = calls.len();
         let mut results = vec![None; call_count];
         let mut prepared_entries = Vec::new();

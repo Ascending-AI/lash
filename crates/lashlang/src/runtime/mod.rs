@@ -156,6 +156,12 @@ impl ExecutionScratch {
 
 pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 
+/// Instructions between a run's cancel checkpoints (FIG-3672 P9): the VM
+/// hands its host a checkpoint each time its executed-instruction count
+/// crosses a multiple of this. Instruction counts are deterministic, so a
+/// replay reaches the same checkpoints at the same points.
+pub const CANCEL_CHECKPOINT_INSTRUCTIONS: u64 = 1 << 20;
+
 #[derive(Clone)]
 pub struct CompiledProgram {
     pub(crate) chunk: Chunk,

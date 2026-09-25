@@ -51,8 +51,15 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
             self.first_started.store(true, Ordering::SeqCst);
             self.started.notify_waiters();
-            while !ctx.is_cancelled() {
-                tokio::task::yield_now().await;
+            // A code executor reaches its turn's cancellation only through
+            // recorded checkpoints (FIG-3672 P9), never a live probe.
+            let mut checkpoint = 0;
+            loop {
+                checkpoint += 1;
+                if ctx.turn_cancel_checkpoint(checkpoint).await.unwrap_or(true) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
             if self.nested_error {
                 ctx.record_nested_effect_error(lash_core::RuntimeEffectControllerError::foreign(
@@ -171,87 +178,6 @@ fn manual_clock_wall_clock_faces_agree() {
         .expect("clock emits RFC 3339");
     assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
     assert_eq!(text.timestamp_millis() as u64, milliseconds);
-}
-
-#[tokio::test]
-async fn bare_cancelled_token_after_mid_cell_lease_loss_is_not_a_cancelled_terminal() {
-    let backend = memory_backend().await;
-    let lease_ttl = std::time::Duration::from_millis(120);
-    let clock = Arc::new(ManualClock::new(1_000));
-    let store = unbound_recording_store_with_clock(&backend, clock.clone()).await;
-    let executor = Arc::new(SettlementExecutor::new(false));
-    let controller = RecordingEffectController::default().with_local_code_execution();
-    let config = runtime_host_config_with_effect_layer(&backend, Arc::new(controller.clone()))
-        .with_clock(clock.clone())
-        .with_lease_timings(
-            lash_core::facade_support::LeaseTimings::from_ttl(lease_ttl)
-                .expect("valid lease timings"),
-        );
-    let mut runtime = TestRuntime::new(&backend, mock_provider(Vec::new()))
-        .plugins(vec![protocol_factory(Arc::clone(&executor))])
-        .host(EmbeddedRuntimeHost::new(config))
-        .store(store.clone())
-        .without_process_registry()
-        .build()
-        .await;
-    let cancel = CancellationToken::new();
-    let cancel_for_turn = cancel.clone();
-    let hint = lash_core::TurnCancelOriginHint::default();
-    hint.configure_local_token(None);
-    let mut input = TurnInput::text("run until the session lease is lost");
-    input.turn_context.set_local_cancel_origin_hint(hint);
-    let controller_for_turn = controller.clone();
-    let backend_for_turn = Arc::clone(&backend);
-    let turn = lash_core::task::spawn(async move {
-        runtime
-            .run_turn_assembled(
-                input,
-                cancel_for_turn,
-                turn_scope(
-                    &backend_for_turn,
-                    &controller_for_turn,
-                    &SessionId::from("root"),
-                    &TurnId::from("lease-loss-mid-cell"),
-                ),
-            )
-            .await
-    });
-    executor.wait_for_first_execution().await;
-    let renewals_before_loss = store.session_execution_lease_renewal_count();
-
-    clock.advance_ms(lease_ttl.as_millis() as u64 + 1);
-    lash_core::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-        store.as_ref(),
-        &SessionId::from("root"),
-        &lash_core::LeaseOwnerIdentity::opaque("lease-loss-successor", "incarnation"),
-        "lease-loss-successor-executor",
-        60_000,
-    )
-    .await
-    .expect("claim expired session execution lease")
-    .acquired()
-    .expect("successor takes over the expired lease");
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while store.session_execution_lease_renewal_count() == renewals_before_loss {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("renewal observes the lost predecessor fence");
-    cancel.cancel();
-
-    let error = turn
-        .await
-        .expect("turn task")
-        .expect_err("lease loss must not commit a fabricated Cancelled terminal");
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
-    );
-    assert_eq!(
-        executor.dispositions(),
-        vec![lash_core::plugin::CodeExecutionDisposition::Accepted]
-    );
 }
 
 #[tokio::test]

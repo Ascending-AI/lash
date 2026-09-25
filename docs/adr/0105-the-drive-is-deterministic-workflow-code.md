@@ -201,6 +201,43 @@ match cx.race(Pin::new(&mut step), Pin::new(&mut gate)).await? {
 The engine tests in `lash-core-execution` run this shape on a `!Send` and a
 `Send` test engine.
 
+**Implemented (P9): cancellation is an engine event.**
+
+- **A recorded step keeps its loser inside its own body.** Restate cannot
+  select a running `ctx.run` away: the SDK requires a run to be awaited as
+  soon as it is issued, and a run is not a future its select can race. So a
+  race whose first arm is a recorded step is carried out by the engine's
+  recorded body. The body runs under a cooperative cancel that fires when the
+  gate pair asks the turn to stop now (an `Immediate` request, or an
+  escalation of an `AfterStep` one), watched over the deployment resolver.
+  Whatever the body returns, finished or stopped, is the step's recorded
+  outcome, so it also records which arm won. A replay serves that outcome and
+  never runs the watch. A watch that fails stops the step, closed rather than
+  open (`ActiveTurnControl::run_step_body`).
+- **Waits race the gate in the engine.** A timer, an await-event, a process
+  await and an effect-group rank wait race the turn's gate where the engine
+  records them: in Restate's journal (the gate's awakeable, then its
+  registration), and on the SQL tier inside the recorded execution. Nothing
+  live races a wait, and no engine writes a verdict back into a token the
+  drive reads.
+- **The drive keeps one recorded fact.** It is the cancellation the turn
+  honours, advanced only by journaled gate peeks (start gate, after the model
+  call, the step boundary, after a code cell that stopped on the host, and
+  after an abort a recorded outcome typed as the turn's cancellation) and by
+  recorded outcomes. There is no live watcher, token, evidence mutex or origin
+  hint on the drive path.
+- **A code cell stops at recorded checkpoints.** The VM hands its host a
+  cancel checkpoint each time its executed-instruction count crosses a
+  multiple of `CANCEL_CHECKPOINT_INSTRUCTIONS`. The cell's host answers it
+  with a journaled gate peek under the checkpoint's identity. The checkpoint
+  is also the cell's only wait during a long stretch of pure compute, so a
+  single-threaded executor cancels a runaway cell without a scheduler yield.
+- **A host-local stop is a durable request.** The facade's `cancel` token and
+  `cancel_running_turns`, and a process stopping its child turn, are
+  forwarded as a request on the turn's gate with lash's internal evidence.
+  The turn honours that request where it honours any request.
+- Effect-journal generation 6.
+
 ### 4. Group operations are complete
 
 `DriveGroups` lifts today's controller surface onto the context and makes it

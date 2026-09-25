@@ -408,7 +408,6 @@ lash_core::TurnFailureCause::Outcome,
                             "process-await cancellation won without turn-cancellation context",
                         ));
                     };
-                    turn_cancellation.cancellation.cancel();
                     let record = registry
                         .request_process_cancel(
                             &process_ref,

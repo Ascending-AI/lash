@@ -45,7 +45,7 @@ pub enum EffectControllerTaskRequest {
     },
     AwaitNextSettlement {
         handle: EffectGroupHandle,
-        cancel: CancellationToken,
+        cancel: crate::runtime::TurnCancelWait,
         response: oneshot::Sender<(
             EffectGroupHandle,
             Result<GroupSettlement, RuntimeEffectControllerError>,
@@ -454,7 +454,7 @@ impl RuntimeEffectController for EffectTaskController {
     async fn await_next_settlement(
         &self,
         handle: &mut EffectGroupHandle,
-        cancel: CancellationToken,
+        cancel: crate::runtime::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         // A `&mut` cannot ride the channel, so the cursor travels as a copy:
         // the task side advances its own handle and returns it with the

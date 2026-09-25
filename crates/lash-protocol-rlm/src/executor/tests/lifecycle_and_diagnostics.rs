@@ -482,7 +482,8 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                     &mut state,
                     lash_core::testing::code_execution_context_cancelling_after_yield(
                         crate::testing::memory_backend_ports().await,
-                    ),
+                    )
+                    .await,
                     ExecRequest {
                         language: language.to_string(),
                         code: code.to_string(),

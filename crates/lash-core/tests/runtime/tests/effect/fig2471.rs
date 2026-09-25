@@ -180,7 +180,9 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
         .unwrap();
     let token = CancellationToken::new();
     token.cancel();
-    let result = active.await_cancel(host.as_ref(), token).await;
+    let result = active
+        .watch_immediate(host.await_event_resolver(), token)
+        .await;
     assert!(
         !matches!(result, Err(ref error) if error.code == lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked),
         "host rejected active gate: {result:?}"
@@ -205,7 +207,7 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
     .await
     .unwrap();
     let evidence = active
-        .await_cancel(host.as_ref(), CancellationToken::new())
+        .watch_immediate(host.await_event_resolver(), CancellationToken::new())
         .await
         .unwrap()
         .unwrap();

@@ -9,6 +9,38 @@ use tokio_util::sync::CancellationToken;
 use crate::tool_dispatch::ToolDispatchContext;
 use crate::{TurnActivity, TurnActivityId, TurnEvent};
 
+/// What an execution knows about its turn's cancellation, from recorded facts
+/// only (FIG-3672 P9).
+///
+/// It starts as the turn's own recorded fact when the execution is built, and
+/// only two things advance it: a recorded outcome that says the turn was
+/// cancelled (a wait that lost to the turn's gate), and a journaled cancel
+/// checkpoint a code cell issues. A replay meets the same outcomes and
+/// checkpoints in the same order, so it reaches the same answer at the same
+/// point. No live watch writes it. Clones share it, so the cell's host and the
+/// context it issues through agree.
+#[derive(Clone, Default)]
+pub(crate) struct RecordedTurnCancel {
+    observed: Arc<std::sync::atomic::AtomicBool>,
+    control: Option<Arc<crate::runtime::turn_control::ActiveTurnControl>>,
+    /// The stop the turn lends its tool children, fired with the fact.
+    lent: Option<CancellationToken>,
+}
+
+impl RecordedTurnCancel {
+    fn is_observed(&self) -> bool {
+        self.observed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn note(&self) {
+        self.observed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(lent) = &self.lent {
+            lent.cancel();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct RuntimeExecutionContext<'run> {
     pub(super) session_id: SessionId,
@@ -34,6 +66,7 @@ pub struct RuntimeExecutionContext<'run> {
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     pub(super) turn_event_tx: Option<Sender<TurnActivity>>,
     pub(super) cancellation_token: Option<CancellationToken>,
+    turn_cancel: RecordedTurnCancel,
     pub(super) observe_turn_cancel: bool,
     /// Durable cancellation authority for waits issued by this execution.
     /// A follow-on physical turn keeps its admitted effect scope but observes
@@ -483,6 +516,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_phase_probe: None,
             turn_event_tx: None,
             cancellation_token: None,
+            turn_cancel: RecordedTurnCancel::default(),
             observe_turn_cancel: true,
             turn_cancel_scope: None,
             tracing: None,
@@ -514,6 +548,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_event_tx: self.turn_event_tx.clone(),
             cancellation_token: self.cancellation_token.clone(),
+            turn_cancel: self.turn_cancel.clone(),
             observe_turn_cancel: self.observe_turn_cancel,
             turn_cancel_scope: self.turn_cancel_scope.clone(),
             tracing: self.tracing.clone(),
@@ -804,6 +839,80 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    /// Starts this execution's recorded turn-cancel fact: `honoured` is
+    /// whether the turn had already recorded a cancellation when it built
+    /// this execution, `control` is the gate pair a code cell's cancel
+    /// checkpoints peek, and `lent` is the stop the turn lends its tool
+    /// children, fired when the fact advances. The turn driver is the only
+    /// caller.
+    pub fn with_recorded_turn_cancel(
+        mut self,
+        honoured: bool,
+        control: Arc<crate::runtime::turn_control::ActiveTurnControl>,
+        lent: CancellationToken,
+    ) -> Self {
+        let turn_cancel = RecordedTurnCancel {
+            observed: Arc::default(),
+            control: Some(control),
+            lent: Some(lent),
+        };
+        if honoured {
+            turn_cancel.note();
+        }
+        self.turn_cancel = turn_cancel;
+        self
+    }
+
+    /// Records that a recorded outcome this execution received cancelled its
+    /// turn: a wait that lost to the turn's cancellation gate. Only outcomes
+    /// the engine recorded may call this, so a replay reaches it at the same
+    /// point.
+    pub fn note_turn_cancelled(&self) {
+        self.turn_cancel.note();
+    }
+
+    /// A code cell's cancel checkpoint (FIG-3672 P9): a journaled peek of the
+    /// turn's gate pair under the checkpoint's own identity, which advances
+    /// this execution's recorded fact when the turn must stop now. A replay
+    /// issues the same checkpoints at the same instruction counts and is
+    /// served the same answers. Answers whether the turn is cancelled.
+    ///
+    /// An execution with no gate control (a process body, a test context)
+    /// has no checkpoint and answers from its fact alone.
+    pub async fn turn_cancel_checkpoint(
+        &self,
+        checkpoint: u64,
+    ) -> Result<bool, crate::RuntimeEffectControllerError> {
+        if self.turn_cancel.is_observed() {
+            return Ok(true);
+        }
+        let Some(control) = self.turn_cancel.control.as_ref() else {
+            return Ok(false);
+        };
+        let Some(cell) = self
+            .parent_invocation
+            .as_ref()
+            .and_then(crate::RuntimeInvocation::replay_key)
+            .map(str::to_string)
+        else {
+            return Ok(false);
+        };
+        let observed = control
+            .observe_pending_cancel(
+                &self.dispatch.effect_controller.scoped(),
+                crate::runtime::turn_control::TurnCancelPeekIdentity::CellCheckpoint {
+                    cell,
+                    checkpoint,
+                },
+            )
+            .await
+            .map_err(crate::RuntimeEffectControllerError::from)?;
+        if observed.is_some() {
+            self.turn_cancel.note();
+        }
+        Ok(observed.is_some())
+    }
+
     pub fn without_turn_cancel_observation(mut self) -> Self {
         self.observe_turn_cancel = false;
         self
@@ -938,9 +1047,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// into their typed terminal instead of reporting it as a guest-program
     /// failure.
     pub fn is_cancelled(&self) -> bool {
-        self.cancellation_token
-            .as_ref()
-            .is_some_and(CancellationToken::is_cancelled)
+        self.turn_cancel.is_observed()
+            || self
+                .cancellation_token
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
     }
 
     pub(super) fn process_id(&self) -> Option<&str> {
@@ -1421,6 +1532,15 @@ impl<'run> RuntimeExecutionContext<'run> {
                 // process failure (FIG-3149).
                 if error.code.is_retryable() {
                     self.record_nested_effect_error(error.clone());
+                }
+                // A sleep that lost to the turn's cancellation gate is a
+                // recorded outcome: the turn is cancelled from here on.
+                if error.code == crate::RuntimeErrorCode::RuntimeEffectSleepCancelled
+                    && self
+                        .turn_cancel_wait(CancellationToken::new())
+                        .observes_turn_cancel()
+                {
+                    self.note_turn_cancelled();
                 }
                 return Err(error);
             }

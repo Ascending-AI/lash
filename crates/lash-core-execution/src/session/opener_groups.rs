@@ -429,7 +429,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let cancel = self.cancellation_token.clone().unwrap_or_default();
         while !handle.is_exhausted() {
             if let Err(error) = controller
-                .await_next_settlement(&mut handle, cancel.child_token())
+                .await_next_settlement(&mut handle, self.turn_cancel_wait(cancel.child_token()))
                 .await
             {
                 self.opener_groups
@@ -549,7 +549,12 @@ impl<'run> RuntimeExecutionContext<'run> {
                         crate::EffectGroupHandle::restored(group_key, children, consumed)?;
                     while !handle.is_exhausted() {
                         controller
-                            .await_next_settlement(&mut handle, CancellationToken::new())
+                            .await_next_settlement(
+                                &mut handle,
+                                crate::runtime::TurnCancelWait::unobserved(
+                                    CancellationToken::new(),
+                                ),
+                            )
                             .await?;
                     }
                 }

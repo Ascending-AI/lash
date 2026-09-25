@@ -69,8 +69,8 @@ where
         self.host.perform(op).await
     }
 
-    async fn yield_now(&self) {
-        self.host.yield_now().await;
+    async fn cancel_checkpoint(&self, checkpoint: u64) {
+        self.host.cancel_checkpoint(checkpoint).await;
     }
 
     fn execution_mode(&self) -> lashlang::ExecutionMode {

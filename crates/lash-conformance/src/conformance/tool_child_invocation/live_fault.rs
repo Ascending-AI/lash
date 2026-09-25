@@ -208,9 +208,10 @@ impl Stage {
     async fn next(&self, handle: &mut crate::EffectGroupHandle) -> crate::GroupSettlement {
         tokio::time::timeout(
             SETTLE_BUDGET,
-            self.scoped()
-                .controller()
-                .await_next_settlement(handle, tokio_util::sync::CancellationToken::new()),
+            self.scoped().controller().await_next_settlement(
+                handle,
+                lash_core::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
+            ),
         )
         .await
         .unwrap_or_else(|_| panic!("the child reported nothing inside the settle budget"))
@@ -269,10 +270,10 @@ pub async fn a_process_env_store_fault_is_never_the_childs_recorded_outcome(
     let mut handle = stage.open(&format!("{prefix}-env-fault-live")).await;
     let absent = tokio::time::timeout(
         ABSENCE_BUDGET,
-        stage
-            .scoped()
-            .controller()
-            .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new()),
+        stage.scoped().controller().await_next_settlement(
+            &mut handle,
+            lash_core::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
+        ),
     )
     .await;
     assert!(

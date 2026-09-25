@@ -80,7 +80,7 @@ pub use linker::{
 pub(crate) use runtime::compile_ast;
 pub use runtime::{
     AbilityOp, AbilityResult, AggregateConsumer, BINDING_SUMMARY_MAX_CHARS,
-    BudgetedJsonProjectionConfig, BudgetedJsonProjector, CompileStats, CompiledLinkedProgram,
+    BudgetedJsonProjectionConfig, BudgetedJsonProjector, CANCEL_CHECKPOINT_INSTRUCTIONS, CompileStats, CompiledLinkedProgram,
     CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram, CompiledProgramCacheStats,
     ContinuationError, DurableBaseline, DurableFragment, DurableParts, EcmaErrorClass, Entry,
     ErrorTaxonomy, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,

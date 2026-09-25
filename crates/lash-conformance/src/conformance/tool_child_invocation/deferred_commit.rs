@@ -266,7 +266,10 @@ async fn deferred_close_while_held(fixture: &ToolChildLawFixture, prefix: &str, 
             .expect("the identical group reopens");
         match scoped
             .controller()
-            .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new())
+            .await_next_settlement(
+                &mut handle,
+                lash_core::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
+            )
             .await
         {
             Ok(settlement) => break settlement,

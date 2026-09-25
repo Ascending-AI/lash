@@ -195,7 +195,10 @@ impl SessionPlugin for JournalSessionPlugin {
                     .await
                     .map_err(|err| PluginOperationFailure::new(err.to_string()))?;
                 let first = controller
-                    .await_next_settlement(&mut handle, CancellationToken::new())
+                    .await_next_settlement(
+                        &mut handle,
+                        lash_core::TurnCancelWait::unobserved(CancellationToken::new()),
+                    )
                     .await
                     .map_err(|err| PluginOperationFailure::new(err.to_string()))?;
                 assert_eq!(first.position, 0, "the fast child wins");

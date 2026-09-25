@@ -308,7 +308,7 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
     async fn await_next_settlement(
         &self,
         handle: &mut crate::EffectGroupHandle,
-        cancel: crate::CancellationToken,
+        cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         self.inner.await_next_settlement(handle, cancel).await
     }

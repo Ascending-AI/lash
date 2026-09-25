@@ -274,7 +274,7 @@ where
     let store_factory = catalog_with_sessions(make_catalog, &[address.session_id.as_str()]).await;
     let cancel_driver = crate::TurnWorkDriver::for_catalog(make(), Arc::clone(&store_factory));
     let (settled, cancelled) = tokio::join!(
-        active.settle_before_commit(owner_host.as_ref(), false, None),
+        active.settle_before_commit(owner_host.as_ref(), None, None),
         cancel_driver.request_cancel(
             crate::TurnCancelRequest::new(address, format!("{prefix}-race-request"), None)
                 .with_reason("cold-instance conformance race"),

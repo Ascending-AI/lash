@@ -538,7 +538,7 @@ impl lash_core::testing::EffectLayer for CapturingRuntimeReplayController {
         &self,
         inner: &dyn RuntimeEffectController,
         handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
+        cancel: lash_core::TurnCancelWait,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         // A group child is a `ToolInvocation` the backend substrate runs
         // itself, so its recorded outcome is captured where the consumer

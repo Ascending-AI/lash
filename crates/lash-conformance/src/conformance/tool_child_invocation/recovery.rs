@@ -286,7 +286,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                         ABSENCE_BUDGET,
                         scoped.controller().await_next_settlement(
                             &mut handle,
-                            tokio_util::sync::CancellationToken::new()
+                            lash_core::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new())
                         ),
                     )
                     .await

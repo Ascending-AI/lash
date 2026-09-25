@@ -27,11 +27,7 @@ mod resident_session;
 pub(in crate::runtime) use commit::LogicalTurnErrorContext;
 use commit::{CancelledTurnFinishContext, TurnCommitContext, TurnFinishInput};
 pub(in crate::runtime) use execute::PreparedTurnExecuteContext;
-#[cfg(any(test, feature = "testing"))]
-pub use execute::TURN_CANCEL_WATCH_MAX_ATTEMPTS;
 use execute::TurnDriverRemainder;
-#[cfg(test)]
-use execute::await_turn_cancellation_with_retry;
 use lease::DriveClaimToBind;
 use post_commit::PostCommitDelivery;
 pub(in crate::runtime) use prepare::TurnPrepareContext;
@@ -528,71 +524,14 @@ async fn publish_terminal_after_commit(
 mod tests {
     use crate::SessionId;
     use crate::TurnId;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
 
-    use super::{
-        ActiveTurnControl, TURN_CANCEL_WATCH_MAX_ATTEMPTS, agent_frame_follow_turn_id,
-        await_turn_cancellation_with_retry, publish_terminal_after_commit,
-    };
+    use super::{ActiveTurnControl, agent_frame_follow_turn_id, publish_terminal_after_commit};
     use crate::{
         AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope, Resolution,
-        ResolveOutcome, RuntimeError, TurnAddress, TurnCancellationEvidence, TurnFinish,
-        TurnOutcome, TurnTerminal,
+        ResolveOutcome, RuntimeError, TurnAddress, TurnFinish, TurnOutcome, TurnTerminal,
     };
-
-    #[derive(Debug)]
-    struct RecordingTestClock {
-        inner: crate::testing::TestClock,
-        sleeps: Mutex<Vec<std::time::Duration>>,
-    }
-
-    impl RecordingTestClock {
-        fn new() -> Self {
-            Self {
-                inner: crate::testing::TestClock::new(0),
-                sleeps: Mutex::new(Vec::new()),
-            }
-        }
-
-        fn sleeps(&self) -> Vec<std::time::Duration> {
-            self.sleeps.lock().expect("recording clock sleeps").clone()
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl crate::Clock for RecordingTestClock {
-        fn now(&self) -> std::time::Instant {
-            self.inner.now()
-        }
-
-        fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-            self.inner.timestamp_datetime()
-        }
-
-        async fn sleep(&self, duration: std::time::Duration) {
-            self.sleeps
-                .lock()
-                .expect("record cancellation-watch sleep")
-                .push(duration);
-        }
-
-        async fn sleep_until(&self, deadline: std::time::Instant) {
-            self.inner.sleep_until(deadline).await;
-        }
-    }
-
-    #[test]
-    fn recording_test_clock_wall_clock_faces_agree() {
-        let clock = RecordingTestClock::new();
-        let clock: &dyn crate::Clock = &clock;
-        let milliseconds = clock.timestamp_ms();
-        let datetime = clock.timestamp_datetime();
-        let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-            .expect("clock emits RFC 3339");
-        assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-        assert_eq!(text.timestamp_millis() as u64, milliseconds);
-    }
 
     /// Refuses every terminal publication and forwards the rest of the
     /// await-event surface to a backend host's controller for the turn.
@@ -672,73 +611,6 @@ mod tests {
             agent_frame_follow_turn_id(&TurnId::from("root-turn"), 2),
             "root-turn:agent-frame:2"
         );
-    }
-
-    #[tokio::test]
-    async fn cancellation_watch_retries_transient_errors_until_evidence_arrives() {
-        let clock = RecordingTestClock::new();
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let observed_attempts = Arc::clone(&attempts);
-        let evidence = await_turn_cancellation_with_retry(&clock, move || {
-            let attempt = observed_attempts.fetch_add(1, Ordering::SeqCst);
-            async move {
-                if attempt < 2 {
-                    Err(RuntimeError::new(
-                        crate::RuntimeErrorCode::TransientCancelWatch,
-                        "temporary ingress failure",
-                    ))
-                } else {
-                    Ok(Some(TurnCancellationEvidence {
-                        request_id: "retry-request".to_string(),
-                        origin: Some("test-user".to_string()),
-                        reason: None,
-                        undelivered: crate::TurnCancelDisposition::Defer,
-                        mode: crate::TurnCancelMode::Immediate,
-                        honoured_after_step: None,
-                    }))
-                }
-            }
-        })
-        .await
-        .expect("cancellation watch succeeds")
-        .expect("cancellation evidence after retries");
-
-        assert_eq!(attempts.load(Ordering::SeqCst), 3);
-        assert_eq!(evidence.request_id, "retry-request");
-        assert_eq!(
-            clock.sleeps(),
-            vec![
-                std::time::Duration::from_millis(25),
-                std::time::Duration::from_millis(50),
-            ],
-            "watcher retries must sleep on the injected clock"
-        );
-    }
-
-    #[tokio::test]
-    async fn cancellation_watch_fails_after_its_error_budget() {
-        let clock = RecordingTestClock::new();
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let observed_attempts = Arc::clone(&attempts);
-        let err = await_turn_cancellation_with_retry(&clock, move || {
-            observed_attempts.fetch_add(1, Ordering::SeqCst);
-            async {
-                Err(RuntimeError::new(
-                    crate::RuntimeErrorCode::TransientCancelWatch,
-                    "cancel resolver remains unavailable",
-                ))
-            }
-        })
-        .await
-        .expect_err("the live cancellation watcher must fail closed after its retry budget");
-
-        assert_eq!(err.code, crate::RuntimeErrorCode::TransientCancelWatch);
-        assert_eq!(
-            attempts.load(Ordering::SeqCst),
-            TURN_CANCEL_WATCH_MAX_ATTEMPTS,
-            "the live cancellation watcher must exhaust its retry budget before teardown"
-        );
-        assert_eq!(clock.sleeps().len(), TURN_CANCEL_WATCH_MAX_ATTEMPTS - 1);
     }
 
     #[tokio::test]

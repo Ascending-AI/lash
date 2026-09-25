@@ -8,7 +8,7 @@ mod attempt_usage;
 use acceptance_window::{AcceptanceWindowJournalController, LATE_TAB_INPUT};
 
 #[tokio::test]
-pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_and_settles_turn() {
+pub(super) async fn a_failed_step_cancel_watch_stops_the_step_closed_and_settles_turn() {
     let backend = memory_backend().await;
     let controller = Arc::new(
         super::effect::RecordingEffectController::default().with_always_failing_cancel_watch(),
@@ -40,7 +40,7 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
                         if let Some(started) = provider_started_tx.lock_recover().take() {
                             let _ = started.send(());
                         }
-                        controller.wait_for_cancel_watch_exhaustion().await;
+                        controller.wait_for_cancel_watch_failure().await;
                         for _ in 0..32 {
                             tokio::task::yield_now().await;
                         }
@@ -97,14 +97,16 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
     let turn_id = "bounded-cancel-watch";
     let turn_address = lash_core::facade_support::TurnAddress::new("root", turn_id);
     let turn_cancel = CancellationToken::new();
-    let observed_turn_cancel = turn_cancel.clone();
+    // The host sink holds the buffered stream event until the test releases
+    // it: nothing on the drive path fires a host token any more.
+    let sink_release = CancellationToken::new();
     let (turn_events, stream_event_entered_rx) =
-        CancellationGatedTurnEvents::new(turn_cancel.clone());
+        CancellationGatedTurnEvents::new(sink_release.clone());
     let turn_events_for_task = turn_events.clone();
     let turn = lash_core::task::spawn(async move {
         runtime
             .stream_turn(
-                TurnInput::text("tear down after the cancellation watcher gives up"),
+                TurnInput::text("stop the step when its cancellation watch fails"),
                 TurnOptions::new(
                     turn_cancel,
                     backend_turn_scope(&backend, &SessionId::from("root"), &TurnId::from(turn_id)),
@@ -134,30 +136,26 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
             if evidence.request_id == "watch-exhaustion-cancel"
     ));
     controller.release_cancel_watch_failures();
+    sink_release.cancel();
 
     let turn = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
         .await
-        .expect("watch exhaustion must tear down and settle the turn")
+        .expect("a failed watch must stop the step and settle the turn")
         .expect("turn task")
         .expect("committed cancellation remains a successful turn terminal");
-    assert_eq!(
-        controller.cancel_watch_attempts(),
-        lash_core::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS
-    );
+    // The model call's body watches the gate itself and fails closed on the
+    // first watch failure (FIG-3672 P9): there is no drive-level watcher to
+    // retry, and the turn learns the cancellation from its journaled peek.
+    assert_eq!(controller.cancel_watch_attempts(), 1);
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         1,
-        "watch exhaustion must abort the in-flight provider call before another can start"
+        "a failed watch must abort the in-flight provider call before another can start"
     );
     assert_eq!(
         tool_executions.load(Ordering::SeqCst),
         0,
-        "provider output produced after watcher exhaustion must never reach an executor"
-    );
-    assert!(
-        observed_turn_cancel.is_cancelled(),
-        "watch exhaustion must cancel the active turn token after {} attempts",
-        controller.cancel_watch_attempts()
+        "provider output produced after the watch failed must never reach an executor"
     );
     assert!(matches!(
         turn.outcome,

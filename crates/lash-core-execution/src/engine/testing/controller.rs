@@ -7,8 +7,6 @@
 //! bytes an engine's replay fence compares — and whose body is the local
 //! executor the drive handed over.
 
-use tokio_util::sync::CancellationToken;
-
 use super::cx::LocalTestCx;
 use crate::{
     AdmittedScope, AwaitEventResolver, EffectGroupHandle, GroupSettlement, LoserPolicy,
@@ -67,7 +65,7 @@ impl RuntimeEffectController for LocalTestCx {
     async fn await_next_settlement(
         &self,
         _handle: &mut EffectGroupHandle,
-        _cancel: CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         Err(effect_groups_unsupported(HARNESS))
     }

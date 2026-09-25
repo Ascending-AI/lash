@@ -632,7 +632,7 @@ impl RuntimeEffectController for FencedRestateController {
     async fn await_next_settlement(
         &self,
         handle: &mut EffectGroupHandle,
-        cancel: tokio_util::sync::CancellationToken,
+        cancel: lash_core::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.controller.await_next_settlement(handle, cancel).await
     }
@@ -684,6 +684,7 @@ impl RuntimeEffectController for FencedRestateController {
 }
 
 mod ingress;
+mod turn_stop;
 use ingress::*;
 struct RestateEffectHostController {
     await_event_ingress: RestateAwaitEventIngress,
@@ -1227,7 +1228,7 @@ impl RuntimeEffectController for RestateEffectHostController {
     async fn await_next_settlement(
         &self,
         handle: &mut EffectGroupHandle,
-        cancel: tokio_util::sync::CancellationToken,
+        cancel: lash_core::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         if handle.is_exhausted() {
             return Err(group_shape_error(format!(
@@ -1263,11 +1264,16 @@ impl RuntimeEffectController for RestateEffectHostController {
                 &request,
             );
             tokio::pin!(wait);
+            // Unjournaled here: the turn's gate is raced over ingress (FIG-3672 P9).
             let resolution = tokio::select! {
                 result = &mut wait => Some(result.map_err(|error| ingress_group_error(
                     "LashDurableWaitWorkflow/await_resolution(RANK)", error
                 ))?),
-                _ = cancel.cancelled() => None,
+                _ = cancel.cancellation().cancelled() => None,
+                stop = self.turn_stop(cancel.observed_scope()) => {
+                    stop?;
+                    None
+                }
             };
             let Some(resolution) = resolution else {
                 return Err(RuntimeEffectControllerError::new(

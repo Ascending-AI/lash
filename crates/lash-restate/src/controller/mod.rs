@@ -17,6 +17,13 @@ use journaled_effect::EngineFaults;
 mod live_frontier;
 mod scope_recording;
 mod scoped;
+mod turn_cancel_request;
+pub(crate) use turn_cancel_request::{
+    restate_await_event_turn_cancel_wait_request, restate_timer_turn_cancel_wait_request,
+};
+use turn_cancel_request::{
+    restate_group_turn_cancel_wait_request, restate_process_turn_cancel_wait_request,
+};
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -40,9 +47,8 @@ use restate_sdk::context::RunRetryPolicy;
 use restate_sdk::errors::TerminalError;
 
 use crate::durable_wait::{
-    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
-    RestateTurnCancelRaceOutcome, restate_await_event_key_for_authority,
-    restate_await_event_key_is_valid_for_authority, restate_durable_wait_request,
+    RestateDurableWaitAddress, RestateDurableWaitResolveRequest, RestateTurnCancelRaceOutcome,
+    restate_await_event_key_for_authority, restate_await_event_key_is_valid_for_authority,
     restate_unknown_or_revoked,
 };
 use crate::effect_group::{
@@ -222,87 +228,6 @@ where
             )
         })?
         .into_result()
-}
-fn restate_turn_cancel_wait_request(
-    authority_id: &RestateAuthorityId,
-    invocation: &RuntimeEffectInvocation,
-    turn_cancel_scope: Option<&ExecutionScope>,
-) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
-    let Some(turn_id) = invocation.attribution.turn_id.as_ref() else {
-        return Ok(None);
-    };
-    let Some(scope) = turn_cancel_scope else {
-        return Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateTurnCancelScopeMissing,
-            "turn effects that observe cancellation require a durable turn-cancel scope",
-        ));
-    };
-    if matches!(scope, ExecutionScope::Process { .. }) {
-        return Ok(None);
-    }
-    let scope @ ExecutionScope::Turn { .. } = scope else {
-        return Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateTurnCancelScopeMismatch,
-            "turn-cancel scope must be a matching turn scope or an explicit process scope",
-        ));
-    };
-    scope
-        .validate()
-        .map_err(RuntimeEffectControllerError::from)?;
-    if scope.session_id() != invocation.attribution.session_id.as_ref()
-        || scope.turn_id() != Some(turn_id)
-    {
-        return Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateTurnCancelScopeMismatch,
-            "turn-cancel scope must match the runtime effect invocation",
-        ));
-    }
-    let key = restate_await_event_key_for_authority(
-        authority_id,
-        scope,
-        AwaitEventWaitIdentity::TurnCancelGate,
-    )?;
-    Ok(Some(restate_durable_wait_request(
-        &key,
-        None,
-        &lash_core::facade_support::SystemClock,
-    )))
-}
-
-pub(crate) fn restate_timer_turn_cancel_wait_request(
-    authority_id: &RestateAuthorityId,
-    invocation: &RuntimeEffectInvocation,
-    observe_turn_cancel: bool,
-    turn_cancel_scope: Option<&ExecutionScope>,
-) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
-    if !observe_turn_cancel {
-        return Ok(None);
-    }
-    restate_turn_cancel_wait_request(authority_id, invocation, turn_cancel_scope)
-}
-
-fn restate_process_turn_cancel_wait_request(
-    authority_id: &RestateAuthorityId,
-    invocation: &RuntimeEffectInvocation,
-    observe_turn_cancel: bool,
-    turn_cancel_scope: Option<&ExecutionScope>,
-) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
-    if !observe_turn_cancel {
-        return Ok(None);
-    }
-    restate_turn_cancel_wait_request(authority_id, invocation, turn_cancel_scope)
-}
-
-pub(crate) fn restate_await_event_turn_cancel_wait_request(
-    authority_id: &RestateAuthorityId,
-    invocation: &RuntimeEffectInvocation,
-    observe_turn_cancel: bool,
-    turn_cancel_scope: Option<&ExecutionScope>,
-) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
-    if !observe_turn_cancel {
-        return Ok(None);
-    }
-    restate_turn_cancel_wait_request(authority_id, invocation, turn_cancel_scope)
 }
 /// Lash [`RuntimeEffectController`] and [`EffectHost`] backed by a Restate handler context.
 ///
@@ -725,25 +650,24 @@ where
                     .await
                     .map_err(|error| effect_group_engine_error("EffectGroupDispatch/run", error))?;
                 let request = ready_wait_request(&shape.wait_scope, &group_key)?;
-                let resolution = self
+                let resolution = match self
                     .context
-                    .await_effect_group_wait(
-                        request,
-                        group_key.clone(),
-                        tokio_util::sync::CancellationToken::new(),
-                    )
+                    .await_effect_group_wait(request, group_key.clone(), None)
                     .await
                     .map_err(|error| {
                         effect_group_engine_error(
                             "LashDurableWaitWorkflow/await_resolution(READY)",
                             error,
                         )
-                    })?
-                    .ok_or_else(|| {
-                        group_shape_error(format!(
+                    })? {
+                    RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
+                    RestateTurnCancelRaceOutcome::TurnCancelled
+                    | RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
+                        return Err(group_shape_error(format!(
                             "opening effect group {group_key} was cancelled while awaiting READY"
-                        ))
-                    })?;
+                        )));
+                    }
+                };
                 match decode_wait_resolution(resolution)? {
                     EffectGroupWaitResolution::Ready => Ok(handle),
                     EffectGroupWaitResolution::Refused { reason } => Err(group_shape_error(
@@ -785,7 +709,7 @@ where
     async fn await_next_settlement(
         &self,
         handle: &mut EffectGroupHandle,
-        cancel: tokio_util::sync::CancellationToken,
+        cancel: lash_core::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         if handle.is_exhausted() {
             return Err(group_shape_error(format!(
@@ -811,24 +735,35 @@ where
         if matches!(read, EffectGroupReadRankResponse::NotSettled) {
             let scope = ExecutionScope::runtime_operation(handle.group_key());
             let request = rank_wait_request(&scope, handle.group_key(), rank)?;
-            let Some(resolution) = self
+            // The rank wait races the turn's durable cancellation gate, never
+            // a live token: the journal records which completed first
+            // (FIG-3672 P9).
+            let turn_cancel = restate_group_turn_cancel_wait_request(&self.authority_id, &cancel)?;
+            let resolution = match self
                 .context
-                .await_effect_group_wait(request, handle.group_key().to_string(), cancel)
+                .await_effect_group_wait(request, handle.group_key().to_string(), turn_cancel)
                 .await
                 .map_err(|error| {
                     effect_group_engine_error(
                         "LashDurableWaitWorkflow/await_resolution(RANK)",
                         error,
                     )
-                })?
-            else {
-                return Err(RuntimeEffectControllerError::new(
-                    RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
-                    format!(
-                        "awaiting effect group {} rank {rank} was cancelled",
-                        handle.group_key()
-                    ),
-                ));
+                })? {
+                RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
+                RestateTurnCancelRaceOutcome::TurnCancelled => {
+                    return Err(RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+                        format!(
+                            "awaiting effect group {} rank {rank} was cancelled",
+                            handle.group_key()
+                        ),
+                    ));
+                }
+                RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
+                    return Err(RuntimeEffectControllerError::from(
+                        lash_core::StoreError::SessionDeleted { session_id },
+                    ));
+                }
             };
             match decode_wait_resolution(resolution)? {
                 EffectGroupWaitResolution::Rank => {}
@@ -1114,7 +1049,6 @@ where
                                 status: lash_trace::TraceDurableTimerStatus::SessionRevoked,
                             }
                         });
-                        cancellation.cancel();
                         return Err(RuntimeEffectControllerError::from(
                             lash_core::StoreError::SessionDeleted { session_id },
                         ));
@@ -1126,7 +1060,6 @@ where
                                 status: lash_trace::TraceDurableTimerStatus::Cancelled,
                             }
                         });
-                        cancellation.cancel();
                         return Err(RuntimeEffectControllerError::new(
                             RuntimeErrorCode::RuntimeEffectSleepCancelled,
                             "runtime effect sleep was cancelled",
@@ -1177,6 +1110,9 @@ where
                                 status: lash_trace::TraceDurableTimerStatus::Cancelled,
                             }
                         });
+                        // The process body's own stop (not a turn's): the
+                        // process drive still reads its token, which P16
+                        // replaces with the recorded verdict (FIG-3672).
                         cancellation.cancel();
                         return Err(RuntimeEffectControllerError::new(
                             RuntimeErrorCode::RuntimeEffectSleepCancelled,
@@ -1205,8 +1141,11 @@ where
                 self.require_active_session(key.scope.session_id())
                     .await
                     .map_err(RuntimeEffectControllerError::from)?;
+                // The token is the waiting execution's own cooperative cancel:
+                // the turn's cancellation reaches this wait only through the
+                // durable gate race below (FIG-3672 P9).
                 let RuntimeAwaitEventOptions {
-                    cancellation,
+                    cancellation: _,
                     deadline,
                     clock,
                     observe_turn_cancel,
@@ -1239,12 +1178,7 @@ where
                 let replay_key = invocation.replay_key().to_string();
                 match self
                     .context
-                    .await_event_or_turn_cancel(
-                        request,
-                        replay_key,
-                        turn_cancel,
-                        cancellation.clone(),
-                    )
+                    .await_event_or_turn_cancel(request, replay_key, turn_cancel)
                     .await
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(resolution)) => {
@@ -1263,7 +1197,6 @@ where
                                 resolution: lash_trace::TraceDurableWaitResolution::SessionRevoked,
                             }
                         });
-                        cancellation.cancel();
                         Err(RuntimeEffectControllerError::from(
                             lash_core::StoreError::SessionDeleted { session_id },
                         ))
@@ -1275,7 +1208,6 @@ where
                                 resolution: lash_trace::TraceDurableWaitResolution::TurnCancelled,
                             }
                         });
-                        cancellation.cancel();
                         Ok(RuntimeEffectOutcome::AwaitEvent {
                             resolution: Resolution::Cancelled,
                         })

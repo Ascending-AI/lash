@@ -6,13 +6,13 @@ use std::task::{Context, Poll};
 use crate::durable_session::DurableSession;
 use crate::session_binding::BoundSession;
 use crate::support::{
-    Arc, CancellationToken, EffectHost, EmbedError, LashCore, LashRuntime, PluginBinding,
-    PluginFactory, PluginOperations, PluginOptions, ProcessHandleView, PromptLayer,
-    PromptLayerSink, ProviderHandle, QueuedTurnBuilder, Result, RuntimeErrorCode, RuntimeHandle,
-    RuntimeObservation, RuntimePersistence, RuntimeSessionState, SessionAdmin, SessionCursor,
-    SessionError, SessionObservation, SessionObservationSubscription, SessionPolicy,
-    SessionReadView, SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest,
-    SessionUsageReport, ToolManifest, ToolState, TurnBuilder, TurnInput, build_plugin_host,
+    Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginBinding, PluginFactory,
+    PluginOperations, PluginOptions, ProcessHandleView, PromptLayer, PromptLayerSink,
+    ProviderHandle, QueuedTurnBuilder, Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation,
+    RuntimePersistence, RuntimeSessionState, SessionAdmin, SessionCursor, SessionError,
+    SessionObservation, SessionObservationSubscription, SessionPolicy, SessionReadView,
+    SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest, SessionUsageReport,
+    ToolManifest, ToolState, TurnBuilder, TurnInput, build_plugin_host,
     refuse_foreign_backend_factories,
 };
 use futures_util::Stream;
@@ -801,8 +801,7 @@ impl LashSession {
             runtime: self.runtime.clone(),
             effect_host: self.binding.effect_host(),
             input,
-            cancel: CancellationToken::new(),
-            cancel_origin_hint: lash_core::TurnCancelOriginHint::default(),
+            stop: lash_core::LocalTurnStop::default(),
             cancels: self.turn_cancels.clone(),
             protocol_turn_options: None,
             provider: None,
@@ -814,8 +813,7 @@ impl LashSession {
         QueuedTurnBuilder {
             runtime: self.runtime.clone(),
             effect_host: self.binding.effect_host(),
-            cancel: CancellationToken::new(),
-            cancel_origin_hint: lash_core::TurnCancelOriginHint::default(),
+            stop: lash_core::LocalTurnStop::default(),
             cancels: self.turn_cancels.clone(),
             turn_id: None,
             drain_id: None,
@@ -959,12 +957,15 @@ impl LashSession {
     /// Cancel every turn currently executing through this opened session
     /// (including its clones) and report how many were signalled.
     ///
-    /// This raw process-local compatibility lever records no origin. User
-    /// controls, shutdown, and provider plumbing should call
+    /// This process-local lever records no origin. User controls, shutdown,
+    /// and provider plumbing should call
     /// [`cancel_running_turns_with_origin`](Self::cancel_running_turns_with_origin).
-    /// Host-facing durable stop controls should retain an
-    /// exact turn id and call [`request_turn_cancel`](Self::request_turn_cancel)
-    /// so cancellation survives separately opened handles and durable replay.
+    /// Each signalled turn receives the stop as a durable request on its own
+    /// cancellation gate, with lash's internal evidence, and honours it where
+    /// it honours any request. Host-facing stop controls should still retain
+    /// an exact turn id and call
+    /// [`request_turn_cancel`](Self::request_turn_cancel), which carries the
+    /// host's own request id and reaches separately opened handles too.
     /// A cancelled turn finishes with
     /// `TurnOutcome::Stopped(TurnStop::Cancelled)` and commits like any other
     /// turn; the session stays usable.
@@ -984,8 +985,8 @@ impl LashSession {
     /// Stop active process-local turns in the given mode and report how many
     /// were signalled. [`TurnCancelMode::Immediate`] is
     /// [`cancel_running_turns`](Self::cancel_running_turns);
-    /// [`TurnCancelMode::AfterStep`] never fires a token: each turn finishes
-    /// its current protocol iteration and stops at that step boundary.
+    /// [`TurnCancelMode::AfterStep`] lets each turn finish its current
+    /// protocol iteration and stop at that step boundary.
     pub fn cancel_running_turns_with_mode(&self, mode: TurnCancelMode) -> usize {
         self.cancel_running_turns_with_origin_and_mode(None, mode)
     }

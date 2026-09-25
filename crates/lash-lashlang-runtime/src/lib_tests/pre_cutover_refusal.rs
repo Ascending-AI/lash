@@ -62,7 +62,7 @@ impl lash_core::RuntimeEffectController for CrossingCounter {
     async fn await_next_settlement(
         &self,
         _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        _cancel: lash_core::TurnCancelWait,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.crossings.fetch_add(1, Ordering::SeqCst);
         Err(lash_core::RuntimeEffectControllerError::new(
