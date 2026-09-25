@@ -315,6 +315,8 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-restate-test:drop__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:lash-restate-test__unit_test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:server_semantics__test": {"cpu_count": 2, "memory_kb": 1048576},
+    "//crates/lash-restate-test:session_driver__test": {"cpu_count": 2, "memory_kb": 1048576},
+    "//crates/lash-restate-test:session_send__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:start_gate_peek__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:suspended_turn__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-restate-test:tool_child_drift__test": {"cpu_count": 2, "memory_kb": 1048576},
