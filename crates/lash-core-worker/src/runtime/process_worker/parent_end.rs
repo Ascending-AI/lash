@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CancelOrigin, ParentEndPlan, ParentScope, ProcessId};
+use crate::{ParentEndPlan, ParentScope, ProcessId};
 
 /// The parent-end recovery pass's state, shared by every clone of one worker.
 #[derive(Default)]
@@ -354,51 +354,20 @@ impl DurableProcessWorker {
         }
     }
 
-    /// Settle one parent scope: request `ParentEnded` cancel on every `Cancel`
-    /// child, then mark the ledger row settled.
-    ///
-    /// A terminal child and a child that already carries a cancel request are
-    /// settled by definition and are never returned by the children query, so
-    /// two sweeps racing on the same parent converge instead of conflicting.
+    /// Settle one parent scope through the one engine-neutral application
+    /// every engine runs (FIG-3822). A native execution reads its cancel
+    /// request from the registry, so its port delivers nothing more.
     pub async fn settle_parent_end_plan(&self, plan: &ParentEndPlan) -> Result<(), PluginError> {
-        let requester = plan
-            .parent
-            .storage_id()
-            .unwrap_or_else(|| plan.parent.storage_kind().to_string());
-        let mut after: Option<ProcessId> = None;
-        loop {
-            let children = self
-                .config
-                .process_registry()
-                .list_parent_end_children(&plan.parent, after.as_ref(), page_bound())
-                .await?;
-            let Some(last) = children.last() else { break };
-            after = Some(last.id.clone());
-            for child in &children {
-                match self
-                    .config
-                    .process_registry()
-                    .request_process_cancel(
-                        &crate::ProcessRef::from_record(child),
-                        CancelOrigin::ParentEnded,
-                        requester.clone(),
-                        None,
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    // A child that went terminal between the page read and the
-                    // write needs no cancel: the scope it belonged to is over
-                    // for it too. Any other refusal keeps the row pending.
-                    Err(PluginError::ProcessAlreadyTerminal { .. }) => {}
-                    Err(error) => return Err(error),
-                }
-            }
-        }
-        self.config
-            .process_registry()
-            .settle_parent_end_plan(&plan.parent)
-            .await
+        let now_ms = self.now_ms();
+        let wiring = self.process_wiring();
+        crate::apply_parent_end_plan(
+            self.config.process_registry().as_ref(),
+            wiring.port().as_ref(),
+            &plan.parent,
+            now_ms,
+        )
+        .await
+        .map(|_| ())
     }
 
     pub(super) async fn finish_terminal_run(

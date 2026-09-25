@@ -558,4 +558,9 @@ pub struct LashRuntime {
     /// physical turn is addressed under the recorded index and never re-reads
     /// the head a replay's live store may have moved past.
     pub(crate) admitted_turn_index: Option<usize>,
+    /// The logical root the session drive is running, while it runs it. The
+    /// drive's recorded close records that root's end once, after its
+    /// terminal commit (FIG-3822), so the root's physical commits (a frame
+    /// switch's included) record none.
+    pub(crate) drive_owned_root: Option<crate::TurnId>,
 }

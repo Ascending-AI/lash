@@ -999,6 +999,15 @@ mod terminal_wait_tests {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessWorkSubstrate for ReattachOnce {
+        async fn deliver_cancel(
+            &self,
+            _process: &lash_core::ProcessRef,
+            _request: &lash_core::CancelRequest,
+            _delivery_key: &str,
+        ) -> std::result::Result<(), lash_core::PluginError> {
+            Ok(())
+        }
+
         async fn admit_pending_processes(
             &self,
             _reason: &str,

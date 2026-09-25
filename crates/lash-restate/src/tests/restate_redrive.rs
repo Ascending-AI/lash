@@ -1043,6 +1043,10 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         vec![
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            // `lash.process.parent-end`: the ended process's plan applied
+            // right after its terminal completion (FIG-3822).
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
@@ -1162,6 +1166,10 @@ pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() 
     assert_eq!(
         restate_message_types(&suspended).expect("decode terminal suspension"),
         vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            // `lash.process.parent-end`: the ended process's plan applied
+            // right after its terminal completion (FIG-3822).
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
@@ -1358,6 +1366,10 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         restate_message_types(&terminal_delivery_suspension)
             .expect("decode effectful terminal suspension"),
         vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            // `lash.process.parent-end`: the ended process's plan applied
+            // right after its terminal completion (FIG-3822).
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,

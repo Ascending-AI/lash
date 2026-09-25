@@ -305,6 +305,15 @@ impl LateBoundProcessWork {
 
 #[async_trait::async_trait]
 impl crate::ProcessWorkSubstrate for LateBoundProcessWork {
+    async fn deliver_cancel(
+        &self,
+        _process: &crate::ProcessRef,
+        _request: &crate::CancelRequest,
+        _delivery_key: &str,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
     async fn admit_pending_processes(
         &self,
         _reason: &str,

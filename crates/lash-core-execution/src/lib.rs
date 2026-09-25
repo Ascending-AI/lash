@@ -819,6 +819,10 @@ pub use runtime::{
     effect_groups_unsupported, ensure_process_lease_schema_version,
     park_turn_of_refused_group_child, park_turn_refused_by_generation,
 };
+pub use runtime::{
+    ParentEndApplication, ParentEndReconcileReport, apply_parent_end_plan, end_parent_scope,
+    end_session_roots, parent_end_delivery_key, parent_end_requester, reconcile_parent_end_plans,
+};
 #[allow(unused_imports)]
 pub(crate) use runtime::{
     ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedTurnWork,

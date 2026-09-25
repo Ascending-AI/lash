@@ -650,6 +650,10 @@ pub use lash_core_execution::{
     ProjectorContext, ProtocolDriverState, SansIoTurnInput, TurnDriverConfig, TurnDriverPreamble,
     TurnMachine, TurnMachineConfig,
 };
+pub use lash_core_execution::{
+    ParentEndApplication, ParentEndReconcileReport, apply_parent_end_plan, end_parent_scope,
+    end_session_roots, parent_end_delivery_key, parent_end_requester, reconcile_parent_end_plans,
+};
 pub use lash_sansio::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };

@@ -725,6 +725,22 @@ impl LiveConformanceHarness {
         Arc::new(self.stores.clone())
     }
 
+    /// The connection this endpoint's server answers on.
+    pub(super) fn connection(&self) -> RestateConnection {
+        self.connection.clone()
+    }
+
+    /// A Restate backend over this endpoint's connection and store set: a
+    /// law's runtime on it shares the registry the endpoint's process
+    /// workflow writes, and its process port delivers to that workflow.
+    pub(super) fn law_backend(&self) -> Arc<dyn lash_core::Backend> {
+        Arc::new(crate::RestateBackend::new(
+            self.connection.clone(),
+            crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+            self.law_stores(),
+        ))
+    }
+
     /// A maker of fresh, unbound conformance handles on this endpoint's
     /// session catalog: the store a crash law's runtime commits through and
     /// the law reads and stamps back, over the same database the endpoint's

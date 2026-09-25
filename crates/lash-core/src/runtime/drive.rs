@@ -343,10 +343,12 @@ impl LashRuntime {
         // under a caller whose scope is a process or a runtime operation: a
         // process-backed child turn keeps the process scope it was admitted
         // under, and so does an operation's turn.
-        let scope = match controller.execution_scope() {
+        let (scope, owns_root_scope) = match controller.execution_scope() {
             crate::ExecutionScope::Process { .. }
-            | crate::ExecutionScope::RuntimeOperation { .. } => controller.admitted_scope().clone(),
-            _ => drive_root_scope(admitted.session(), &root),
+            | crate::ExecutionScope::RuntimeOperation { .. } => {
+                (controller.admitted_scope().clone(), false)
+            }
+            _ => (drive_root_scope(admitted.session(), &root), true),
         };
         let host = Arc::clone(&self.host.core.control.effect_host);
         let root_controller = step_controller(controller, host.as_ref(), scope.clone())
@@ -385,7 +387,19 @@ impl LashRuntime {
         }
         match admitted.work().clone() {
             crate::engine::AdmittedWork::Input { head } => {
-                Box::pin(self.run_input_root(&root_controller, &admitted, &head, sinks, live)).await
+                // The root's end is the drive's recorded close after its
+                // terminal commit (FIG-3822), so none of its physical commits
+                // writes a parent-end row: the frame a switch leaves carries
+                // the root's own id and is not its end.
+                let previous = self.drive_owned_root.clone();
+                if owns_root_scope {
+                    self.drive_owned_root = Some(root.clone());
+                }
+                let run =
+                    Box::pin(self.run_input_root(&root_controller, &admitted, &head, sinks, live))
+                        .await;
+                self.drive_owned_root = previous;
+                run
             }
             crate::engine::AdmittedWork::Queued => {
                 Box::pin(self.run_queued_root(&root_controller, &admitted, sinks)).await

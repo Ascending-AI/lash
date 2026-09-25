@@ -167,6 +167,10 @@ pub use process::{
     refused_process_registrations,
 };
 pub use process::{
+    ParentEndApplication, ParentEndReconcileReport, apply_parent_end_plan, end_parent_scope,
+    end_session_roots, parent_end_delivery_key, parent_end_requester, reconcile_parent_end_plans,
+};
+pub use process::{
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
     ProcessDrainReport, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
     ProcessWorkerFault,
