@@ -467,6 +467,13 @@ pub enum RemoteParkReason {
         current: u32,
         message: String,
     },
+    /// The engine stopped retrying work that kept failing live.
+    EngineRetryExhausted {
+        attempts: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_failure_code: Option<String>,
+        message: String,
+    },
 }
 
 /// The park a process is in while its body refuses to replay its journal
@@ -485,6 +492,10 @@ pub struct RemoteProcessPark {
     pub attempts: u32,
     /// Whether the latest run refused (a rerun under way clears it).
     pub refusing: bool,
+    /// The engine's opaque handle on the stopped execution, when the engine
+    /// parked the process itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 impl RemoteProcessPark {

@@ -693,11 +693,11 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
     async fn park_process_with_authority(
         &self,
         process_id: &ProcessId,
-        reason: crate::store::ParkReason,
+        park: crate::store::ProcessParkWrite,
         authority: &crate::ProcessExecutionWriteAuthority,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.inner
-            .park_process_with_authority(process_id, reason, authority)
+            .park_process_with_authority(process_id, park, authority)
             .await
     }
 

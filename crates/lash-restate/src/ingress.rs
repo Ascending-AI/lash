@@ -852,6 +852,30 @@ impl RestateAdminClient {
             .map(|response| response.rows)
     }
 
+    /// The paused invocations of `service`: each stopped after its handler's
+    /// retry policy spent its attempts, with the attempt count and the last
+    /// failure Restate recorded.
+    pub async fn paused_invocations(
+        &self,
+        service: &str,
+    ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
+        let service = sql_string_literal(service);
+        let paused = RestateInvocationLifecycle::Paused.sql_literal();
+        self.query_json(&format!(
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND target_service_name = {service}"
+        ))
+        .await
+    }
+
+    /// Resume a paused invocation: a fresh retry loop over its kept journal.
+    pub async fn resume_invocation(
+        &self,
+        invocation_id: &RestateInvocationId,
+    ) -> Result<(), RestateHttpError> {
+        self.patch_invocation(invocation_id, "resume", "Restate invocation resume")
+            .await
+    }
+
     async fn patch_invocation(
         &self,
         invocation_id: &RestateInvocationId,
@@ -892,6 +916,10 @@ pub enum RestateInvocationLifecycle {
     Running,
     BackingOff,
     Suspended,
+    /// Stopped after its retry policy's last attempt, keeping its journal
+    /// until an operator resumes, cancels or kills it. Open: nothing settled
+    /// it.
+    Paused,
     Completed,
     Failed,
     Unknown(String),
@@ -906,6 +934,7 @@ impl RestateInvocationLifecycle {
         Self::Running,
         Self::BackingOff,
         Self::Suspended,
+        Self::Paused,
     ];
 
     /// The wire spelling of this status, as stored in `sys_invocation`.
@@ -916,6 +945,7 @@ impl RestateInvocationLifecycle {
             Self::Running => "running",
             Self::BackingOff => "backing-off",
             Self::Suspended => "suspended",
+            Self::Paused => "paused",
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Unknown(raw) => raw,
@@ -957,6 +987,7 @@ impl<'de> serde::Deserialize<'de> for RestateInvocationLifecycle {
             "running" => Self::Running,
             "backing-off" => Self::BackingOff,
             "suspended" => Self::Suspended,
+            "paused" => Self::Paused,
             "completed" => Self::Completed,
             "failed" => Self::Failed,
             _ => Self::Unknown(raw),
@@ -1013,6 +1044,35 @@ impl RestateInvocationStatus {
     }
 }
 
+/// The `sys_invocation` projection [`RestatePausedInvocation`] deserializes
+/// from.
+const RESTATE_PAUSED_INVOCATION_COLUMNS: &str = "id, target_service_name, target_service_key, target_handler_name, retry_count, last_failure, last_failure_error_code";
+
+/// A paused invocation, as a park reconcile reads it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct RestatePausedInvocation {
+    pub id: String,
+    pub target_service_name: String,
+    #[serde(default)]
+    pub target_service_key: Option<String>,
+    pub target_handler_name: String,
+    /// Attempts in the retry loop that paused it.
+    #[serde(default)]
+    pub retry_count: Option<u64>,
+    /// The last failure, as Restate renders it.
+    #[serde(default)]
+    pub last_failure: Option<String>,
+    /// The last failure's error code.
+    #[serde(default)]
+    pub last_failure_error_code: Option<String>,
+}
+
+impl RestatePausedInvocation {
+    pub fn invocation_id(&self) -> RestateInvocationId {
+        RestateInvocationId::new(self.id.clone())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct DeploymentOpenInvocations {
     #[serde(default)]
@@ -1055,7 +1115,7 @@ mod tests {
     fn the_open_status_sql_filter_names_exactly_the_known_open_variants() {
         assert_eq!(
             open_invocation_statuses_sql(),
-            "status IN ('pending', 'ready', 'running', 'backing-off', 'suspended')"
+            "status IN ('pending', 'ready', 'running', 'backing-off', 'suspended', 'paused')"
         );
         for status in [
             RestateInvocationLifecycle::Pending,
@@ -1063,6 +1123,7 @@ mod tests {
             RestateInvocationLifecycle::Running,
             RestateInvocationLifecycle::BackingOff,
             RestateInvocationLifecycle::Suspended,
+            RestateInvocationLifecycle::Paused,
         ] {
             assert!(status.is_open(), "{status} is a known open status");
         }

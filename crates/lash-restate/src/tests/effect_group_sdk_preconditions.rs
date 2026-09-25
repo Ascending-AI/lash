@@ -466,7 +466,7 @@ async fn witness_retry_exhaustion_pauses_until_resumed(
     .await;
     let id = RestateInvocationId::new(flaky.invocation_id.clone());
     let admin = client.admin();
-    let paused = RestateInvocationLifecycle::Unknown("paused".to_owned());
+    let paused = RestateInvocationLifecycle::Paused;
     let is_paused = || async {
         let status = admin.invocation_status(&id).await.ok()??;
         (status.status == paused).then_some(())

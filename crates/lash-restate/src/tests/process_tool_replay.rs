@@ -412,7 +412,8 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
             &ProcessId::from(process_id),
             lash_core::store::ParkReason::ReplayDivergence {
                 message: "parked between attempts".to_string(),
-            },
+            }
+            .into(),
             &authority.clone().bind_attempt(1),
         )
         .await
