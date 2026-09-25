@@ -93,15 +93,15 @@ impl SessionStoreFactory for NoByIdLookupSessionStoreFactory {
 
     async fn turn_park_feed(
         &self,
-        after: crate::store::TurnParkFeedCursor,
+        after: crate::store::ParkFeedCursor,
         limit: std::num::NonZeroUsize,
-    ) -> Result<crate::store::TurnParkFeedPage, crate::StoreError> {
+    ) -> Result<crate::store::ParkFeedPage<crate::store::TurnParkTarget>, crate::StoreError> {
         self.inner.turn_park_feed(after, limit).await
     }
 
     async fn compact_turn_park_feed(
         &self,
-        through: crate::store::TurnParkFeedCursor,
+        through: crate::store::ParkFeedCursor,
     ) -> Result<(), crate::StoreError> {
         self.inner.compact_turn_park_feed(through).await
     }

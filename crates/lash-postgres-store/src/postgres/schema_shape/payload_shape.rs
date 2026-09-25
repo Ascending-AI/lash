@@ -240,9 +240,28 @@ fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
         ),
         PayloadShape::of::<lash_core_execution::store::ParkReason>(),
     );
+    // FIG-3659 NOW-B: the process park feed's `parked` rows carry it too.
+    // The SQLite twin lives in the process registry, whose own schema
+    // version gates it.
+    park.include_persisted_projection(
+        PayloadCarrier::new(
+            PayloadBackend::Postgres,
+            "lash_process_park_events",
+            "reason_json",
+        ),
+        PayloadShape::of::<lash_core_execution::store::ParkReason>(),
+    );
     payloads.insert(
         PayloadCarrier::new(PayloadBackend::Postgres, "lash_turn_parks", "reason_json"),
         park,
+    );
+    payloads.insert(
+        PayloadCarrier::new(
+            PayloadBackend::Postgres,
+            "lash_process_park_events",
+            "reason_json",
+        ),
+        PayloadRegistration::of::<lash_core_execution::store::ParkReason>(),
     );
     payloads.insert(
         PayloadCarrier::new(PayloadBackend::Sqlite, "turn_parks", "reason_json"),
@@ -803,6 +822,7 @@ mod tests {
         assert_eq!(
             identities,
             std::collections::BTreeSet::from([
+                String::from("postgres lash_process_park_events.reason_json"),
                 String::from("postgres lash_runtime_turn_commits.result_json"),
                 String::from("postgres lash_turn_cancellation_bindings.admitted_scope_json"),
                 String::from("postgres lash_turn_park_events.reason_json"),

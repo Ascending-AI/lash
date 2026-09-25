@@ -389,6 +389,27 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
     async fn count_non_terminal_processes(&self) -> Result<usize, crate::PluginError> {
         self.inner.count_non_terminal_processes().await
     }
+
+    async fn list_parked_processes(
+        &self,
+        query: &crate::store::ProcessParkQuery,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        self.inner.list_parked_processes(query).await
+    }
+
+    async fn process_park_feed(
+        &self,
+        after: crate::store::ParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<crate::store::ParkFeedPage<crate::store::ProcessParkKey>, crate::PluginError> {
+        self.inner.process_park_feed(after, limit).await
+    }
+
+    async fn summarize_parked_processes(
+        &self,
+    ) -> Result<crate::store::ParkSummary, crate::PluginError> {
+        self.inner.summarize_parked_processes().await
+    }
 }
 
 delegate_process_registrar!(
@@ -666,6 +687,27 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.inner
             .clear_process_wait_with_authority(process_id, authority)
+            .await
+    }
+
+    async fn park_process_with_authority(
+        &self,
+        process_id: &ProcessId,
+        reason: crate::store::ParkReason,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .park_process_with_authority(process_id, reason, authority)
+            .await
+    }
+
+    async fn begin_parked_rerun_with_authority(
+        &self,
+        process_id: &ProcessId,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .begin_parked_rerun_with_authority(process_id, authority)
             .await
     }
 }

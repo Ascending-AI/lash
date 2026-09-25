@@ -71,6 +71,18 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
+        "process_park_clock",
+        PermanentlyExempt {
+            reason: "singleton monotone process park-feed sequence and compaction horizon",
+        },
+    ),
+    (
+        "process_park_events",
+        Bounded {
+            lever: "compact_process_park_feed",
+        },
+    ),
+    (
         "blobs",
         Bounded {
             lever: "gc_unreachable; session-owner blob reclaim",
@@ -447,7 +459,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 49, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 51, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

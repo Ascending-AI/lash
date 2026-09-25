@@ -863,6 +863,37 @@ impl ProcessEventAppendRequest {
         ))
     }
 
+    /// Builds the park fact of a process whose body refused to replay its
+    /// journal (NOW-B). Keyed by the record's newest event sequence: each
+    /// refusal of a rerun appends its own fact, and a retried write of the
+    /// same refusal coalesces onto it.
+    pub fn parked(
+        process_id: &ProcessId,
+        reason: &crate::store::ParkReason,
+        after_event_sequence: u64,
+    ) -> Self {
+        Self::new("process.parked", serde_json::json!({ "reason": reason })).with_replay_key(
+            format!("process:{process_id}:parked:after:{after_event_sequence}"),
+        )
+    }
+
+    /// Builds the fact that a rerun of a parked process began (NOW-B): the
+    /// park stays, but no longer exempts the next start from the attempt
+    /// budget until the rerun refuses again.
+    pub fn park_rerun_began(
+        process_id: &ProcessId,
+        park_id: crate::store::ParkId,
+        after_event_sequence: u64,
+    ) -> Self {
+        Self::new(
+            "process.park_rerun_began",
+            serde_json::json!({ "park_id": park_id }),
+        )
+        .with_replay_key(format!(
+            "process:{process_id}:park-rerun:after:{after_event_sequence}"
+        ))
+    }
+
     /// Builds the single replay-stable external-reference event for process-store implementors
     /// binding durable backend work.
     pub fn external_ref_set(
@@ -997,6 +1028,8 @@ pub(super) enum ProcessEventKind {
     AbandonRequested,
     CancelRequested,
     CallerDeparted,
+    Parked,
+    ParkRerunBegan,
     ObserverAdded,
     ObserverRemoved,
     SubscriptionRetargeted,
@@ -1016,6 +1049,8 @@ impl ProcessEventKind {
             "process.abandon_requested" => Self::AbandonRequested,
             "process.cancel_requested" => Self::CancelRequested,
             "process.caller_departed" => Self::CallerDeparted,
+            "process.parked" => Self::Parked,
+            "process.park_rerun_began" => Self::ParkRerunBegan,
             "process.observer_added" => Self::ObserverAdded,
             "process.observer_removed" => Self::ObserverRemoved,
             "process.subscription_retargeted" => Self::SubscriptionRetargeted,
@@ -1047,6 +1082,8 @@ pub fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
         | ProcessEventKind::AbandonRequested
         | ProcessEventKind::CancelRequested
         | ProcessEventKind::CallerDeparted
+        | ProcessEventKind::Parked
+        | ProcessEventKind::ParkRerunBegan
         | ProcessEventKind::ObserverAdded
         | ProcessEventKind::ObserverRemoved
         | ProcessEventKind::SubscriptionRetargeted => Some(ProcessEventType {

@@ -124,6 +124,8 @@ pub const TABLES: &[&str] = &[
     process::leases::TABLE,
     process::observers::TABLE,
     process::parent_end_plans::TABLE,
+    process::park_clock::TABLE,
+    process::park_events::TABLE,
     process::processes::TABLE,
     process::segment_handovers::TABLE,
     process::tombstones::TABLE,
@@ -193,6 +195,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(process::artifact_cleanup::ArtifactCleanupStatements::NEUTRAL);
     statements.extend_from_slice(process::definitions::DefinitionStatements::NEUTRAL);
     statements.extend_from_slice(process::events::EventStatements::NEUTRAL);
+    statements.extend_from_slice(process::park_events::ProcessParkEventStatements::NEUTRAL);
     statements.extend_from_slice(process::leases::LeaseStatements::NEUTRAL);
     statements.extend_from_slice(process::observers::ObserverStatements::NEUTRAL);
     statements.extend_from_slice(process::parent_end_plans::ParentEndPlanStatements::NEUTRAL);

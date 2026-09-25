@@ -331,6 +331,35 @@ CREATE TABLE lash_durable_read_fixture.lash_process_observers (
 
 
 --
+-- Name: lash_process_park_clock; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_process_park_clock (
+    singleton boolean DEFAULT true NOT NULL,
+    current_seq bigint DEFAULT 0 NOT NULL,
+    compaction_horizon bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_process_park_clock_singleton CHECK (singleton)
+);
+
+
+--
+-- Name: lash_process_park_events; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_process_park_events (
+    seq bigint NOT NULL,
+    process_id text NOT NULL COLLATE pg_catalog."C",
+    park_id bigint NOT NULL,
+    kind text NOT NULL,
+    cause text,
+    reason_json text,
+    at_ms bigint NOT NULL,
+    CONSTRAINT ck_process_park_events_kind CHECK ((kind = ANY (ARRAY['parked'::text, 'unparked'::text, 'cancelled'::text]))),
+    CONSTRAINT ck_process_park_events_parked_reason CHECK ((((kind = 'parked'::text) AND (reason_json IS NOT NULL) AND (cause IS NULL)) OR ((kind <> 'parked'::text) AND (reason_json IS NULL) AND (cause IS NOT NULL))))
+);
+
+
+--
 -- Name: lash_process_segment_handovers; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -399,10 +428,13 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     parent_scope_id text COLLATE pg_catalog."C",
     on_parent_end text NOT NULL,
     cancel_requested_at_ms bigint,
+    parked_since_ms bigint,
+    parked_reason_code text,
     record_json text NOT NULL,
     CONSTRAINT ck_processes_on_parent_end CHECK ((on_parent_end = ANY (ARRAY['abandon'::text, 'cancel'::text]))),
     CONSTRAINT ck_processes_parent_scope_id CHECK ((((parent_scope_kind = 'host'::text) AND (parent_scope_id IS NULL)) OR ((parent_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text])) AND (parent_scope_id IS NOT NULL)))),
     CONSTRAINT ck_processes_parent_scope_kind CHECK ((parent_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text, 'host'::text]))),
+    CONSTRAINT ck_processes_parked CHECK (((parked_since_ms IS NULL) = (parked_reason_code IS NULL))),
     CONSTRAINT ck_processes_status CHECK ((status = ANY (ARRAY['running'::text, 'waiting'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text, 'caller_departed'::text])))
 );
 
@@ -1106,6 +1138,19 @@ INSERT INTO lash_durable_read_fixture.lash_process_change_clock VALUES (true, 0,
 
 
 --
+-- Data for Name: lash_process_park_clock; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+INSERT INTO lash_durable_read_fixture.lash_process_park_clock VALUES (true, 0, 0);
+
+
+--
+-- Data for Name: lash_process_park_events; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_process_segment_handovers; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1530,6 +1575,22 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_leases
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_observers
     ADD CONSTRAINT lash_process_observers_pkey PRIMARY KEY (session_id, process_id, process_incarnation);
+
+
+--
+-- Name: lash_process_park_clock lash_process_park_clock_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_park_clock
+    ADD CONSTRAINT lash_process_park_clock_pkey PRIMARY KEY (singleton);
+
+
+--
+-- Name: lash_process_park_events lash_process_park_events_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_park_events
+    ADD CONSTRAINT lash_process_park_events_pkey PRIMARY KEY (seq);
 
 
 --
@@ -2035,6 +2096,13 @@ CREATE INDEX idx_lash_processes_parent_end_pending ON lash_durable_read_fixture.
 --
 
 CREATE INDEX idx_lash_processes_parent_scope ON lash_durable_read_fixture.lash_processes USING btree (parent_scope_kind, parent_scope_id, process_id);
+
+
+--
+-- Name: idx_lash_processes_parked; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_parked ON lash_durable_read_fixture.lash_processes USING btree (parked_since_ms, process_id) WHERE (parked_since_ms IS NOT NULL);
 
 
 --

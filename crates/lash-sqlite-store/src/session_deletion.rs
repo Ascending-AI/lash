@@ -205,7 +205,7 @@ pub(super) async fn delete_session_from_catalog(
                     &session_id,
                     &released_turn_id,
                     released_park_id,
-                    &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                    &lash_core_execution::store::ParkEventKind::Cancelled {
                         cause: lash_core_execution::store::ParkCancelCause::SessionDeleted,
                     },
                     crate::clamp_epoch_ms(now_ms),

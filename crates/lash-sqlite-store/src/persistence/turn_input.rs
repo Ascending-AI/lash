@@ -761,7 +761,7 @@ impl TurnInputStore for Store {
                             &session_id,
                             &released_turn_id,
                             released_park_id,
-                            &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                            &lash_core_execution::store::ParkEventKind::Cancelled {
                                 cause: lash_core_execution::store::ParkCancelCause::InputWithdrawn,
                             },
                             crate::clamp_epoch_ms(now),
@@ -843,7 +843,7 @@ impl TurnInputStore for Store {
                                 &session_id,
                                 &released_turn_id,
                                 released_park_id,
-                                &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                                &lash_core_execution::store::ParkEventKind::Cancelled {
                                     cause:
                                         lash_core_execution::store::ParkCancelCause::InputWithdrawn,
                                 },

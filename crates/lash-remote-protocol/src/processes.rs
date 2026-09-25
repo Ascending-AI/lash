@@ -441,9 +441,62 @@ pub enum RemoteProcessWaitKind {
         key: String,
         ordinal: u64,
     },
-    /// The body refused to replay its journal and waits for an operator
-    /// (FIG-3586).
-    Parked { code: String, message: String },
+}
+
+/// Why a process parked: the serde form of the core park reason, arm for
+/// arm (FIG-3659 NOW-B).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteParkReason {
+    /// A code cell's re-execution issued a command its journal does not hold.
+    ReplayDivergence { message: String },
+    /// A code cell's journal was written under a replay-key grammar this
+    /// build does not mint.
+    KeyFormatCutover { message: String },
+    /// A host tool binding the journal names is missing or changed.
+    BindingDrift { message: String },
+    /// A recorded effect's envelope no longer matches the one the redrive
+    /// reconstructs.
+    EffectReplayDivergence {
+        effect_kind: String,
+        message: String,
+    },
+    /// The session-state generation gate refused the redrive.
+    SessionStateGenerationRefused {
+        found: u32,
+        current: u32,
+        message: String,
+    },
+}
+
+/// The park a process is in while its body refuses to replay its journal
+/// (FIG-3659 NOW-B).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteProcessPark {
+    /// Why it parked, as its latest refusal said.
+    pub reason: RemoteParkReason,
+    /// The process event sequence of the fact that opened the park.
+    pub park_id: u64,
+    /// Epoch milliseconds of the park's first refusal.
+    pub since_ms: u64,
+    /// Epoch milliseconds of its latest refusal.
+    pub last_refused_ms: u64,
+    /// Refusals since the park opened.
+    pub attempts: u32,
+    /// Whether the latest run refused (a rerun under way clears it).
+    pub refusing: bool,
+}
+
+impl RemoteProcessPark {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        if self.attempts == 0 {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: "a process park counts at least one refusal".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 impl RemoteProcessWaitState {
@@ -465,9 +518,6 @@ impl RemoteProcessWaitState {
                     });
                 }
                 Ok(())
-            }
-            RemoteProcessWaitKind::Parked { code, .. } => {
-                require_non_empty(type_name, "wait.code", code)
             }
         }
     }
@@ -577,6 +627,10 @@ pub struct RemoteProcessRecord {
     pub cancel_request: Option<lash_sansio::CancelRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<RemoteProcessWaitState>,
+    /// The park the process is in, while its body refuses to replay its
+    /// journal (FIG-3659 NOW-B).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub park: Option<RemoteProcessPark>,
     #[serde(default)]
     pub status: RemoteProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -664,6 +718,9 @@ impl RemoteProcessRecord {
         }
         if let Some(wait) = &self.wait {
             wait.validate(type_name)?;
+        }
+        if let Some(park) = &self.park {
+            park.validate(type_name)?;
         }
         if let Some(outcome) = &self.outcome {
             outcome.validate(type_name)?;
@@ -787,6 +844,9 @@ pub struct RemoteObservedProcess {
     pub external_ref: Option<RemoteProcessExternalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<RemoteProcessWaitState>,
+    /// The park the process is in (FIG-3659 NOW-B).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub park: Option<RemoteProcessPark>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<SessionId>,
 }
@@ -817,6 +877,9 @@ impl RemoteObservedProcess {
         }
         if let Some(wait) = &self.wait {
             wait.validate(type_name)?;
+        }
+        if let Some(park) = &self.park {
+            park.validate(type_name)?;
         }
         if let Some(child_session_id) = &self.child_session_id {
             require_non_empty(type_name, "child_session_id", child_session_id)?;

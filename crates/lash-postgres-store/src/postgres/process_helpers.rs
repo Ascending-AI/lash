@@ -190,6 +190,18 @@ pub(crate) async fn save_process_tx(
         .bind(record.last_event_sequence as i64)
         .bind(cancel_requested_at_ms(record))
         .bind(serde_json::to_string(record).map_err(process_decode_error)?)
+        .bind(
+            record
+                .park
+                .as_deref()
+                .map(|park| clamp_epoch_ms(park.since_ms)),
+        )
+        .bind(
+            record
+                .park
+                .as_deref()
+                .map(|park| park.reason.code().as_str()),
+        )
         .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
@@ -386,8 +398,22 @@ pub(crate) async fn apply_process_event_append_tx(
                 .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
+            let park_transitions = lash_core_execution::runtime::process_park_transitions(
+                record.park.as_deref(),
+                &projected_record,
+            );
             *record = projected_record;
             save_process_tx(tx, record).await?;
+            // The park feed rides the event's own transaction (FIG-3659
+            // NOW-B): a park that opened or closed here is durable in the feed
+            // exactly when the fact that moved it is.
+            crate::process_registry::park_feed::log_process_park_transitions_tx(
+                tx,
+                &record.park_key(),
+                &park_transitions,
+                occurred_at_ms,
+            )
+            .await?;
             // A process that just reached a terminal status is an ended parent
             // scope: its ledger row rides the same transaction as the terminal
             // append, so no child can be stranded by a crash between the two.

@@ -9,6 +9,8 @@ mod leases;
 mod list_tests;
 #[path = "process_registry/parent_end.rs"]
 pub(crate) mod parent_end;
+#[path = "process_registry/park_feed.rs"]
+mod park_feed;
 #[path = "process_registry/prune_api.rs"]
 mod prune_api;
 mod registration;
@@ -184,6 +186,30 @@ impl lash_core_execution::ProcessQuery for SqliteProcessRegistry {
         &self,
     ) -> Result<usize, lash_core_execution::PluginError> {
         worklist::count_non_terminal_processes(self).await
+    }
+
+    async fn list_parked_processes(
+        &self,
+        query: &lash_core_execution::store::ProcessParkQuery,
+    ) -> Result<Vec<ProcessRecord>, lash_core_execution::PluginError> {
+        park_feed::list_parked_processes(self, query).await
+    }
+
+    async fn process_park_feed(
+        &self,
+        after: lash_core_execution::store::ParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<
+        lash_core_execution::store::ParkFeedPage<lash_core_execution::store::ProcessParkKey>,
+        lash_core_execution::PluginError,
+    > {
+        park_feed::process_park_feed(self, after, limit).await
+    }
+
+    async fn summarize_parked_processes(
+        &self,
+    ) -> Result<lash_core_execution::store::ParkSummary, lash_core_execution::PluginError> {
+        park_feed::summarize_parked_processes(self).await
     }
 }
 
@@ -1106,6 +1132,93 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                     match lash_core_execution::runtime::prepare_process_transition(
                         &record,
                         ProcessTransition::ClearWait,
+                    )? {
+                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Append(request) => {
+                            Self::append_event_conn(
+                                tx,
+                                &mut record,
+                                *request,
+                                now,
+                                wake_delivery_config,
+                            )?;
+                        }
+                    }
+                    Ok(record)
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn park_process_with_authority(
+        &self,
+        process_id: &ProcessId,
+        reason: lash_core_execution::store::ParkReason,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
+        let process_id = process_id.clone();
+        let authority = authority.clone();
+        let now = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let mut record = Self::require_process_conn(tx, &process_id)?;
+                    validate_process_execution_authority_conn(
+                        tx,
+                        &process_id,
+                        &record,
+                        &authority,
+                        None,
+                        now,
+                    )?;
+                    match lash_core_execution::runtime::prepare_process_transition(
+                        &record,
+                        ProcessTransition::Park(reason),
+                    )? {
+                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Append(request) => {
+                            Self::append_event_conn(
+                                tx,
+                                &mut record,
+                                *request,
+                                now,
+                                wake_delivery_config,
+                            )?;
+                        }
+                    }
+                    Ok(record)
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn begin_parked_rerun_with_authority(
+        &self,
+        process_id: &ProcessId,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
+        let process_id = process_id.clone();
+        let authority = authority.clone();
+        let now = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let mut record = Self::require_process_conn(tx, &process_id)?;
+                    validate_process_execution_authority_conn(
+                        tx,
+                        &process_id,
+                        &record,
+                        &authority,
+                        None,
+                        now,
+                    )?;
+                    match lash_core_execution::runtime::prepare_process_transition(
+                        &record,
+                        ProcessTransition::BeginParkedRerun,
                     )? {
                         ProcessTransitionPlan::Unchanged => return Ok(record),
                         ProcessTransitionPlan::Append(request) => {

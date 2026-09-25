@@ -1862,7 +1862,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
 
     let before = factory
         .turn_park_feed(
-            lash_core_execution::store::TurnParkFeedCursor::initial(),
+            lash_core_execution::store::ParkFeedCursor::initial(),
             std::num::NonZeroUsize::new(100).expect("a nonzero page size"),
         )
         .await
@@ -1885,7 +1885,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
 
     let after = factory
         .turn_park_feed(
-            lash_core_execution::store::TurnParkFeedCursor::from_store_sequence(head),
+            lash_core_execution::store::ParkFeedCursor::from_store_sequence(head),
             std::num::NonZeroUsize::new(100).expect("a nonzero page size"),
         )
         .await
@@ -1904,11 +1904,11 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
     for (event, session_id) in after.events.iter().zip(session_ids.iter()) {
         assert_eq!(
             event.kind,
-            lash_core_execution::store::TurnParkEventKind::Cancelled {
+            lash_core_execution::store::ParkEventKind::Cancelled {
                 cause: lash_core_execution::store::ParkCancelCause::SessionDeleted,
             },
             "each deleted park closes as session-deleted"
         );
-        assert_eq!(&event.session_id, session_id);
+        assert_eq!(&event.target.session_id, session_id);
     }
 }

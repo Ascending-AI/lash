@@ -367,15 +367,18 @@ impl lash::persistence::SessionStoreFactory for GatedSessionStoreFactory {
 
     async fn turn_park_feed(
         &self,
-        after: lash::persistence::TurnParkFeedCursor,
+        after: lash::persistence::ParkFeedCursor,
         limit: std::num::NonZeroUsize,
-    ) -> Result<lash::persistence::TurnParkFeedPage, lash::persistence::StoreError> {
+    ) -> Result<
+        lash::persistence::ParkFeedPage<lash::persistence::TurnParkTarget>,
+        lash::persistence::StoreError,
+    > {
         self.inner.turn_park_feed(after, limit).await
     }
 
     async fn compact_turn_park_feed(
         &self,
-        through: lash::persistence::TurnParkFeedCursor,
+        through: lash::persistence::ParkFeedCursor,
     ) -> Result<(), lash::persistence::StoreError> {
         self.inner.compact_turn_park_feed(through).await
     }

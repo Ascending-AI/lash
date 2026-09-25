@@ -1027,25 +1027,6 @@ pub enum WaitKind {
         key: String,
         ordinal: u64,
     },
-    /// The body refused to replay its journal (FIG-3586): the running build
-    /// cannot serve what an earlier build recorded, and nothing was
-    /// dispatched. A parked process waits for an operator verb — redeploy the
-    /// build that wrote its journal, cancel, or fork. Its sweeps re-run it
-    /// without spending its attempt budget, and each refuses again until one
-    /// does not.
-    Parked {
-        /// The refusal's runtime error code.
-        code: String,
-        /// The refusal's operator-facing message.
-        message: String,
-    },
-}
-
-impl WaitKind {
-    /// Whether this wait is a replay refusal's park.
-    pub fn is_parked(&self) -> bool {
-        matches!(self, Self::Parked { .. })
-    }
 }
 
 impl WaitState {
@@ -1054,13 +1035,7 @@ impl WaitState {
     pub fn key(&self) -> &str {
         match &self.kind {
             WaitKind::Signal { key, .. } => key,
-            WaitKind::Parked { .. } => "parked",
         }
-    }
-
-    /// Whether this wait is a replay refusal's park.
-    pub fn is_parked(&self) -> bool {
-        self.kind.is_parked()
     }
 }
 
@@ -1542,6 +1517,13 @@ pub struct ProcessRecord {
     pub cancel_request: Option<Box<CancelRequest>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<WaitState>,
+    /// The park the process is in, while its body refuses to replay its
+    /// journal (FIG-3586, FIG-3659 NOW-B). Folded from `process.parked`
+    /// facts and cleared by the first lifecycle fact past the refusal; never
+    /// set on a terminal record. Boxed for the same reason as the other
+    /// usually-absent facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub park: Option<Box<crate::store::ProcessPark>>,
     #[serde(default)]
     pub status: ProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1609,6 +1591,7 @@ impl ProcessRecord {
             abandon_request: None,
             cancel_request: None,
             wait: None,
+            park: None,
             status: ProcessStatus::Running,
             outcome: None,
         }
@@ -1618,6 +1601,19 @@ impl ProcessRecord {
     /// presence of an incidental event.
     pub fn is_terminal(&self) -> bool {
         self.status.is_terminal()
+    }
+
+    /// The key this process's park projection and park feed name it by. The
+    /// one place a process record is mapped onto
+    /// [`ProcessParkKey`](crate::store::ProcessParkKey).
+    pub fn park_key(&self) -> crate::store::ProcessParkKey {
+        self.id.clone()
+    }
+
+    /// Whether the process is parked and its latest run refused: the only
+    /// state in which a sweep's rerun is exempt from the attempt budget.
+    pub fn is_refusing_park(&self) -> bool {
+        self.park.as_deref().is_some_and(|park| park.refusing)
     }
 
     /// Exposes originator id to store and durable-substrate implementors while persisting and

@@ -1,6 +1,6 @@
 //! The process family: the process registry and the two wake-floor tables.
 //!
-//! Thirteen tables, the largest family in either store. They are one family
+//! Fifteen tables, the largest family in either store. They are one family
 //! because they are one transactional unit: an event append writes the event,
 //! the process projection, the parent-end ledger, the wake delivery and the
 //! allocation floor in the same transaction, and a prune moves a process row,
@@ -30,6 +30,8 @@ pub mod events;
 pub mod leases;
 pub mod observers;
 pub mod parent_end_plans;
+pub mod park_clock;
+pub mod park_events;
 pub mod processes;
 pub mod segment_handovers;
 pub mod tombstones;

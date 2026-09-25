@@ -56,6 +56,7 @@ fn peer_record(
         abandon_request: None,
         cancel_request: None,
         wait: None,
+        park: None,
         status: RemoteProcessStatus::Running,
         outcome: None,
     })

@@ -6,5 +6,5 @@ error[E0046]: not all trait items implemented, missing: `count_unsettled_turns`,
    |
    = help: implement the missing item: `fn count_unsettled_turns<'life0: 'async_trait, 'async_trait>(&'life0 self) -> Pin<Box<(dyn Future<Output = Result<UnsettledTurnCounts, StoreError>> + Send + 'async_trait)>> { todo!() }`
    = help: implement the missing item: `fn list_turn_parks<'life0: 'async_trait, 'life1: 'async_trait, 'async_trait>(&'life0 self, _: &'life1 TurnParkQuery) -> Pin<Box<(dyn Future<Output = Result<Vec<TurnPark>, StoreError>> + Send + 'async_trait)>> { todo!() }`
-   = help: implement the missing item: `fn turn_park_feed<'life0: 'async_trait, 'async_trait>(&'life0 self, _: TurnParkFeedCursor, _: NonZero<usize>) -> Pin<Box<(dyn Future<Output = Result<TurnParkFeedPage, StoreError>> + Send + 'async_trait)>> { todo!() }`
-   = help: implement the missing item: `fn compact_turn_park_feed<'life0: 'async_trait, 'async_trait>(&'life0 self, _: TurnParkFeedCursor) -> Pin<Box<(dyn Future<Output = Result<(), StoreError>> + Send + 'async_trait)>> { todo!() }`
+   = help: implement the missing item: `fn turn_park_feed<'life0: 'async_trait, 'async_trait>(&'life0 self, _: ParkFeedCursor, _: NonZero<usize>) -> Pin<Box<(dyn Future<Output = Result<ParkFeedPage<TurnParkTarget>, StoreError>> + Send + 'async_trait)>> { todo!() }`
+   = help: implement the missing item: `fn compact_turn_park_feed<'life0: 'async_trait, 'async_trait>(&'life0 self, _: ParkFeedCursor) -> Pin<Box<(dyn Future<Output = Result<(), StoreError>> + Send + 'async_trait)>> { todo!() }`

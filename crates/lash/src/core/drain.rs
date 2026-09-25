@@ -4,7 +4,8 @@
 /// admission is host policy. Lash reads the configured process registry and
 /// counts every retained non-terminal process row, including waiting or
 /// suspended work and retrying work whose persisted status remains `running`,
-/// and the session store's turns in flight and parked turns (FIG-3586). This
+/// the parked processes among them, and the session store's turns in flight
+/// and parked turns (FIG-3586, FIG-3659). This
 /// read does not stop routing, impose a deadline, or retire anything.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub struct DeploymentDrainStatus {
@@ -19,9 +20,14 @@ pub struct DeploymentDrainStatus {
     /// its claims until a redrive under the build that wrote its journal, a
     /// cancel, or a fork resolves it.
     pub parked_turns: usize,
+    /// Processes that are parked: their body refused to replay its journal,
+    /// and they hold what they hold until an operator acts. Parked processes
+    /// are non-terminal, so they are included in
+    /// [`remaining_invocations`](Self::remaining_invocations).
+    pub parked_processes: usize,
     /// Host-clock epoch milliseconds of the oldest live park's first refusal:
-    /// the minimum `since_ms` over parked turns (NOW-B folds in parked
-    /// processes). `None` when nothing is parked.
+    /// the minimum `since_ms` over parked turns and parked processes. `None`
+    /// when nothing is parked.
     pub oldest_parked_since_ms: Option<u64>,
     /// Host-clock epoch milliseconds at which this read completed.
     pub checked_at: u64,
@@ -48,6 +54,7 @@ impl serde::Serialize for DeploymentDrainStatus {
             remaining_invocations: usize,
             in_flight_turns: usize,
             parked_turns: usize,
+            parked_processes: usize,
             oldest_parked_since_ms: Option<u64>,
             checked_at: u64,
             drained: bool,
@@ -57,6 +64,7 @@ impl serde::Serialize for DeploymentDrainStatus {
             remaining_invocations: self.remaining_invocations,
             in_flight_turns: self.in_flight_turns,
             parked_turns: self.parked_turns,
+            parked_processes: self.parked_processes,
             oldest_parked_since_ms: self.oldest_parked_since_ms,
             checked_at: self.checked_at,
             drained: self.drained(),
