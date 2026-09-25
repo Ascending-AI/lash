@@ -21,11 +21,12 @@ startup --host_jvm_args=-Xmx4g
 # An idle server returns its heap: G1 runs a periodic collection once a minute
 # and uncommits what it frees, instead of holding its peak until it exits.
 startup --host_jvm_args=-XX:G1PeriodicGCInterval=60000
-# Each fork is its own output base and therefore its own Bazel server; 22
-# idle servers held ~51 GiB on this box. The default idle timeout is 10800;
-# a restart after eviction costs seconds, so ten minutes is enough to keep an
-# edit-build loop warm without parking a server per forgotten fork.
-startup --max_idle_secs=600
+# Each fork is its own output base and therefore its own Bazel server. With
+# ~30 agent lanes, their idle servers held the shared host at its 96 GiB user
+# memory cap (32 servers, ~80 GB). A restart after eviction costs seconds and
+# the build graph is cached remotely, so three idle minutes is enough: an
+# agent lane's think/edit gap between builds should not pin a 2-5 GB server.
+startup --max_idle_secs=180
 common --enable_platform_specific_config
 common --lockfile_mode=error
 
