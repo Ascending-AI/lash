@@ -34,6 +34,8 @@ macro_rules! persistence_operations {
                 fn admit_session_state(&self, lease: &SessionExecutionLeaseAuthority) -> Result<SessionStateAdmission, StoreError>;
                 fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError>;
                 fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError>;
+                fn load_session_at(&self, base: &SessionHeadRef) -> Result<PersistedSessionRead, StoreError>;
+                fn retain_admission_base(&self, lease: &SessionExecutionLeaseAuthority, base: &SessionHeadRef) -> Result<(), StoreError>;
                 fn committed_turn_exists(&self, turn_id: &crate::TurnId) -> Result<bool, StoreError>;
                 fn drain_end_exists(&self, drain_id: &str) -> Result<bool, StoreError>;
                 fn load_node(&self, node_id: &str) -> Result<Option<crate::SessionNodeRecord>, StoreError>;

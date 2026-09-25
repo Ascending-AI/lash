@@ -481,6 +481,25 @@ lash_conformance::tool_child_turn_cancel_tests!({
     fixture
 });
 
+lash_conformance::admitted_head_redrive_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres admitted-head redrive conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    let (attachments, stores) = pg_law_stores(&storage);
+    (
+        (database_lock, attachments),
+        "postgres",
+        Arc::clone(&host),
+        stores,
+        lash_conformance::HostTurnRunner::shared(host),
+    )
+});
+
 // The orchestration plugins sit above lash-conformance, so the tier supplies
 // them to the FIG-1293 migrated-tools law.
 lash_conformance::migrated_tools_redrive_tests!({

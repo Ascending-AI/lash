@@ -113,6 +113,7 @@ impl RuntimePersistenceLeaseTiming {
     }
 }
 
+mod admission_base_retention;
 mod append_receipts;
 mod attachments_and_queue;
 mod checkpoint_claims;
@@ -133,6 +134,7 @@ mod turn_parks;
 
 /// Public implementation paths used only by the exported registration macros.
 pub mod runtime_persistence_macro_support {
+    pub use super::admission_base_retention::*;
     pub use super::append_receipts::*;
     pub use super::attachments_and_queue::*;
     pub use super::checkpoint_claims::*;

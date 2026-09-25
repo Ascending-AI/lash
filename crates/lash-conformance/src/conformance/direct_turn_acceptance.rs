@@ -1381,7 +1381,7 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
     assert!(
         matches!(
             journal.controller.journaled_drive(),
-            Some(crate::AcceptedTurnInputDrive::Claimed { claim }) if claim.inputs.len() == 3
+            Some(crate::AcceptedTurnInputDrive::Claimed { claim, .. }) if claim.inputs.len() == 3
         ),
         "the journaled drive carries all three rows"
     );
@@ -1492,7 +1492,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
         .crash_before_commit(&store, provider.clone(), &turn_id, "the accepted words")
         .await;
     let journaled = match journal.controller.journaled_drive() {
-        Some(crate::AcceptedTurnInputDrive::Claimed { claim }) => claim,
+        Some(crate::AcceptedTurnInputDrive::Claimed { claim, .. }) => claim,
         other => panic!("the first execution claimed its accepted row: {other:?}"),
     };
     let late = enqueue_next_turn(&store, "admitted after the crash").await;
@@ -1808,7 +1808,7 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
         .crash_before_commit(&store, provider.clone(), &turn_id, "answer me once")
         .await;
     let journaled = match journal.controller.journaled_drive() {
-        Some(crate::AcceptedTurnInputDrive::Claimed { claim }) => claim,
+        Some(crate::AcceptedTurnInputDrive::Claimed { claim, .. }) => claim,
         other => panic!("the first execution claimed its accepted row: {other:?}"),
     };
     let accepted = journaled.inputs[0].input_id.clone();

@@ -350,6 +350,25 @@ lash_conformance::migrated_tools_redrive_tests!(
     }
 );
 
+// FIG-3682's admitted-head law on the live endpoint: the turn runs in a probe
+// handler, crashes after its commit, and Restate redelivers it; the redrive
+// replays the invocation's journal against a head that already holds the
+// commit. The turn calls no tool, so it runs on the replay leg too.
+lash_conformance::admitted_head_redrive_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        // Restate state outlives a run: each run names its own session.
+        let prefix: &'static str =
+            Box::leak(format!("restate-admitted-head-{}", harness.run_nonce()).into_boxed_str());
+        (harness, prefix, effect_host, stores, turn_runner)
+    }
+);
+
 /// Discards a claimed wake delivery with no reason, straight in the SQLite
 /// memory registry the Restate wake-ordering leg writes through.
 struct SqliteWakeDiscards {
@@ -754,10 +773,21 @@ mod on_the_server_double {
         )
     });
 
+    lash_conformance::admitted_head_redrive_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let prefix: &'static str =
+            Box::leak(format!("restate-admitted-head-{}", harness.run_nonce()).into_boxed_str());
+        (harness, prefix, effect_host, stores, turn_runner)
+    });
+
     // `migrated_tools_redrive_tests` stays off the double for now: in about
-    // half of streaming runs the tool child stops after its attempt's run
-    // completes, waiting in-process on the turn's opener (FIG-3682). It runs
-    // on the live server, above.
+    // half of streaming runs the batch tool child stops after its first nested
+    // attempt's run completes (FIG-3671, #2140). It runs on the live server,
+    // above.
 
     lash_conformance::effect_host_await_event_witness_tests!({
         let harness = Arc::new(LiveConformanceHarness::start_on(HarnessServer::in_process()).await);
@@ -1397,7 +1427,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             normalized_record,
-            r##"{"effect_journal_version":5,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_ref\":{\"process_id\":\"fig1767-proc\",\"incarnation\":1},\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"20d4cec599f2608d4d3b9257b9def351f9e4b193aff837496b293488474521a3"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"fig1767-proc","process_incarnation":1,"sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"fig1767-proc","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"fig1767-proc"}},"semantics":{},"occurred_at":0}}}}}"##,
+            r##"{"effect_journal_version":6,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_ref\":{\"process_id\":\"fig1767-proc\",\"incarnation\":1},\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"20d4cec599f2608d4d3b9257b9def351f9e4b193aff837496b293488474521a3"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"fig1767-proc","process_incarnation":1,"sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"fig1767-proc","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"fig1767-proc"}},"semantics":{},"occurred_at":0}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }

@@ -1,5 +1,6 @@
 //! Implementation paths used only by exported conformance registration macros.
 
+pub use super::admitted_head_redrive::*;
 pub use super::artifact_store::*;
 pub use super::attachment_adoption::*;
 pub use super::attachment_owner::*;

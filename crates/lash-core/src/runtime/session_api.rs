@@ -384,6 +384,72 @@ impl LashRuntime {
             self.resident_session.mark_graph_head_current();
             return Ok(());
         };
+        self.adopt_session_read(read)
+    }
+
+    /// Adopt `base`, the head the running direct turn was admitted on, as the
+    /// resident session (FIG-3682).
+    ///
+    /// A replay of an admitted turn rebuilds its input state from here, never
+    /// from the live head: the turn's own commit, or a lane service, may have
+    /// moved the live head since the turn was admitted, and a turn replayed on
+    /// that head would issue other effects than its journal holds. A base the
+    /// resident session already is needs no read. Revision zero is the session
+    /// before any head existed. Any other base comes from
+    /// [`load_session_at`](crate::store::SessionCommitStore::load_session_at),
+    /// which refuses a head the store no longer retains.
+    pub(in crate::runtime) async fn adopt_admission_base(
+        &mut self,
+        base: &crate::store::SessionHeadRef,
+    ) -> Result<(), SessionError> {
+        let Some(store) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+        else {
+            return Ok(());
+        };
+        if self.state.head_revision == base.revision
+            && self.state.session_graph.leaf_node_id == base.leaf
+            && self.state.checkpoint_ref == base.checkpoint
+        {
+            return Ok(());
+        }
+        if base.revision == 0 {
+            // No head existed when the turn was admitted: the resident session
+            // is the one a runtime opens over an empty store, which has no
+            // graph, frame, checkpoint or turn counters yet. Its first commit
+            // opens the initial frame.
+            self.state.session_graph = crate::SessionGraph::default();
+            self.state.agent_frames.clear();
+            self.state.current_frame_node_id = None;
+            self.state.checkpoint_ref = None;
+            self.state.checkpoint_components =
+                crate::RuntimeSessionState::new(self.state.policy.clone()).checkpoint_components;
+            self.state.persisted_node_ids.clear();
+            self.state.head_revision = 0;
+            self.state.turn_index = 0;
+            self.state.token_usage = crate::TokenUsage::default();
+            self.state.last_prompt_usage = None;
+            self.resident_session.mark_graph_loaded();
+            self.resident_session.mark_graph_head_current();
+            return Ok(());
+        }
+        let read = store
+            .load_session_at(base)
+            .await
+            .map_err(|source| SessionError::Store {
+                context: "failed to read the head the turn was admitted on".to_string(),
+                source,
+            })?;
+        self.adopt_session_read(read)
+    }
+
+    /// Adopt a durable session read as the resident session, head-authoritatively.
+    fn adopt_session_read(
+        &mut self,
+        read: crate::store::PersistedSessionRead,
+    ) -> Result<(), SessionError> {
         // Defend refreshes against third-party stores that return an unvalidated resident graph.
         read.graph
             .validate_resident_integrity()

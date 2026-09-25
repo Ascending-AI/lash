@@ -264,6 +264,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     source_node_id                    TEXT,
     drive_epoch                       INTEGER NOT NULL DEFAULT 0,
     drive_admission_id                TEXT,
+    admission_base_checkpoint_ref     TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
     CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
@@ -897,7 +898,13 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// store-delegated turn control used (the effect-replay database keeps its
 /// own). A pre-88 database is rejected at open and recreated; it is not
 /// migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 88;
+/// Bumped to 89 for FIG-3682: `session_meta` gains
+/// `admission_base_checkpoint_ref`, the checkpoint of the head the session's
+/// latest turn was admitted on. Maintenance keeps it as a checkpoint root, so
+/// a replay of that turn can rebuild its input state from the head it was
+/// admitted on after its own commit superseded the head. A pre-89 database is
+/// rejected at open and recreated; it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 89;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

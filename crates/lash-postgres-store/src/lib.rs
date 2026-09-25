@@ -511,7 +511,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `tool_completion_key_process_lifetime` from the durable error-code
 // vocabulary. No relation changes; component-128 catalogs are rejected and
 // recreated.
-const SCHEMA_VERSION: i32 = 129;
+// Version 130 (FIG-3682) adds `lash_session_meta.admission_base_checkpoint_ref`,
+// the checkpoint of the head a session's latest turn was admitted on, which
+// garbage collection keeps as a checkpoint root. Component-129 catalogs lack
+// the column and are rejected and recreated.
+const SCHEMA_VERSION: i32 = 130;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

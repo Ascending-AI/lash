@@ -126,6 +126,12 @@ crate::statements! {
              SET drive_epoch = ?3, drive_admission_id = ?4
              WHERE session_id = ?1 AND drive_epoch = ?2";
 
+        /// Retain checkpoint `?2` (or nothing) as the base session `?1`'s
+        /// latest turn was admitted on, replacing the previous admission's
+        /// (FIG-3682). Maintenance keeps it as a checkpoint root, so a replay
+        /// of that turn can still read the head it was admitted on.
+        retain_admission_base = "UPDATE session_meta SET admission_base_checkpoint_ref = ?2 WHERE session_id = ?1";
+
         /// The recorded lineage of `?1`.
         select_lineage = "SELECT relation_kind, parent_session_id, source_session_id, source_node_id
              FROM session_meta WHERE session_id = ?1";

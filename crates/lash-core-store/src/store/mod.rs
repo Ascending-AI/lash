@@ -81,7 +81,7 @@ pub use commit_identity::{
 };
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
-    StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
+    SessionHeadRef, StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{
@@ -1085,6 +1085,58 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// resolution completed and found no readable session; inability to
     /// determine the head must be returned as `Err`, never collapsed to absence.
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError>;
+
+    /// The session as it stood at `base`, the head one of its turns was
+    /// admitted on (FIG-3682).
+    ///
+    /// A replay of an admitted turn rebuilds the turn's input state from this
+    /// read, never from the live head: the turn's own commit, or a lane
+    /// service, may have advanced the head since. The read carries the graph
+    /// along `base.leaf` and the checkpoint `base.checkpoint`; the session's
+    /// configuration, frame, usage ledger and failure settlements are the live
+    /// ones. `base` always names a leaf or a checkpoint: the head before the
+    /// session's first commit is rebuilt by the caller without a store read.
+    ///
+    /// A backend refuses [`StoreError::TurnBaseNotRetained`] when it no longer
+    /// holds `base`, and never answers with another head. The default reads
+    /// only the live head, so it answers exactly when the live head is still
+    /// `base`; a backend that retains superseded heads
+    /// ([`retain_admission_base`](Self::retain_admission_base)) overrides it.
+    async fn load_session_at(
+        &self,
+        base: &SessionHeadRef,
+    ) -> Result<PersistedSessionRead, StoreError> {
+        match self.load_session().await? {
+            Some(read)
+                if read.head_revision == base.revision
+                    && read.graph.leaf_node_id == base.leaf
+                    && read.checkpoint_ref == base.checkpoint =>
+            {
+                Ok(read)
+            }
+            _ => Err(StoreError::TurnBaseNotRetained {
+                revision: base.revision,
+            }),
+        }
+    }
+
+    /// Keep `base` readable by [`load_session_at`](Self::load_session_at)
+    /// until the session's next admission replaces it (FIG-3682).
+    ///
+    /// Called by a turn's admission under the session's execution lease, once
+    /// per first execution. While it stands, maintenance that reclaims
+    /// unreferenced checkpoints treats `base.checkpoint` as a root, so a
+    /// replay of the admitted turn can rebuild its input state even after the
+    /// turn's own commit superseded the head and a vacuum ran. A backend that
+    /// never reclaims a superseded checkpoint has nothing to do, which is the
+    /// default.
+    async fn retain_admission_base(
+        &self,
+        _lease: &SessionExecutionLeaseAuthority,
+        _base: &SessionHeadRef,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
 
     async fn load_node(
         &self,

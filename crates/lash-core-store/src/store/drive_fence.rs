@@ -73,6 +73,34 @@ impl AdmissionId {
     }
 }
 
+/// A session head a drive names: the state generation, the head revision, the
+/// leaf of its graph and its checkpoint (ADR 0105 §2, §9).
+///
+/// A commit names the head it expects. An admission names the head it was
+/// admitted on, its base: a replay of the admitted turn rebuilds the turn's
+/// input state from this reference, never from the live head, which the turn's
+/// own commit or a lane service may have advanced since (FIG-3682). `leaf` and
+/// `checkpoint` are `None` for a session with no committed graph or checkpoint.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SessionHeadRef {
+    pub generation: u32,
+    pub revision: u64,
+    pub leaf: Option<crate::NodeId>,
+    pub checkpoint: Option<super::BlobRef>,
+}
+
+impl SessionHeadRef {
+    /// Whether `head` is this head: the same revision, leaf and checkpoint.
+    /// The generation is the store's, not the head row's, so it is compared
+    /// by the caller that read it.
+    #[must_use]
+    pub fn names_head(&self, head: &super::SessionHeadMeta) -> bool {
+        self.revision == head.head_revision
+            && self.leaf == head.leaf_node_id
+            && self.checkpoint == head.checkpoint_ref
+    }
+}
+
 /// What the store's seal answered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DriveEpochSeal {

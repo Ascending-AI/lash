@@ -915,7 +915,18 @@ pub(crate) fn source_key_display_id(source: &str) -> String {
 pub enum AcceptedTurnInputDrive {
     /// The claim reached the accepted row: drive every claimed row and settle
     /// them under the claim predicate.
-    Claimed { claim: Box<TurnInputClaim> },
+    ///
+    /// This is the turn's admission, so it also records what the turn was
+    /// admitted on: the session head (`base`) and the turn index. A replay
+    /// rebuilds the turn's input state from `base` and addresses its effects
+    /// under `turn_index`, never re-reading either from the live head, which
+    /// the turn's own commit may already have advanced (FIG-3682). S5's
+    /// `AdmitDrive` absorbs both as `Admitted::{base, turn_index}`.
+    Claimed {
+        claim: Box<TurnInputClaim>,
+        base: crate::store::SessionHeadRef,
+        turn_index: u64,
+    },
     /// The accepted row is open but sits behind more earlier admissions than
     /// one claim absorbs. Nothing is driven and nothing is dropped: the row
     /// stays queued in arrival order and the next drains answer it.

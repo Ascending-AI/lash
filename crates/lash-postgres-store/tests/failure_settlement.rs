@@ -518,9 +518,12 @@ async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input()
     let lash::EmbedError::Runtime(late_redrive) = late_redrive else {
         panic!("the refused redrive is a runtime error: {late_redrive:?}");
     };
+    // The later turn moved the head under the uncommitted aborted turn, so
+    // its admission no longer names the live head: it parks before any
+    // effect replays (FIG-3682).
     assert_eq!(
         late_redrive.code,
-        lash_core::RuntimeErrorCode::PostgresEffectReplayHashConflict,
+        lash_core::RuntimeErrorCode::EffectReplayDivergence,
         "{late_redrive:?}"
     );
 
