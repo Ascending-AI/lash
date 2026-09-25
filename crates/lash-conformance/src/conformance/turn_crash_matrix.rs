@@ -97,11 +97,14 @@ mod error_return;
 mod expectations;
 mod held_turn_input;
 mod invocation_effect_host;
+mod layered_group_child;
 mod pre_cutover_generation;
 mod recovery;
+mod reference_turn;
 mod seam_controllers;
 
 use recovery::run_crash_matrix_case;
+use reference_turn::ReferenceTurn;
 
 pub use after_commit_redrive::turn_crash_after_commit_redrive_replays_the_committed_receipt;
 pub use cancel_closure::turn_cancel_closure_recovers_from_a_crash_at_every_cut;
@@ -122,12 +125,15 @@ use expectations::{
 };
 pub use held_turn_input::held_turn_input_visibility_survives_claim_holder_crash;
 use invocation_effect_host::InvocationEffectHost;
+pub use layered_group_child::a_host_layer_observes_its_group_childrens_effects;
 pub use pre_cutover_generation::{
     pre_cutover_generation_turn_claim_is_refused_typed,
     pre_cutover_generation_turn_redrive_is_refused_before_any_effect,
 };
 use pretty_assertions::assert_eq;
-pub(crate) use seam_controllers::{CrashAfterCheckpointExecutionController, SeamLayer};
+pub(crate) use seam_controllers::{
+    CrashAfterCheckpointExecutionController, LawSeamHost, SeamLayer,
+};
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
@@ -406,6 +412,8 @@ struct SeamState {
     /// The armed error-return placement (FIG-3524), independent of `armed`:
     /// a crash point and an error return are never armed on the same run.
     error_return: Option<ErrorReturnPlacement>,
+    /// Whether a tool attempt already consumed the armed error return.
+    error_return_taken: bool,
     hit: bool,
     process_crashed: bool,
 }
@@ -428,6 +436,10 @@ struct SeamControl {
     /// Notified on every [`SeamControl::record`], so a seam can wait for another
     /// seam to appear in the trace rather than poll for it.
     recorded: Arc<tokio::sync::Notify>,
+    /// Cancelled when the law's crash kills the process running the turn: an
+    /// execution the engine runs apart from the turn's own (a group child's)
+    /// dies with it ([`SeamControl::process_crash`]).
+    process_crash: tokio_util::sync::CancellationToken,
 }
 
 /// Whether a matrix case runs its successor turn under a nominal lease-renewal
@@ -519,6 +531,7 @@ impl SeamControl {
         state.completed.clear();
         state.armed = Some(point);
         state.error_return = None;
+        state.error_return_taken = false;
         state.hit = false;
         state.process_crashed = false;
     }
@@ -529,6 +542,7 @@ impl SeamControl {
         state.completed.clear();
         state.armed = None;
         state.error_return = None;
+        state.error_return_taken = false;
         state.hit = false;
         state.process_crashed = false;
     }
@@ -540,6 +554,7 @@ impl SeamControl {
         state.completed.clear();
         state.armed = None;
         state.error_return = Some(placement);
+        state.error_return_taken = false;
         state.hit = false;
         state.process_crashed = false;
     }
@@ -548,8 +563,30 @@ impl SeamControl {
         self.state.lock_recover().error_return
     }
 
+    /// The armed error-return placement, consumed by the first tool attempt
+    /// that reaches it: a retry of the faulted attempt runs clean, as a retry
+    /// after a real store blip does. An engine that retries a failed group
+    /// child itself (Restate) re-enters the seam; the law reads that
+    /// re-entry as the retry.
+    fn take_tool_attempt_error_return(&self) -> Option<ErrorReturnPlacement> {
+        let mut state = self.state.lock_recover();
+        if state.error_return_taken {
+            return None;
+        }
+        let placement = state.error_return?;
+        state.error_return_taken = true;
+        Some(placement)
+    }
+
     fn simulate_process_crash(&self) {
         self.state.lock_recover().process_crashed = true;
+        self.process_crash.cancel();
+    }
+
+    /// Resolves once the law's crash killed the process running this seam's
+    /// turn.
+    async fn process_crash(&self) {
+        self.process_crash.cancelled().await;
     }
 
     fn process_has_crashed(&self) -> bool {
@@ -1686,53 +1723,51 @@ fn golden_trace() -> Vec<TurnSeamOperation> {
     serde_json::from_str(GOLDEN_TRACE).expect("committed turn crash trace is valid")
 }
 
-/// Re-record the reference turn and fail if its live seam traffic drifts from
-/// the committed golden trace or the outcome table omits a generated point.
+/// Re-record the reference turn on the tier's runner and fail if its live
+/// seam traffic drifts from the committed golden trace or the outcome table
+/// omits a generated point.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn turn_crash_trace_drift_check<F, I>(
+pub async fn turn_crash_trace_drift_check<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
-    make_invocation: I,
+    host: Arc<dyn crate::EffectHost>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str, crate::ExecutionScope) -> super::ConformanceInvocation,
+    F: Fn(&str) -> Arc<S>,
+    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
 {
-    let stores = stores.as_ref();
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let raw = make("trace-drift");
+    let raw = make("trace-drift") as Arc<dyn RuntimePersistence>;
     let identity = ReferenceIdentity::for_scenario("trace-drift");
     seed_reference_ingress(&raw, &identity, "trace-drift").await;
-    let decorated = SeamStore::wrap(raw, control.clone());
-    let invocation = make_invocation("trace-drift", reference_turn_scope(&identity));
-    let effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
-        control: control.clone(),
-        executions,
-        journal_faults: None,
-    }
-    .over(invocation.controller_handle());
-    let runtime = Box::pin(build_runtime_with_lease_timings(
-        stores,
-        decorated,
-        control.clone(),
-        Arc::clone(&effect_controller),
+    // The golden trace below is an exact ordering; pin the one seam whose
+    // timing is owned by a background timer rather than by the turn.
+    let (attempt, reports) = ReferenceTurn::new(
+        &stores,
+        raw,
+        &LawSeamHost::over(host),
         &identity,
-        TraceTool::default(),
+        control.clone(),
+        &executions,
         nominal_recovery_timings(),
-    ))
-    .await;
-    control.clear();
-    // The golden trace below is an exact ordering; pin the one seam whose timing
-    // is owned by a background timer rather than by the turn.
-    control.pin_renewal_after_provider();
-    let turn = Box::pin(drive_turn(runtime, effect_controller, &identity))
+    )
+    .before_drive(|control| {
+        control.clear();
+        control.pin_renewal_after_provider();
+    })
+    .reporting();
+    runner
+        .run_turn(reference_admitted_scope(&identity), attempt)
+        .await;
+    let turn = reference_turn::reported(reports)
         .await
+        .map(crate::facade_support::QueuedTurnDrain::ran)
         .expect("reference turn succeeds")
         .expect("reference ingress produces a turn");
-    invocation.end();
     assert_eq!(turn.assistant_output.safe_text, "trace turn complete");
     assert_eq!(
         control.trace(),
@@ -1859,39 +1894,116 @@ fn pending_input_text(read: &crate::PendingTurnInputRead) -> String {
         .collect()
 }
 
-/// Run the trace-generated level-1 crash matrix against one persistence
-/// backend. The factory must return fresh outer handles over the substrate
-/// selected by its semantic scenario key.
+/// Run the trace-generated level-1 crash matrix on the tier's runner: every
+/// generated crash point kills the reference turn's execution where it
+/// stands, and the tier recovers the turn its own way (see the
+/// `turn_runner` module docs). `make` returns fresh outer handles over the
+/// substrate selected by its semantic scenario key.
 ///
 /// Every generated crash point runs under a nominal lease-renewal task. The
 /// matrix then replays the renewal-boundary point once more with the renewal
 /// task deterministically starved, which pins the retained-admission retry
 /// after lease loss that a loaded runner would otherwise reach only by luck.
+pub async fn turn_crash_matrix_level_1<F, S>(
+    stores: Arc<dyn crate::StoreSet>,
+    make: F,
+    host: Arc<dyn crate::EffectHost>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) where
+    F: Fn(&str) -> Arc<S>,
+    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+{
+    Box::pin(turn_crash_matrix_level_1_parking(
+        stores,
+        make,
+        host,
+        runner,
+        &[],
+    ))
+    .await;
+}
+
+/// A level-one crash point a tier cannot recover yet, parked under the
+/// known-defect ticket that brings it back. `point` is the point as the
+/// outcome table encodes it (`turn_crash_outcomes.json`).
+#[derive(Clone, Copy, Debug)]
+pub struct ParkedTurnCrashPoint {
+    pub point: &'static str,
+    pub ticket: &'static str,
+    pub reason: &'static str,
+}
+
+/// Every parked point decoded, checked to name a generated crash point once,
+/// and to carry a ticket and a reason: a parking that names nothing the
+/// matrix runs is stale.
+fn validate_parked_points(
+    parked: &[ParkedTurnCrashPoint],
+) -> Result<Vec<(TurnCrashPoint, ParkedTurnCrashPoint)>, String> {
+    let generated = generated_points(&golden_trace());
+    let mut decoded: Vec<(TurnCrashPoint, ParkedTurnCrashPoint)> = Vec::new();
+    for parking in parked {
+        let point: TurnCrashPoint = serde_json::from_str(parking.point)
+            .map_err(|error| format!("`{}` is not a crash point: {error}", parking.point))?;
+        if !generated.contains(&point) {
+            return Err(format!(
+                "`{}` is not a generated crash point",
+                parking.point
+            ));
+        }
+        if decoded.iter().any(|(seen, _)| *seen == point) {
+            return Err(format!("`{}` is parked twice", parking.point));
+        }
+        if !parking.ticket.starts_with("FIG-") || parking.reason.trim().is_empty() {
+            return Err(format!(
+                "`{}` must name its FIG ticket and a reason",
+                parking.point
+            ));
+        }
+        decoded.push((point, *parking));
+    }
+    Ok(decoded)
+}
+
+/// [`turn_crash_matrix_level_1`] with `parked` crash points held back, each
+/// under the known-defect ticket that brings it back. A tier parks a point
+/// only where recovery from it hits that defect; every other point runs.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn turn_crash_matrix_level_1<F, I>(
+pub async fn turn_crash_matrix_level_1_parking<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
-    make_invocation: I,
+    host: Arc<dyn crate::EffectHost>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    parked: &[ParkedTurnCrashPoint],
 ) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str, crate::ExecutionScope) -> super::ConformanceInvocation,
+    F: Fn(&str) -> Arc<S>,
+    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
 {
-    Box::pin(turn_crash_trace_drift_check(
-        Arc::clone(&stores),
-        &make,
-        &make_invocation,
-    ))
-    .await;
-    let stores = stores.as_ref();
+    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
+    let host = LawSeamHost::over(host);
+    let law = MatrixLaw {
+        stores: &stores,
+        make: &make,
+        host: &host,
+        runner: &runner,
+    };
+    let parked = validate_parked_points(parked)
+        .unwrap_or_else(|error| panic!("invalid parked level-one crash points: {error}"));
     for entry in turn_crash_matrix_outcomes() {
+        if let Some(parking) = parked.iter().find(|(point, _)| *point == entry.point) {
+            eprintln!(
+                "level-one crash point {} parked under {}: {}",
+                point_key(&entry.point),
+                parking.1.ticket,
+                parking.1.reason
+            );
+            continue;
+        }
         let scenario = point_key(&entry.point);
         Box::pin(run_crash_matrix_case(
-            stores,
-            &make,
-            &make_invocation,
+            &law,
             &entry,
             &scenario,
             RenewalPressure::Nominal,
@@ -1910,14 +2022,21 @@ pub async fn turn_crash_matrix_level_1<F, I>(
         .expect("generated matrix contains the renewal-boundary crash point");
     let starved_scenario = format!("{}:starved-renewal", point_key(&renewal_boundary.point));
     Box::pin(run_crash_matrix_case(
-        stores,
-        &make,
-        &make_invocation,
+        &law,
         &renewal_boundary,
         &starved_scenario,
         RenewalPressure::Starved,
     ))
     .await;
+}
+
+/// What every case of a runner-driven crash-matrix law runs over.
+pub(super) struct MatrixLaw<'law> {
+    pub(super) stores: &'law Arc<dyn crate::StoreSet>,
+    pub(super) make: &'law dyn Fn(&str) -> Arc<dyn RuntimePersistence>,
+    /// The law's one layered host over the tier's.
+    pub(super) host: &'law LawSeamHost,
+    pub(super) runner: &'law Arc<dyn crate::ConformanceTurnRunner>,
 }
 
 #[cfg(test)]

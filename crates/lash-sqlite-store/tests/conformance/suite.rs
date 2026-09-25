@@ -1269,15 +1269,10 @@ fn journaled_crash_invocation(
     .with_effect_journal_faults(faults)
 }
 
-lash_conformance::turn_crash_matrix_tests!({
-    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
-    let retained = Retained::default();
-    let stores = retained.open_blocking().as_stores();
-    let journal = crash_journal();
-    // FIG-3524: the error-return sweep arms journal faults on its controller;
-    // the short renew interval lets a `renew` fault fire while the parked
-    // tool attempt is still open.
-    let error_journal = sync_await(async move {
+/// The error-return sweep's journal (FIG-3524): its short renew interval lets
+/// a `renew` fault fire while the parked tool attempt is still open.
+fn error_return_journal() -> TestBackend {
+    sync_await(async move {
         TestBackend::open_with(
             SUBSTRATE,
             with_lease_timings(
@@ -1290,52 +1285,46 @@ lash_conformance::turn_crash_matrix_tests!({
             crate::backend_fixture::system_clock(),
         )
         .await
-    });
+    })
+}
+
+/// A turn-crash runner fixture over `journal`'s own effect host: the runner
+/// cuts turns with that journal's fault injector.
+fn journal_runner_fixture(
+    journal: TestBackend,
+) -> (
+    Retained,
+    Arc<dyn lash_core_execution::StoreSet>,
+    impl Fn(&str) -> Arc<lash_sqlite_store::Store> + Send + Sync + 'static,
+    Arc<dyn EffectHost>,
+    Arc<dyn lash_conformance::ConformanceTurnRunner>,
+) {
+    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
+    let retained = Retained::default();
+    let stores = retained.open_blocking().as_stores();
     retained.keep(&journal);
-    retained.keep(&error_journal);
+    let host = journal.effect_host();
+    let faults = host.effect_journal_faults();
+    let host = host as Arc<dyn EffectHost>;
     (
         retained,
         stores,
-        move |scenario: &str| scenarios.store(scenario),
-        move |_: &str, scope: ExecutionScope| journaled_crash_invocation(&journal, scope),
-        move |_: &str, scope: ExecutionScope| {
-            let controller = sync_await({
-                let error_journal = error_journal.clone();
-                let scope = scope.clone();
-                async move {
-                    error_journal
-                        .open_effect_controller(scope)
-                        .await
-                        .expect("journaled error-return controller")
-                }
-            });
-            sqlite_conformance_invocation(controller.clone(), scope)
-                .with_effect_journal_faults(controller.effect_journal_faults())
-        },
+        move |scenario: &str| scenarios.concrete_store(scenario),
+        Arc::clone(&host),
+        lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
     )
-});
+}
 
-// The level-one matrix simulates each crash in process. On the journaled
-// SQLite engine the crashed attempt's group child keeps running and renewing
-// its effect lease, which nothing in the process can stop, so the successor
-// waits on it forever. The native host this matrix ran on is gone; the real
-// SIGKILL matrix below covers this engine's crash recovery.
+lash_conformance::turn_crash_matrix_tests!({ journal_runner_fixture(error_return_journal()) });
+
+// The level-one matrix crashes each turn in process. On the journaled SQLite
+// engine the crashed attempt's group child keeps running and renewing its
+// effect lease, which nothing in the process can stop, so the successor waits
+// on it forever. The real SIGKILL matrix covers this engine's crash recovery.
 lash_conformance::turn_crash_level_1_tests!(
     #[ignore = "parked: an in-process crash cannot stop the journaled engine's attempt (FIG-3668)"]
     {
-        let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
-        let retained = Retained::default();
-        let stores = retained.open_blocking().as_stores();
-        let journal = crash_journal();
-        retained.keep(&journal);
-        let error_journal = journal.clone();
-        (
-            retained,
-            stores,
-            move |scenario: &str| scenarios.store(scenario),
-            move |_: &str, scope: ExecutionScope| journaled_crash_invocation(&journal, scope),
-            move |_: &str, scope: ExecutionScope| journaled_crash_invocation(&error_journal, scope),
-        )
+        journal_runner_fixture(crash_journal())
     }
 );
 
@@ -1343,21 +1332,9 @@ lash_conformance::turn_crash_level_1_tests!(
 // generation-refusal pair, the direct-acceptance crash and the cancel-closure
 // cuts, on the crash journal's own host. A crash drops the turn's task, and
 // the recovery is a fresh runtime over the same stores and journal.
-lash_conformance::turn_crash_runner_tests!({
-    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
-    let retained = Retained::default();
-    let stores = retained.open_blocking().as_stores();
-    let journal = crash_journal();
-    retained.keep(&journal);
-    let host = journal.effect_host() as Arc<dyn EffectHost>;
-    (
-        retained,
-        stores,
-        move |scenario: &str| scenarios.concrete_store(scenario),
-        Arc::clone(&host),
-        lash_conformance::HostTurnRunner::shared(host),
-    )
-});
+lash_conformance::turn_crash_runner_tests!({ journal_runner_fixture(crash_journal()) });
+
+lash_conformance::effect_layer_group_child_tests!({ journal_runner_fixture(crash_journal()) });
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {

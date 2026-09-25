@@ -380,6 +380,19 @@ impl EffectHost for LayeredEffectHost {
         self.inner.effect_group_closing()
     }
 
+    /// The inner host's routing first, then this host's layer: a child an
+    /// engine handler drives crosses every layer of the stack, innermost
+    /// first, as the controllers this host lends do.
+    fn route_handler_child_controller<'run>(
+        &self,
+        controller: ScopedEffectController<'run>,
+    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        Self::layer_scoped(
+            self.inner.route_handler_child_controller(controller)?,
+            Arc::clone(&self.layer),
+        )
+    }
+
     fn install_tool_child_host(&self, candidate: Arc<ToolChildHost>) -> Option<Arc<ToolChildHost>> {
         self.inner.install_tool_child_host(candidate)
     }

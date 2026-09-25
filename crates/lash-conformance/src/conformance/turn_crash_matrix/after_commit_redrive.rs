@@ -13,9 +13,11 @@
 //! therefore resumes the settled run and returns its terminal receipt at the
 //! pinned position, with no effect, provider call or further commit.
 //!
-//! The law runs on the fixture's journaled controller where the backend has
-//! one, and redrives it in strict replay, so any effect the successor tried to
-//! address would be refused rather than silently executed again.
+//! The law runs its turns on the tier's runner: the crash kills the turn's
+//! execution where it stands, and the redrive is the tier's next run of the
+//! same scope — a fresh driver in process, a redelivery replaying the journal
+//! on Restate. Any effect, provider call or commit the redrive issued would
+//! cross the seam and fail the law.
 
 use super::*;
 use pretty_assertions::assert_eq;
@@ -57,19 +59,23 @@ fn after_commit_points() -> Vec<(&'static str, TurnCrashPoint)> {
 /// [`after_commit_points`], then redrive it on the same store: the redrive
 /// returns the committed run's receipt at the turn index the admission pinned,
 /// and executes and commits nothing.
-///
-/// `make_invocation` supplies the controller for a `(scenario, scope)`: the
-/// journaled controller on backends with an effect journal, whose redrive
-/// runs in strict replay.
-pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, I>(
+pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
-    make_invocation: I,
+    host: Arc<dyn crate::EffectHost>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str, crate::ExecutionScope) -> super::super::ConformanceInvocation,
+    F: Fn(&str) -> Arc<S>,
+    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
 {
-    let stores = stores.as_ref();
+    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
+    let host = LawSeamHost::over(host);
+    let law = MatrixLaw {
+        stores: &stores,
+        make: &make,
+        host: &host,
+        runner: &runner,
+    };
     let generated = generated_points(&golden_trace());
     for (key, point) in after_commit_points() {
         assert!(
@@ -77,14 +83,7 @@ pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, I>
             "after-commit placement {key} is not a point of the golden trace: {point:?}"
         );
         let scenario = format!("after-commit-redrive-{key}");
-        Box::pin(run_after_commit_redrive(
-            stores,
-            &make,
-            &make_invocation,
-            &scenario,
-            &point,
-        ))
-        .await;
+        Box::pin(run_after_commit_redrive(&law, &scenario, &point)).await;
     }
 }
 
@@ -92,47 +91,33 @@ pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, I>
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn run_after_commit_redrive<F, I>(
-    stores: &dyn crate::StoreSet,
-    make: &F,
-    make_invocation: &I,
-    scenario: &str,
-    point: &TurnCrashPoint,
-) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str, crate::ExecutionScope) -> super::super::ConformanceInvocation,
-{
+async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &TurnCrashPoint) {
+    let make = law.make;
     let identity = ReferenceIdentity::for_scenario(scenario);
-    let scope = crate::ExecutionScope::queue_drain(&identity.session_id, identity.turn_id.as_str());
+    let admitted = reference_admitted_scope(&identity);
     let raw = make(scenario);
     seed_reference_ingress(&raw, &identity, scenario).await;
-    let invocation = make_invocation(scenario, scope);
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let control = SeamControl::default();
-    let controller: Arc<dyn RuntimeEffectController> = SeamLayer {
-        control: control.clone(),
-        executions: Arc::clone(&executions),
-        journal_faults: None,
-    }
-    .over(invocation.controller_handle());
-    let runtime = Box::pin(build_runtime(
-        stores,
-        SeamStore::wrap(raw, control.clone()),
-        control.clone(),
-        Arc::clone(&controller),
-        &identity,
-        TraceTool::default(),
-    ))
-    .await;
-    control.arm(point.clone());
-    let task_identity = identity.clone();
-    let task = crate::task::spawn(async move {
-        Box::pin(drive_turn(runtime, controller, &task_identity)).await
-    });
-    control.wait_for_hit().await;
-    control.simulate_process_crash();
-    task.abort();
-    let _ = task.await;
+    let crash = crash_at_armed_point(&control);
+    let armed = point.clone();
+    law.runner
+        .run_turn_until_crash(
+            admitted.clone(),
+            ReferenceTurn::new(
+                law.stores,
+                raw,
+                law.host,
+                &identity,
+                control,
+                &executions,
+                crashed_turn_timings(),
+            )
+            .before_drive(move |control| control.arm(armed.clone()))
+            .attempt(),
+            crash,
+        )
+        .await;
     let executed = executions.load(std::sync::atomic::Ordering::SeqCst);
     assert_eq!(
         executed, 1,
@@ -159,33 +144,23 @@ async fn run_after_commit_redrive<F, I>(
         "{scenario}: the final commit settled the run admission with the head"
     );
 
-    wait_for_recovery_lease(make, scenario, point, point_leaves_lane_held(point)).await;
-    let successor_invocation = invocation.redrive();
+    wait_for_recovery_lease(&make, scenario, point, point_leaves_lane_held(point)).await;
     let successor_control = SeamControl::default();
-    let successor_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
-        control: successor_control.clone(),
-        executions: Arc::clone(&executions),
-        journal_faults: None,
-    }
-    .over(successor_invocation.controller_handle());
-    let mut successor = Box::pin(build_runtime_with_lease_timings(
-        stores,
-        SeamStore::wrap(make(scenario), successor_control.clone()),
-        successor_control.clone(),
-        Arc::clone(&successor_controller),
+    let (successor, redriven) = ReferenceTurn::new(
+        law.stores,
+        make(scenario),
+        law.host,
         &identity,
-        TraceTool::default(),
+        successor_control.clone(),
+        &executions,
         nominal_recovery_timings(),
-    ))
-    .await;
-    successor_control.clear();
-    let drain = Box::pin(successor.stream_next_queued_work(crate::TurnOptions::new(
-        tokio_util::sync::CancellationToken::new(),
-        scoped_controller(successor_controller, &identity),
-    )))
-    .await
-    .unwrap_or_else(|error| panic!("{scenario}: the after-commit redrive failed: {error}"));
-    successor_invocation.end();
+    )
+    .before_drive(SeamControl::clear)
+    .reporting();
+    law.runner.run_turn(admitted, successor).await;
+    let drain = reference_turn::reported(redriven)
+        .await
+        .unwrap_or_else(|error| panic!("{scenario}: the after-commit redrive failed: {error}"));
 
     let crate::facade_support::QueuedTurnDrain::Replayed(receipt) = drain else {
         panic!("{scenario}: the redrive must replay the settled run, got another drain outcome");
