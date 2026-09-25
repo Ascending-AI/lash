@@ -46,8 +46,12 @@ impl SimEngine {
     }
 
     /// A fresh engine on a server double under `seed` whose live attempts
-    /// run whenever Tokio polls them, as against a real server: the
-    /// generated search lane's cross-session concurrency.
+    /// run whenever Tokio polls them, as `restate-server` does: the
+    /// generated search lane's cross-session concurrency. A scenario that
+    /// stops a running turn from outside it needs this too: a host-local stop
+    /// is a durable request on the turn's cancellation gate, an ingress call,
+    /// and serial scheduling lands ingress only between attempts, so it would
+    /// wait on the very attempt it stops (FIG-3672 P9).
     pub async fn concurrent(seed: u64) -> Result<Self, FixedScriptRunnerError> {
         Self::scheduled(seed, lash_restate_test::Scheduling::Concurrent).await
     }
@@ -62,19 +66,6 @@ impl SimEngine {
         config.retry.initial_interval = std::time::Duration::from_millis(1);
         config.retry.max_interval = std::time::Duration::from_millis(10);
         lash_restate_test::backend(seed, config)
-            .await
-            .map(|restate| Self { restate })
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
-    }
-
-    /// An engine whose server double runs every live attempt concurrently,
-    /// as `restate-server` does. A scenario that stops a running turn from
-    /// outside it needs this: a host-local stop is a durable request on the
-    /// turn's cancellation gate, an ingress call, and serial scheduling lands
-    /// ingress only between attempts, so it would wait on the very attempt it
-    /// stops (FIG-3672 P9).
-    pub async fn concurrent(seed: u64) -> Result<Self, FixedScriptRunnerError> {
-        lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
             .await
             .map(|restate| Self { restate })
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
