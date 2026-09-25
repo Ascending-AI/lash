@@ -1065,6 +1065,7 @@ impl LashRuntime {
                 "session command idempotency key cannot be empty",
             ));
         }
+        self.refuse_unservable_route(&command)?;
         let source_key = command.source_key(&idempotency_key);
         let session_id = self.state.session_id.clone();
         let Some(store) = self

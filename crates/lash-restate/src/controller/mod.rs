@@ -1646,9 +1646,12 @@ pub(crate) fn restate_effect_execution(
         // A drive's admission and its seal read and write the session's
         // store: a store that did not answer is this attempt's fault, so the
         // step runs again, and only a verdict is ever recorded (FIG-3600).
+        // A root's turn-config resolution reads the durable head the same
+        // way: only the config is recorded (FIG-3600 S6).
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
+        | RuntimeEffectCommand::ResolveTurnConfig { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment
         | RuntimeEffectCommand::LlmCall { .. }) => RestateEffectExecution::JournaledRun {

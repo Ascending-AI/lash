@@ -190,6 +190,12 @@ impl RuntimeErrorCode {
             Self::LiveReplay => Redrivable,
             // the provider's failure is the recorded model-call result.
             Self::LlmProvider => Terminal,
+            // a refusal of the config command that named the route; the same route is refused again.
+            Self::ProviderRouteUnknown => Terminal,
+            // a refusal of the config command that named the route; the same route is refused again.
+            Self::ProviderCredentialsMissing => Terminal,
+            // the route was validated when it was set; this worker's deployment cannot bind it now.
+            Self::ProviderBindingUnavailable => Retryable,
             // a plugin refusal over the same inputs.
             Self::Plugin => Terminal,
             // the selected queued work cannot be admitted; the same selection is refused again.

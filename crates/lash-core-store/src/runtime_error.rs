@@ -181,6 +181,17 @@ pub enum RuntimeErrorCode {
     InvalidTurnCancelRequest,
     LiveReplay,
     LlmProvider,
+    /// A config command named a route the host's provider resolver does not
+    /// serve (FIG-3600 S6): refused at send, or at apply, typed.
+    ProviderRouteUnknown,
+    /// A config command named a route the host's resolver knows but holds no
+    /// credentials for (FIG-3600 S6): refused typed, like an unknown route.
+    ProviderCredentialsMissing,
+    /// The route a turn recorded at its start cannot be bound to a provider
+    /// on this worker (FIG-3600 S6, D3 Q3). The route was validated when it
+    /// was set, so this is the worker's deployment, not the session's intent:
+    /// the engine retries the root, and its retry budget parks it.
+    ProviderBindingUnavailable,
     Plugin,
     QueuedWork,
     /// One queued row alone renders larger than the whole model context window,
@@ -587,6 +598,9 @@ impl RuntimeErrorCode {
             Self::InvalidTurnCancelRequest => "invalid_turn_cancel_request",
             Self::LiveReplay => "live_replay",
             Self::LlmProvider => "llm_provider",
+            Self::ProviderRouteUnknown => "provider_route_unknown",
+            Self::ProviderCredentialsMissing => "provider_credentials_missing",
+            Self::ProviderBindingUnavailable => "provider_binding_unavailable",
             Self::Plugin => "plugin",
             Self::QueuedWork => "queued_work",
             Self::QueuedWorkRowExceedsContextWindow => "queued_work_row_exceeds_context_window",
@@ -846,6 +860,9 @@ impl RuntimeErrorCode {
         Self::InvalidTurnCancelRequest,
         Self::LiveReplay,
         Self::LlmProvider,
+        Self::ProviderRouteUnknown,
+        Self::ProviderCredentialsMissing,
+        Self::ProviderBindingUnavailable,
         Self::Plugin,
         Self::QueuedWork,
         Self::QueuedWorkRowExceedsContextWindow,
@@ -1043,6 +1060,9 @@ impl RuntimeErrorCode {
             "invalid_turn_cancel_request" => Self::InvalidTurnCancelRequest,
             "live_replay" => Self::LiveReplay,
             "llm_provider" => Self::LlmProvider,
+            "provider_route_unknown" => Self::ProviderRouteUnknown,
+            "provider_credentials_missing" => Self::ProviderCredentialsMissing,
+            "provider_binding_unavailable" => Self::ProviderBindingUnavailable,
             "plugin" => Self::Plugin,
             "queued_work" => Self::QueuedWork,
             "queued_work_row_exceeds_context_window" => Self::QueuedWorkRowExceedsContextWindow,
@@ -1613,7 +1633,8 @@ impl RuntimeEffectControllerError {
 
     /// Only the host derivations — the assistant-response hooks, the
     /// execution-environment sync and the execution-environment load — and a
-    /// drive's admission and seal, whose store faults are the attempt's (FIG-3600),
+    /// drive's admission, seal and turn-config resolution, whose store faults
+    /// are the attempt's (FIG-3600),
     /// can consume derivation retry authority, and any step whose cancellation
     /// watch was lost ([`Self::turn_cancel_watch_lost`]): that fault is about
     /// the attempt, never the step.
@@ -1625,6 +1646,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::LoadExecutionEnv
                 | RuntimeEffectKind::AdmitDrive
                 | RuntimeEffectKind::SealDriveAdmission
+                | RuntimeEffectKind::ResolveTurnConfig
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
         {
             self.journal_disposition

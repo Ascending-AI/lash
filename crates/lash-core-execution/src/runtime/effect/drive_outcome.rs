@@ -1,4 +1,5 @@
-//! The recorded outcomes of a session drive's admission steps (FIG-3600).
+//! The recorded outcomes of a session drive's admission steps (FIG-3600) and
+//! of a root's turn-config resolution (FIG-3600 S6).
 
 use super::{RuntimeEffectControllerError, RuntimeEffectOutcome};
 use crate::RuntimeEffectKind;
@@ -23,6 +24,18 @@ impl RuntimeEffectOutcome {
             Self::SealDriveAdmission { verdict } => Ok(*verdict),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::SealDriveAdmission,
+                other.kind(),
+            )),
+        }
+    }
+
+    pub fn into_resolve_turn_config(
+        self,
+    ) -> Result<crate::PersistedSessionConfig, RuntimeEffectControllerError> {
+        match self {
+            Self::ResolveTurnConfig { config } => Ok(*config),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::ResolveTurnConfig,
                 other.kind(),
             )),
         }

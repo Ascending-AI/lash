@@ -477,16 +477,12 @@ impl LashRuntime {
                 RuntimeError::new(crate::RuntimeErrorCode::LlmProvider, err.to_string())
             })?
         } else {
-            // A recorded/requested provider-pin conflict is answered typed at
-            // open (ADR 0066, `SessionPolicy::settle_provider_pin`), so the
-            // only mismatch that can still reach this stringifying edge is a
-            // host resolver registered under a different id than the session's
-            // recorded pin. Keep it as a runtime error: no new plumbing.
+            // The route is the turn's recorded config (D3 §2.1); it was
+            // validated when it was set, so a route this worker cannot bind
+            // is its deployment, retried and never the turn's outcome (Q3).
             self.host
                 .resolve_session_policy(&self.state.session_id, turn_policy.clone())
-                .map_err(|err| {
-                    RuntimeError::new(crate::RuntimeErrorCode::LlmProvider, err.to_string())
-                })?
+                .map_err(crate::runtime::drive::provider_binding_unavailable)?
         };
         let manager = self
             .runtime_session_services_for_turn(session_execution_lease, &turn_graph_appends)
