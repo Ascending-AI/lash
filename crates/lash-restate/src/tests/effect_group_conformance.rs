@@ -388,6 +388,29 @@ pub(super) enum HarnessAdmin {
 }
 
 impl HarnessAdmin {
+    /// Whether the invocation of workflow `service`'s `run` handler under
+    /// `key` is paused: its retry policy spent its attempts, and it runs
+    /// nothing more until an operator resumes it.
+    pub(super) async fn workflow_paused(&self, service: &str, key: &str) -> bool {
+        match self {
+            Self::InProcess { server } => {
+                let target = format!("{service}/{key}/run");
+                server
+                    .invocations()
+                    .iter()
+                    .any(|view| view.target == target && view.status == "paused")
+            }
+            Self::Live { admin_url } => {
+                crate::RestateAdminClient::new(RestateConnection::new(admin_url.clone()))
+                    .workflow_invocation_status(service, key, "run")
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some_and(|status| status.status.as_str() == "paused")
+            }
+        }
+    }
+
     /// Kills the open invocation of workflow `service`'s `run` handler under
     /// `key`, as an operator does, and returns its id.
     pub(super) async fn kill_workflow_run(&self, service: &str, key: &str) -> String {

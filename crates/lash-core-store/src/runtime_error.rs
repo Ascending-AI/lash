@@ -1324,6 +1324,21 @@ pub struct SessionStateVersionRefusal {
     pub found: u32,
     pub current: u32,
 }
+
+impl SessionStateVersionRefusal {
+    /// The generations `error` refused, when it is the generation gate's
+    /// refusal.
+    #[must_use]
+    pub fn of_store_error(error: &crate::store::StoreError) -> Option<Self> {
+        match *error {
+            crate::store::StoreError::SessionStateVersionUnsupported { found, current }
+            | crate::store::StoreError::SessionStateVersionNewerThanRuntime { found, current } => {
+                Some(Self { found, current })
+            }
+            _ => None,
+        }
+    }
+}
 /// Runtime error for unexpected failures.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]

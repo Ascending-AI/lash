@@ -34,16 +34,10 @@ lash_conformance::turn_crash_generation_claim_tests!({ turn_crash_runner_fixture
 lash_conformance::turn_crash_direct_acceptance_tests!({ turn_crash_runner_fixture().await });
 
 // The redrive of a turn the pre-cutover build left in flight is refused
-// before any effect, and the refusal reaches the attempt typed, but the
-// refused execution returns where the crashed execution's journal holds
-// its next command: Restate reports a journal mismatch and retries the
-// invocation instead of ending it.
-lash_conformance::turn_crash_generation_redrive_tests!(
-    #[ignore = "parked: a refused redrive diverges from the crashed execution's journal (FIG-3735)"]
-    {
-        turn_crash_runner_fixture().await
-    }
-);
+// before any effect and parks, typed: its handler fails each retry
+// retryably where the crashed execution's journal holds its next command,
+// and the turn handler's retry policy pauses the invocation (FIG-3735).
+lash_conformance::turn_crash_generation_redrive_tests!({ turn_crash_runner_fixture().await });
 
 // Seven of the eight closure cuts recover. A crash inside the store write
 // that applies the input effects and consumes the authorization leaves the

@@ -139,9 +139,9 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// the *current* catalog, so these are exactly the artifacts its refusal must
 /// enumerate.
 ///
-/// The retained 128 -> 129 generation introduced no relation or constraint
-/// the refusal would name. Component 130 (FIG-3682) is destructive: no
-/// 129 → 130 arm exists, so the component-129 stamp over the current catalog
+/// The retained 129 -> 130 generation introduced no relation or constraint
+/// the refusal would name. Component 131 (FIG-3735) is destructive: no
+/// 130 → 131 arm exists, so the component-130 stamp over the current catalog
 /// is refused for having no applicable migration and names no artifacts.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A destructive generation has no migration arm, so a predecessor stamp over

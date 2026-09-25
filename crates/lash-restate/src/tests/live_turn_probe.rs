@@ -51,6 +51,10 @@ struct QueuedAttempt {
     /// The law's trigger that kills this attempt from outside it, when the
     /// law crashes the turn at a point of its own choosing.
     crash: Option<lash_conformance::ConformanceCrash>,
+    /// An aborted end keeps the attempt queued, so every retry of the open
+    /// invocation runs it again, as a product handler's retry re-runs its
+    /// turn.
+    repeats_on_retry: bool,
 }
 
 /// How one execution of the handler ended, as the runner is told.
@@ -101,6 +105,7 @@ enum NextAttempt {
         attempt: lash_conformance::ConformanceTurnAttempt,
         crashing: bool,
         crash: Option<lash_conformance::ConformanceCrash>,
+        repeats_on_retry: bool,
         ends: tokio::sync::mpsc::UnboundedSender<AttemptEnd>,
     },
     /// The law has queued no attempt yet.
@@ -124,6 +129,7 @@ fn next_attempt(key: &str) -> NextAttempt {
         attempt: Arc::clone(&front.attempt),
         crashing: front.crashing,
         crash: front.crash.clone(),
+        repeats_on_retry: front.repeats_on_retry,
         ends: turn.ends.clone(),
     }
 }
@@ -145,7 +151,7 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
         ctx: WorkflowContext<'_>,
         Json(key): Json<String>,
     ) -> HandlerResult<Json<bool>> {
-        let (admitted, attempt, crashing, crash, ends) = loop {
+        let (admitted, attempt, crashing, crash, repeats_on_retry, ends) = loop {
             let queued = attempt_queued().notified();
             tokio::pin!(queued);
             queued.as_mut().enable();
@@ -155,8 +161,9 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
                     attempt,
                     crashing,
                     crash,
+                    repeats_on_retry,
                     ends,
-                } => break (admitted, attempt, crashing, crash, ends),
+                } => break (admitted, attempt, crashing, crash, repeats_on_retry, ends),
                 // An invocation that finds nothing to run fails terminally
                 // rather than silently succeeding without the turn it was
                 // asked to run.
@@ -246,7 +253,9 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
                 .into());
             }
         };
-        finish_attempt(&key);
+        if !(repeats_on_retry && matches!(end, AttemptEnd::Aborted)) {
+            finish_attempt(&key);
+        }
         let _ = ends.send(end);
         result
     }
@@ -502,8 +511,15 @@ impl LiveTurnRunner {
     /// Runs `attempts` as the next attempts of `admitted`'s invocation: a new
     /// invocation, or the retry of the one a parked or aborted run left open.
     /// Returns once the turn settled (the invocation completed) or aborted
-    /// (the invocation stays open for the law's next run of the scope).
-    async fn run_attempts(&self, admitted: lash_core::AdmittedScope, attempts: Vec<QueuedAttempt>) {
+    /// (the invocation stays open for the law's next run of the scope). An
+    /// attempt that repeats on retry instead runs on every retry until the
+    /// invocation pauses, and the runner returns how many runs aborted.
+    async fn run_attempts(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        attempts: Vec<QueuedAttempt>,
+    ) -> usize {
+        let until_paused = attempts.iter().any(|attempt| attempt.repeats_on_retry);
         let scope = format!("{:?}", admitted.scope());
         let crash_expected = attempts.iter().any(|attempt| attempt.crashing);
         let leave_open_on_crash = attempts
@@ -553,6 +569,8 @@ impl LiveTurnRunner {
             }
         };
         let mut crashed = false;
+        let mut aborted = 0_usize;
+        let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
             tokio::select! {
                 // The handler reports its attempt's end before it returns, so
@@ -569,6 +587,9 @@ impl LiveTurnRunner {
                         break;
                     }
                     Some(AttemptEnd::Crashed) => crashed = true,
+                    Some(AttemptEnd::Settled) if until_paused => panic!(
+                        "the live conformance turn `{key}` settled where every run must park"
+                    ),
                     Some(AttemptEnd::Settled) => {
                         let ran = (&mut call).await.expect("the probe's ingress call task");
                         pending_turns()
@@ -582,12 +603,26 @@ impl LiveTurnRunner {
                         );
                         break;
                     }
+                    Some(AttemptEnd::Aborted) if until_paused => aborted += 1,
                     Some(AttemptEnd::Aborted) => {
+                        aborted += 1;
                         open.insert(scope, OpenInvocation { key: key.clone(), call });
                         break;
                     }
                     None => panic!("the live conformance turn `{key}` lost its attempt channel"),
                 },
+                // A paused invocation runs nothing more until an operator
+                // resumes it; the law is done with it.
+                _ = poll.tick(), if until_paused && aborted > 0 => {
+                    if self.admin.workflow_paused("ConformanceTurnProbe", &key).await {
+                        pending_turns()
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .remove(&key);
+                        call.abort();
+                        break;
+                    }
+                }
                 ran = &mut call => {
                     pending_turns()
                         .lock()
@@ -604,6 +639,7 @@ impl LiveTurnRunner {
             crashed || !crash_expected,
             "the live conformance turn `{key}` ended without its crashing attempt crashing"
         );
+        aborted
     }
 }
 
@@ -620,6 +656,7 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
                 attempt,
                 crashing: false,
                 crash: None,
+                repeats_on_retry: false,
             }],
         )
         .await;
@@ -638,15 +675,34 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
                     attempt: crashing,
                     crashing: true,
                     crash: None,
+                    repeats_on_retry: false,
                 },
                 QueuedAttempt {
                     attempt: redrive,
                     crashing: false,
                     crash: None,
+                    repeats_on_retry: false,
                 },
             ],
         )
         .await;
+    }
+
+    async fn run_parking_turn_until_rested(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        attempt: lash_conformance::ConformanceTurnAttempt,
+    ) -> usize {
+        self.run_attempts(
+            admitted,
+            vec![QueuedAttempt {
+                attempt,
+                crashing: false,
+                crash: None,
+                repeats_on_retry: true,
+            }],
+        )
+        .await
     }
 
     async fn run_turn_until_crash(
@@ -661,6 +717,7 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
                 attempt,
                 crashing: true,
                 crash: Some(crash),
+                repeats_on_retry: false,
             }],
         )
         .await;

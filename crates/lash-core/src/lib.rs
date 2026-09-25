@@ -795,7 +795,8 @@ pub use runtime::{
     WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
     WorkerSweepPolicy, admit_session_state_generation, artifact_destination_owner_retired_error,
     artifact_owner_retired_error, artifact_staging_edge_missing_error, artifact_store_plugin_error,
-    effect_groups_unsupported, ensure_process_lease_schema_version, tool_failure_code,
+    effect_groups_unsupported, ensure_process_lease_schema_version,
+    park_turn_refused_by_generation, tool_failure_code,
 };
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 #[allow(unused_imports)]

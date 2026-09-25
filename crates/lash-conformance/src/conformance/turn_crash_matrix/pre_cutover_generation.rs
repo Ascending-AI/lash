@@ -29,6 +29,14 @@ type Refusal = Result<crate::SessionError, crate::RuntimeError>;
 /// must refuse it with the typed `SessionStateVersionUnsupported` store error,
 /// and no provider request, tool dispatch, effect execution or durable commit
 /// may cross a seam.
+///
+/// The refused turn was in flight, so the redrive parks it with the typed
+/// `SessionStateGenerationRefused` reason (FIG-3735): an earlier execution
+/// already journaled its commands, and a durable engine must keep that
+/// journal for a build of the turn's own generation rather than end the
+/// invocation where the journal holds its next command. The tier's engine
+/// rests the parked turn — Restate pauses the invocation after the turn
+/// handler's attempt budget — and each refused run re-parks it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -135,12 +143,15 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
         journal_faults: None,
     };
     let (refusals, mut refused) = tokio::sync::mpsc::unbounded_channel::<Refusal>();
+    let admitted = reference_admitted_scope(&identity);
     let redrive: crate::ConformanceTurnAttempt = {
         let stores = Arc::clone(&stores);
         let store = make(scenario) as Arc<dyn RuntimePersistence>;
         let host = Arc::clone(&host);
         let identity = identity.clone();
         let tool = tool.clone();
+        let admitted = admitted.clone();
+        let session = Arc::clone(&predecessor) as Arc<dyn RuntimePersistence>;
         Arc::new(move |scoped| {
             let stores = Arc::clone(&stores);
             let store = SeamStore::wrap(Arc::clone(&store), successor_seam.control.clone());
@@ -148,10 +159,11 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
             let identity = identity.clone();
             let seam = successor_seam.clone();
             let tool = tool.clone();
+            let admitted = admitted.clone();
+            let session = Arc::clone(&session);
             let refusals = refusals.clone();
             Box::pin(async move {
-                seam.control.clear();
-                match Box::pin(try_build_runtime_on_host(
+                let refusal = match Box::pin(try_build_runtime_on_host(
                     stores.as_ref(),
                     store,
                     &seam,
@@ -162,54 +174,102 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
                 ))
                 .await
                 {
-                    Err(refusal) => {
-                        let _ = refusals.send(Ok(refusal));
-                        crate::ConformanceTurnEnd::Settled
-                    }
+                    Err(refusal) => Ok(refusal),
                     Ok(runtime) => {
-                        let turn = Box::pin(drive_turn_on(runtime, seam.over_scoped(scoped))).await;
-                        let end = crate::ConformanceTurnEnd::of(&turn);
-                        let _ = refusals.send(match turn {
+                        match Box::pin(drive_turn_on(runtime, seam.over_scoped(scoped))).await {
                             Err(error) => Err(error),
                             Ok(turn) => panic!(
-                                "a pre-cutover session must not be admitted by the next build: \
-                                 {turn:?}"
+                                "a pre-cutover session must not be admitted by the next build: {turn:?}"
                             ),
-                        });
-                        end
+                        }
                     }
+                };
+                let generations = match &refusal {
+                    Ok(crate::SessionError::Store { source, .. }) => {
+                        crate::SessionStateVersionRefusal::of_store_error(source)
+                    }
+                    Ok(_) => None,
+                    Err(error) => error.session_state_version_refusal(),
+                };
+                // The redrive met the generation gate with its turn in flight:
+                // the turn parks, typed, and its handler ends the attempt as
+                // every parked turn does.
+                let parked = match generations {
+                    Some(generations) => crate::park_turn_refused_by_generation(
+                        session.as_ref(),
+                        &admitted,
+                        generations,
+                        stores.clock().timestamp_ms(),
+                    )
+                    .await
+                    .expect("record the refused turn's park"),
+                    None => None,
+                };
+                let _ = refusals.send(refusal);
+                if parked.is_some() {
+                    crate::ConformanceTurnEnd::Aborted(crate::TurnFailureCause::Parked)
+                } else {
+                    crate::ConformanceTurnEnd::Settled
                 }
             })
         })
     };
-    runner
-        .run_turn(reference_admitted_scope(&identity), redrive)
+    let runs = runner
+        .run_parking_turn_until_rested(admitted, redrive)
         .await;
-    let refused = refused
-        .recv()
-        .await
-        .expect("the redrive reported its refusal");
-
-    match refused {
-        Ok(crate::SessionError::Store { source, .. }) => assert!(
-            matches!(
-                &source,
-                StoreError::SessionStateVersionUnsupported { found, current }
-                    if *found == previous
-                        && *current == crate::store::CURRENT_SESSION_STATE_VERSION
+    assert!(runs >= 1, "the redrive ran");
+    for run in 0..runs {
+        let refused = refused
+            .recv()
+            .await
+            .expect("every run of the redrive reported its refusal");
+        match refused {
+            Ok(crate::SessionError::Store { source, .. }) => assert!(
+                matches!(
+                    &source,
+                    StoreError::SessionStateVersionUnsupported { found, current }
+                        if *found == previous
+                            && *current == crate::store::CURRENT_SESSION_STATE_VERSION
+                ),
+                "run {run}: the pre-cutover generation must be refused as unsupported, got \
+                 {source:?}"
             ),
-            "the pre-cutover generation must be refused as unsupported, got {source:?}"
-        ),
-        Ok(other) => panic!("the refusal must be the typed store error, got {other:?}"),
-        Err(error) => assert_eq!(
-            error.session_state_version_refusal(),
-            Some(crate::SessionStateVersionRefusal {
-                found: previous,
-                current: crate::store::CURRENT_SESSION_STATE_VERSION,
-            }),
-            "the pre-cutover generation must be refused as unsupported, got {error:?}"
-        ),
+            Ok(other) => {
+                panic!("run {run}: the refusal must be the typed store error, got {other:?}")
+            }
+            Err(error) => assert_eq!(
+                error.session_state_version_refusal(),
+                Some(crate::SessionStateVersionRefusal {
+                    found: previous,
+                    current: crate::store::CURRENT_SESSION_STATE_VERSION,
+                }),
+                "run {run}: the pre-cutover generation must be refused as unsupported, got \
+                 {error:?}"
+            ),
+        }
     }
+    let park = predecessor
+        .load_turn_park(&identity.session_id)
+        .await
+        .expect("read the refused turn's park")
+        .expect("the refused in-flight turn is parked");
+    assert_eq!(
+        (&park.turn_id, park.reason.code(), park.attempts as usize),
+        (
+            &identity.turn_id,
+            crate::store::ParkReasonCode::SessionStateGenerationRefused,
+            runs
+        ),
+        "the turn parks once per refused run, with the typed generation refusal: {park:?}"
+    );
+    assert!(
+        matches!(
+            park.reason,
+            crate::store::ParkReason::SessionStateGenerationRefused { found, current, .. }
+                if found == previous && current == crate::store::CURRENT_SESSION_STATE_VERSION
+        ),
+        "the park names both generations: {park:?}"
+    );
     let redriven = successor_control.trace();
     assert_eq!(
         redriven

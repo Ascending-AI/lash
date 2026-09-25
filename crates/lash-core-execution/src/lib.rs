@@ -813,7 +813,7 @@ pub use runtime::{
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
     WorkerSweepPolicy, admit_session_state_generation, effect_groups_unsupported,
-    ensure_process_lease_schema_version,
+    ensure_process_lease_schema_version, park_turn_refused_by_generation,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

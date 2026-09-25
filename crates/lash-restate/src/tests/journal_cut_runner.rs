@@ -50,6 +50,16 @@ impl ConformanceTurnRunner for JournalCutRunner {
         self.inner.run_turn(admitted, attempt).await;
     }
 
+    async fn run_parking_turn_until_rested(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        attempt: ConformanceTurnAttempt,
+    ) -> usize {
+        self.inner
+            .run_parking_turn_until_rested(admitted, attempt)
+            .await
+    }
+
     async fn run_crashed_then_redriven_turn(
         &self,
         admitted: lash_core::AdmittedScope,

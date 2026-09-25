@@ -904,7 +904,12 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// a replay of that turn can rebuild its input state from the head it was
 /// admitted on after its own commit superseded the head. A pre-89 database is
 /// rejected at open and recreated; it is not migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 89;
+/// Bumped to 90 for FIG-3735: a `turn_parks` reason may be
+/// `session_state_generation_refused`, the park of an in-flight turn whose
+/// redrive the session-state generation gate refused, which a pre-90 build
+/// cannot decode. No relation changes; a pre-90 database is rejected at open
+/// and recreated; it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 90;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

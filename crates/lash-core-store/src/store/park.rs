@@ -131,6 +131,19 @@ pub enum ParkReason {
         /// The refusal message, with the divergent envelope paths.
         message: String,
     },
+    /// The turn was in flight when its session's state generation left the
+    /// range this build admits (FIG-3571, FIG-3735): the build that runs the
+    /// redrive refuses the session at admission, before any effect, and the
+    /// turn holds its claims until a build of the generation that wrote them
+    /// redrives it.
+    SessionStateGenerationRefused {
+        /// The generation the session's marker holds.
+        found: u32,
+        /// The generation this build admits.
+        current: u32,
+        /// The refusal message, naming both generations.
+        message: String,
+    },
 }
 
 /// The reason a park carries, as a plain code: the metric label and the query
@@ -147,6 +160,8 @@ pub enum ParkReasonCode {
     BindingDrift,
     /// See [`ParkReason::EffectReplayDivergence`].
     EffectReplayDivergence,
+    /// See [`ParkReason::SessionStateGenerationRefused`].
+    SessionStateGenerationRefused,
 }
 
 impl ParkReasonCode {
@@ -157,6 +172,7 @@ impl ParkReasonCode {
         Self::KeyFormatCutover,
         Self::BindingDrift,
         Self::EffectReplayDivergence,
+        Self::SessionStateGenerationRefused,
     ];
 
     /// The serde tag the matching [`ParkReason`] arm serializes under, and
@@ -168,6 +184,7 @@ impl ParkReasonCode {
             Self::KeyFormatCutover => "key_format_cutover",
             Self::BindingDrift => "binding_drift",
             Self::EffectReplayDivergence => "effect_replay_divergence",
+            Self::SessionStateGenerationRefused => "session_state_generation_refused",
         }
     }
 
@@ -179,12 +196,31 @@ impl ParkReasonCode {
             "key_format_cutover" => Some(Self::KeyFormatCutover),
             "binding_drift" => Some(Self::BindingDrift),
             "effect_replay_divergence" => Some(Self::EffectReplayDivergence),
+            "session_state_generation_refused" => Some(Self::SessionStateGenerationRefused),
             _ => None,
         }
     }
 }
 
 impl ParkReason {
+    /// The park of an in-flight turn whose session the generation gate
+    /// refused ([`ParkReason::SessionStateGenerationRefused`]).
+    #[must_use]
+    pub fn session_state_generation_refused(
+        refusal: crate::runtime_error::SessionStateVersionRefusal,
+    ) -> Self {
+        let crate::runtime_error::SessionStateVersionRefusal { found, current } = refusal;
+        Self::SessionStateGenerationRefused {
+            found,
+            current,
+            message: format!(
+                "the turn was in flight on session-state generation {found}, and this build \
+                 admits only generation {current}: its redrive was refused before any effect; \
+                 redrive it under a build of generation {found}, cancel it, or fork from before it"
+            ),
+        }
+    }
+
     /// The park reason `error` carries, when it is a refusal that parks the
     /// turn ([`RuntimeErrorCode::parks_turn`]).
     #[must_use]
@@ -222,6 +258,9 @@ impl ParkReason {
             Self::KeyFormatCutover { .. } => ParkReasonCode::KeyFormatCutover,
             Self::BindingDrift { .. } => ParkReasonCode::BindingDrift,
             Self::EffectReplayDivergence { .. } => ParkReasonCode::EffectReplayDivergence,
+            Self::SessionStateGenerationRefused { .. } => {
+                ParkReasonCode::SessionStateGenerationRefused
+            }
         }
     }
 
@@ -242,7 +281,8 @@ impl ParkReason {
             Self::ReplayDivergence { message }
             | Self::KeyFormatCutover { message }
             | Self::BindingDrift { message }
-            | Self::EffectReplayDivergence { message, .. } => message,
+            | Self::EffectReplayDivergence { message, .. }
+            | Self::SessionStateGenerationRefused { message, .. } => message,
         }
     }
 }
