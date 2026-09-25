@@ -122,11 +122,35 @@ kind = "rust_serde_shapes"
 paths = ["crates/lash-restate/src/session_driver.rs"]
 must_cover = ["RestateSessionDriveRequest", "RestateTurnDriveRequest"]
 
+# The kernel's engine vocabulary both handlers journal: the admission and
+# seal outcomes, the `LashTurn` request and output, and the `LashSession`
+# output. A shape change here reaches an old journal as a decode failure
+# unless the generation moves with it.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = [
+  "crates/lash-core-execution/src/engine/admission.rs",
+  "crates/lash-core-execution/src/engine/drive.rs",
+  "crates/lash-core-execution/src/engine/contracts.rs",
+]
+must_cover = [
+  "Admitted",
+  "AdmittedWork",
+  "AdmitRequest",
+  "AdmitVerdict",
+  "SealVerdict",
+  "RootOutcome",
+  "DriveOutcome",
+  "DriveStop",
+  "DriveRequest",
+]
+
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-restate/src/session_driver.rs"]
 symbols = [
   "DRIVE_HANDLER",
+  "TURN_OUTCOME_STATE",
   "unstamped_drive_version",
   "GENERATION_SENTINEL",
   "turn_workflow_key",

@@ -64,8 +64,9 @@ pub use contracts::{
 };
 pub use control::{NoScopeClose, ScopeCloseSink};
 pub use drive::{
-    DriveAbort, DriveOutcome, DriveStop, RootOutcome, admission_body, drive_admission_replay_key,
-    drive_admission_scope, drive_close_root_replay_key, drive_root_scope, drive_seal_replay_key,
+    DriveAbort, DriveLoop, DriveOutcome, DriveStop, RootOutcome, admission_body,
+    drive_admission_replay_key, drive_admission_scope, drive_close_root_replay_key,
+    drive_root_scope, drive_seal_replay_key,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 

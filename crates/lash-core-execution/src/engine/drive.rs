@@ -10,7 +10,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::admission::{Admitted, DriveRequestId, ParkRef, SealVerdict};
+use std::collections::BTreeSet;
+
+use super::admission::{Admitted, AdmittedWork, DriveRequestId, ParkRef, SealVerdict};
 use super::commit::TurnCommitId;
 use crate::{AdmittedScope, RuntimeError, SessionId, TurnId, TurnOutcome};
 
@@ -118,6 +120,65 @@ pub enum DriveStop {
     /// in this drive: the store still owes it work nothing will run. The
     /// drive stops rather than spin on it.
     RootAborted { root: TurnId },
+    /// The drive stopped admitting with work possibly left: `root` ran
+    /// nothing (its seal was superseded, or its queued run ceded), admission
+    /// named it again after this drive already ran it, or the caller had what
+    /// it waited for. Unlike [`Idle`](Self::Idle), admission did not answer
+    /// that nothing is pending; the session's next ask to drive re-checks.
+    Yielded { root: TurnId },
+}
+
+/// The stop rules every drive loop keeps, in process or split across an
+/// engine's handlers: one copy, so no engine's loop can lose one.
+///
+/// - A root this drive already ran is not run again; what admission found
+///   was left behind by that run, and the next ask answers it
+///   ([`DriveStop::Yielded`]).
+/// - A root whose execution the engine released is consumed, and the drive
+///   goes on; if admission names it again the drive stops
+///   ([`DriveStop::RootAborted`]) instead of calling it a second time.
+/// - A root that ran nothing (a superseded seal, or a queued run that ceded)
+///   stops the drive: another driver holds the session, or the queue has
+///   nothing this drive can claim now ([`DriveStop::Yielded`]).
+#[derive(Clone, Debug, Default)]
+pub struct DriveLoop {
+    ran: BTreeSet<TurnId>,
+    released: BTreeSet<TurnId>,
+}
+
+impl DriveLoop {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the drive runs `admitted`'s root: `Err(stop)` when it stops
+    /// instead.
+    pub fn before(&mut self, admitted: &Admitted) -> Result<(), DriveStop> {
+        let root = admitted.root();
+        if self.released.contains(root) {
+            return Err(DriveStop::RootAborted { root: root.clone() });
+        }
+        if !self.ran.insert(root.clone()) {
+            return Err(DriveStop::Yielded { root: root.clone() });
+        }
+        Ok(())
+    }
+
+    /// How the drive goes on after a root of `work` ended `outcome`:
+    /// `Some(stop)` when it stops.
+    pub fn after(&mut self, work: &AdmittedWork, outcome: &RootOutcome) -> Option<DriveStop> {
+        match outcome {
+            RootOutcome::Committed { .. } => None,
+            RootOutcome::Ceded { root } => matches!(work, AdmittedWork::Queued)
+                .then(|| DriveStop::Yielded { root: root.clone() }),
+            RootOutcome::Refused { root, .. } => Some(DriveStop::Yielded { root: root.clone() }),
+            RootOutcome::Released { root } => {
+                self.released.insert(root.clone());
+                None
+            }
+        }
+    }
 }
 
 /// What one drive of a session did: the roots it ran, in order, and why it

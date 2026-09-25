@@ -38,12 +38,11 @@ mod root;
 
 pub use reconcile::{ReconcileReport, reconcile_drive_request, reconcile_session_work};
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::engine::{
-    AdmitRequest, AdmitVerdict, Admitted, DriveAbort, DriveOutcome, DriveRequest, DriveStop,
-    RootOutcome, drive_admission_replay_key, drive_admission_scope, drive_root_scope,
+    AdmitRequest, AdmitVerdict, Admitted, DriveAbort, DriveLoop, DriveOutcome, DriveRequest,
+    DriveStop, RootOutcome, drive_admission_replay_key, drive_admission_scope, drive_root_scope,
     drive_seal_replay_key,
 };
 use crate::runtime::LashRuntime;
@@ -203,7 +202,7 @@ impl LashRuntime {
         mut done: impl FnMut(&RootRun) -> bool,
     ) -> Result<(DriveOutcome, Vec<RootRun>), DriveAbort> {
         let mut runs: Vec<RootRun> = Vec::new();
-        let mut ran_roots = BTreeSet::new();
+        let mut rules = DriveLoop::new();
         let mut ordinal = 0_u32;
         let stop = loop {
             let admitted = match Box::pin(self.admit_drive_step(controller, request, ordinal))
@@ -223,30 +222,21 @@ impl LashRuntime {
                     "a drive exhausted its admission ordinals",
                 ))
             })?;
-            // A root this drive already ran is not run again: what admission
-            // found was left behind by that run (a row it could not claim),
-            // and the next ask to drive the session answers it.
-            if !ran_roots.insert(admitted.root().clone()) {
-                break DriveStop::Idle;
+            if let Err(stop) = rules.before(&admitted) {
+                break stop;
             }
-            let queued = matches!(admitted.work(), crate::engine::AdmittedWork::Queued);
+            let work = admitted.work().clone();
             let run =
                 Box::pin(self.run_admitted_root_step(controller, admitted, sinks, live)).await?;
-            let ran_nothing = match &run.outcome {
-                RootOutcome::Committed { .. } => false,
-                RootOutcome::Ceded { .. } => queued,
-                RootOutcome::Refused { .. } | RootOutcome::Released { .. } => true,
-            };
+            let stop = rules.after(&work, &run.outcome);
             let finished = done(&run);
+            let root = run.outcome.root().clone();
             runs.push(run);
-            if finished {
-                break DriveStop::Idle;
+            if let Some(stop) = stop {
+                break stop;
             }
-            // A superseded seal means another drive holds the session; a
-            // queued run that found nothing claimable leaves the rest to the
-            // next ask. Either way this drive has nothing more to do now.
-            if ran_nothing {
-                break DriveStop::Idle;
+            if finished {
+                break DriveStop::Yielded { root };
             }
         };
         let outcome = DriveOutcome {

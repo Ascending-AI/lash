@@ -61,12 +61,13 @@
 use std::sync::{Arc, Mutex, Weak};
 
 use lash_core::engine::{
-    AdmitVerdict, Admitted, BuildGeneration, DriveAbort, DriveOutcome, DriveRequest,
+    AdmitVerdict, Admitted, BuildGeneration, DriveAbort, DriveLoop, DriveOutcome, DriveRequest,
     DriveRequestId, DriveStop, RootOutcome, drive_admission_scope, drive_root_scope,
 };
 use lash_core::{SessionDriver, SessionId, SessionWorkEngine};
 use restate_sdk::context::{
-    ContextClient, ContextSideEffects, ObjectContext, RunFuture as _, WorkflowContext,
+    ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, ObjectContext,
+    RunFuture as _, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -90,6 +91,10 @@ pub const LASH_SESSION_DRIVE_VERSION: u32 = 1;
 
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";
+
+/// The `LashTurn` state entry `run` records the root's outcome under once it
+/// ended, terminally included; `outcome` reads it back.
+const TURN_OUTCOME_STATE: &str = "outcome";
 
 /// The generation an unstamped request was written by: none this build
 /// drives.
@@ -417,10 +422,18 @@ pub trait LashSession {
     async fn drive(request: Json<RestateSessionDriveRequest>) -> HandlerResult<Json<DriveOutcome>>;
 }
 
-/// One admitted root, keyed `{session}:{root}`.
+/// One admitted root, keyed [`turn_workflow_key`]. A workflow key runs
+/// once: a drive that admits a root whose `run` already started attaches to
+/// its recorded [`outcome`](LashTurn::outcome) instead.
 #[restate_sdk::workflow]
 pub trait LashTurn {
     async fn run(request: Json<RestateTurnDriveRequest>) -> HandlerResult<Json<RootOutcome>>;
+
+    /// The outcome `run` recorded, once it ended: what it returned, or
+    /// [`RootOutcome::Released`] for a run that ended terminally without a
+    /// lash outcome. `None` while `run` has not ended.
+    #[shared]
+    async fn outcome() -> HandlerResult<Json<Option<RootOutcome>>>;
 }
 
 /// The `LashSession` object over the deployment's driver slot, journaling
@@ -544,6 +557,17 @@ impl LashTurn for LashTurnImpl {
         .await
         .map(Json)
     }
+
+    async fn outcome(
+        &self,
+        ctx: SharedWorkflowContext<'_>,
+    ) -> HandlerResult<Json<Option<RootOutcome>>> {
+        let recorded = ctx
+            .get::<Json<RootOutcome>>(TURN_OUTCOME_STATE)
+            .await?
+            .map(|Json(outcome)| outcome);
+        Ok(Json(recorded))
+    }
 }
 
 /// What `LashSession/{session}/drive` journals: admission `n` on the
@@ -577,10 +601,10 @@ async fn drive_session_journal(
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone());
     let admission_scope = drive_admission_scope(&request.session, &request.request);
     let mut ran = Vec::new();
-    // The roots whose `LashTurn` ended without a lash outcome in this drive.
-    // Every entry comes from a journaled call result, so a replay rebuilds
-    // the same set.
-    let mut released = std::collections::BTreeSet::new();
+    // The kernel's stop rules, the same ones the in-process drive keeps.
+    // Every outcome they read comes from a journaled call result, so a
+    // replay rebuilds the same state.
+    let mut rules = DriveLoop::new();
     let mut ordinal = 0_u32;
     loop {
         let scoped = controller
@@ -592,20 +616,18 @@ async fn drive_session_journal(
             .map_err(abort_failure)?;
         let stop = match verdict {
             AdmitVerdict::Admit(admitted) => {
-                let root = admitted.root().clone();
-                // Admission named a root whose execution this drive already
-                // saw released: the store still owes it work nothing will
-                // run, so the drive stops instead of calling it again.
-                if released.contains(&root) {
-                    return Ok(DriveOutcome {
-                        ran,
-                        stop: DriveStop::RootAborted { root },
-                    });
+                // A root this drive already ran, or whose execution it saw
+                // released, is never called a second time: its `LashTurn`
+                // key has run once.
+                if let Err(stop) = rules.before(&admitted) {
+                    return Ok(DriveOutcome { ran, stop });
                 }
+                let root = admitted.root().clone();
+                let work = admitted.work().clone();
                 let key = turn_workflow_key(admitted.session(), &root);
                 let outcome = match controller
                     .context()
-                    .workflow_client::<LashTurnClient>(key)
+                    .workflow_client::<LashTurnClient>(key.clone())
                     .run(Json(RestateTurnDriveRequest {
                         drive_version: LASH_SESSION_DRIVE_VERSION,
                         sender_generation: Some(generation.clone()),
@@ -615,23 +637,40 @@ async fn drive_session_journal(
                     .await
                 {
                     Ok(Json(outcome)) => outcome,
-                    // The root's execution ended terminally without a lash
-                    // outcome: an operator's verb killed it, or it was
-                    // refused. It is consumed, never a failure of the whole
-                    // drive; the next admission reads what the store decided
-                    // about the root (ADR 0104 O4).
+                    // The call ended without a lash outcome: an earlier drive
+                    // already ran this key (409), the run was refused
+                    // terminally, or an operator's verb killed it. The drive
+                    // attaches to what the run recorded; a run that recorded
+                    // nothing is released. Either way the root is consumed,
+                    // never a failure of the whole drive: the next admission
+                    // reads what the store decided about it (ADR 0104 O4).
                     Err(error) => {
-                        tracing::warn!(
-                            session_id = request.session.as_str(),
-                            root = root.as_str(),
-                            error = %error,
-                            "session drive consumed a released root execution"
-                        );
-                        released.insert(root.clone());
-                        RootOutcome::Released { root }
+                        let recorded = controller
+                            .context()
+                            .workflow_client::<LashTurnClient>(key)
+                            .outcome()
+                            .call()
+                            .await
+                            .map_err(HandlerError::from)?;
+                        match recorded {
+                            Json(Some(outcome)) => outcome,
+                            Json(None) => {
+                                tracing::warn!(
+                                    session_id = request.session.as_str(),
+                                    root = root.as_str(),
+                                    error = %error,
+                                    "session drive consumed a released root execution"
+                                );
+                                RootOutcome::Released { root }
+                            }
+                        }
                     }
                 };
+                let stop = rules.after(&work, &outcome);
                 ran.push(outcome);
+                if let Some(stop) = stop {
+                    return Ok(DriveOutcome { ran, stop });
+                }
                 ordinal = ordinal.checked_add(1).ok_or_else(|| {
                     HandlerError::from(TerminalError::new(format!(
                         "session `{}` drive `{}` exhausted its admission ordinals",
@@ -682,10 +721,20 @@ async fn run_root_journal(
     let scoped = controller
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
         .map_err(refused_scope)?;
-    driver
-        .run_root(scoped, admitted)
-        .await
-        .map_err(abort_failure)
+    let root = admitted.root().clone();
+    let (recorded, result) = match driver.run_root(scoped, admitted).await {
+        Ok(outcome) => (outcome.clone(), Ok(outcome)),
+        // A retryable end records nothing: the run is not over.
+        Err(abort @ (DriveAbort::Retry(_) | DriveAbort::Parked { .. })) => {
+            return Err(abort_failure(abort));
+        }
+        Err(abort @ DriveAbort::Refused(_)) => {
+            (RootOutcome::Released { root }, Err(abort_failure(abort)))
+        }
+    };
+    // The key runs once; a later drive that admits this root reads this.
+    controller.context().set(TURN_OUTCOME_STATE, Json(recorded));
+    result
 }
 
 #[cfg(test)]
