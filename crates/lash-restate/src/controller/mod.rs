@@ -1601,7 +1601,6 @@ pub(crate) fn restate_effect_execution(
             RestateEffectExecution::PeekAwaitEvent { invocation, key }
         }
         command @ (RuntimeEffectCommand::LlmCall { .. }
-        | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::Direct { .. }
         | RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::Trigger { .. }
@@ -1610,8 +1609,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
-        | RuntimeEffectCommand::PresentToolResult { .. }
-        | RuntimeEffectCommand::SyncExecutionEnvironment) => RestateEffectExecution::JournaledRun {
+        | RuntimeEffectCommand::PresentToolResult { .. }) => RestateEffectExecution::JournaledRun {
             envelope: RuntimeEffectEnvelope {
                 invocation,
                 command,
@@ -1619,18 +1617,21 @@ pub(crate) fn restate_effect_execution(
             },
             engine_faults: EngineFaults::Recorded,
         },
-        // A store read: a store that did not answer is this attempt's fault,
-        // never the read's recorded outcome (FIG-3683).
-        command @ RuntimeEffectCommand::LoadExecutionEnv { .. } => {
-            RestateEffectExecution::JournaledRun {
-                envelope: RuntimeEffectEnvelope {
-                    invocation,
-                    command,
-                    group,
-                },
-                engine_faults: EngineFaults::Retried,
-            }
-        }
+        // Store reads and store-backed derivations: a store or session that
+        // did not answer is this attempt's fault, never the step's recorded
+        // outcome (FIG-3683, FIG-3726). The executor marks only live faults
+        // retryable, so a deterministic outcome — the synced environment, a
+        // deterministic hook failure — is journaled as ever.
+        command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
+        | RuntimeEffectCommand::AssistantResponseHooks { .. }
+        | RuntimeEffectCommand::SyncExecutionEnvironment) => RestateEffectExecution::JournaledRun {
+            envelope: RuntimeEffectEnvelope {
+                invocation,
+                command,
+                group,
+            },
+            engine_faults: EngineFaults::Retried,
+        },
     })
 }
 pub(crate) fn restate_effect_name(invocation: &RuntimeEffectInvocation) -> String {
