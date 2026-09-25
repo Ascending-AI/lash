@@ -421,9 +421,12 @@ no probe that fires it fails that test.
 - Appending at exactly `array.length` is supported. An assignment that skips an
   index would create holes the v1 dense-list representation cannot distinguish
   from explicit `undefined`, so it rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`.
-  Negative and other non-index writes would create named object properties and
-  reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; neither path mutates an
-  element.
+  An elision in an array literal — a hole anywhere, including a trailing one
+  as in `[1, , ]`; a single trailing comma is not an elision — creates the
+  same hole, so it rejects statically with the same code rather than silently
+  storing `undefined`. Negative and other non-index writes would create named
+  object properties and reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`;
+  neither path mutates an element.
 - Deleting an object field preserves aliases and returns the ECMA boolean.
   Deleting a present dense-array index would create a hole, so it rejects at
   runtime with `TS_DELETE_ARRAY_INDEX_UNSUPPORTED` and directs the author to
@@ -660,8 +663,9 @@ The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
 the durable VM callback driver. `sort` is stable, mutates and returns its
 receiver; `toSorted`, `toReversed`, `toSpliced`, and `with` return fresh arrays.
 The array representation is dense: `arr.length = 0` is accepted, while writes
-that would create holes reject as `TS_SPARSE_ARRAY_UNSUPPORTED` instead of
-silently changing callback semantics. `push`, `pop`, `shift`, and `unshift`
+that would create holes, and elisions in array literals, reject as
+`TS_SPARSE_ARRAY_UNSUPPORTED` instead of silently changing callback
+semantics. `push`, `pop`, `shift`, and `unshift`
 mutate the receiver in place with their ECMA return values — the new length for
 `push`/`unshift`, the removed element or `undefined` for `pop`/`shift` — and
 compose with the callback methods, so accumulating into an array inside

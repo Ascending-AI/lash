@@ -68,6 +68,7 @@ pub enum DiagnosticCode {
     FunctionRedeclarationUnsupported,
     ReturnOutsideFunction,
     LoopControlOutsideLoop,
+    SparseArrayUnsupported,
     UnsupportedStatement,
     UnsupportedExpression,
     InvalidAst,
@@ -148,6 +149,7 @@ impl DiagnosticCode {
         Self::FunctionRedeclarationUnsupported,
         Self::ReturnOutsideFunction,
         Self::LoopControlOutsideLoop,
+        Self::SparseArrayUnsupported,
         Self::UnsupportedStatement,
         Self::UnsupportedExpression,
         Self::InvalidAst,
@@ -271,6 +273,9 @@ impl DiagnosticCode {
             Self::FunctionRedeclarationUnsupported => {
                 "give each declaration its own name; hold a value that changes in a `let`"
             }
+            Self::SparseArrayUnsupported => {
+                "write every element, spelling an empty slot as `undefined` — `[0, undefined, 2]`"
+            }
             Self::UnsupportedStatement | Self::UnsupportedExpression => {
                 "rewrite with the constructs the dialect prompt lists"
             }
@@ -354,6 +359,7 @@ impl DiagnosticCode {
             | Self::FunctionNotPersisted
             | Self::NonLiftableCapture
             | Self::DateImmutable
+            | Self::SparseArrayUnsupported
             // Stricter than ECMA-262 exactly where `tsc --strict` rejects
             // the program (ADR 0064, FIG-3651).
             | Self::DeleteNonReferenceUnsupported
@@ -463,6 +469,7 @@ impl DiagnosticCode {
             Self::FunctionRedeclarationUnsupported => "TS_FUNCTION_REDECLARATION_UNSUPPORTED",
             Self::ReturnOutsideFunction => "TS_RETURN_OUTSIDE_FUNCTION",
             Self::LoopControlOutsideLoop => "TS_LOOP_CONTROL_OUTSIDE_LOOP",
+            Self::SparseArrayUnsupported => "TS_SPARSE_ARRAY_UNSUPPORTED",
             Self::UnsupportedStatement => "TS_STATEMENT_UNSUPPORTED",
             Self::UnsupportedExpression => "TS_EXPRESSION_UNSUPPORTED",
             Self::InvalidAst => "TS_INVALID_SHARED_AST",

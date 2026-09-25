@@ -362,8 +362,7 @@ impl Checker {
 
     fn expr(&mut self, expr: &Expr) -> Result<(), Diagnostic> {
         match expr {
-            Expr::Undefined
-            | Expr::Null
+            Expr::Null
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)

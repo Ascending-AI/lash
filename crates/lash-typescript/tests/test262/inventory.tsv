@@ -216,6 +216,7 @@ typescript	accessors
 typescript	annotations
 typescript	array-holes
 typescript	array-index-delete
+typescript	array-literal-elisions
 typescript	array-named-properties
 typescript	as-casts
 typescript	async-array-callbacks

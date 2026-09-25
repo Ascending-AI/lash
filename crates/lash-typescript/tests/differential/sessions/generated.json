@@ -310,8 +310,8 @@
           }
         },
         {
-          "source": "class A { static #x = 1; }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "function f(o: any) { return #x in o; }\n",
+          "reject": "TS_PRIVATE_NAME_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -1916,8 +1916,8 @@
           }
         },
         {
-          "source": "const f = Function('return 1');\n",
-          "reject": "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED",
+          "source": "Uint8Array.fromBase64('AAA=');\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -3363,8 +3363,8 @@
           }
         },
         {
-          "source": "const d = new Date(0); d.setUTCHours(1);\n",
-          "reject": "TS_DATE_IMMUTABLE",
+          "source": "JSON.stringify('\\ud800');\n",
+          "reject": "TS_LONE_SURROGATE_LITERAL_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5030,8 +5030,8 @@
           }
         },
         {
-          "source": "function F() { } const o = new F();\n",
-          "reject": "TS_NEW_UNSUPPORTED",
+          "source": "const p: any = 1; p.finally(() => { });\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5365,7 +5365,7 @@
           }
         },
         {
-          "source": "class A { }\n",
+          "source": "class A { #x = 1; }\n",
           "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
@@ -5704,8 +5704,8 @@
           }
         },
         {
-          "source": "function f(o: any) { return #x in o; }\n",
-          "reject": "TS_PRIVATE_NAME_UNSUPPORTED",
+          "source": "const o = { get x() { return 1; } };\n",
+          "reject": "TS_ACCESSOR_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -6514,8 +6514,8 @@
           }
         },
         {
-          "source": "const m = import('mod');\n",
-          "reject": "TS_DYNAMIC_IMPORT_UNSUPPORTED",
+          "source": "class A { #x = 1; }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -7967,8 +7967,8 @@
           }
         },
         {
-          "source": "const r = /a/v;\n",
-          "reject": "TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED",
+          "source": "import bytes from 'mod' with { type: 'bytes' };\n",
+          "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8604,8 +8604,8 @@
           }
         },
         {
-          "source": "for await (const x of [1]) { }\n",
-          "reject": "TS_FOR_OF_UNSUPPORTED",
+          "source": "'a'.isWellFormed();\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8999,8 +8999,8 @@
           }
         },
         {
-          "source": "const o: any = {}; o.__lookupGetter__('x');\n",
-          "reject": "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
+          "source": "function f() { return new.target; }\n",
+          "reject": "TS_META_PROPERTY_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9462,8 +9462,8 @@
           }
         },
         {
-          "source": "const o: any = {}; o.__lookupGetter__('x');\n",
-          "reject": "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
+          "source": "Math.sumPrecise([1, 2]);\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9554,8 +9554,8 @@
           }
         },
         {
-          "source": "class A { #m() { } }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "const o: any = {}; o.__proto__ = {};\n",
+          "reject": "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -10015,8 +10015,8 @@
           }
         },
         {
-          "source": "@dec class A { }\n",
-          "reject": "TS_DECORATOR_UNSUPPORTED",
+          "source": "const r = /a/d;\n",
+          "reject": "TS_REGEX_INDICES_FLAG_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],

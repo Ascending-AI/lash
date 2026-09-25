@@ -340,6 +340,33 @@ fn reserved_value_identifiers_refuse_only_at_the_top_level() {
     }
 }
 
+/// A hole in an array literal is a sparse array, which the dense v1
+/// representation cannot express; it refuses statically rather than filling
+/// the slot with `undefined` (FIG-3702). A trailing comma alone is not an
+/// elision, and a hole in a destructuring *pattern* skips an element without
+/// creating one.
+#[test]
+fn array_literal_elisions_reject_but_commas_and_pattern_holes_do_not() {
+    for source in [
+        "const a = [, 2];",
+        "const a = [0, , 2];",
+        "const a = [1, , ];",
+        "const a = [0, , 2, , 4];",
+        "const a = [[0, , 2]];",
+        "const a = [1, ...[0, , 2]];",
+    ] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        assert_eq!(error.code, Code::SparseArrayUnsupported, "{error}");
+    }
+    for source in [
+        "const a = [1,];",
+        "const a = [];",
+        "const [x, , z] = [1, 2, 3]; finish(z);",
+    ] {
+        lash_typescript::validate(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+}
+
 #[test]
 fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
     for source in [
