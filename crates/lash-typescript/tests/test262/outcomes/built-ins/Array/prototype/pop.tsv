@@ -1,0 +1,23 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/pop/S15.4.4.6_A1.1_T1.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/pop/S15.4.4.6_A1.2_T1.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/pop/S15.4.4.6_A2_T1.js	fail	FIG-3700
+test/built-ins/Array/prototype/pop/S15.4.4.6_A2_T2.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/pop/S15.4.4.6_A2_T3.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/pop/S15.4.4.6_A2_T4.js	fail	FIG-3700
+test/built-ins/Array/prototype/pop/S15.4.4.6_A3_T1.js	fail	FIG-3700
+test/built-ins/Array/prototype/pop/S15.4.4.6_A3_T2.js	fail	FIG-3700
+test/built-ins/Array/prototype/pop/S15.4.4.6_A3_T3.js	fail	FIG-3700
+test/built-ins/Array/prototype/pop/S15.4.4.6_A4_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/pop/S15.4.4.6_A4_T2.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/pop/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/pop/clamps-to-integer-limit.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/pop/length-near-integer-limit.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/pop/length.js	pass	-
+test/built-ins/Array/prototype/pop/name.js	pass	-
+test/built-ins/Array/prototype/pop/prop-desc.js	pass	-
+test/built-ins/Array/prototype/pop/set-length-array-is-frozen.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/pop/set-length-array-length-is-non-writable.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/pop/set-length-zero-array-is-frozen.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/pop/set-length-zero-array-length-is-non-writable.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/pop/throws-with-string-receiver.js	refused	TS_METHOD_UNSUPPORTED

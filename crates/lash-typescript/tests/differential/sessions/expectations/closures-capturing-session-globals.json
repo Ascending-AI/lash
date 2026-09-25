@@ -1,0 +1,50 @@
+{
+  "id": "closures-capturing-session-globals",
+  "about": "a closure reads the session global it captures",
+  "probe": [
+    "base",
+    "add",
+    "value"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "const base = 10;\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "base": "number 10",
+          "add": "unbound",
+          "value": "unbound"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "const add = (value) => value + base;\nconsole.log(add(1));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "11"
+        ],
+        "probes": {
+          "base": "number 10",
+          "add": "function undefined",
+          "value": "unbound"
+        },
+        "closures": [
+          "add"
+        ]
+      }
+    }
+  ]
+}

@@ -162,13 +162,22 @@ fn test262() -> Vec<CorpusProgram> {
             .map(str::to_owned)
             .collect::<Vec<_>>()
     };
-    // The outcome record's `outcomes/<shard>.tsv` files, read as one table.
+    // The outcome record's `outcomes/**/*.tsv` shards, read as one table.
     let outcomes_directory = data_path("outcomes");
-    let mut outcome_files = std::fs::read_dir(&outcomes_directory)
-        .unwrap_or_else(|error| panic!("read {}: {error}", outcomes_directory.display()))
-        .map(|entry| entry.expect("an outcomes entry").path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "tsv"))
-        .collect::<Vec<_>>();
+    let mut outcome_files = Vec::new();
+    let mut pending = vec![outcomes_directory.clone()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+        {
+            let path = entry.expect("an outcomes entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "tsv") {
+                outcome_files.push(path);
+            }
+        }
+    }
     outcome_files.sort();
     let passing = outcome_files
         .iter()

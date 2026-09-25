@@ -1,0 +1,68 @@
+{
+  "id": "global-this-reads-in-functions",
+  "about": "a globalThis read at the top level, in a function and in a nested closure reads the global's current value, again after a reload (FIG-3620)",
+  "probe": [
+    "count",
+    "readCount",
+    "outer",
+    "inner",
+    "readAgain",
+    "again"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "globalThis.count = 1;\nfunction readCount() { return globalThis.count; }\nconst outer = () => {\n  const inner = () => globalThis.count;\n  return inner();\n};\nconsole.log(globalThis.count, readCount(), outer());\nglobalThis.count = 2;\nconsole.log(globalThis.count, readCount(), outer());\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1 1 1",
+          "2 2 2"
+        ],
+        "probes": {
+          "count": "number 2",
+          "readCount": "function undefined",
+          "outer": "function undefined",
+          "inner": "unbound",
+          "readAgain": "unbound",
+          "again": "unbound"
+        },
+        "closures": [
+          "readCount",
+          "outer"
+        ]
+      }
+    },
+    {
+      "source": "function readAgain() { return globalThis.count; }\nconst again = () => (() => globalThis.count)();\nconsole.log(globalThis.count, readAgain(), again(), [1].map(() => globalThis.count));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 2 2 [2]"
+        ],
+        "probes": {
+          "count": "number 2",
+          "readCount": "function undefined",
+          "outer": "function undefined",
+          "inner": "unbound",
+          "readAgain": "function undefined",
+          "again": "function undefined"
+        },
+        "closures": [
+          "readCount",
+          "outer",
+          "readAgain",
+          "again"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+flag	raw	skip	ticket-ruling:FIG-3646:the dialect is strict-mode only (ADR 0062: every cell is one strict script), and Test262 runs a raw test once, in non-strict mode only	-

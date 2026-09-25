@@ -1,0 +1,3 @@
+# test262-path	class	qualifier
+test/built-ins/Object/getOwnPropertySymbols/length.js	pass	-
+test/built-ins/Object/getOwnPropertySymbols/name.js	pass	-

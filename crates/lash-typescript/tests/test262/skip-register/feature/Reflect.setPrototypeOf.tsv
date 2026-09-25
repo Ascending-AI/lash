@@ -1,0 +1,5 @@
+# test262-path	excluding-census-row
+test/built-ins/Object/prototype/setPrototypeOf-with-different-values.js	feature:Reflect.setPrototypeOf
+test/built-ins/Object/prototype/setPrototypeOf-with-non-circular-values-__proto__.js	feature:Reflect.setPrototypeOf
+test/built-ins/Object/prototype/setPrototypeOf-with-non-circular-values.js	feature:Reflect.setPrototypeOf
+test/built-ins/Object/prototype/setPrototypeOf-with-same-value.js	feature:Reflect.setPrototypeOf

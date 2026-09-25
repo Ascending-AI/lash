@@ -1,0 +1,3 @@
+# test262-path	excluding-census-row
+test/built-ins/Array/prototype/flatMap/array-like-objects-nested.js	feature:Int32Array
+test/built-ins/Array/prototype/flatMap/array-like-objects-typedarrays.js	feature:Int32Array

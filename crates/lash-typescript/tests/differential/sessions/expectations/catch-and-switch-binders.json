@@ -1,0 +1,31 @@
+{
+  "id": "catch-and-switch-binders",
+  "about": "a catch binder and a switch-case declaration end with their blocks",
+  "probe": [
+    "caught",
+    "picked",
+    "choice"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "try {\n  throw new Error(\"boom\");\n} catch (caught) {\n  console.log(caught.message);\n}\nconst choice = 2;\nswitch (choice) {\n  case 2: {\n    const picked = \"two\";\n    console.log(picked);\n    break;\n  }\n  default:\n    console.log(\"other\");\n}\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "boom",
+          "two"
+        ],
+        "probes": {
+          "caught": "unbound",
+          "picked": "unbound",
+          "choice": "number 2"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

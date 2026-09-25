@@ -1,0 +1,14 @@
+# test262-path	class	qualifier
+test/language/expressions/typeof/boolean.js	pass	-
+test/language/expressions/typeof/built-in-exotic-objects-no-call.js	refused	TS_THIS_UNSUPPORTED
+test/language/expressions/typeof/built-in-functions.js	pass	-
+test/language/expressions/typeof/built-in-ordinary-objects-no-call.js	pass	-
+test/language/expressions/typeof/get-value-ref-err.js	refused	TS_UNKNOWN_BINDING
+test/language/expressions/typeof/get-value.js	refused	TS_METHOD_UNSUPPORTED
+test/language/expressions/typeof/native-call.js	refused	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED
+test/language/expressions/typeof/null.js	pass	-
+test/language/expressions/typeof/number.js	pass	-
+test/language/expressions/typeof/string.js	pass	-
+test/language/expressions/typeof/syntax.js	refused	TS_EVAL_UNSUPPORTED
+test/language/expressions/typeof/undefined.js	pass	-
+test/language/expressions/typeof/unresolvable-reference.js	pass	-

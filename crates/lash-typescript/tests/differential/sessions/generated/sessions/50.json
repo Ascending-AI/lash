@@ -1,0 +1,114 @@
+{
+  "seed": 50,
+  "probe": [
+    "alpha",
+    "beta",
+    "count",
+    "delta",
+    "entry",
+    "gamma",
+    "iota",
+    "n",
+    "phi",
+    "psi",
+    "rest",
+    "rho",
+    "tau",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "const psi = (n, ...rest) => 7 + rest.length;\nconsole.log(psi(5));\nfunction gamma(count) {\n  var alpha = [];\n  return Math.round(psi(count));\n}\nconsole.log(gamma((Math.min(1, 8) % 2)));\nvar phi = 'x';\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "7",
+          "7"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "function undefined",
+          "iota": "unbound",
+          "n": "unbound",
+          "phi": "string \"x\"",
+          "psi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "tau": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "gamma",
+          "psi"
+        ]
+      }
+    },
+    {
+      "source": "var beta = ('Lash' === ('b.c'.padStart(5, '*') + phi.padStart(5, '*')));\nconst tau = { h: 7 };\nconsole.info(phi, ('ab' === 'a,b'), String(4).includes('a'));\ntau.h **= 1;\nconst delta = ((-4)).toFixed(1);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "x false false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "boolean false",
+          "count": "unbound",
+          "delta": "string \"-4.0\"",
+          "entry": "unbound",
+          "gamma": "function undefined",
+          "iota": "unbound",
+          "n": "unbound",
+          "phi": "string \"x\"",
+          "psi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "tau": "object {\"h\":7}",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "gamma",
+          "psi"
+        ]
+      }
+    },
+    {
+      "source": "globalThis.phi = (delta.slice(0, 2) + 'hi'.padStart(5, '*'));\ntau.h = ((7 % 1) ** 2);\nconsole.info(tau);\nif ((beta || (phi === 'ab'))) {\n  console.log(beta, 2);\n} else {\n  const iota = new TypeError('ab');\n  console.log(iota.name, iota.message, String(iota), iota instanceof Error);\n}\nfor (const entry of delta) {\n  const zeta = beta;\n  const rho = new RegExp('[a-z]+', 'i');\n  console.log(rho.test('ab'), rho.source, rho.flags, rho.lastIndex, String(rho));\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "{\"h\":0}",
+          "TypeError ab TypeError: ab true",
+          "true [a-z]+ i 0 /[a-z]+/i",
+          "true [a-z]+ i 0 /[a-z]+/i",
+          "true [a-z]+ i 0 /[a-z]+/i",
+          "true [a-z]+ i 0 /[a-z]+/i"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "boolean false",
+          "count": "unbound",
+          "delta": "string \"-4.0\"",
+          "entry": "unbound",
+          "gamma": "function undefined",
+          "iota": "unbound",
+          "n": "unbound",
+          "phi": "string \"-4***hi\"",
+          "psi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "tau": "object {\"h\":0}",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "gamma",
+          "psi"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Temporal	skip	ticket-ruling:FIG-1413:Temporal — the whole surface is time-zone and calendar data, which is host-dependent for the same reason the locale surfaces are rejected	-

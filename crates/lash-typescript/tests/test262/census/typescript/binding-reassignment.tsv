@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	binding-reassignment	rejected	TS_ASSIGN_CONST	const c = 1; c = 2; // tsc TS2588

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	decorators	rejected	TS_DECORATOR_UNSUPPORTED	@dec class A { }

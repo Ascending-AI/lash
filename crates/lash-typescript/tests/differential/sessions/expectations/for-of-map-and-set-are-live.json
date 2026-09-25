@@ -1,0 +1,39 @@
+{
+  "id": "for-of-map-and-set-are-live",
+  "about": "a for...of over a Map or a Set visits entries added during the loop and skips ones deleted before their turn (FIG-3625)",
+  "probe": [
+    "counts",
+    "tags",
+    "key",
+    "value",
+    "tag"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const counts = new Map([['a', 1], ['b', 2], ['c', 3]]);\nfor (const [key, value] of counts) {\n  if (key === 'a') {\n    counts.delete('b');\n    counts.set('d', 4);\n    counts.set('c', 30);\n  }\n  console.log(key, value);\n}\nconst tags = new Set(['x']);\nfor (const tag of tags) {\n  if (tags.size < 3) {\n    tags.add(tag + 'y');\n  }\n  console.log(tag);\n}\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "a 1",
+          "c 30",
+          "d 4",
+          "x",
+          "xy",
+          "xyy"
+        ],
+        "probes": {
+          "counts": "object {}",
+          "tags": "object {}",
+          "key": "unbound",
+          "value": "unbound",
+          "tag": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

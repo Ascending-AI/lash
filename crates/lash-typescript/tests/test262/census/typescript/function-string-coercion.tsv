@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	function-string-coercion	rejected	TS_FUNCTION_STRING_COERCION	const s = '' + (() => 1);

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	async-calls-unawaited	rejected	TS_AWAIT_REQUIRED	async function f() { return 1; } f();

@@ -1,0 +1,57 @@
+{
+  "id": "top-level-declarations",
+  "about": "let, const, var and function declarations at a cell's top level are session globals",
+  "probe": [
+    "a",
+    "b",
+    "c",
+    "d"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "let a = 1;\nconst b = [2, 3];\nvar c = { three: 3 };\nfunction d() { return 4; }\nconsole.log(a, b, c, d());\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1 [2,3] {\"three\":3} 4"
+        ],
+        "probes": {
+          "a": "number 1",
+          "b": "object [2,3]",
+          "c": "object {\"three\":3}",
+          "d": "function undefined"
+        },
+        "closures": [
+          "d"
+        ]
+      }
+    },
+    {
+      "source": "console.log(a + b.length + c.three);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "6"
+        ],
+        "probes": {
+          "a": "number 1",
+          "b": "object [2,3]",
+          "c": "object {\"three\":3}",
+          "d": "function undefined"
+        },
+        "closures": [
+          "d"
+        ]
+      }
+    }
+  ]
+}

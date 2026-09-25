@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	stable-typedarray-sort	skip	ticket-ruling:FIG-1413:stable-typedarray-sort	-

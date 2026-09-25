@@ -1,0 +1,159 @@
+{
+  "seed": 10,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "entry",
+    "field",
+    "gamma",
+    "iota",
+    "item",
+    "omega",
+    "problem",
+    "psi",
+    "rest",
+    "rho",
+    "sigma",
+    "tau",
+    "theta",
+    "turn1",
+    "turn2",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "let psi = true;\nlet alpha = { b: 'Lash' };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "object {\"b\":\"Lash\"}",
+          "beta": "unbound",
+          "chi": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "psi": "boolean true",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const entry of [(5 % 3), 11]) {\n  console.log(alpha, psi);\n  if (('  pad ' === '  pad '.split(',').reverse().join('|'))) {\n    console.info(alpha);\n  }\n}\nif (false) {\n  alpha.b = Object.keys(alpha).join('').split(',').reverse().join('|');\n  alpha.b = 'zz';\n} else {\n  for (const field in alpha) {\n    console.log(field);\n    console.log(field, field, field);\n  }\n}\nfor (const field in alpha) {\n  console.log(field);\n}\ntry {\n  console.warn(0);\n  if ((6 >= 1)) {\n    console.log(true, ((!true ? 7 : 2) * 1));\n    alpha.b = 'zz';\n  } else {\n    const sigma = (3 >= Object.keys(alpha).join('').length);\n    const beta = 2;\n  }\n} catch {\n  console.log('caught');\n}\n{\n  const alpha = new URL('https://example.com/p?x=1');\n  console.log(alpha.href, alpha.pathname, alpha.searchParams.get('x'), alpha.origin);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "{\"b\":\"Lash\"} true",
+          "{\"b\":\"Lash\"}",
+          "{\"b\":\"Lash\"} true",
+          "{\"b\":\"Lash\"}",
+          "b",
+          "b b b",
+          "b",
+          "0",
+          "true 2",
+          "https://example.com/p?x=1 /p 1 https://example.com"
+        ],
+        "probes": {
+          "alpha": "object {\"b\":\"zz\"}",
+          "beta": "unbound",
+          "chi": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "psi": "boolean true",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log('a,b', 1, psi);\nswitch ((8.5 + 'b.c'.length) % 3) {\n  case 0: {\n    {\n      alpha.b = 'x';\n      let chi = (psi instanceof Map);\n      const omega = new RegExp('[a-z]+', 'i');\n      console.log(omega.test('  pad '), omega.source, omega.flags, omega.lastIndex, String(omega));\n    }\n    break;\n  }\n  case 1: {\n    let turn1 = 0;\n    do {\n      turn1++;\n      let zeta = ['x'.length, Math.min(turn1, 8)];\n    } while (turn1 < 3);\n  }\n  default: {\n    for (const field in alpha) {\n      console.log(field);\n    }\n  }\n}\nvar rho = { ...{ a: [6, 6, Number.parseInt('a,b' + '7', 10)] } };\nconsole.info(true, 2);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "a,b 1 true",
+          "b",
+          "true 2"
+        ],
+        "probes": {
+          "alpha": "object {\"b\":\"zz\"}",
+          "beta": "unbound",
+          "chi": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "psi": "boolean true",
+          "rest": "unbound",
+          "rho": "object {\"a\":[6,6,null]}",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let turn2 = 0;\nwhile (turn2 < 1) {\n  turn2++;\n  alpha.b = 'zz';\n}\nswitch (Number.parseInt('a,b' + '7', 10) % 3) {\n  case 0: {\n    rho.a.push(turn2);\n    let omega = 'ab';\n    break;\n  }\n  case 1: {\n    const iota = (item) => 9;\n    console.log(iota('Lash'.indexOf('b')));\n    try {\n      console.info(psi, alpha, { ...rho, z: 0 });\n      throw new Error('  pad ');\n    } catch (problem) {\n      console.log(problem.name, problem.message, problem instanceof RangeError);\n    } finally {\n      globalThis.rho = { a: [turn2, 1] };\n    }\n    break;\n  }\n  default: {\n    for (const field in alpha) {\n      console.log(field);\n    }\n  }\n}\nvar tau = true;\nlet gamma = 'b.c'.padStart(5, '*');\nconst theta = (item, ...rest) => Math.floor(3) + rest.length;\nconsole.log(theta((1 * (3 ** 2))));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "b",
+          "3"
+        ],
+        "probes": {
+          "alpha": "object {\"b\":\"zz\"}",
+          "beta": "unbound",
+          "chi": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "string \"**b.c\"",
+          "iota": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "psi": "boolean true",
+          "rest": "unbound",
+          "rho": "object {\"a\":[6,6,null]}",
+          "sigma": "unbound",
+          "tau": "boolean true",
+          "theta": "function undefined",
+          "turn1": "unbound",
+          "turn2": "number 1",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "theta"
+        ]
+      }
+    }
+  ]
+}

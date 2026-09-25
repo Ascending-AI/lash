@@ -1,0 +1,16 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/findLast/array-altered-during-loop.js	pass	-
+test/built-ins/Array/prototype/findLast/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findLast/length.js	pass	-
+test/built-ins/Array/prototype/findLast/maximum-index.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findLast/name.js	pass	-
+test/built-ins/Array/prototype/findLast/predicate-call-parameters.js	pass	-
+test/built-ins/Array/prototype/findLast/predicate-call-this-strict.js	pass	-
+test/built-ins/Array/prototype/findLast/predicate-called-for-each-array-property.js	pass	-
+test/built-ins/Array/prototype/findLast/predicate-is-not-callable-throws.js	pass	-
+test/built-ins/Array/prototype/findLast/predicate-not-called-on-empty-array.js	pass	-
+test/built-ins/Array/prototype/findLast/prop-desc.js	pass	-
+test/built-ins/Array/prototype/findLast/return-abrupt-from-predicate-call.js	pass	-
+test/built-ins/Array/prototype/findLast/return-abrupt-from-property.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findLast/return-abrupt-from-this-length.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findLast/return-abrupt-from-this.js	refused	TS_METHOD_UNSUPPORTED

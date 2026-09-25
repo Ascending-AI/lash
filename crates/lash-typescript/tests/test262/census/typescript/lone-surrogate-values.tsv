@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	lone-surrogate-values	rejected	TS_LONE_SURROGATE_UNSUPPORTED	const s = '😀'[0];

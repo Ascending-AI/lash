@@ -1,0 +1,9 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/toLocaleString/S15.4.4.3_A1_T1.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toLocaleString/S15.4.4.3_A3_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/toLocaleString/invoke-element-tolocalestring.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toLocaleString/length.js	pass	-
+test/built-ins/Array/prototype/toLocaleString/name.js	pass	-
+test/built-ins/Array/prototype/toLocaleString/primitive_this_value.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/toLocaleString/primitive_this_value_getter.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toLocaleString/prop-desc.js	pass	-

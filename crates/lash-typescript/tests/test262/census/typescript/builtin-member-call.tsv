@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	builtin-member-call	rejected	TS_METHOD_UNSUPPORTED	const x = Math.extra();

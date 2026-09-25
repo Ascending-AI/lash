@@ -1,0 +1,20 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/shift/S15.4.4.9_A1.1_T1.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/shift/S15.4.4.9_A1.2_T1.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/shift/S15.4.4.9_A2_T1.js	fail	FIG-3700
+test/built-ins/Array/prototype/shift/S15.4.4.9_A2_T2.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/shift/S15.4.4.9_A2_T3.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/shift/S15.4.4.9_A2_T4.js	fail	FIG-3700
+test/built-ins/Array/prototype/shift/S15.4.4.9_A2_T5.js	fail	FIG-3700
+test/built-ins/Array/prototype/shift/S15.4.4.9_A3_T3.js	fail	FIG-3700
+test/built-ins/Array/prototype/shift/S15.4.4.9_A4_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/shift/S15.4.4.9_A4_T2.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/shift/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/shift/length.js	pass	-
+test/built-ins/Array/prototype/shift/name.js	pass	-
+test/built-ins/Array/prototype/shift/prop-desc.js	pass	-
+test/built-ins/Array/prototype/shift/set-length-array-is-frozen.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/shift/set-length-array-length-is-non-writable.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/shift/set-length-zero-array-is-frozen.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/shift/set-length-zero-array-length-is-non-writable.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/shift/throws-when-this-value-length-is-writable-false.js	refused	TS_METHOD_UNSUPPORTED

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	export-star-as-namespace-from-module	rejected	TS_IMPORT_EXPORT_UNSUPPORTED	export * as ns from 'mod';

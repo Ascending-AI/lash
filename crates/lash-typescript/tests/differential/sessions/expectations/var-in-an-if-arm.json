@@ -1,0 +1,26 @@
+{
+  "id": "var-in-an-if-arm",
+  "about": "a var in an if arm is a session global",
+  "probe": [
+    "lifted"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "if (true) {\n  var lifted = \"up\";\n}\nconsole.log(lifted);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "up"
+        ],
+        "probes": {
+          "lifted": "string \"up\""
+        },
+        "closures": []
+      }
+    }
+  ]
+}

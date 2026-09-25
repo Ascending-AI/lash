@@ -1,0 +1,19 @@
+{
+  "name": "regexp-match",
+  "create": "const value = /(?<word>[a-z]+)(\\d)?/.exec('  lash9');",
+  "uses": "console.log(value.index, value.input, value.groups.word, value[2], value.length, Array.isArray(value));",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "2   lash9 lash 9 3 true"
+      ],
+      "probes": {}
+    }
+  ]
+}

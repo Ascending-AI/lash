@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Int32Array	skip	ticket-ruling:FIG-1413:Int32Array	-

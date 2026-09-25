@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	async-iteration	rejected	TS_FOR_OF_UNSUPPORTED	for await (const x of [1]) { }

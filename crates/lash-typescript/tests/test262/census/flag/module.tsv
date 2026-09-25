@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+flag	module	skip	ticket-ruling:FIG-3646:a cell is a Script, never module code (ADR 0062), so a test that must run as a module has no goal symbol to run under	-

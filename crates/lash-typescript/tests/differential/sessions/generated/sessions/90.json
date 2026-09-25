@@ -1,0 +1,69 @@
+{
+  "seed": 90,
+  "probe": [
+    "alpha",
+    "chi",
+    "entry",
+    "field",
+    "local",
+    "omega",
+    "phi",
+    "problem",
+    "rho",
+    "turn1",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "for (const entry of []) {\n  let omega = { d: true, h: [8] };\n}\nlet turn1 = 0;\nwhile (turn1 < 2) {\n  turn1++;\n  console.info((true ? (-(turn1 ^ turn1)) : 8));\n  {\n    console.log(Math.min(((-turn1) >>> Math.min(turn1, turn1)), Math.max(turn1, Math.min(5.5, turn1))), 10);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "1 10",
+          "0",
+          "2 10"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "local": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rho": "unbound",
+          "turn1": "number 2",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const field in { d: ('zz' === 'zz'), c: 'ab', g: (3 >= turn1) }) {\n  console.log(field);\n  const phi = { g: 'zz'.replace(/[a-z]/g, '_').toUpperCase() };\n}\nconsole.log([[Number.parseInt('b.c'.split(',').reverse().join('|') + '7', 10)], [2]].flat().includes(2));\nconst alpha = true;\nswitch (turn1 % 3) {\n  case 0: {\n    try {\n      const rho = new URLSearchParams({ q: 'a b', r: '+' });\n      console.log(rho.toString(), rho.get('b'), rho.getAll('b'), rho.size, rho.has('q'));\n      throw new SyntaxError('b.c');\n    } catch (problem) {\n      console.log(problem.name, problem.message, problem instanceof RangeError);\n    }\n    console.log(alpha);\n    break;\n  }\n  default: {\n    const chi = (value) => { const local = 6; return (turn1 % (local - turn1)); };\n    console.log(chi(turn1));\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "d",
+          "c",
+          "g",
+          "true",
+          "2"
+        ],
+        "probes": {
+          "alpha": "boolean true",
+          "chi": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "local": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rho": "unbound",
+          "turn1": "number 2",
+          "value": "unbound"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/binding-cells-stay-in-their-cell.json.
+
+session binding-cells-stay-in-their-cell
+about closures share the bindings they assign, per call and per iteration, and only the values they leave reach the session (FIG-3707)
+probe counts counter a b c fns i f
+cell
+const counts = [];
+{
+  const counter = () => { let c = 0; return () => { c += 1; return c; }; };
+  const a = counter();
+  const b = counter();
+  a();
+  a();
+  b();
+  counts.push(a(), b());
+  const fns = [];
+  for (let i = 0; i < 3; i++) {
+    fns.push(() => i);
+    i += 0;
+  }
+  counts.push(...fns.map((f) => f()));
+}
+console.log(JSON.stringify(counts));
+cell
+counts.push(counts.length);
+console.log(JSON.stringify(counts));
+end

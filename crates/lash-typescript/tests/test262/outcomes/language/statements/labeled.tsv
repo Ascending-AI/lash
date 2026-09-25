@@ -1,0 +1,14 @@
+# test262-path	class	qualifier
+test/language/statements/labeled/S12.12_A1_T1.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/labeled/continue.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/labeled/cptn-break.js	refused	TS_EVAL_UNSUPPORTED
+test/language/statements/labeled/cptn-nrml.js	refused	TS_EVAL_UNSUPPORTED
+test/language/statements/labeled/decl-async-function.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/labeled/decl-cls.js	pass	-
+test/language/statements/labeled/decl-const.js	pass	-
+test/language/statements/labeled/decl-fun-strict.js	pass	-
+test/language/statements/labeled/decl-let.js	pass	-
+test/language/statements/labeled/value-await-non-module-escaped.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/labeled/value-await-non-module.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/labeled/value-yield-strict-escaped.js	pass	-
+test/language/statements/labeled/value-yield-strict.js	pass	-

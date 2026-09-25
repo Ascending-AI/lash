@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	with	rejected	TS_WITH_UNSUPPORTED	with ({}) { }

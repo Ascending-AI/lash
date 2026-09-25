@@ -1,11 +1,13 @@
 // The Node session oracle's generator (FIG-3599).
 //
-// Reads `corpus.txt` and writes `expectations.json`: every session's cells
-// with the reference answer of the pinned Node. Each cell runs as a
-// successive classic Script in ONE realm under the cell-to-Script mapping
-// `realm.mjs` states once (the README next to this file states it in full,
-// and ADR 0062 records it); the generated sessions (FIG-3608) are answered by
-// the same realm through `oracle.mjs`.
+// Reads `corpus/<id>.txt` — one file per session, so two lanes' corpus rows
+// never share a file (FIG-3727) — and writes `expectations/<id>.json` plus
+// `expectations/meta.json`: every session's cells with the reference answer
+// of the pinned Node. Each cell runs as a successive classic Script in ONE
+// realm under the cell-to-Script mapping `realm.mjs` states once (the README
+// next to this file states it in full, and ADR 0062 records it); the
+// generated sessions (FIG-3608) are answered by the same realm through
+// `oracle.mjs`.
 //
 // Regeneration is deliberate and byte-identical, as for `../generate.mjs`:
 //
@@ -13,7 +15,14 @@
 //
 // The generator refuses any Node other than the stamped version.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,9 +32,25 @@ requirePinnedNode();
 
 const directory = dirname(fileURLToPath(import.meta.url));
 
-// --- corpus.txt --------------------------------------------------------------
+// --- corpus/ -----------------------------------------------------------------
 
-function parseCorpus(text) {
+// Every `corpus/<id>.txt` holds exactly one `session <id> ... end` block.
+function corpusFiles() {
+  const corpusDirectory = join(directory, 'corpus');
+  return readdirSync(corpusDirectory)
+    .filter((name) => name.endsWith('.txt') && statSync(join(corpusDirectory, name)).isFile())
+    .sort()
+    .map((name) => {
+      const text = readFileSync(join(corpusDirectory, name), 'utf8');
+      const sessions = parseCorpus(text, `corpus/${name}`);
+      if (sessions.length !== 1 || sessions[0].id !== name.slice(0, -4)) {
+        throw new Error(`corpus/${name} must hold exactly the session it is named for`);
+      }
+      return sessions[0];
+    });
+}
+
+function parseCorpus(text, file) {
   const sessions = [];
   let session = null;
   let cell = null;
@@ -45,7 +70,7 @@ function parseCorpus(text) {
     }
   };
   for (const [index, line] of lines.entries()) {
-    const where = `corpus.txt:${index + 1}`;
+    const where = `${file}:${index + 1}`;
     if (cell && !cell.answered && !/^(cell\b|lash(-resident|-restart)? |end$)/.test(line)) {
       cell.lines.push(line);
       continue;
@@ -102,8 +127,13 @@ function parseCorpus(text) {
 
 // --- generation --------------------------------------------------------------
 
-const sessions = parseCorpus(readFileSync(join(directory, 'corpus.txt'), 'utf8'));
-const output = { node: NODE_VERSION, sessions: [] };
+const sessions = corpusFiles();
+
+// One `expectations/<id>.json` per session plus `meta.json`, so a corpus
+// change touches only its own shard; stale shards are removed.
+const expectations = join(directory, 'expectations');
+mkdirSync(expectations, { recursive: true });
+const written = new Set(['meta.json']);
 for (const session of sessions) {
   const observations = observeSession(session.probe, session.cells, session.host);
   const cells = session.cells.map((cell, index) => {
@@ -117,13 +147,24 @@ for (const session of sessions) {
     if (cell.lash) entry.lash = cell.lash;
     return entry;
   });
-  output.sessions.push({
+  const output = {
     id: session.id,
     about: session.about,
     ...(Object.keys(session.host).length ? { host: session.host } : {}),
     probe: session.probe,
     deviations: session.deviations,
     cells,
-  });
+  };
+  const name = `${session.id}.json`;
+  writeFileSync(join(expectations, name), `${JSON.stringify(output, null, 2)}\n`);
+  written.add(name);
 }
-writeFileSync(join(directory, 'expectations.json'), `${JSON.stringify(output, null, 2)}\n`);
+writeFileSync(
+  join(expectations, 'meta.json'),
+  `${JSON.stringify({ node: NODE_VERSION }, null, 2)}\n`,
+);
+for (const name of readdirSync(expectations)) {
+  if (name.endsWith('.json') && !written.has(name)) {
+    unlinkSync(join(expectations, name));
+  }
+}

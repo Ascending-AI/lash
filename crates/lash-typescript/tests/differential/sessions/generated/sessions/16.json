@@ -1,0 +1,154 @@
+{
+  "seed": 16,
+  "probe": [
+    "alpha",
+    "delta",
+    "entry",
+    "field",
+    "i",
+    "iota",
+    "item",
+    "n",
+    "omega",
+    "phi",
+    "psi",
+    "rest",
+    "rho",
+    "scaled",
+    "step",
+    "theta",
+    "turn1",
+    "turn2",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "const omega = (typeof 9).slice(0, 2);\nconst rho = 10;\nlet iota = { h: omega.padStart(5, '*'), d: ('  pad ' === omega) };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "iota": "object {\"h\":\"***nu\",\"d\":false}",
+          "item": "unbound",
+          "n": "unbound",
+          "omega": "string \"nu\"",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "number 10",
+          "scaled": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const field in iota) {\n  console.log(field);\n  const theta = new Map(Object.entries({ z: 7, y: 5 }));\n  console.log(theta.size, theta.get('a'), theta.has('  pad '), [...theta.keys()], theta instanceof Map);\n}\nif (((rho + 6) < 3)) {\n  switch ((rho & (false ? 4 : rho)) % 3) {\n    case 0: {\n      iota.d = ('e' in iota);\n      break;\n    }\n    case 1: {\n      const alpha = (item) => { const scaled = '  pad '.length; return 7; };\n      console.log(alpha(rho));\n      break;\n    }\n    default: {\n      console.log(iota, rho, iota);\n    }\n  }\n}\nfinish(11);\n",
+      "node": {
+        "outcome": "finish",
+        "finish": 11,
+        "prints": [
+          "h",
+          "2 undefined false [\"z\",\"y\"] true",
+          "d",
+          "2 undefined false [\"z\",\"y\"] true"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "iota": "object {\"h\":\"***nu\",\"d\":false}",
+          "item": "unbound",
+          "n": "unbound",
+          "omega": "string \"nu\"",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "number 10",
+          "scaled": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const field in iota) {\n  console.log(field);\n  let turn1 = 0;\n  while (turn1 < 1) {\n    turn1++;\n    const phi = new RangeError('hi');\n    let rho = (turn1 instanceof Date);\n  }\n}\nlet turn2 = 0;\nwhile (turn2 < 1) {\n  turn2++;\n  for (let i = 0; i < 3; i++) {\n    console.log(2, turn2);\n    let zeta = new Date(2511987744000);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "h",
+          "d",
+          "2 1",
+          "2 1",
+          "2 1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "iota": "object {\"h\":\"***nu\",\"d\":false}",
+          "item": "unbound",
+          "n": "unbound",
+          "omega": "string \"nu\"",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "number 10",
+          "scaled": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "number 1",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "iota.d = false;\nswitch ((omega.indexOf('b') ** 2) % 3) {\n  case 0: {\n    iota.h = `${Math.min(turn2, 1)}:${String(2)}`;\n    break;\n  }\n  case 1: {\n    for (let step = 0; step < 2; step++) {\n      iota.d = false;\n    }\n    const rho = (n, ...rest) => (turn2).toFixed(1).length + rest.length;\n    console.log(rho(2));\n    break;\n  }\n  default: {\n    iota.h = '  pad '.split(',').reverse().join('|');\n  }\n}\nvar delta = false;\ntry {\n  switch (turn2 % 3) {\n    case 0: {\n      console.log(omega, rho);\n      break;\n    }\n    default: {\n      console.info(turn2);\n    }\n  }\n  {\n    console.log(false);\n    let psi = (0 ** 2);\n    iota.h = (omega.slice(0, 2) + 'a,b');\n  }\n} catch {\n  console.log('caught');\n} finally {\n  for (const entry of omega) {\n    iota.h = iota?.h.toUpperCase();\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3",
+          "1",
+          "false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "delta": "boolean false",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "iota": "object {\"h\":\"NUA,B\",\"d\":false}",
+          "item": "unbound",
+          "n": "unbound",
+          "omega": "string \"nu\"",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "number 10",
+          "scaled": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "number 1",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

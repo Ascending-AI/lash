@@ -1,9 +1,10 @@
 //! Generated differential sessions and the snapshot round-trip law (FIG-3608).
 //!
 //! The [`generator`](super::generator) draws a session from a seed. The
-//! bounded corpus is the first [`BOUNDED_SEEDS`] seeds; `generated.json`
-//! checks in Node's answer for each of its sessions and for each row of the
-//! [`round_trip`](super::round_trip) law, and is written by one deliberate,
+//! bounded corpus is the first [`BOUNDED_SEEDS`] seeds; the `generated/`
+//! shard tree checks in Node's answer for each of its sessions and for each
+//! row of the [`round_trip`](super::round_trip) law, and is written by one
+//! deliberate,
 //! byte-identical step that asks the pinned Node live:
 //!
 //! ```console
@@ -30,19 +31,14 @@ use super::node::{NodeCell, NodeOracle, NodeSession, sessions_directory};
 use super::round_trip::{self, NOT_A_DIALECT_VALUE, ROWS};
 use super::{Observation, PINNED_NODE, run_session};
 
-/// The one deliberate step that rewrites `generated.json`, spelled exactly so
+/// The one deliberate step that rewrites `generated/`, spelled exactly so
 /// every drift failure names it. The generator draws its rejected cells from
 /// the census's probe list, so a census change can change what a seed draws:
 /// regenerate after one.
 const REGENERATE: &str = "kiln run //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test -- \
      --ignored --exact testing::cell_conformance::node_oracle::generated::write_the_generated_corpus";
 
-const GENERATED: &str =
-    include_str!("../../../../../lash-typescript/tests/differential/sessions/generated.json");
-const CENSUS: &str = include_str!("../../../../../lash-typescript/tests/test262/census.tsv");
 const README: &str = include_str!("../../../../../lash-typescript/README.md");
-const CORPUS: &str =
-    include_str!("../../../../../lash-typescript/tests/differential/sessions/expectations.json");
 
 /// The bounded corpus: seeds `0..BOUNDED_SEEDS`, checked in with Node's
 /// answers and run in the cacheable test partition.
@@ -58,6 +54,13 @@ struct GeneratedCorpus {
     seeds: u64,
     sessions: Vec<StoredSession>,
     round_trip: Vec<StoredRow>,
+}
+
+/// `generated/meta.json`: the corpus-wide fields of the shard tree.
+#[derive(Deserialize, Serialize)]
+struct GeneratedMeta {
+    node: String,
+    seeds: u64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -83,13 +86,60 @@ struct StoredRow {
     node: Vec<Observation>,
 }
 
+/// The `generated/` shard tree read back as one corpus: `meta.json`, one
+/// `sessions/<seed>.json` per session, and one `round-trip/<name>.json` per
+/// row, so two lanes' corpus changes almost never touch the same file
+/// (FIG-3727).
+#[allow(clippy::disallowed_methods)] // FIG-2971: a corpus check is a host; the checked-in shards are a test's data.
 fn corpus() -> GeneratedCorpus {
-    let corpus: GeneratedCorpus = serde_json::from_str(GENERATED).expect("generated.json parses");
+    let directory = sessions_directory().join("generated");
+    let meta: GeneratedMeta = serde_json::from_str(
+        &std::fs::read_to_string(directory.join("meta.json")).expect("read generated/meta.json"),
+    )
+    .expect("generated/meta.json parses");
     assert_eq!(
-        corpus.node, PINNED_NODE,
+        meta.node, PINNED_NODE,
         "the generated corpus pins the oracle's Node"
     );
-    corpus
+    let mut sessions = Vec::new();
+    let mut seeds = BTreeSet::new();
+    for (shard, text) in super::node::shard_files(&directory.join("sessions"), "json") {
+        let session: StoredSession = serde_json::from_str(&text)
+            .unwrap_or_else(|error| panic!("generated/sessions/{shard}.json: {error}"));
+        assert_eq!(
+            shard.parse::<u64>().expect("a numeric session shard name"),
+            session.seed,
+            "generated/sessions/{shard}.json holds another seed; regenerate with `{REGENERATE}`"
+        );
+        assert!(
+            seeds.insert(session.seed),
+            "seed {} has an answer in two session shards",
+            session.seed
+        );
+        sessions.push(session);
+    }
+    sessions.sort_by_key(|session| session.seed);
+    let mut round_trip = Vec::new();
+    for (shard, text) in super::node::shard_files(&directory.join("round-trip"), "json") {
+        let row: StoredRow = serde_json::from_str(&text)
+            .unwrap_or_else(|error| panic!("generated/round-trip/{shard}.json: {error}"));
+        assert_eq!(
+            row.name, shard,
+            "generated/round-trip/{shard}.json holds another row; regenerate with `{REGENERATE}`"
+        );
+        round_trip.push(row);
+    }
+    assert_eq!(
+        meta.seeds as usize,
+        sessions.len(),
+        "generated/meta.json counts a different bounded corpus than generated/sessions/; regenerate with `{REGENERATE}`"
+    );
+    GeneratedCorpus {
+        node: meta.node,
+        seeds: meta.seeds,
+        sessions,
+        round_trip,
+    }
 }
 
 /// What lash must observe for a cell Node observed as `node`: Node's
@@ -214,12 +264,22 @@ pub(super) fn node_answers(
     })
 }
 
-/// Writes `generated.json`: the bounded corpus and the round-trip rows, each
-/// with the pinned Node's answer. Deliberate, like `generate.mjs`.
+/// Writes the `generated/` shard tree: `meta.json`, one
+/// `sessions/<seed>.json` per bounded session, and one
+/// `round-trip/<name>.json` per round-trip row, each with the pinned Node's
+/// answer. Deliberate, like `generate.mjs`, and byte-identical run to run.
 #[test]
-#[ignore = "asks the pinned Node live and writes generated.json; run through `kiln run`"]
+#[ignore = "asks the pinned Node live and writes the generated corpus; run through `kiln run`"]
 #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the live Node oracle is a test host capability.
 fn write_the_generated_corpus() {
+    fn write_shard(path: &std::path::Path, value: &impl Serialize) {
+        let mut text = serde_json::to_string_pretty(value).expect("a shard serializes");
+        text.push('\n');
+        std::fs::create_dir_all(path.parent().expect("a shard's directory"))
+            .unwrap_or_else(|error| panic!("create {}: {error}", path.display()));
+        std::fs::write(path, text)
+            .unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+    }
     let mut oracle = NodeOracle::start();
     let sessions = (0..BOUNDED_SEEDS)
         .map(|seed| {
@@ -240,7 +300,7 @@ fn write_the_generated_corpus() {
                     .collect(),
             }
         })
-        .collect();
+        .collect::<Vec<_>>();
     let round_trip = ROWS
         .iter()
         .map(|row| {
@@ -261,17 +321,36 @@ fn write_the_generated_corpus() {
                 }),
             }
         })
-        .collect();
-    let corpus = GeneratedCorpus {
-        node: PINNED_NODE.to_string(),
-        seeds: BOUNDED_SEEDS,
-        sessions,
-        round_trip,
-    };
-    let mut text = serde_json::to_string_pretty(&corpus).expect("the corpus serializes");
-    text.push('\n');
-    let path = sessions_directory().join("generated.json");
-    std::fs::write(&path, text).unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+        .collect::<Vec<_>>();
+    let directory = sessions_directory().join("generated");
+    if directory.exists() {
+        // The whole tree is derived: clearing it removes stale shards too.
+        std::fs::remove_dir_all(&directory)
+            .unwrap_or_else(|error| panic!("remove stale {}: {error}", directory.display()));
+    }
+    write_shard(
+        &directory.join("meta.json"),
+        &GeneratedMeta {
+            node: PINNED_NODE.to_string(),
+            seeds: BOUNDED_SEEDS,
+        },
+    );
+    for session in &sessions {
+        write_shard(
+            &directory
+                .join("sessions")
+                .join(format!("{}.json", session.seed)),
+            session,
+        );
+    }
+    for row in &round_trip {
+        write_shard(
+            &directory
+                .join("round-trip")
+                .join(format!("{}.json", row.name)),
+            row,
+        );
+    }
 }
 
 /// The bounded corpus's sessions of one shard, each regenerated from its
@@ -281,7 +360,7 @@ fn check_shard(shard: u64) {
     let corpus = corpus();
     assert_eq!(
         corpus.seeds, BOUNDED_SEEDS,
-        "generated.json holds another bounded corpus; regenerate it with `{REGENERATE}`"
+        "the generated tree holds another bounded corpus; regenerate it with `{REGENERATE}`"
     );
     let mut failures = Vec::new();
     for stored in corpus
@@ -301,7 +380,7 @@ fn check_shard(shard: u64) {
                 });
         if drifted {
             failures.push(format!(
-                "seed {}: the generator no longer draws the checked-in session; regenerate generated.json with `{REGENERATE}`",
+                "seed {}: the generator no longer draws the checked-in session; regenerate the generated tree with `{REGENERATE}`",
                 stored.seed
             ));
             continue;
@@ -388,10 +467,9 @@ fn generated_sessions_against_live_node() {
 
 /// Whether the census accepts the row `kind name`.
 fn census_accepts(kind: &str, name: &str) -> bool {
-    CENSUS.lines().any(|line| {
-        let columns = line.split('\t').collect::<Vec<_>>();
-        columns.len() >= 3 && columns[0] == kind && columns[1] == name && columns[2] == "accepted"
-    })
+    super::node::census_rows()
+        .iter()
+        .any(|columns| columns[0] == *kind && columns[1] == *name && columns[2] == "accepted")
 }
 
 /// The generator draws only from the dialect's accepted grammar, and the
@@ -454,15 +532,21 @@ fn listed(section: &str, name: &str) -> bool {
 /// exclusion to delete.
 #[test]
 fn every_generator_exclusion_is_a_pinned_open_defect() {
-    let corpus: serde_json::Value =
-        serde_json::from_str(CORPUS).expect("the session expectations parse");
-    let corpus_defects = corpus["sessions"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|session| session["cells"].as_array().into_iter().flatten())
-        .filter_map(|cell| cell["defect"].as_str())
-        .collect::<BTreeSet<_>>();
+    let corpus_defects =
+        super::node::shard_files(&sessions_directory().join("expectations"), "json")
+            .into_iter()
+            .filter(|(shard, _)| shard != "meta")
+            .flat_map(|(_, text)| {
+                let session: serde_json::Value =
+                    serde_json::from_str(&text).expect("a session expectations shard parses");
+                session["cells"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|cell| cell["defect"].as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<BTreeSet<_>>();
     let mut failures = Vec::new();
     for (defect, ticket) in OPEN_DEFECT_EXCLUSIONS {
         if !listed("## Open conformance defects", defect) {
@@ -470,7 +554,7 @@ fn every_generator_exclusion_is_a_pinned_open_defect() {
                 "the generator excludes `{defect}` ({ticket}), which is not an open defect: delete the exclusion"
             ));
         }
-        if !corpus_defects.contains(defect) {
+        if !corpus_defects.contains(*defect) {
             failures.push(format!(
                 "the generator excludes `{defect}`, which no session-corpus defect cell pins"
             ));
@@ -524,14 +608,14 @@ fn every_value_type_round_trips_or_is_refused() {
             .find(|stored| stored.name == row.name)
         else {
             failures.push(format!(
-                "round-trip row `{}` has no Node answer in generated.json; regenerate it with `{REGENERATE}`",
+                "round-trip row `{}` has no Node answer in the generated tree; regenerate it with `{REGENERATE}`",
                 row.name
             ));
             continue;
         };
         if stored.create != row.create || stored.uses != row.uses {
             failures.push(format!(
-                "round-trip row `{}` changed since its Node answer; regenerate generated.json with `{REGENERATE}`",
+                "round-trip row `{}` changed since its Node answer; regenerate the generated tree with `{REGENERATE}`",
                 row.name
             ));
             continue;
@@ -540,7 +624,7 @@ fn every_value_type_round_trips_or_is_refused() {
     }
     if corpus.round_trip.len() != ROWS.len() {
         failures.push(format!(
-            "generated.json answers rows the law no longer has; regenerate it with `{REGENERATE}`"
+            "the generated tree answers rows the law no longer has; regenerate it with `{REGENERATE}`"
         ));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

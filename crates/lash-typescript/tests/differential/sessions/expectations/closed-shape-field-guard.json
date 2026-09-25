@@ -1,0 +1,44 @@
+{
+  "id": "closed-shape-field-guard",
+  "about": "a field a closed object literal lacks is refused at link, where Node reads undefined",
+  "probe": [
+    "point"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const point = { x: 1, y: 2 };\nconsole.log(point.z);\n",
+      "reject": null,
+      "deviation": "closed-shape-field-guard",
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "undefined"
+        ],
+        "probes": {
+          "point": "object {\"x\":1,\"y\":2}"
+        },
+        "closures": []
+      },
+      "lash": {
+        "resident": {
+          "outcome": "rejected",
+          "diagnostic": "TS_LINK_ERROR",
+          "prints": [],
+          "probes": {
+            "point": "unbound"
+          }
+        },
+        "restart": {
+          "outcome": "rejected",
+          "diagnostic": "TS_LINK_ERROR",
+          "prints": [],
+          "probes": {
+            "point": "unbound"
+          }
+        }
+      }
+    }
+  ]
+}

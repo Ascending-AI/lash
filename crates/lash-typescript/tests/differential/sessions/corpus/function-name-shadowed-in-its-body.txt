@@ -1,0 +1,19 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/function-name-shadowed-in-its-body.json.
+
+session function-name-shadowed-in-its-body
+about a function body may declare a binding of the function's own name (FIG-3608)
+probe named arrow scale
+deviation closure-boundary
+cell
+function named() {
+  let named = 1;
+  return named;
+}
+const arrow = (scale) => {
+  const arrow = scale * 2;
+  return arrow;
+};
+console.log(named(), arrow(3));
+end

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Proxy	skip	ticket-ruling:FIG-1413:Proxy — an interposed handler makes every property access an arbitrary guest computation, which the durable snapshot cannot represent and the effect model cannot bound	-

@@ -1,0 +1,30 @@
+{
+  "id": "collection-copy-constructors",
+  "about": "new Map and new Set copy another collection (FIG-3608)",
+  "probe": [
+    "map",
+    "set",
+    "copies"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "{\n  const map = new Map([['k', 1]]);\n  const set = new Set([4, 5]);\n  const copies = [new Set(set).size, new Map(map).get('k'), new Map(new Set([['x', 2]])).get('x'), [...new Set(map)]];\n  console.log(copies);\n}\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[2,1,2,[[\"k\",1]]]"
+        ],
+        "probes": {
+          "map": "unbound",
+          "set": "unbound",
+          "copies": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

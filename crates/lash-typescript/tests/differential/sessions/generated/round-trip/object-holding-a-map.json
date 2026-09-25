@@ -1,0 +1,19 @@
+{
+  "name": "object-holding-a-map",
+  "create": "const value = { tags: new Map([['k', 1]]), n: 1 };",
+  "uses": "console.log(value.tags.get('k'), value.n);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "1 1"
+      ],
+      "probes": {}
+    }
+  ]
+}

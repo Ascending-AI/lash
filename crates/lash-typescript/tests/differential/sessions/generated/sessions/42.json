@@ -1,0 +1,107 @@
+{
+  "seed": 42,
+  "probe": [
+    "chi",
+    "count",
+    "delta",
+    "field",
+    "gamma",
+    "key",
+    "problem",
+    "psi",
+    "rho",
+    "sigma",
+    "theta",
+    "turn1",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "const theta = 9;\nconsole.log('ab', (false ? 'a,b'.indexOf('b') : 6), theta);\nconst chi = new URLSearchParams('b=2&a=1&b=3');\nlet psi = chi;\npsi.append('k', 'ab');\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "ab 6 9"
+        ],
+        "probes": {
+          "chi": "object {}",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "key": "unbound",
+          "problem": "unbound",
+          "psi": "object {}",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "theta": "number 9",
+          "turn1": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log(psi, (1.5).toFixed(1));\nfor (const [key, value] of psi) {\n  chi.delete('a');\n  let gamma = new Date(Date.UTC(2024, 0, 26));\n  if (false) { break; }\n}\nfunction delta(count) {\n  return count <= 1 ? 1 : count + delta(count - 1);\n}\nconsole.log(delta(6));\nfunction rho(count) {\n  return count <= 1 ? 1 : count + rho(count - 1);\n}\nconsole.log(rho(4));\nchi.sort();\npsi.append('k', 'x');\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "b=2&a=1&b=3&k=ab 1.5",
+          "21",
+          "10"
+        ],
+        "probes": {
+          "chi": "object {}",
+          "count": "unbound",
+          "delta": "function undefined",
+          "field": "unbound",
+          "gamma": "unbound",
+          "key": "unbound",
+          "problem": "unbound",
+          "psi": "object {}",
+          "rho": "function undefined",
+          "sigma": "unbound",
+          "theta": "number 9",
+          "turn1": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "delta",
+          "rho"
+        ]
+      }
+    },
+    {
+      "source": "try {\n  psi.set('a', 'b.c');\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n}\nfunction sigma(count) {\n  return 0;\n}\nconsole.log(sigma(Number.parseInt('  pad ' + '7', 10)));\nfor (const field in { ...{ e: 'ab'.includes('a'), d: 'hi' }, b: [theta] }) {\n  console.log(field);\n}\nconsole.info(theta);\nlet turn1 = 0;\ndo {\n  turn1++;\n  chi.sort();\n} while (turn1 < 1);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "e",
+          "d",
+          "b",
+          "9"
+        ],
+        "probes": {
+          "chi": "object {}",
+          "count": "unbound",
+          "delta": "function undefined",
+          "field": "unbound",
+          "gamma": "unbound",
+          "key": "unbound",
+          "problem": "unbound",
+          "psi": "object {}",
+          "rho": "function undefined",
+          "sigma": "function undefined",
+          "theta": "number 9",
+          "turn1": "number 1",
+          "value": "unbound"
+        },
+        "closures": [
+          "delta",
+          "rho",
+          "sigma"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	date-mutation	rejected	TS_DATE_IMMUTABLE	const d = new Date(0); d.setUTCHours(1);

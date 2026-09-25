@@ -1,0 +1,24 @@
+{
+  "id": "top-level-class",
+  "about": "class is a named rejection, so the cell never binds its name",
+  "probe": [
+    "Shape"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "class Shape {}\n",
+      "reject": "TS_CLASS_UNSUPPORTED",
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "Shape": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

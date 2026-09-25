@@ -1,0 +1,5 @@
+# test262-path	excluding-census-row
+test/language/expressions/class/elements/field-definition-accessor-no-line-terminator.js	feature:decorators
+test/language/expressions/class/elements/syntax/valid/grammar-field-accessor.js	feature:decorators
+test/language/statements/class/elements/field-definition-accessor-no-line-terminator.js	feature:decorators
+test/language/statements/class/elements/syntax/valid/grammar-field-accessor.js	feature:decorators

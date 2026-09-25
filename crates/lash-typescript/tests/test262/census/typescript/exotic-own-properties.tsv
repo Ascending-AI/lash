@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	exotic-own-properties	rejected	TS_EXOTIC_PROPERTY_UNSUPPORTED	const m: any = new Map(); m.x = 1;

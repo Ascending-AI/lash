@@ -1,0 +1,8 @@
+# test262-path	class	qualifier
+test/language/statements/with/12.10.1-10-s.js	refused	TS_EVAL_UNSUPPORTED
+test/language/statements/with/12.10.1-11gs.js	refused	TS_WITH_UNSUPPORTED
+test/language/statements/with/12.10.1-5-s.js	refused	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED
+test/language/statements/with/labelled-fn-stmt.js	refused	TS_WITH_UNSUPPORTED
+test/language/statements/with/strict-fn-expr.js	refused	TS_WITH_UNSUPPORTED
+test/language/statements/with/strict-fn-method.js	refused	TS_WITH_UNSUPPORTED
+test/language/statements/with/strict-script.js	refused	TS_WITH_UNSUPPORTED

@@ -1,0 +1,25 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/for-of-map-and-set-are-live.json.
+
+session for-of-map-and-set-are-live
+about a for...of over a Map or a Set visits entries added during the loop and skips ones deleted before their turn (FIG-3625)
+probe counts tags key value tag
+cell
+const counts = new Map([['a', 1], ['b', 2], ['c', 3]]);
+for (const [key, value] of counts) {
+  if (key === 'a') {
+    counts.delete('b');
+    counts.set('d', 4);
+    counts.set('c', 30);
+  }
+  console.log(key, value);
+}
+const tags = new Set(['x']);
+for (const tag of tags) {
+  if (tags.size < 3) {
+    tags.add(tag + 'y');
+  }
+  console.log(tag);
+}
+end

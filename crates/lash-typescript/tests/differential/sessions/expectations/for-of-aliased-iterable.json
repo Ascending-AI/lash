@@ -1,0 +1,30 @@
+{
+  "id": "for-of-aliased-iterable",
+  "about": "a for...of loop visits what its body appends through an alias made before the loop (FIG-3625)",
+  "probe": [
+    "items",
+    "same",
+    "item"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const items = [1];\nconst same = items;\nfor (const item of items) {\n  if (same.length < 3) {\n    same.push(item + 1);\n  }\n}\nconsole.log(same);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[1,2,3]"
+        ],
+        "probes": {
+          "items": "object [1,2,3]",
+          "same": "object [1,2,3]",
+          "item": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

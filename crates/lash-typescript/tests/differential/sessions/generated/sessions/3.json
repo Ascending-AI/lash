@@ -1,0 +1,63 @@
+{
+  "seed": 3,
+  "probe": [
+    "entry",
+    "index",
+    "kappa",
+    "lambda",
+    "n",
+    "omega",
+    "psi",
+    "rest",
+    "sigma",
+    "slot",
+    "tau"
+  ],
+  "cells": [
+    {
+      "source": "const [tau, ...omega] = [Array.from({ length: 1 }, (slot, index) => index * 2).length, Array.from({ length: 0 }, (slot, index) => index * 2).length, Math.floor(9)];\nfor (const entry of omega) {\n  let kappa = ['b.c'];\n}\nconst { a: sigma, b: lambda = 0 } = { a: 'b.c', b: 'Lash'.indexOf('b') };\nfor (const entry of sigma) {\n  const psi = entry.indexOf('b');\n  const tau = (n, ...rest) => n + rest.length;\n  console.log(tau(7.5));\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "7.5",
+          "7.5",
+          "7.5"
+        ],
+        "probes": {
+          "entry": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "lambda": "number -1",
+          "n": "unbound",
+          "omega": "object [0,9]",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "string \"b.c\"",
+          "slot": "unbound",
+          "tau": "number 1"
+        }
+      }
+    },
+    {
+      "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
+      "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "entry": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "lambda": "number -1",
+          "n": "unbound",
+          "omega": "object [0,9]",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "string \"b.c\"",
+          "slot": "unbound",
+          "tau": "number 1"
+        }
+      }
+    }
+  ]
+}

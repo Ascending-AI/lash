@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	generators	rejected	TS_GENERATOR_UNSUPPORTED	function* f() { }

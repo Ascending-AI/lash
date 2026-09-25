@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+flag	non-deterministic	skip	ticket-ruling:FIG-3646:such a test may pass by more than one path, so its outcome cannot be pinned by a ratchet	-

@@ -1,0 +1,3 @@
+# test262-path	class	qualifier
+test/built-ins/SetIteratorPrototype/next/length.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/SetIteratorPrototype/next/name.js	refused	TS_METHOD_UNSUPPORTED

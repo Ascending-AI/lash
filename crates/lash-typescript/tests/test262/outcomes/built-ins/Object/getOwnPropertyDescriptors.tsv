@@ -1,0 +1,12 @@
+# test262-path	class	qualifier
+test/built-ins/Object/getOwnPropertyDescriptors/exception-not-object-coercible.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/getOwnPropertyDescriptors/function-length.js	pass	-
+test/built-ins/Object/getOwnPropertyDescriptors/function-name.js	pass	-
+test/built-ins/Object/getOwnPropertyDescriptors/function-property-descriptor.js	pass	-
+test/built-ins/Object/getOwnPropertyDescriptors/inherited-properties-omitted.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Object/getOwnPropertyDescriptors/normal-object.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/getOwnPropertyDescriptors/primitive-booleans.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/getOwnPropertyDescriptors/primitive-numbers.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/getOwnPropertyDescriptors/primitive-strings.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/getOwnPropertyDescriptors/tamper-with-global-object.js	refused	TS_THIS_UNSUPPORTED
+test/built-ins/Object/getOwnPropertyDescriptors/tamper-with-object-keys.js	refused	TS_METHOD_UNSUPPORTED

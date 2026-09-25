@@ -1,0 +1,184 @@
+{
+  "seed": 48,
+  "probe": [
+    "beta",
+    "chi",
+    "delta",
+    "gamma",
+    "index",
+    "item",
+    "kappa",
+    "n",
+    "omega",
+    "phi",
+    "problem",
+    "rho",
+    "scaled",
+    "sigma",
+    "slot",
+    "step",
+    "tau",
+    "theta",
+    "turn1",
+    "turn2",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "console.log(false);\nconst chi = /(?<head>[a-z])(?<tail>[a-z]*)/;\nlet turn1 = 0;\ndo {\n  turn1++;\n  chi.lastIndex = 0;\n} while (turn1 < 2);\nconst tau = (item) => { const scaled = turn1; return 5; };\nconsole.log(tau((turn1 << 2)));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false",
+          "5"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "object {}",
+          "delta": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "function undefined",
+          "theta": "unbound",
+          "turn1": "number 2",
+          "turn2": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "tau"
+        ]
+      }
+    },
+    {
+      "source": "try {\n  console.info(turn1, chi, (turn1 * 1));\n  let turn2 = 0;\n  while (turn2 < 1) {\n    turn2++;\n    const kappa = (n) => (-9);\n    console.log(kappa(5));\n  }\n  throw new RangeError('a,b', { cause: 1 });\n} catch {\n  console.log('caught');\n} finally {\n  try {\n    const kappa = new Map(Object.entries({ z: 12, y: 1 }));\n    throw new SyntaxError('Lash', { cause: 1 });\n  } catch (problem) {\n    console.log(problem.name, problem.message, problem instanceof RangeError);\n  }\n}\nconst zeta = [turn1, (turn1 * (turn1 ** 2)), 9.5];\nconst gamma = chi;\nswitch (4.5 % 3) {\n  case 0: {\n    console.log(Array.from({ length: 2 }, (slot, index) => index * 2).length);\n    if ('zz'.includes('a')) {\n      chi.lastIndex = 0;\n      console.log(7, gamma, zeta);\n    } else {\n      console.log(chi);\n    }\n    break;\n  }\n  case 1: {\n    try {\n      let phi = gamma;\n      throw new Error('b.c');\n    } catch (problem) {\n      console.log(problem.name, problem.message, problem instanceof RangeError);\n    }\n    break;\n  }\n  default: {\n    const chi = new Error('x');\n    console.log(chi.name, chi.message, String(chi), chi instanceof Error);\n  }\n}\nlet delta = gamma.test('ab');\nvar beta = { d: JSON.stringify(zeta) };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 /(?<head>[a-z])(?<tail>[a-z]*)/ 2",
+          "-9",
+          "caught",
+          "SyntaxError Lash false",
+          "Error x Error: x true"
+        ],
+        "probes": {
+          "beta": "object {\"d\":\"[2,8,9.5]\"}",
+          "chi": "object {}",
+          "delta": "boolean true",
+          "gamma": "object {}",
+          "index": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "function undefined",
+          "theta": "unbound",
+          "turn1": "number 2",
+          "turn2": "unbound",
+          "value": "unbound",
+          "zeta": "object [2,8,9.5]"
+        },
+        "closures": [
+          "tau"
+        ]
+      }
+    },
+    {
+      "source": "{\n  const kappa = new URL('https://example.com/a/b?x=1');\n  console.log(kappa.href, kappa.pathname, kappa.searchParams.get('x'), kappa.origin);\n  for (let step = 0; step < 3; step++) {\n    const gamma = (value, step = 2) => (6 - 5) + step;\n    console.log(gamma(turn1));\n    kappa.searchParams.append('k', 'hi');\n  }\n  for (let step = 0; step < 3; step++) {\n    gamma.lastIndex = 0;\n  }\n}\nconst { a: theta, b: omega = 0 } = { a: 'b.c', b: (zeta.at(-1) ?? 0) };\nglobalThis.beta = { ...{ d: theta } };\nfinish(Math.min(8, 2));\n",
+      "node": {
+        "outcome": "finish",
+        "finish": 2,
+        "prints": [
+          "https://example.com/a/b?x=1 /a/b 1 https://example.com",
+          "3",
+          "3",
+          "3"
+        ],
+        "probes": {
+          "beta": "object {\"d\":\"b.c\"}",
+          "chi": "object {}",
+          "delta": "boolean true",
+          "gamma": "object {}",
+          "index": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "omega": "number 9.5",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "function undefined",
+          "theta": "string \"b.c\"",
+          "turn1": "number 2",
+          "turn2": "unbound",
+          "value": "unbound",
+          "zeta": "object [2,8,9.5]"
+        },
+        "closures": [
+          "tau"
+        ]
+      }
+    },
+    {
+      "source": "globalThis.beta = { d: 'b.c'.trim() };\nconst rho = /(?<first>[a-z])(b)?/.exec('ab');\n{\n  const omega = new URL('https://example.com/q?x=1');\n  console.log(omega.href, omega.pathname, omega.searchParams.get('x'), omega.origin);\n  {\n    const sigma = /(?<first>[a-z])(b)?/.exec('hi');\n    console.log(String(Math.min(turn1, Math.min(...zeta, 1))));\n    zeta.unshift(Math.min(...zeta, 1));\n  }\n}\nthrow new Error('hi');\n",
+      "node": {
+        "outcome": "throw",
+        "error": "Error",
+        "prints": [
+          "https://example.com/q?x=1 /q 1 https://example.com",
+          "1"
+        ],
+        "probes": {
+          "beta": "object {\"d\":\"b.c\"}",
+          "chi": "object {}",
+          "delta": "boolean true",
+          "gamma": "object {}",
+          "index": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "omega": "number 9.5",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rho": "object [\"ab\",\"a\",\"b\"]",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "function undefined",
+          "theta": "string \"b.c\"",
+          "turn1": "number 2",
+          "turn2": "unbound",
+          "value": "unbound",
+          "zeta": "object [1,2,8,9.5]"
+        },
+        "closures": [
+          "tau"
+        ]
+      }
+    }
+  ]
+}

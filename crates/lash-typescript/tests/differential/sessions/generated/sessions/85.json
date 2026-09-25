@@ -1,0 +1,146 @@
+{
+  "seed": 85,
+  "probe": [
+    "alpha",
+    "count",
+    "entry",
+    "field",
+    "index",
+    "iota",
+    "kappa",
+    "omega",
+    "rho",
+    "sigma",
+    "slot",
+    "tau",
+    "theta",
+    "turn1",
+    "turn2",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "console.log(!false, (0).toFixed(1).slice(0, 2).includes('a'));\n{\n  const sigma = /a(b*)/g;\n  console.log(sigma.test('a,b'), sigma.source, sigma.flags, sigma.lastIndex, String(sigma));\n  for (const entry of ['ab']) {\n    const theta = { ...{ e: [] }, d: 4, b: entry.length };\n    console.info(theta, theta);\n  }\n  for (const field in { c: sigma.test('hi') }) {\n    console.log(field);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "true false",
+          "true a(b*) g 1 /a(b*)/g",
+          "{\"e\":[],\"d\":4,\"b\":2} {\"e\":[],\"d\":4,\"b\":2}",
+          "c"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "count": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.warn(true, 3, (3).toFixed(1));\nlet iota = 'hi';\n{\n  let sigma = Number.parseInt(iota + '7', 10);\n  for (const field in { ...{ ['g']: false }, ['b']: false, ['e']: [sigma, sigma] }) {\n    console.log(field);\n    console.warn(0);\n  }\n  console.warn(sigma, iota.includes('a'));\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "true 3 3.0",
+          "g",
+          "0",
+          "b",
+          "0",
+          "e",
+          "0",
+          "NaN false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "count": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "string \"hi\"",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "if (false) {\n  for (const field in { ['c']: false, ['d']: 6 }) {\n    console.log(field);\n  }\n  let turn1 = 0;\n  while (turn1 < 3) {\n    turn1++;\n    let zeta = String(turn1);\n    const kappa = { c: (iota.padStart(5, '*') + zeta.replaceAll('b', 'B')) };\n  }\n}\nlet alpha = [iota, JSON.stringify(iota)];\nvar omega = [7];\nfor (const field in omega) {\n  console.log(field);\n}\nconsole.log(omega);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "[7]"
+        ],
+        "probes": {
+          "alpha": "object [\"hi\",\"\\\"hi\\\"\"]",
+          "count": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "string \"hi\"",
+          "kappa": "unbound",
+          "omega": "object [7]",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let tau = (3 ** 2);\nfunction rho(count) {\n  return Array.from({ length: 3 }, (slot, index) => index * 2).length;\n}\nconsole.log(rho(11));\ntry {\n  let turn2 = 0;\n  while (turn2 < 3) {\n    turn2++;\n    tau ||= Math.max(Array.from({ length: 3 }, (slot, index) => index * 2).length, Number.parseInt(iota + '7', 10));\n  }\n  throw new RangeError('Lash', { cause: 1 });\n} catch {\n  console.log('caught');\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3",
+          "caught"
+        ],
+        "probes": {
+          "alpha": "object [\"hi\",\"\\\"hi\\\"\"]",
+          "count": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "string \"hi\"",
+          "kappa": "unbound",
+          "omega": "object [7]",
+          "rho": "function undefined",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "number 9",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "rho"
+        ]
+      }
+    }
+  ]
+}

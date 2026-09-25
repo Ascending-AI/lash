@@ -1,0 +1,100 @@
+{
+  "seed": 61,
+  "probe": [
+    "alpha",
+    "count",
+    "delta",
+    "entry",
+    "iota",
+    "item",
+    "j",
+    "kappa",
+    "lambda",
+    "n",
+    "omega",
+    "phi",
+    "rest",
+    "scaled",
+    "tau",
+    "theta",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "function lambda(count) {\n  {\n    const lambda = new Date(1346436248000);\n    let delta = { ...{ a: (true ? count : count) } };\n    delta.a *= 3;\n  }\n  let iota = { ...{ f: true }, h: [12, 2.5], d: (count >= count) };\n  return Number.parseInt(`${count}:${'b.c'}` + '7', 10);\n}\nconsole.log(lambda(10));\nfor (const entry of []) {\n  for (const entry of ['Lash']) {\n    let tau = { a: true, f: false };\n    tau.a = false;\n  }\n  console.info(entry);\n}\n{\n  const delta = new Date(Date.UTC(2024, 6, 9));\n  console.log(delta.toISOString(), delta.getUTCDay(), delta.getTime() > 0, delta instanceof Date);\n  if ((delta instanceof Array)) {\n    const alpha = 'zz'.replaceAll('b', 'B');\n  }\n  console.info(delta.toISOString(), delta.toISOString());\n}\nconsole.log('zz', Number.parseInt('hi'.split(',').reverse().join('|').toLowerCase() + '7', 10));\nvar theta = lambda(0);\nconsole.warn(theta);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "10",
+          "2024-07-09T00:00:00.000Z 2 true true",
+          "2024-07-09T00:00:00.000Z 2024-07-09T00:00:00.000Z",
+          "zz NaN",
+          "0"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "lambda": "function undefined",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "rest": "unbound",
+          "scaled": "unbound",
+          "tau": "unbound",
+          "theta": "number 0",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "lambda"
+        ]
+      }
+    },
+    {
+      "source": "const zeta = (n) => { const scaled = 4; return 12; };\nconsole.log(zeta(7));\nconst kappa = { d: (theta instanceof Map), g: 10, e: zeta(2) };\nconsole.log(false);\nif (false) {\n  kappa.g -= 2;\n  const tau = (value) => { const scaled = zeta((theta + theta)); return theta; };\n  console.log(tau(('x'.indexOf('b') - theta)));\n} else {\n  kappa.d = false;\n  for (let j = 0; j < 3; j++) {\n    console.log(false, theta);\n    if (false) { continue; }\n  }\n}\nlet phi = [(theta).toFixed(1)];\nconst omega = (item, ...rest) => item + rest.length;\nconsole.log(omega(theta));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "12",
+          "false",
+          "false 0",
+          "false 0",
+          "false 0",
+          "0"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "object {\"d\":false,\"g\":10,\"e\":12}",
+          "lambda": "function undefined",
+          "n": "unbound",
+          "omega": "function undefined",
+          "phi": "object [\"0.0\"]",
+          "rest": "unbound",
+          "scaled": "unbound",
+          "tau": "unbound",
+          "theta": "number 0",
+          "value": "unbound",
+          "zeta": "function undefined"
+        },
+        "closures": [
+          "lambda",
+          "omega",
+          "zeta"
+        ]
+      }
+    }
+  ]
+}

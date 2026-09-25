@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	iterator-helpers	skip	ticket-ruling:FIG-1413:iterator-helpers — lazy iterator pipelines keep suspended iteration state alive across a park, and the dialect's answer is that every iterator is materialized at a bounded sink instead	-

@@ -1,0 +1,18 @@
+# test262-path	class	qualifier
+test/built-ins/Object/is/length.js	pass	-
+test/built-ins/Object/is/name.js	pass	-
+test/built-ins/Object/is/not-same-value-x-y-boolean.js	pass	-
+test/built-ins/Object/is/not-same-value-x-y-null.js	pass	-
+test/built-ins/Object/is/not-same-value-x-y-number.js	pass	-
+test/built-ins/Object/is/not-same-value-x-y-object.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Object/is/not-same-value-x-y-string.js	pass	-
+test/built-ins/Object/is/not-same-value-x-y-type.js	pass	-
+test/built-ins/Object/is/not-same-value-x-y-undefined.js	pass	-
+test/built-ins/Object/is/object-is.js	pass	-
+test/built-ins/Object/is/same-value-x-y-boolean.js	pass	-
+test/built-ins/Object/is/same-value-x-y-empty.js	pass	-
+test/built-ins/Object/is/same-value-x-y-null.js	pass	-
+test/built-ins/Object/is/same-value-x-y-number.js	pass	-
+test/built-ins/Object/is/same-value-x-y-object.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Object/is/same-value-x-y-string.js	pass	-
+test/built-ins/Object/is/same-value-x-y-undefined.js	pass	-

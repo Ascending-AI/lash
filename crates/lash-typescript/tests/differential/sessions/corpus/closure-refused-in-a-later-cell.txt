@@ -1,0 +1,17 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/closure-refused-in-a-later-cell.json.
+
+session closure-refused-in-a-later-cell
+about a later cell's use of a function an earlier cell bound is refused by name, live and after a reload (FIG-3608)
+probe helper twice box n
+deviation closure-boundary
+cell
+const helper = (n) => n + 1;
+function twice(n) { return n * 2; }
+const box = { run: helper, n: 2 };
+console.log(helper(1), twice(2), box.n);
+cell deviation closure-boundary
+console.log(typeof helper, twice(3), box.n);
+lash {"outcome":"rejected","diagnostic":"TS_FUNCTION_NOT_PERSISTED","prints":[],"probes":{"box":"dropped","helper":"dropped","n":"unbound","twice":"dropped"}}
+end

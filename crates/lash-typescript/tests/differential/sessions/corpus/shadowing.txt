@@ -1,0 +1,25 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/shadowing.json.
+
+session shadowing
+about a block shadow neither leaks nor overwrites the session global it shadows
+probe shade
+cell
+let shade = "outer";
+{
+  let shade = "inner";
+  console.log(shade);
+}
+console.log(shade);
+cell
+{
+  const shade = "block";
+  console.log(shade);
+}
+if (shade === "outer") {
+  let shade = "arm";
+  console.log(shade);
+}
+console.log(shade);
+end

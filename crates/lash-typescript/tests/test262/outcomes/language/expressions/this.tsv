@@ -1,0 +1,6 @@
+# test262-path	class	qualifier
+test/language/expressions/this/11.1.1-1.js	refused	TS_THIS_UNSUPPORTED
+test/language/expressions/this/S11.1.1_A1.js	pass	-
+test/language/expressions/this/S11.1.1_A3.2.js	refused	TS_EVAL_UNSUPPORTED
+test/language/expressions/this/S11.1.1_A4.1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/this/S11.1.1_A4.2.js	refused	TS_NEW_UNSUPPORTED

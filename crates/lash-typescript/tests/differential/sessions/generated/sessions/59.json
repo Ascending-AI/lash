@@ -1,0 +1,93 @@
+{
+  "seed": 59,
+  "probe": [
+    "alpha",
+    "beta",
+    "delta",
+    "index",
+    "iota",
+    "kappa",
+    "key",
+    "omega",
+    "phi",
+    "psi",
+    "sigma",
+    "slot",
+    "tau",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "let delta = new Map([['b', 0], ['a', 11]]);\nvar omega = true;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "delta": "object {}",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "key": "unbound",
+          "omega": "boolean true",
+          "phi": "unbound",
+          "psi": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const [iota, ...psi] = [0, Number.parseInt(('ab' + 'x') + '7', 10), (omega ? 5 : 8)];\nconst { a: kappa, b: phi = 0 } = { a: JSON.stringify(psi), b: Math.max(...psi, 1) };\nlet sigma = [];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "delta": "object {}",
+          "index": "unbound",
+          "iota": "number 0",
+          "kappa": "string \"[null,5]\"",
+          "key": "unbound",
+          "omega": "boolean true",
+          "phi": "number null",
+          "psi": "object [null,5]",
+          "sigma": "object []",
+          "slot": "unbound",
+          "tau": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const tau = false;\nconsole.log(sigma, ((0 !== 9) || delta.has('a')));\nswitch (phi % 3) {\n  case 0: {\n    sigma.forEach((value) => { psi.push(value); });\n    psi.push(10);\n    break;\n  }\n  default: {\n    for (const [key, value] of delta) {\n      let beta = { d: omega, e: 'Lash', h: [(phi * phi), 5, 4] };\n    }\n  }\n}\npsi.forEach((value) => { sigma.push(value); });\nconsole.log((typeof 10).split(',').reverse().join('|'));\nconst alpha = Math.min((-Array.from({ length: 2 }, (slot, index) => index * 2).length), 10);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[] true",
+          "number"
+        ],
+        "probes": {
+          "alpha": "number -2",
+          "beta": "unbound",
+          "delta": "object {}",
+          "index": "unbound",
+          "iota": "number 0",
+          "kappa": "string \"[null,5]\"",
+          "key": "unbound",
+          "omega": "boolean true",
+          "phi": "number null",
+          "psi": "object [null,5]",
+          "sigma": "object [null,5]",
+          "slot": "unbound",
+          "tau": "boolean false",
+          "value": "unbound"
+        }
+      }
+    }
+  ]
+}

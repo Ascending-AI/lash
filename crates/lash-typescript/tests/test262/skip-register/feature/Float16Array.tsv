@@ -1,0 +1,6 @@
+# test262-path	excluding-census-row
+test/built-ins/Math/f16round/length.js	feature:Float16Array
+test/built-ins/Math/f16round/name.js	feature:Float16Array
+test/built-ins/Math/f16round/not-a-constructor.js	feature:Float16Array
+test/built-ins/Math/f16round/prop-desc.js	feature:Float16Array
+test/built-ins/Math/f16round/value-conversion.js	feature:Float16Array

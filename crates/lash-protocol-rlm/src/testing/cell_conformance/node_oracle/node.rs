@@ -1,6 +1,6 @@
 //! The live Node oracle: `oracle.mjs` as a child process.
 //!
-//! Only the deliberate steps ask Node live: writing `generated.json`, the
+//! Only the deliberate steps ask Node live: writing `generated/`, the
 //! long generated run and the minimizer. The cacheable test partition reads
 //! the checked-in answers and never starts a process (ADR 0062: no network,
 //! no Node in the Bazel test partition).
@@ -26,6 +26,96 @@ pub(super) fn repository_root() -> PathBuf {
 /// The directory both session corpora live in.
 pub(super) fn sessions_directory() -> PathBuf {
     repository_root().join("crates/lash-typescript/tests/differential/sessions")
+}
+
+/// Every `*.<extension>` file under `directory`, recursively, as
+/// `(shard, text)`: the shard is the path under the directory without the
+/// suffix (`generated/sessions/7.json` is shard `7` under `sessions/`), and
+/// the list is sorted by it.
+#[allow(clippy::disallowed_methods)] // FIG-2971: a corpus check is a host; the checked-in shards are a test's data.
+pub(super) fn shard_files(directory: &std::path::Path, extension: &str) -> Vec<(String, String)> {
+    let mut files = Vec::new();
+    let mut pending = vec![directory.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+        {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|suffix| suffix == extension) {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let shard = path
+                .strip_prefix(directory)
+                .expect("a file under its directory")
+                .with_extension("")
+                .to_str()
+                .expect("UTF-8 shard name")
+                .replace('\\', "/");
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            (shard, text)
+        })
+        .collect()
+}
+
+/// ICU's default collation as Node's `localeCompare` orders the record
+/// alphabet (`[A-Za-z0-9._-]`): punctuation before digits before letters at
+/// the primary level, letters case-folded, then case (lower before upper) to
+/// break ties. The pre-shard `census.tsv` held this order and the session
+/// generator's draws index into it, so the sharded census's readers sort the
+/// union back into it (FIG-3727).
+pub(super) fn collation_key(name: &str) -> (Vec<u16>, Vec<u16>) {
+    let primary = |character: char| match character {
+        '_' => 1,
+        '-' => 2,
+        '.' => 3,
+        '0'..='9' => 10 + u16::from(character as u8 - b'0'),
+        'a'..='z' | 'A'..='Z' => 20 + u16::from(character.to_ascii_lowercase() as u8 - b'a'),
+        other => panic!("record key `{name}` carries {other:?}, which the collation cannot order"),
+    };
+    (
+        name.chars().map(primary).collect(),
+        name.chars()
+            .map(|character| u16::from(character.is_uppercase()))
+            .collect(),
+    )
+}
+
+/// The Test262 census's rows, the union of the `census/<kind>/<name>.tsv`
+/// shards in collation order — the order the pre-shard `census.tsv` held.
+pub(super) fn census_rows() -> Vec<Vec<String>> {
+    let directory = repository_root().join("crates/lash-typescript/tests/test262/census");
+    let mut rows = shard_files(&directory, "tsv")
+        .into_iter()
+        .flat_map(|(shard, text)| {
+            text.lines()
+                .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+                .map(|line| line.split('\t').map(str::to_owned).collect::<Vec<_>>())
+                .map(move |fields| {
+                    assert_eq!(
+                        fields.len(),
+                        5,
+                        "census/{shard}.tsv has a malformed row {fields:?}"
+                    );
+                    fields
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        collation_key(&left[0])
+            .cmp(&collation_key(&right[0]))
+            .then_with(|| collation_key(&left[1]).cmp(&collation_key(&right[1])))
+    });
+    rows
 }
 
 /// One session as the oracle service reads it.

@@ -1,0 +1,18 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/mutation-through-session-globals.json.
+
+session mutation-through-session-globals
+about a later cell mutates the objects and arrays earlier cells bound
+probe holder queue
+cell
+const holder = { count: 1 };
+const queue = [1];
+cell
+holder.count += 1;
+holder.extra = "x";
+queue.push(2);
+console.log(holder, queue);
+cell
+console.log(holder.count, queue.length);
+end

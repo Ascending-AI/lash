@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Intl.DateTimeFormat-dayPeriod	skip	ticket-ruling:FIG-1413:Intl.DateTimeFormat-dayPeriod	-

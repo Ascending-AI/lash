@@ -1,0 +1,16 @@
+# test262-path	class	qualifier
+test/built-ins/AsyncFunction/AsyncFunction-construct.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/AsyncFunction/AsyncFunction-is-extensible.js	pass	-
+test/built-ins/AsyncFunction/AsyncFunction-is-subclass.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/AsyncFunction/AsyncFunction-length.js	pass	-
+test/built-ins/AsyncFunction/AsyncFunction-name.js	pass	-
+test/built-ins/AsyncFunction/AsyncFunction-prototype.js	pass	-
+test/built-ins/AsyncFunction/AsyncFunction.js	pass	-
+test/built-ins/AsyncFunction/AsyncFunctionPrototype-is-extensible.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/AsyncFunction/AsyncFunctionPrototype-is-not-callable.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/AsyncFunction/AsyncFunctionPrototype-prototype.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/AsyncFunction/instance-construct-throws.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/AsyncFunction/instance-has-name.js	pass	-
+test/built-ins/AsyncFunction/instance-length.js	pass	-
+test/built-ins/AsyncFunction/instance-prototype-property.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/AsyncFunction/is-not-a-global.js	refused	TS_UNKNOWN_BINDING

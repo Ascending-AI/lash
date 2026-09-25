@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	iterator-chunking	skip	ticket-ruling:FIG-1413:iterator-chunking	-

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Promise	skip	ticket-ruling:FIG-1413:Promise	-

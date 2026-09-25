@@ -1,0 +1,30 @@
+{
+  "id": "for-of-binder",
+  "about": "a for...of binder ends with its loop (FIG-3571 phase-1 leak `item`)",
+  "probe": [
+    "items",
+    "item",
+    "total"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const items = [1, 2, 3];\nlet total = 0;\nfor (const item of items) {\n  total = total + item;\n}\nconsole.log(total);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "6"
+        ],
+        "probes": {
+          "items": "object [1,2,3]",
+          "item": "unbound",
+          "total": "number 6"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

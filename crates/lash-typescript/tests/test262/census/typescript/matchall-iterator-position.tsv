@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	matchall-iterator-position	rejected	TS_REGEX_ITERATOR_POSITION	const it = 'a'.matchAll(/a/g);

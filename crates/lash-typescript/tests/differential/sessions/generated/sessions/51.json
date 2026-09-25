@@ -1,0 +1,75 @@
+{
+  "seed": 51,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "count",
+    "error",
+    "gamma",
+    "iota",
+    "kappa",
+    "omega",
+    "phi",
+    "rho",
+    "sigma",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "const { a: rho, b: beta = 0 } = { a: 'Lash', b: 6 };\nvar iota = { h: [2, 7.5], c: 1, a: [Number.parseInt('zz' + '7', 10), beta, 'hi'.length] };\niota.a.push(Math.min(beta, 6));\nfunction sigma(count) {\n  return count <= 1 ? 1 : count + sigma(count - 1);\n}\nconsole.log(sigma(6));\nconst gamma = JSON.parse(JSON.stringify(iota));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "21"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "number 6",
+          "chi": "unbound",
+          "count": "unbound",
+          "error": "unbound",
+          "gamma": "object {\"h\":[2,7.5],\"c\":1,\"a\":[null,6,2,6]}",
+          "iota": "object {\"h\":[2,7.5],\"c\":1,\"a\":[null,6,2,6]}",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "rho": "string \"Lash\"",
+          "sigma": "function undefined",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "sigma"
+        ]
+      }
+    },
+    {
+      "source": "const [omega, ...kappa] = [(5 - 6), (10 % 7), 12];\ntry {\n  switch (6 % 3) {\n    case 0: {\n      let chi = (typeof beta);\n      const alpha = new RangeError('ab');\n      console.log(alpha.name, alpha.message, String(alpha), alpha instanceof Error);\n      break;\n    }\n    case 1: {\n      iota.h.push(9);\n      const zeta = new URLSearchParams({ q: 'a b', r: '+' });\n      break;\n    }\n    default: {\n      const phi = rho;\n    }\n  }\n  throw new SyntaxError('a,b', { cause: 1 });\n} catch (error) {\n  console.log(error.name, error.message, error instanceof RangeError);\n}\nkappa[0] = (1 ** 2);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "RangeError ab RangeError: ab true",
+          "SyntaxError a,b false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "number 6",
+          "chi": "unbound",
+          "count": "unbound",
+          "error": "unbound",
+          "gamma": "object {\"h\":[2,7.5],\"c\":1,\"a\":[null,6,2,6]}",
+          "iota": "object {\"h\":[2,7.5],\"c\":1,\"a\":[null,6,2,6]}",
+          "kappa": "object [1,12]",
+          "omega": "number -1",
+          "phi": "unbound",
+          "rho": "string \"Lash\"",
+          "sigma": "function undefined",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "sigma"
+        ]
+      }
+    }
+  ]
+}

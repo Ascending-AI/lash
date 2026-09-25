@@ -1,0 +1,133 @@
+{
+  "seed": 6,
+  "probe": [
+    "alpha",
+    "beta",
+    "delta",
+    "field",
+    "gamma",
+    "index",
+    "iota",
+    "kappa",
+    "lambda",
+    "omega",
+    "phi",
+    "psi",
+    "rest",
+    "sigma",
+    "slot",
+    "theta",
+    "turn1",
+    "turn2",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "const delta = Math.abs(11);\nlet turn1 = 0;\ndo {\n  turn1++;\n  const gamma = { a: [3, 6, (false ? 4 : delta)] };\n  const lambda = turn1;\n} while (turn1 < 3);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "delta": "number 11",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "turn1": "number 3",
+          "turn2": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let psi = 'zz';\n{\n  console.log(delta, psi);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "11 zz"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "delta": "number 11",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "string \"zz\"",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "turn1": "number 3",
+          "turn2": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "switch (delta % 3) {\n  case 0: {\n    console.log(turn1, delta);\n    break;\n  }\n  case 1: {\n    const phi = turn1;\n    break;\n  }\n  default: {\n    let beta = { ...{ e: turn1, f: [Math.min(turn1, delta), turn1, 4] } };\n  }\n}\nconst [alpha, ...kappa] = [5, psi.indexOf('b'), Array.from({ length: 1 }, (slot, index) => index * 2).length];\nlet turn2 = 0;\nwhile (turn2 < 3) {\n  turn2++;\n  for (const field in kappa) {\n    console.log(field);\n    const iota = new URL('https://example.com/p?x=1');\n    console.log(iota.href, iota.pathname, iota.searchParams.get('x'), iota.origin);\n  }\n}\nconst sigma = (value, ...rest) => Math.max(alpha, 11) + rest.length;\nconsole.log(sigma(7));\nconst { a: theta, b: zeta = 0 } = { a: 'ab', b: 0 };\nvar omega = psi;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "https://example.com/p?x=1 /p 1 https://example.com",
+          "1",
+          "https://example.com/p?x=1 /p 1 https://example.com",
+          "0",
+          "https://example.com/p?x=1 /p 1 https://example.com",
+          "1",
+          "https://example.com/p?x=1 /p 1 https://example.com",
+          "0",
+          "https://example.com/p?x=1 /p 1 https://example.com",
+          "1",
+          "https://example.com/p?x=1 /p 1 https://example.com",
+          "11"
+        ],
+        "probes": {
+          "alpha": "number 5",
+          "beta": "unbound",
+          "delta": "number 11",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "object [-1,1]",
+          "lambda": "unbound",
+          "omega": "string \"zz\"",
+          "phi": "unbound",
+          "psi": "string \"zz\"",
+          "rest": "unbound",
+          "sigma": "function undefined",
+          "slot": "unbound",
+          "theta": "string \"ab\"",
+          "turn1": "number 3",
+          "turn2": "number 3",
+          "value": "unbound",
+          "zeta": "number 0"
+        },
+        "closures": [
+          "sigma"
+        ]
+      }
+    }
+  ]
+}

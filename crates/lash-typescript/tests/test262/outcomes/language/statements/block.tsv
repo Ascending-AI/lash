@@ -1,0 +1,16 @@
+# test262-path	class	qualifier
+test/language/statements/block/12.1-1.js	pass	-
+test/language/statements/block/12.1-2.js	pass	-
+test/language/statements/block/12.1-3.js	pass	-
+test/language/statements/block/12.1-4.js	pass	-
+test/language/statements/block/12.1-5.js	pass	-
+test/language/statements/block/12.1-6.js	pass	-
+test/language/statements/block/12.1-7.js	pass	-
+test/language/statements/block/S12.1_A2.js	refused	TS_UNKNOWN_BINDING
+test/language/statements/block/S12.1_A4_T1.js	pass	-
+test/language/statements/block/S12.1_A4_T2.js	pass	-
+test/language/statements/block/S12.1_A5.js	pass	-
+test/language/statements/block/labeled-continue.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/block/scope-lex-close.js	pass	-
+test/language/statements/block/scope-lex-open.js	pass	-
+test/language/statements/block/scope-var-none.js	pass	-

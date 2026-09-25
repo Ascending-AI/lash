@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Symbol.toStringTag	skip	ticket-ruling:FIG-1413:Symbol.toStringTag	-

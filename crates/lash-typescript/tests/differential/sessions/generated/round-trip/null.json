@@ -1,0 +1,19 @@
+{
+  "name": "null",
+  "create": "const value = null;",
+  "uses": "console.log(value === null, typeof value, value ?? 'fallback');",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "true object fallback"
+      ],
+      "probes": {}
+    }
+  ]
+}

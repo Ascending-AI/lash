@@ -1,0 +1,113 @@
+{
+  "seed": 23,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "gamma",
+    "index",
+    "item",
+    "n",
+    "psi",
+    "rho",
+    "scaled",
+    "slot",
+    "step",
+    "theta",
+    "turn1"
+  ],
+  "cells": [
+    {
+      "source": "const beta = { b: '  pad '.trim() };\nbeta.b = 'Lash';\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "object {\"b\":\"Lash\"}",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "n": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound"
+        }
+      }
+    },
+    {
+      "source": "beta.b = Object.keys(beta).join('');\nconst { a: chi, b: rho = 0 } = { a: ((5.5 - 6)).toFixed(1), b: (6 ** 2) };\nfor (let step = 0; step < 3; step++) {\n  let psi = beta;\n}\nfor (const entry of ['a,b']) {\n  let delta = { d: true, g: ('Lash'.toUpperCase() === ('a,b' + 'b.c')) };\n  let psi = [Math.floor(4.5)];\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "object {\"b\":\"b\"}",
+          "chi": "string \"-0.5\"",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "n": "unbound",
+          "psi": "unbound",
+          "rho": "number 36",
+          "scaled": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const entry of chi) {\n  beta.b = 'x'.padStart(5, '*');\n}\nconst alpha = beta;\nlet turn1 = 0;\ndo {\n  turn1++;\n  if (false) {\n    const beta = new URL('https://example.com/a/b?x=1');\n    console.log(beta.href, beta.pathname, beta.searchParams.get('x'), beta.origin);\n  } else {\n    console.log((Math.min(turn1, rho)).toFixed(1).split(',').reverse().join('|'));\n    const theta = (n) => { const scaled = 10; return 1; };\n    console.log(theta(Array.from({ length: 1 }, (slot, index) => index * 2).length));\n  }\n  console.log(turn1, alpha, ((-(turn1 >>> turn1)) >= (0 + (-rho))));\n} while (turn1 < 3);\n{\n  {\n    alpha.b = 'Lash'.split(',').reverse().join('|').split(',').reverse().join('|');\n  }\n  for (const entry of chi) {\n    console.log(alpha);\n  }\n  const gamma = (item, step = 2) => (3 - 1) + step;\n  console.log(gamma((8 << Array.from({ length: 3 }, (slot, index) => index * 2).length)));\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1.0",
+          "1",
+          "1 {\"b\":\"****x\"} true",
+          "2.0",
+          "1",
+          "2 {\"b\":\"****x\"} true",
+          "3.0",
+          "1",
+          "3 {\"b\":\"****x\"} true",
+          "{\"b\":\"Lash\"}",
+          "{\"b\":\"Lash\"}",
+          "{\"b\":\"Lash\"}",
+          "{\"b\":\"Lash\"}",
+          "4"
+        ],
+        "probes": {
+          "alpha": "object {\"b\":\"Lash\"}",
+          "beta": "object {\"b\":\"Lash\"}",
+          "chi": "string \"-0.5\"",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "n": "unbound",
+          "psi": "unbound",
+          "rho": "number 36",
+          "scaled": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "number 3"
+        }
+      }
+    }
+  ]
+}

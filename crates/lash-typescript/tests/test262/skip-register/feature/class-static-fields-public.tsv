@@ -1,0 +1,23 @@
+# test262-path	excluding-census-row
+test/language/expressions/class/elements/class-name-static-initializer-anonymous.js	feature:class-static-fields-public
+test/language/expressions/class/elements/class-name-static-initializer-decl.js	feature:class-static-fields-public
+test/language/expressions/class/elements/class-name-static-initializer-expr.js	feature:class-static-fields-public
+test/language/expressions/class/elements/intercalated-static-non-static-computed-fields.js	feature:class-static-fields-public
+test/language/expressions/class/elements/static-as-valid-static-field-assigned.js	feature:class-static-fields-public
+test/language/expressions/class/elements/static-as-valid-static-field.js	feature:class-static-fields-public
+test/language/expressions/class/elements/static-field-declaration.js	feature:class-static-fields-public
+test/language/expressions/class/elements/static-field-init-this-inside-arrow-function.js	feature:class-static-fields-public
+test/language/expressions/class/elements/static-field-init-with-this.js	feature:class-static-fields-public
+test/language/expressions/class/elements/static-field-redeclaration.js	feature:class-static-fields-public
+test/language/statements/class/elements/intercalated-static-non-static-computed-fields.js	feature:class-static-fields-public
+test/language/statements/class/elements/static-as-valid-static-field-assigned.js	feature:class-static-fields-public
+test/language/statements/class/elements/static-as-valid-static-field.js	feature:class-static-fields-public
+test/language/statements/class/elements/static-field-declaration.js	feature:class-static-fields-public
+test/language/statements/class/elements/static-field-init-this-inside-arrow-function.js	feature:class-static-fields-public
+test/language/statements/class/elements/static-field-init-with-this.js	feature:class-static-fields-public
+test/language/statements/class/elements/static-field-initializer-error.js	feature:class-static-fields-public
+test/language/statements/class/elements/static-field-redeclaration.js	feature:class-static-fields-public
+test/language/statements/class/elements/static-fielddefinition-initializer-abrupt-completion.js	feature:class-static-fields-public
+test/language/statements/class/static-classelementname-abrupt-completion.js	feature:class-static-fields-public
+test/language/statements/class/static-init-abrupt.js	feature:class-static-fields-public
+test/language/statements/class/static-init-sequence.js	feature:class-static-fields-public

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	tagged-templates	rejected	TS_TAGGED_TEMPLATE_UNSUPPORTED	const s = String.raw`a`;

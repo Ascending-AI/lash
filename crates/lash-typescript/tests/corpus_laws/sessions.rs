@@ -11,7 +11,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Deserialize;
 
-const EXPECTATIONS: &str = include_str!("../differential/sessions/expectations.json");
 const README: &str = include_str!("../../README.md");
 
 /// The one session-wide probe rule the register holds.
@@ -61,8 +60,48 @@ pub(crate) struct Observation {
     pub(crate) closures: Vec<String>,
 }
 
+/// The session corpus: `expectations/meta.json` for the pinned Node, then
+/// every `expectations/<session>.json` shard (FIG-3727), so two sessions
+/// never share a file.
+#[allow(clippy::disallowed_methods)] // FIG-2971: a corpus law is a host; the checked-in shards are a test's data.
 pub(crate) fn corpus() -> Corpus {
-    serde_json::from_str(EXPECTATIONS).expect("the session expectations parse")
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/differential/sessions");
+    #[derive(Deserialize)]
+    struct Meta {
+        node: String,
+    }
+    let meta: Meta = serde_json::from_str(
+        &std::fs::read_to_string(directory.join("expectations/meta.json"))
+            .expect("read expectations/meta.json"),
+    )
+    .expect("the session expectations' meta parses");
+    let mut sessions = std::fs::read_dir(directory.join("expectations"))
+        .expect("read the expectations shards")
+        .map(|entry| {
+            let path = entry.expect("an expectations entry").path();
+            assert!(
+                path.extension()
+                    .is_some_and(|extension| extension == "json"),
+                "{}: expectations holds only .json shards",
+                path.display()
+            );
+            path
+        })
+        .filter(|path| path.file_name().is_some_and(|name| name != "meta.json"))
+        .map(|path| {
+            serde_json::from_str(
+                &std::fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display())),
+            )
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+        })
+        .collect::<Vec<Session>>();
+    sessions.sort_by(|left, right| left.id.cmp(&right.id));
+    Corpus {
+        node: meta.node,
+        sessions,
+    }
 }
 
 impl Cell {

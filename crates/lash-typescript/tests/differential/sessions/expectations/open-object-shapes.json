@@ -1,0 +1,51 @@
+{
+  "id": "open-object-shapes",
+  "about": "a computed key, a computed-key write or an escape opens an object literal, so a missing field reads undefined (FIG-3626)",
+  "probe": [
+    "name",
+    "keyed",
+    "written",
+    "grown"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const name = 'k';\nconst keyed = { [name]: 1 };\nconst written = { a: 1 };\nwritten[name] = 2;\nconst grown = { a: 1 };\nObject.assign(grown, { k: 3 });\nconsole.log(keyed.k, keyed.missing, written.k, written.missing, grown.k, grown.missing);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1 undefined 2 undefined 3 undefined"
+        ],
+        "probes": {
+          "name": "string \"k\"",
+          "keyed": "object {\"k\":1}",
+          "written": "object {\"a\":1,\"k\":2}",
+          "grown": "object {\"a\":1,\"k\":3}"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "console.log(keyed.k, written.k, grown.k);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1 2 3"
+        ],
+        "probes": {
+          "name": "string \"k\"",
+          "keyed": "object {\"k\":1}",
+          "written": "object {\"a\":1,\"k\":2}",
+          "grown": "object {\"a\":1,\"k\":3}"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

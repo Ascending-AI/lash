@@ -1,0 +1,14 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/global-object-and-lexical-binding.json.
+
+session global-object-and-lexical-binding
+about a write through globalThis creates a global object property that a let of the same name shadows
+probe counter
+cell
+let counter = 1;
+cell deviation global-object-aliases-lexical-bindings
+globalThis.counter = counter + 1;
+console.log(counter);
+lash {"outcome":"normal","prints":["2"],"probes":{"counter":"number 2"}}
+end

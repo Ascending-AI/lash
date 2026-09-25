@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	date-parse-non-iso	rejected	TS_DATE_PARSE_NON_ISO	finish(Date.parse('March 7, 2024'));

@@ -1,0 +1,9 @@
+# test262-path	excluding-census-row
+test/built-ins/AsyncIteratorPrototype/Symbol.asyncIterator/length.js	feature:Symbol.asyncIterator
+test/built-ins/AsyncIteratorPrototype/Symbol.asyncIterator/name.js	feature:Symbol.asyncIterator
+test/built-ins/AsyncIteratorPrototype/Symbol.asyncIterator/prop-desc.js	feature:Symbol.asyncIterator
+test/built-ins/AsyncIteratorPrototype/Symbol.asyncIterator/return-val.js	feature:Symbol.asyncIterator
+test/language/expressions/async-generator/yield-star-getiter-async-return-method-is-null.js	feature:Symbol.asyncIterator
+test/language/expressions/async-generator/yield-star-getiter-async-throw-method-is-null.js	feature:Symbol.asyncIterator
+test/language/statements/async-generator/yield-star-return-missing-value-is-awaited.js	feature:Symbol.asyncIterator
+test/language/statements/for-await-of/iterator-close-non-throw-get-method-is-null.js	feature:Symbol.asyncIterator

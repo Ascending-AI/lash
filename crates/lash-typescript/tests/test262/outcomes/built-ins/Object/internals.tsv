@@ -1,0 +1,7 @@
+# test262-path	class	qualifier
+test/built-ins/Object/internals/DefineOwnProperty/consistent-value-function-arguments.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/internals/DefineOwnProperty/consistent-value-function-caller.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/internals/DefineOwnProperty/consistent-value-regexp-dollar1.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/internals/DefineOwnProperty/consistent-writable-regexp-dollar1.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reassign.js	refused	TS_LINK_ERROR
+test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reconfigure.js	refused	TS_METHOD_UNSUPPORTED

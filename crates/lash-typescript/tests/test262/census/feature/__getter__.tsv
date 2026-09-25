@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	__getter__	rejected	TS_PROTOTYPE_MUTATION_UNSUPPORTED	const o: any = {}; o.__lookupGetter__('x');

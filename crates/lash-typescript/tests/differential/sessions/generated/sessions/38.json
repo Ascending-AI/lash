@@ -1,0 +1,131 @@
+{
+  "seed": 38,
+  "probe": [
+    "beta",
+    "chi",
+    "entry",
+    "error",
+    "field",
+    "gamma",
+    "index",
+    "iota",
+    "kappa",
+    "omega",
+    "phi",
+    "psi",
+    "scaled",
+    "shared1",
+    "sigma",
+    "slot",
+    "theta",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "globalThis.shared1 = ('hi' + 'b.c');\nconsole.log((Array.from({ length: 1 }, (slot, index) => index * 2).length).toFixed(1), shared1);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1.0 hib.c"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "scaled": "unbound",
+          "shared1": "string \"hib.c\"",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let gamma = (-(11 % 0));\nlet iota = 'x';\nlet phi = [shared1, (Array.from({ length: 0 }, (slot, index) => index * 2).length).toFixed(1)];\nfor (const entry of shared1) {\n  let psi = [(phi.length + iota.length), gamma];\n  switch (3 % 3) {\n    case 0: {\n      phi.push(...['b.c'.trimStart().slice(0, 2), 'b.c']);\n      let omega = gamma;\n      break;\n    }\n    default: {\n      psi.push((3 ** 2));\n    }\n  }\n}\ntry {\n  console.log('x', iota, phi);\n  for (const field in phi) {\n    console.log(field);\n  }\n} catch (error) {\n  console.log(error.name, error.message, error instanceof RangeError);\n}\nif (!!true) {\n  {\n    const chi = (Math.max(phi.length, gamma) ** 2);\n    phi.unshift('a,b');\n  }\n} else {\n  {\n    phi.push(...[String((true ? gamma : gamma)), shared1]);\n    const beta = (value) => Array.from({ length: 2 }, (slot, index) => index * 2).length;\n    console.log(beta((gamma + iota.indexOf('b'))));\n  }\n  const theta = Array.from({ length: 2 }, (slot, index) => index * 2).length;\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "x x [\"hib.c\",\"0.0\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\"]",
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "number null",
+          "index": "unbound",
+          "iota": "string \"x\"",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "object [\"a,b\",\"hib.c\",\"0.0\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\"]",
+          "psi": "unbound",
+          "scaled": "unbound",
+          "shared1": "string \"hib.c\"",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const sigma = phi;\nconst zeta = (value) => { const scaled = 1.5; return (scaled % 4); };\nconsole.log(zeta(1));\nvar kappa = phi.concat([(gamma).toFixed(1)]);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1.5"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "number null",
+          "index": "unbound",
+          "iota": "string \"x\"",
+          "kappa": "object [\"a,b\",\"hib.c\",\"0.0\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"NaN\"]",
+          "omega": "unbound",
+          "phi": "object [\"a,b\",\"hib.c\",\"0.0\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\"]",
+          "psi": "unbound",
+          "scaled": "unbound",
+          "shared1": "string \"hib.c\"",
+          "sigma": "object [\"a,b\",\"hib.c\",\"0.0\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\",\"b.\",\"b.c\"]",
+          "slot": "unbound",
+          "theta": "unbound",
+          "value": "unbound",
+          "zeta": "function undefined"
+        },
+        "closures": [
+          "zeta"
+        ]
+      }
+    }
+  ]
+}

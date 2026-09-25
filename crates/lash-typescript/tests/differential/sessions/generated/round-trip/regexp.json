@@ -1,0 +1,19 @@
+{
+  "name": "regexp",
+  "create": "const value = /a(b+)/gi;\nvalue.test('xab');",
+  "uses": "console.log(value.lastIndex, value.source, value.flags, value.exec('xabbb ABB')?.[1], value.lastIndex, String(value));",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "3 a(b+) gi BB 9 /a(b+)/gi"
+      ],
+      "probes": {}
+    }
+  ]
+}

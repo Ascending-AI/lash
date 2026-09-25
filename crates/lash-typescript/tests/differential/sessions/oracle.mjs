@@ -8,7 +8,7 @@
 //
 // runs it in a fresh realm under the one cell-to-Script mapping
 // (`realm.mjs`), and writes one line per session: the JSON array of Node's
-// observation of each cell, in the shape `expectations.json` records.
+// observation of each cell, in the shape the `expectations/` shards record.
 //
 // It refuses any Node other than the stamped version, as the generators do.
 

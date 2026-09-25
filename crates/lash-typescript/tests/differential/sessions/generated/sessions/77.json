@@ -1,0 +1,107 @@
+{
+  "seed": 77,
+  "probe": [
+    "chi",
+    "entry",
+    "gamma",
+    "i",
+    "index",
+    "left",
+    "problem",
+    "rho",
+    "right",
+    "scaled",
+    "sigma",
+    "slot",
+    "tau",
+    "theta",
+    "turn1",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "let turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  console.log(turn1);\n}\nconst theta = [0, 10];\nfor (const entry of theta) {\n  theta.pop();\n  const tau = (value) => { const scaled = turn1; return (0 & 9.5); };\n  console.log(tau(Math.abs((true ? turn1 : 5.5))));\n  if (true) { break; }\n}\ntry {\n  for (let i = 0; i < 1; i++) {\n    theta.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n    theta.reverse();\n  }\n  theta.push(...[6, (0 + turn1)]);\n  throw new TypeError('hi');\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n} finally {\n  {\n    console.log(false, Number.parseInt(theta.join('-') + '7', 10));\n    console.info(turn1, 'a,b', turn1);\n    const chi = (turn1 >= Math.min(...theta, 1));\n  }\n}\ntheta.push(((1 >= turn1) ? turn1 : Array.from({ length: 2 }, (slot, index) => index * 2).length));\nswitch (((-9) & 8.5) % 3) {\n  case 0: {\n    console.warn(theta);\n    switch ((-(1 | 10)) % 3) {\n      case 0: {\n        let gamma = 7;\n        break;\n      }\n      case 1: {\n        const gamma = new Set([1, 7.5, 1]);\n        console.log(gamma.size, gamma.has(1), [...gamma.union(new Set([7]))], gamma instanceof Set);\n        break;\n      }\n      default: {\n        theta.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n      }\n    }\n    break;\n  }\n  case 1: {\n    const sigma = new Map([['b', 8.5], ['a', 5]]);\n    console.log(sigma.size, sigma.get('a'), sigma.has('  pad '), [...sigma.keys()], sigma instanceof Map);\n    const tau = { ...{ g: [turn1], f: false, d: theta.slice(1) } };\n  }\n  default: {\n    {\n      console.warn(String(turn1), theta, 'x'.slice(0, 2).toLowerCase());\n    }\n  }\n}\nthrow new RangeError('Lash');\n",
+      "node": {
+        "outcome": "throw",
+        "error": "RangeError",
+        "prints": [
+          "1",
+          "0",
+          "TypeError hi false",
+          "false 0",
+          "1 a,b 1",
+          "[0,6,1,1]"
+        ],
+        "probes": {
+          "chi": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "left": "unbound",
+          "problem": "unbound",
+          "rho": "unbound",
+          "right": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "object [6,1,1,0]",
+          "turn1": "number 1",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "theta.pop();\ntheta.reverse();\nif (((false ? turn1 : 10) < turn1)) {\n  let rho = theta;\n  for (const entry of []) {\n    rho = [turn1, turn1, turn1];\n    rho = theta.map((value) => (1 - value));\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "chi": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "left": "unbound",
+          "problem": "unbound",
+          "rho": "unbound",
+          "right": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "object [1,1,6]",
+          "turn1": "number 1",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "isNaN(1, 2);\n",
+      "reject": "TS_EXPRESSION_UNSUPPORTED",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "chi": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "left": "unbound",
+          "problem": "unbound",
+          "rho": "unbound",
+          "right": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "object [1,1,6]",
+          "turn1": "number 1",
+          "value": "unbound"
+        }
+      }
+    }
+  ]
+}

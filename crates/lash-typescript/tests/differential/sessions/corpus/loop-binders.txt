@@ -1,0 +1,23 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/loop-binders.json.
+
+session loop-binders
+about for...in, classic for and while-block bindings end with their loop
+probe record key keys i count inner
+cell
+const record = { x: 1, y: 2 };
+const keys = [];
+for (const key in record) {
+  keys.push(key);
+}
+let count = 0;
+for (let i = 0; i < 3; i++) {
+  count = count + i;
+}
+while (count < 5) {
+  const inner = count;
+  count = inner + 1;
+}
+console.log(keys, count);
+end

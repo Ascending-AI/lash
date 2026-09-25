@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+directory	staging	skip	ticket-ruling:FIG-1413:staging	-

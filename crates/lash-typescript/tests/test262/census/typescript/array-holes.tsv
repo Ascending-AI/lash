@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	array-holes	rejected	TS_SPARSE_ARRAY_UNSUPPORTED	const a = [1]; a[3] = 9;

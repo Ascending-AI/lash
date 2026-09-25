@@ -1,0 +1,30 @@
+{
+  "id": "block-name-then-top-level-name",
+  "about": "a block binding and a later top-level binding of the same name are two bindings",
+  "probe": [
+    "first",
+    "second"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "{\n  const first = 1;\n  console.log(first);\n}\nlet first = 2;\nfor (const second of [3]) {\n  console.log(second);\n}\nconst second = 4;\nconsole.log(first, second);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1",
+          "3",
+          "2 4"
+        ],
+        "probes": {
+          "first": "number 2",
+          "second": "number 4"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

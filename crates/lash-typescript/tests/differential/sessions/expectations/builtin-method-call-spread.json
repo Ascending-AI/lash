@@ -1,0 +1,33 @@
+{
+  "id": "builtin-method-call-spread",
+  "about": "a spread argument to a builtin method passes the array's items, among fixed ones and nested (FIG-3627)",
+  "probe": [
+    "items",
+    "rows",
+    "count",
+    "row"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const items = [3, 1];\nitems.push(...[4, 5]);\nconst rows = [[9, 2], [6]];\nconst count = items.push(0, ...rows.map((row) => Math.max(...row)));\nconsole.log(items, count);\nconsole.log(...items);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[3,1,4,5,0,9,6] 7",
+          "3 1 4 5 0 9 6"
+        ],
+        "probes": {
+          "items": "object [3,1,4,5,0,9,6]",
+          "rows": "object [[9,2],[6]]",
+          "count": "number 7",
+          "row": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

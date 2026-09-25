@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	function-constructor	rejected	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED	const f = Function('return 1');

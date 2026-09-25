@@ -1,0 +1,19 @@
+{
+  "name": "shared-object",
+  "create": "const shared = { count: 1 };\nconst value = { left: shared, right: shared };",
+  "uses": "value.left.count = 2;\nconsole.log(value.right.count, shared.count);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "2 2"
+      ],
+      "probes": {}
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+flag	CanBlockIsTrue	skip	ticket-ruling:FIG-3646:the host agent never blocks ([[CanBlock]] is false), so a test that requires blocking has no host to run on	-

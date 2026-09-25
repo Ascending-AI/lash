@@ -1,0 +1,28 @@
+{
+  "id": "rebinding-starts-a-type-over",
+  "about": "a name bound two ways by a branch takes a value of a third type (FIG-3631)",
+  "probe": [
+    "flag",
+    "value"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const flag = [1].length > 0;\nlet value = flag ? 1 : true;\nvalue = 'x';\nconsole.log(value);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "x"
+        ],
+        "probes": {
+          "flag": "boolean true",
+          "value": "string \"x\""
+        },
+        "closures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/global-this-read-past-a-parameter.json.
+
+session global-this-read-past-a-parameter
+about a parameter of the same name does not answer a globalThis read (FIG-3620)
+probe shadowed pick
+deviation closure-boundary
+cell
+globalThis.shadowed = "global";
+function pick(shadowed) { return [shadowed, globalThis.shadowed]; }
+console.log(pick("param"));
+end

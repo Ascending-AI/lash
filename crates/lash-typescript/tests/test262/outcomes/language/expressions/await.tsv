@@ -1,0 +1,19 @@
+# test262-path	class	qualifier
+test/language/expressions/await/async-await-interleaved.js	refused	TS_AWAIT_REQUIRED
+test/language/expressions/await/await-BindingIdentifier-in-global.js	refused	TS_INSTANCEOF_UNSUPPORTED
+test/language/expressions/await/await-BindingIdentifier-nested.js	pass	-
+test/language/expressions/await/await-awaits-thenable-not-callable.js	refused	TS_AWAIT_REQUIRED
+test/language/expressions/await/await-awaits-thenables-that-throw.js	refused	TS_AWAIT_REQUIRED
+test/language/expressions/await/await-awaits-thenables.js	refused	TS_AWAIT_REQUIRED
+test/language/expressions/await/await-in-function.js	pass	-
+test/language/expressions/await/await-in-global.js	pass	-
+test/language/expressions/await/await-in-nested-function.js	refused	TS_AWAIT_REQUIRED
+test/language/expressions/await/await-monkey-patched-promise.js	refused	TS_METHOD_UNSUPPORTED
+test/language/expressions/await/await-non-promise-thenable.js	refused	TS_METHOD_UNSUPPORTED
+test/language/expressions/await/await-non-promise.js	refused	TS_METHOD_UNSUPPORTED
+test/language/expressions/await/await-throws-rejections.js	refused	TS_METHOD_UNSUPPORTED
+test/language/expressions/await/early-errors-await-not-simple-assignment-target.js	pass	-
+test/language/expressions/await/no-operand.js	pass	-
+test/language/expressions/await/syntax-await-has-UnaryExpression-with-MultiplicativeExpression.js	refused	TS_METHOD_UNSUPPORTED
+test/language/expressions/await/syntax-await-has-UnaryExpression.js	refused	TS_AWAIT_REQUIRED
+test/language/expressions/await/syntax-await-in-ConditionalExpression.js	refused	TS_METHOD_UNSUPPORTED

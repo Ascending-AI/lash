@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Intl.ListFormat	skip	ticket-ruling:FIG-1413:Intl.ListFormat	-

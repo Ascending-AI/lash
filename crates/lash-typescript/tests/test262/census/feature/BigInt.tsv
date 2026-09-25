@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	BigInt	rejected	TS_BIGINT_UNSUPPORTED	const x = 1n;

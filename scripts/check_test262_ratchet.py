@@ -2,10 +2,10 @@
 """The Test262 outcome ratchet across commits (FIG-3646).
 
 The conformance runner holds each head to its own outcome record — the
-`outcomes/<top-level directory>.tsv` shards, one file per top-level test
-directory (FIG-3727): a changed outcome fails until the record changes with
-it. This check holds the record to its base, so the record itself can only
-improve:
+`outcomes/**/*.tsv` shards, one file per test directory cut as deep as the
+tree is hot (FIG-3727): a changed outcome fails until the record changes
+with it. This check holds the record to its base, so the record itself can
+only improve:
 
 - a test that passed at the base passes at the head;
 - a test failing at the head either failed at the base too, or was not
@@ -17,12 +17,12 @@ Owners may change (a failure moving to a narrower ticket); classes may not
 regress.
 
 One exception is a ruling, not a regression: a test that passed may become
-`refused <code>` when the same change adds a `rejected` row to `census.tsv`
-that names `<code>`. A new refusal class (an unsupported feature
-the dialect used to accept by accident, or a construct `tsc --strict`
-rejects) can demote tests that passed only incidentally, and the census row
-that registers it is the reviewed record of that decision. Every such move is
-printed.
+`refused <code>` when the same change adds a `rejected` row to the census
+(`census/<kind>/<name>.tsv`, or the legacy `census.tsv`) that names `<code>`.
+A new refusal class (an unsupported feature the dialect used to accept by
+accident, or a construct `tsc --strict` rejects) can demote tests that
+passed only incidentally, and the census row that registers it is the
+reviewed record of that decision. Every such move is printed.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ TEST262 = "crates/lash-typescript/tests/test262"
 OUTCOMES = f"{TEST262}/outcomes.tsv"
 OUTCOMES_DIR = f"{TEST262}/outcomes"
 CENSUS = f"{TEST262}/census.tsv"
+CENSUS_DIR = f"{TEST262}/census"
 
 
 def parse(text: str) -> dict[str, tuple[str, str]]:
@@ -60,19 +61,22 @@ def parse_shards(texts: list[tuple[str, str]]) -> dict[str, tuple[str, str]]:
     return outcomes
 
 
-def outcome_paths(ref: str | None) -> list[str]:
-    """The record's paths at `ref` (None = the working tree): the legacy single
-    `outcomes.tsv`, or every `outcomes/<shard>.tsv` (FIG-3727)."""
+def tree_paths(ref: str | None, legacy_file: str, directory: str) -> list[str]:
+    """A sharded record's paths at `ref` (None = the working tree): the legacy
+    single file, or every `*.tsv` under its shard directory, recursively."""
     if ref is None:
         paths = []
-        if (ROOT / OUTCOMES).is_file():
-            paths.append(OUTCOMES)
-        directory = ROOT / OUTCOMES_DIR
-        if directory.is_dir():
-            paths.extend(f"{OUTCOMES_DIR}/{name}" for name in sorted(p.name for p in directory.glob("*.tsv")))
+        if (ROOT / legacy_file).is_file():
+            paths.append(legacy_file)
+        root_directory = ROOT / directory
+        if root_directory.is_dir():
+            paths.extend(
+                f"{directory}/{path.relative_to(root_directory)}"
+                for path in sorted(root_directory.rglob("*.tsv"))
+            )
         return paths
     listed = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", ref, "--", OUTCOMES, OUTCOMES_DIR],
+        ["git", "ls-tree", "-r", "--name-only", ref, "--", legacy_file, directory],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -80,6 +84,12 @@ def outcome_paths(ref: str | None) -> list[str]:
     if listed.returncode != 0:
         return []
     return [line for line in listed.stdout.splitlines() if line.endswith(".tsv")]
+
+
+def outcome_paths(ref: str | None) -> list[str]:
+    """The record's paths at `ref` (None = the working tree): the legacy single
+    `outcomes.tsv`, or every `outcomes/**/*.tsv` shard (FIG-3727)."""
+    return tree_paths(ref, OUTCOMES, OUTCOMES_DIR)
 
 
 def tallies(outcomes: dict[str, tuple[str, str]]) -> dict[tuple[str, str], int]:
@@ -142,11 +152,22 @@ def base_outcomes(base: str) -> dict[str, tuple[str, str]] | None:
     return parse_shards([(name, text) for name, text in texts if text is not None])
 
 
+def census_rows(ref: str | None) -> str:
+    """The census's full text at `ref` (None = the working tree): the legacy
+    `census.tsv` or every `census/<kind>/<name>.tsv` shard, concatenated."""
+    if ref is None:
+        return "".join((ROOT / path).read_text() for path in tree_paths(None, CENSUS, CENSUS_DIR))
+    return "".join(
+        text
+        for path in tree_paths(ref, CENSUS, CENSUS_DIR)
+        if (text := show(ref, path)) is not None
+    )
+
+
 def new_refusal_codes(base: str) -> frozenset[str]:
     """The codes named by rejection rows the head's census adds over the base's."""
-    head = rejected_rows((ROOT / CENSUS).read_text())
-    base_text = show(base, CENSUS)
-    base_rows = rejected_rows(base_text) if base_text is not None else {}
+    head = rejected_rows(census_rows(None))
+    base_rows = rejected_rows(census_rows(base))
     return frozenset(code for row, code in head.items() if base_rows.get(row) != code)
 
 

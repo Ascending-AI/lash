@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	arbitrary-module-namespace-names	skip	ticket-ruling:FIG-1413:arbitrary-module-namespace-names	-

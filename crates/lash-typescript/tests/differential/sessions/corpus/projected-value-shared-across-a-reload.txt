@@ -1,0 +1,16 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/projected-value-shared-across-a-reload.json.
+
+session projected-value-shared-across-a-reload
+about an object holding a host projection, bound under two names, stays one object in later cells
+host report {"n":1,"title":"t"}
+probe holder alias
+cell
+const holder = { doc: report, n: 1 };
+const alias = holder;
+cell
+alias.n = 2;
+holder.n = holder.n + 10;
+console.log(holder.n, alias.n, holder === alias, holder.doc.title);
+end

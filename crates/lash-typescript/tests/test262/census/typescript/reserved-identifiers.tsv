@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	reserved-identifiers	rejected	TS_RESERVED_IDENTIFIER	const __typescript_x = 1;

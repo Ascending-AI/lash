@@ -1,0 +1,26 @@
+{
+  "id": "printed-non-finite-numbers",
+  "about": "inside a printed object or array a non-finite number is JSON's null (FIG-3608)",
+  "probe": [
+    "values"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const values = [NaN, Infinity];\nconsole.log(values, { low: -Infinity }, NaN, [undefined]);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[null,null] {\"low\":null} NaN [null]"
+        ],
+        "probes": {
+          "values": "object [null,null]"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

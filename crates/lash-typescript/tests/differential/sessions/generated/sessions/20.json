@@ -1,0 +1,96 @@
+{
+  "seed": 20,
+  "probe": [
+    "delta",
+    "gamma",
+    "i",
+    "iota",
+    "lambda",
+    "rho",
+    "scaled",
+    "shared1",
+    "tau",
+    "theta",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "{\n  const lambda = /(?<first>[a-z])(b)?/.exec('b.c');\n  const theta = [];\n  if ((3 >= 'Lash'.length)) {\n    let rho = JSON.stringify(theta);\n  } else {\n    let delta = '  pad ';\n  }\n}\nglobalThis.shared1 = { f: 'x' };\nconst gamma = (value) => { const scaled = (-Number.parseInt('hi' + '7', 10)); return 11; };\nconsole.log(gamma(9));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "11"
+        ],
+        "probes": {
+          "delta": "unbound",
+          "gamma": "function undefined",
+          "i": "unbound",
+          "iota": "unbound",
+          "lambda": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "shared1": "object {\"f\":\"x\"}",
+          "tau": "unbound",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "gamma"
+        ]
+      }
+    },
+    {
+      "source": "let tau = new Error('x');\nshared1.f = (9).toFixed(1).trimStart();\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "delta": "unbound",
+          "gamma": "function undefined",
+          "i": "unbound",
+          "iota": "unbound",
+          "lambda": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "shared1": "object {\"f\":\"9.0\"}",
+          "tau": "object {}",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "gamma"
+        ]
+      }
+    },
+    {
+      "source": "shared1.f = String(1);\nfor (let i = 0; i < 3; i++) {\n  const iota = new Map([['b', 5], ['a', 10]]);\n  console.log(iota.size, iota.get('a'), iota.has('b.c'), [...iota.keys()], iota instanceof Map);\n  console.info(shared1, tau, [...iota.entries()]);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 10 false [\"b\",\"a\"] true",
+          "{\"f\":\"1\"} Error: x [[\"b\",5],[\"a\",10]]",
+          "2 10 false [\"b\",\"a\"] true",
+          "{\"f\":\"1\"} Error: x [[\"b\",5],[\"a\",10]]",
+          "2 10 false [\"b\",\"a\"] true",
+          "{\"f\":\"1\"} Error: x [[\"b\",5],[\"a\",10]]"
+        ],
+        "probes": {
+          "delta": "unbound",
+          "gamma": "function undefined",
+          "i": "unbound",
+          "iota": "unbound",
+          "lambda": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "shared1": "object {\"f\":\"1\"}",
+          "tau": "object {}",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "gamma"
+        ]
+      }
+    }
+  ]
+}

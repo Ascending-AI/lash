@@ -1,0 +1,51 @@
+{
+  "seed": 63,
+  "probe": [
+    "alpha",
+    "chi",
+    "delta",
+    "entry",
+    "kappa",
+    "shared1",
+    "theta",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "for (const entry of [(9).toFixed(1), 'a,b']) {\n  const alpha = { h: (8.5).toFixed(1).includes('a'), f: 'x' };\n}\nvar chi = true;\nglobalThis.shared1 = [9, 0];\nconsole.info(chi);\nconst theta = `${'Lash'.length}:${'zz'}`;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "true"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "boolean true",
+          "delta": "unbound",
+          "entry": "unbound",
+          "kappa": "unbound",
+          "shared1": "object [9,0]",
+          "theta": "string \"4:zz\"",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const [kappa, ...delta] = [(chi ? theta.indexOf('b') : 1), Math.max(...shared1, 1), 2];\nfor (const entry of [`${kappa}:${theta}`, 'x', 'x']) {\n  delta.sort();\n}\nlet zeta = chi;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "boolean true",
+          "delta": "object [2,9]",
+          "entry": "unbound",
+          "kappa": "number -1",
+          "shared1": "object [9,0]",
+          "theta": "string \"4:zz\"",
+          "zeta": "boolean true"
+        }
+      }
+    }
+  ]
+}

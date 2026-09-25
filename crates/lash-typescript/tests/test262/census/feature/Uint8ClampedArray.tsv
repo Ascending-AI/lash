@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Uint8ClampedArray	skip	ticket-ruling:FIG-1413:Uint8ClampedArray	-

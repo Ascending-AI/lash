@@ -1,0 +1,22 @@
+# test262-path	class	qualifier
+test/language/expressions/strict-equals/S11.9.4_A1.js	refused	TS_EVAL_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A2.1_T1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A2.1_T2.js	refused	TS_UNKNOWN_BINDING
+test/language/expressions/strict-equals/S11.9.4_A2.1_T3.js	refused	TS_UNKNOWN_BINDING
+test/language/expressions/strict-equals/S11.9.4_A2.4_T1.js	pass	-
+test/language/expressions/strict-equals/S11.9.4_A2.4_T2.js	pass	-
+test/language/expressions/strict-equals/S11.9.4_A2.4_T3.js	refused	TS_UNKNOWN_BINDING
+test/language/expressions/strict-equals/S11.9.4_A3.js	pass	-
+test/language/expressions/strict-equals/S11.9.4_A4.1_T1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A4.1_T2.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A4.2.js	pass	-
+test/language/expressions/strict-equals/S11.9.4_A4.3.js	pass	-
+test/language/expressions/strict-equals/S11.9.4_A5.js	pass	-
+test/language/expressions/strict-equals/S11.9.4_A6.1.js	refused	TS_EVAL_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A6.2.js	pass	-
+test/language/expressions/strict-equals/S11.9.4_A7.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A8_T1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A8_T2.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A8_T3.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A8_T4.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/strict-equals/S11.9.4_A8_T5.js	pass	-

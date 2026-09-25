@@ -1,0 +1,128 @@
+{
+  "seed": 0,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "count",
+    "delta",
+    "entry",
+    "error",
+    "field",
+    "gamma",
+    "iota",
+    "lambda",
+    "omega",
+    "phi",
+    "rest",
+    "rho",
+    "sigma",
+    "tau",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "console.warn('Lash', (false && true));\nvar lambda = false;\nlet omega = 'hi';\nthrow new TypeError('hi');\n",
+      "node": {
+        "outcome": "throw",
+        "error": "TypeError",
+        "prints": [
+          "Lash false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "lambda": "boolean false",
+          "omega": "string \"hi\"",
+          "phi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "try {\n  {\n    const alpha = { e: (2 === 8), d: omega };\n    const sigma = /(?<first>[a-z])(b)?/.exec('x');\n  }\n  console.log('zz'.slice(0, 2).slice(0, 2), [[2], [2]].flat().includes(2));\n  throw new TypeError('x');\n} catch (error) {\n  console.log(error.name, error.message, error instanceof RangeError);\n} finally {\n  switch (4 % 3) {\n    case 0: {\n      let rho = new RangeError('x');\n      break;\n    }\n    case 1: {\n      let sigma = { h: [], c: 0, b: [(8 ** 2), 0, (3 + 4)] };\n    }\n    default: {\n      let alpha = new Date(Date.UTC(2024, 3, 26));\n    }\n  }\n}\nif ((9 !== 7)) {\n  let zeta = { f: true, h: [(-12), 9], e: [8, 11] };\n  const delta = new Date(3667480326000);\n}\nconst beta = [];\n{\n  {\n    let delta = Math.round(11);\n    let tau = ('  pad '.replace(/[a-z]/g, '_').trim() === omega.trim());\n    globalThis.lambda = true;\n  }\n  beta.sort();\n  for (const entry of [omega.toUpperCase()]) {\n    const phi = (value, ...rest) => value + rest.length;\n    console.log(phi(Math.min(...beta, 1)));\n  }\n}\nfunction iota(count) {\n  return count <= 1 ? 1 : count + iota(count - 1);\n}\nconsole.log(iota(1));\nconst chi = new URLSearchParams({ q: 'a b', r: '+' });\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "zz true",
+          "TypeError x false",
+          "1",
+          "1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "object []",
+          "chi": "object {}",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "function undefined",
+          "lambda": "boolean true",
+          "omega": "string \"hi\"",
+          "phi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "iota"
+        ]
+      }
+    },
+    {
+      "source": "for (const field in beta) {\n  console.log(field);\n}\nconsole.log(beta.join('-'), lambda);\nfunction gamma(count) {\n  return count <= 1 ? 1 : count + gamma(count - 1);\n}\nconsole.log(gamma(1));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          " true",
+          "1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "object []",
+          "chi": "object {}",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "function undefined",
+          "iota": "function undefined",
+          "lambda": "boolean true",
+          "omega": "string \"hi\"",
+          "phi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "gamma",
+          "iota"
+        ]
+      }
+    }
+  ]
+}

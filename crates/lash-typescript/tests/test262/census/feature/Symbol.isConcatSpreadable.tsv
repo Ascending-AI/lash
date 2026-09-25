@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Symbol.isConcatSpreadable	skip	ticket-ruling:FIG-1413:Symbol.isConcatSpreadable	-

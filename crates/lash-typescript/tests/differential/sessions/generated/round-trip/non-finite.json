@@ -1,0 +1,19 @@
+{
+  "name": "non-finite",
+  "create": "const value = [NaN, Infinity, -Infinity, 2 ** 53, 0.1 + 0.2];",
+  "uses": "console.log(Number.isNaN(value[0]), value[1] > 1e308, value[2] < 0, value[3] + 1, value[4] * 10);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "true true true 9007199254740992 3.0000000000000004"
+      ],
+      "probes": {}
+    }
+  ]
+}

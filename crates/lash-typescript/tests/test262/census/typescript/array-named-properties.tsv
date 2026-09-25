@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	array-named-properties	rejected	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED	const a = [1, 2]; a[-1] = 9;

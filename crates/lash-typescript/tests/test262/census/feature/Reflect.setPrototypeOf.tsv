@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Reflect.setPrototypeOf	skip	ticket-ruling:FIG-1413:Reflect.setPrototypeOf	-

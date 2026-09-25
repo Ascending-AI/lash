@@ -1,0 +1,134 @@
+{
+  "seed": 14,
+  "probe": [
+    "beta",
+    "count",
+    "delta",
+    "field",
+    "gamma",
+    "index",
+    "iota",
+    "item",
+    "j",
+    "kappa",
+    "lambda",
+    "omega",
+    "phi",
+    "problem",
+    "rest",
+    "rho",
+    "sigma",
+    "slot",
+    "theta",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "function iota(count) {\n  return count <= 1 ? 1 : count + iota(count - 1);\n}\nconsole.log(iota(2));\n{\n  {\n    const delta = new RangeError('Lash');\n    console.log(delta.name, delta.message, String(delta), delta instanceof Error);\n    const rho = { h: iota(1), e: Math.min((11 % 4), 3), g: 0 };\n    const sigma = new RangeError('Lash');\n    console.log(sigma.name, sigma.message, String(sigma), sigma instanceof Error);\n  }\n}\nconst beta = [11];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3",
+          "RangeError Lash RangeError: Lash true",
+          "RangeError Lash RangeError: Lash true"
+        ],
+        "probes": {
+          "beta": "object [11]",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "function undefined",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "iota"
+        ]
+      }
+    },
+    {
+      "source": "for (let j = 0; j < 1; j++) {\n  beta.splice(0, 1);\n  if (true) {\n    beta.splice(0, 1);\n  }\n}\nconst gamma = (value, ...rest) => value + rest.length;\nconsole.log(gamma(10));\nif (false) {\n  if (true) {\n    let lambda = [2.5, 11, Math.floor(3)];\n  } else {\n    console.warn(beta);\n    beta.pop();\n  }\n  try {\n    const theta = (item, ...rest) => 3.5 + rest.length;\n    console.log(theta(0));\n    console.warn(beta, Math.abs(4));\n  } catch (problem) {\n    console.log(problem.name, problem.message, problem instanceof RangeError);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "10"
+        ],
+        "probes": {
+          "beta": "object []",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "function undefined",
+          "index": "unbound",
+          "iota": "function undefined",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "gamma",
+          "iota"
+        ]
+      }
+    },
+    {
+      "source": "function kappa(count) {\n  let lambda = beta;\n  return 7;\n}\nconsole.log(kappa(3));\nbeta.splice(0, 1);\nfor (const field in beta) {\n  console.log(field);\n}\nconst { a: phi, b: omega = 0 } = { a: String((10 ** 2)), b: 9 };\nfor (const field in beta) {\n  console.log(field);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "7"
+        ],
+        "probes": {
+          "beta": "object []",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "function undefined",
+          "index": "unbound",
+          "iota": "function undefined",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "function undefined",
+          "lambda": "unbound",
+          "omega": "number 9",
+          "phi": "string \"100\"",
+          "problem": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "gamma",
+          "iota",
+          "kappa"
+        ]
+      }
+    }
+  ]
+}

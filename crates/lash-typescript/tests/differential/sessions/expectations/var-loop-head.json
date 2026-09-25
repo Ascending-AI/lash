@@ -1,0 +1,28 @@
+{
+  "id": "var-loop-head",
+  "about": "a var in a for...of head is the one var binding of the script, not a loop binding",
+  "probe": [
+    "shared"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "var shared = 0;\nfor (var shared of [1, 2]) {\n  console.log(shared);\n}\nconsole.log(shared);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1",
+          "2",
+          "2"
+        ],
+        "probes": {
+          "shared": "number 2"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

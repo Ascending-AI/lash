@@ -1,0 +1,40 @@
+{
+  "id": "durable-error-value",
+  "about": "an Error bound at the top level stays an Error after a reload (FIG-3608)",
+  "probe": [
+    "failure"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const failure = new RangeError('out', { cause: 'why' });\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "failure": "object {}"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "console.log(String(failure), failure instanceof RangeError, failure.cause);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "RangeError: out true why"
+        ],
+        "probes": {
+          "failure": "object {}"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

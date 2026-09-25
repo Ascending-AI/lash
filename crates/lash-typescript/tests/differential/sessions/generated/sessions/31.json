@@ -1,0 +1,128 @@
+{
+  "seed": 31,
+  "probe": [
+    "alpha",
+    "beta",
+    "entry",
+    "field",
+    "gamma",
+    "iota",
+    "kappa",
+    "n",
+    "omega",
+    "phi",
+    "psi",
+    "rest",
+    "sigma",
+    "step"
+  ],
+  "cells": [
+    {
+      "source": "let alpha = 'a,b'.indexOf('b');\nalpha -= 2;\nlet iota = { c: String(1), h: 7, d: 'b.c'.trim().toLowerCase() };\niota.h = 8.5;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "number 0",
+          "beta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "object {\"c\":\"1\",\"h\":8.5,\"d\":\"b.c\"}",
+          "kappa": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "step": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const kappa = [`${7}:${String(alpha)}`, Object.keys(iota).join('').slice(0, 2), '  pad '.padStart(5, '*')];\nlet phi = ['hi', 'hi'.slice(0, 2), 'zz'.slice(0, 2)];\nif (false) {\n  const omega = (n, ...rest) => 10 + rest.length;\n  console.log(omega(omega(5.5)));\n} else {\n  for (let step = 0; step < 3; step++) {\n    phi = kappa.slice(1);\n    const beta = (n, step = 2) => 2 + step;\n    console.log(beta((step + alpha)));\n  }\n  {\n    console.warn(kappa, !true);\n    const gamma = /(?<first>[a-z])(b)?/.exec('hi');\n    console.log(gamma?.[0] ?? 'none', gamma?.index ?? -1, gamma?.groups?.first ?? '-', gamma === null);\n    const psi = /(?<first>[a-z])(b)?/.exec('a,b');\n    console.log(psi?.[0] ?? 'none', psi?.index ?? -1, psi?.groups?.first ?? '-', psi === null);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "4",
+          "4",
+          "4",
+          "[\"7:0\",\"ch\",\"  pad \"] false",
+          "h 0 h false",
+          "a 0 a false"
+        ],
+        "probes": {
+          "alpha": "number 0",
+          "beta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "object {\"c\":\"1\",\"h\":8.5,\"d\":\"b.c\"}",
+          "kappa": "object [\"7:0\",\"ch\",\"  pad \"]",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "object [\"ch\",\"  pad \"]",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "step": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const entry of phi) {\n  iota.d = JSON.stringify(entry);\n  console.log(false, iota);\n}\nconsole.log(alpha, iota);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false {\"c\":\"1\",\"h\":8.5,\"d\":\"\\\"ch\\\"\"}",
+          "false {\"c\":\"1\",\"h\":8.5,\"d\":\"\\\"  pad \\\"\"}",
+          "0 {\"c\":\"1\",\"h\":8.5,\"d\":\"\\\"  pad \\\"\"}"
+        ],
+        "probes": {
+          "alpha": "number 0",
+          "beta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "object {\"c\":\"1\",\"h\":8.5,\"d\":\"\\\"  pad \\\"\"}",
+          "kappa": "object [\"7:0\",\"ch\",\"  pad \"]",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "object [\"ch\",\"  pad \"]",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "step": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const field in kappa) {\n  console.log(field);\n}\nconst sigma = new URLSearchParams('b=2&a=1&b=3');\niota.c = 'x';\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "1",
+          "2"
+        ],
+        "probes": {
+          "alpha": "number 0",
+          "beta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "object {\"c\":\"x\",\"h\":8.5,\"d\":\"\\\"  pad \\\"\"}",
+          "kappa": "object [\"7:0\",\"ch\",\"  pad \"]",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "object [\"ch\",\"  pad \"]",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "object {}",
+          "step": "unbound"
+        }
+      }
+    }
+  ]
+}

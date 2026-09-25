@@ -1,0 +1,9 @@
+# test262-path	class	qualifier
+test/built-ins/eval/length-enumerable.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/eval/length-non-configurable.js	pass	-
+test/built-ins/eval/length-non-writable.js	pass	-
+test/built-ins/eval/length-value.js	pass	-
+test/built-ins/eval/name.js	pass	-
+test/built-ins/eval/no-construct.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/eval/no-proto.js	pass	-
+test/built-ins/eval/prop-desc.js	refused	TS_THIS_UNSUPPORTED

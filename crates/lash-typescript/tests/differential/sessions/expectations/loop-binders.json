@@ -1,0 +1,36 @@
+{
+  "id": "loop-binders",
+  "about": "for...in, classic for and while-block bindings end with their loop",
+  "probe": [
+    "record",
+    "key",
+    "keys",
+    "i",
+    "count",
+    "inner"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const record = { x: 1, y: 2 };\nconst keys = [];\nfor (const key in record) {\n  keys.push(key);\n}\nlet count = 0;\nfor (let i = 0; i < 3; i++) {\n  count = count + i;\n}\nwhile (count < 5) {\n  const inner = count;\n  count = inner + 1;\n}\nconsole.log(keys, count);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[\"x\",\"y\"] 5"
+        ],
+        "probes": {
+          "record": "object {\"x\":1,\"y\":2}",
+          "key": "unbound",
+          "keys": "object [\"x\",\"y\"]",
+          "i": "unbound",
+          "count": "number 5",
+          "inner": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

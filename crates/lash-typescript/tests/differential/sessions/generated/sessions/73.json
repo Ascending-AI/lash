@@ -1,0 +1,150 @@
+{
+  "seed": 73,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "error",
+    "field",
+    "i",
+    "index",
+    "kappa",
+    "key",
+    "omega",
+    "problem",
+    "sigma",
+    "slot",
+    "tau",
+    "turn1",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "const omega = new URLSearchParams('b=2&a=1&b=3');\nfor (const [key, value] of omega) {\n  const { a: chi, b: kappa = 0 } = { a: 'hi'.slice(0, 2), b: 7 };\n}\nswitch (((false && true) ? Math.round(0) : 9) % 3) {\n  case 0: {\n    for (const field in { ['a']: [], ['f']: [12, 4, 0] }) {\n      console.log(field);\n    }\n  }\n  default: {\n    const delta = /(?<first>[a-z])(b)?/.exec('ab');\n    console.log(delta?.[0] ?? 'none', delta?.index ?? -1, delta?.groups?.first ?? '-', delta === null);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "a",
+          "f",
+          "ab 0 a false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "key": "unbound",
+          "omega": "object {}",
+          "problem": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "try {\n  const beta = { e: (Math.abs(6) ** 2), c: [(4 + 9), 5], b: false };\n  if ('hi'.includes('a')) {\n    const zeta = [(false ? 2 : 3.5)];\n    let omega = (zeta instanceof Object);\n  } else {\n    let alpha = [];\n  }\n  throw new TypeError('b.c');\n} catch (error) {\n  console.log(error.name, error.message, error instanceof RangeError);\n}\nfor (const entry of []) {\n  try {\n    console.log(omega, 'x', 4);\n    let chi = omega;\n    throw new SyntaxError('a,b', { cause: 1 });\n  } catch (problem) {\n    console.log(problem.name, problem.message, problem instanceof RangeError);\n  } finally {\n    omega.sort();\n  }\n}\nif (false) {\n  omega.append('k', 'Lash');\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "TypeError b.c false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "key": "unbound",
+          "omega": "object {}",
+          "problem": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (let i = 0; i < 2; i++) {\n  omega.append('k', '  pad ');\n}\nomega.append('k', 'hi');\nconst sigma = false;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "key": "unbound",
+          "omega": "object {}",
+          "problem": "unbound",
+          "sigma": "boolean false",
+          "slot": "unbound",
+          "tau": "unbound",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "omega.append('k', 'ab');\nomega.set('a', '  pad ');\n{\n  if ('b.c'.slice(0, 2).includes('a')) {\n    omega.set('a', 'Lash');\n  }\n  let turn1 = 0;\n  while (turn1 < 1) {\n    turn1++;\n    const alpha = new RegExp('[a-z]+', 'i');\n    console.log(alpha.test('x'), alpha.source, alpha.flags, alpha.lastIndex, String(alpha));\n    console.log([[turn1], [2]].flat().includes(2));\n  }\n  switch (Array.from({ length: 2 }, (slot, index) => index * 2).length % 3) {\n    case 0: {\n      const chi = new Map([['b', 2], ['a', 4]]);\n      break;\n    }\n    default: {\n      omega.sort();\n    }\n  }\n}\nconsole.log((JSON.stringify(sigma) === 'ab'), 'Lash');\nomega.append('k', 'b.c');\n{\n  const tau = new Set([1, 12, 1]);\n  console.log(tau.size, tau.has(1), [...tau.union(new Set([7]))], tau instanceof Set);\n  for (let i = 0; i < 1; i++) {\n    console.log(omega);\n  }\n  tau.add(1);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "true [a-z]+ i 0 /[a-z]+/i",
+          "true",
+          "false Lash",
+          "2 true [1,12,7] true",
+          "a=++pad+&b=2&b=3&k=++pad+&k=++pad+&k=hi&k=ab&k=b.c"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "key": "unbound",
+          "omega": "object {}",
+          "problem": "unbound",
+          "sigma": "boolean false",
+          "slot": "unbound",
+          "tau": "unbound",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

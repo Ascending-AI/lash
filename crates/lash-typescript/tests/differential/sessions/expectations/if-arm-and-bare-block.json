@@ -1,0 +1,31 @@
+{
+  "id": "if-arm-and-bare-block",
+  "about": "a const in an if arm or a bare block ends with its block (FIG-3571 phase-1 leak `armed`)",
+  "probe": [
+    "flag",
+    "armed",
+    "scratch"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const flag = true;\nif (flag) {\n  const armed = \"yes\";\n  console.log(armed);\n} else {\n  const armed = \"no\";\n  console.log(armed);\n}\n{\n  const scratch = 7;\n  console.log(scratch);\n}\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "yes",
+          "7"
+        ],
+        "probes": {
+          "flag": "boolean true",
+          "armed": "unbound",
+          "scratch": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

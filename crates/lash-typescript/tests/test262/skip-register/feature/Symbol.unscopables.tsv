@@ -1,0 +1,8 @@
+# test262-path	excluding-census-row
+test/built-ins/Array/prototype/Symbol.unscopables/array-find-from-last.js	feature:Symbol.unscopables
+test/built-ins/Array/prototype/Symbol.unscopables/at.js	feature:Symbol.unscopables
+test/built-ins/Array/prototype/Symbol.unscopables/change-array-by-copy.js	feature:Symbol.unscopables
+test/built-ins/Array/prototype/Symbol.unscopables/prop-desc.js	feature:Symbol.unscopables
+test/built-ins/Array/prototype/Symbol.unscopables/value.js	feature:Symbol.unscopables
+test/language/global-code/unscopables-ignored.js	feature:Symbol.unscopables
+test/language/identifier-resolution/unscopables.js	feature:Symbol.unscopables

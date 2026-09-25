@@ -1,0 +1,30 @@
+{
+  "id": "var-hoists-out-of-blocks",
+  "about": "a var declared in a block or loop head of the top level is a session global",
+  "probe": [
+    "hoisted",
+    "looped",
+    "seen"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "if (true) {\n  var hoisted = \"up\";\n}\nconst seen = [];\nfor (var looped of [1, 2]) {\n  seen.push(looped);\n}\nconsole.log(hoisted, looped, seen);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "up 2 [1,2]"
+        ],
+        "probes": {
+          "hoisted": "string \"up\"",
+          "looped": "number 2",
+          "seen": "object [1,2]"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

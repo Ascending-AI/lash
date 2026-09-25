@@ -1,0 +1,17 @@
+# test262-path	class	qualifier
+test/built-ins/AggregateError/cause-property.js	pass	-
+test/built-ins/AggregateError/length.js	pass	-
+test/built-ins/AggregateError/message-method-prop-cast.js	pass	-
+test/built-ins/AggregateError/message-method-prop.js	pass	-
+test/built-ins/AggregateError/message-undefined-no-prop.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/AggregateError/name.js	pass	-
+test/built-ins/AggregateError/newtarget-is-undefined.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/AggregateError/newtarget-proto.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/AggregateError/prop-desc.js	refused	TS_THIS_UNSUPPORTED
+test/built-ins/AggregateError/proto.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/AggregateError/prototype/constructor.js	pass	-
+test/built-ins/AggregateError/prototype/errors-absent-on-prototype.js	pass	-
+test/built-ins/AggregateError/prototype/message.js	pass	-
+test/built-ins/AggregateError/prototype/name.js	pass	-
+test/built-ins/AggregateError/prototype/prop-desc.js	pass	-
+test/built-ins/AggregateError/prototype/proto.js	refused	TS_METHOD_UNSUPPORTED

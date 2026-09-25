@@ -1,0 +1,19 @@
+{
+  "name": "object-holding-a-function",
+  "create": "const value = { run: () => 1, n: 2 };",
+  "uses": "console.log(value.n, typeof value.run);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "2 function"
+      ],
+      "probes": {}
+    }
+  ]
+}

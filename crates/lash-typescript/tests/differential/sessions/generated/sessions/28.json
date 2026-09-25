@@ -1,0 +1,90 @@
+{
+  "seed": 28,
+  "probe": [
+    "beta",
+    "chi",
+    "gamma",
+    "i",
+    "lambda",
+    "left",
+    "local",
+    "n",
+    "omega",
+    "psi",
+    "right"
+  ],
+  "cells": [
+    {
+      "source": "var chi = { b: 'a,b'.replace(/[a-z]/g, '_') };\nconsole.info(chi, chi, chi);\nchi.b = 'Lash';\nconsole.log(true, chi);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "{\"b\":\"_,_\"} {\"b\":\"_,_\"} {\"b\":\"_,_\"}",
+          "true {\"b\":\"Lash\"}"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "object {\"b\":\"Lash\"}",
+          "gamma": "unbound",
+          "i": "unbound",
+          "lambda": "unbound",
+          "left": "unbound",
+          "local": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "psi": "unbound",
+          "right": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let omega = { a: 12, e: false, g: 11 };\n{\n  const lambda = new Map(Object.entries({ z: 9, y: 3 }));\n  console.log(lambda.size, lambda.get('a'), lambda.has('ab'), [...lambda.keys()], lambda instanceof Map);\n}\nchi.b = 'zz';\nconsole.log(7, omega);\nvar psi = [5, 10, 3];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 undefined false [\"z\",\"y\"] true",
+          "7 {\"a\":12,\"e\":false,\"g\":11}"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "object {\"b\":\"zz\"}",
+          "gamma": "unbound",
+          "i": "unbound",
+          "lambda": "unbound",
+          "left": "unbound",
+          "local": "unbound",
+          "n": "unbound",
+          "omega": "object {\"a\":12,\"e\":false,\"g\":11}",
+          "psi": "object [5,10,3]",
+          "right": "unbound"
+        }
+      }
+    },
+    {
+      "source": "globalThis.chi = { b: chi.b };\npsi.push(...[omega.a, psi.indexOf(9)]);\nconsole.log(8, (3).toFixed(1));\nfor (let i = 0; i < 2; i++) {\n  {\n    let gamma = chi;\n    console.info(omega, gamma);\n    psi.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n  }\n  const beta = (n) => { const local = Math.max(...psi, 1); return 1; };\n  console.log(beta(((8 ** 2) ** 2)));\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "8 3.0",
+          "{\"a\":12,\"e\":false,\"g\":11} {\"b\":\"zz\"}",
+          "1",
+          "{\"a\":12,\"e\":false,\"g\":11} {\"b\":\"zz\"}",
+          "1"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "object {\"b\":\"zz\"}",
+          "gamma": "unbound",
+          "i": "unbound",
+          "lambda": "unbound",
+          "left": "unbound",
+          "local": "unbound",
+          "n": "unbound",
+          "omega": "object {\"a\":12,\"e\":false,\"g\":11}",
+          "psi": "object [5,3,12,10,-1]",
+          "right": "unbound"
+        }
+      }
+    }
+  ]
+}

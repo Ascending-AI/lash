@@ -1,0 +1,183 @@
+{
+  "seed": 8,
+  "probe": [
+    "alpha",
+    "chi",
+    "count",
+    "delta",
+    "entry",
+    "error",
+    "field",
+    "gamma",
+    "index",
+    "iota",
+    "item",
+    "kappa",
+    "lambda",
+    "omega",
+    "phi",
+    "problem",
+    "psi",
+    "sigma",
+    "slot",
+    "tau",
+    "theta",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "var iota = 'ab'.slice(0, 2).padStart(5, '*');\n{\n  const theta = new URLSearchParams('b=2&a=1&b=3');\n  console.log(theta.toString(), theta.get('b'), theta.getAll('b'), theta.size, theta.has('q'));\n}\nconsole.log(iota);\nfor (const field in { d: 'a,b', e: 'ab'.padStart(5, '*'), g: [11] }) {\n  console.log(field);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "b=2&a=1&b=3 2 [\"2\",\"3\"] 3 false",
+          "***ab",
+          "d",
+          "e",
+          "g"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "string \"***ab\"",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let kappa = [8];\nfor (const field in kappa) {\n  console.log(field);\n  try {\n    const zeta = { b: iota };\n  } catch (problem) {\n    console.log(problem.name, problem.message, problem instanceof RangeError);\n  } finally {\n    let phi = 2;\n  }\n}\nlet delta = [Array.from({ length: 1 }, (slot, index) => index * 2).length, (-2), iota.indexOf('b')];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "object [1,-2,4]",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "string \"***ab\"",
+          "item": "unbound",
+          "kappa": "object [8]",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "function sigma(count) {\n  var chi = JSON.parse(JSON.stringify(kappa));\n  return 8;\n}\nconsole.log(sigma(9));\nvar omega = { c: 0, a: (kappa.findLastIndex((value) => value < 3) >= 0), d: sigma(...delta, 1) };\n{\n  for (const entry of iota) {\n    const alpha = sigma(Number.parseInt(`${2}:${entry}` + '7', 10));\n    console.info(alpha, alpha, String(sigma(alpha)).includes('a'));\n  }\n  switch (10 % 3) {\n    case 0: {\n      console.warn(7, 'a,b');\n      kappa.push(...[12, (true ? 8.5 : Number.parseInt(iota + '7', 10))]);\n    }\n    case 1: {\n      const alpha = [JSON.stringify(iota).replaceAll('b', 'B'), iota];\n      const tau = new URLSearchParams('b=2&a=1&b=3');\n      console.log(tau.toString(), tau.get('b'), tau.getAll('b'), tau.size, tau.has('q'));\n    }\n    default: {\n      delta.unshift(9.5);\n    }\n  }\n  let phi = new RangeError('x');\n}\nif (true) {\n  const kappa = ((4 ** 2) >= 10);\n  {\n    const psi = (item) => Number.parseInt(iota.slice(0, 2) + '7', 10);\n    console.log(psi(iota.trimEnd().length));\n    const gamma = /(?<first>[a-z])(b)?/.exec('b.c');\n    console.log(gamma?.[0] ?? 'none', gamma?.index ?? -1, gamma?.groups?.first ?? '-', gamma === null);\n    const lambda = new RegExp('[a-z]+', 'i');\n    console.log(lambda.test('zz'), lambda.source, lambda.flags, lambda.lastIndex, String(lambda));\n  }\n} else {\n  console.log({ ...omega, z: 0 }, iota);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "8",
+          "8 8 false",
+          "8 8 false",
+          "8 8 false",
+          "8 8 false",
+          "8 8 false",
+          "b=2&a=1&b=3 2 [\"2\",\"3\"] 3 false",
+          "NaN",
+          "b 0 b false",
+          "true [a-z]+ i 0 /[a-z]+/i"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "object [9.5,1,-2,4]",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "string \"***ab\"",
+          "item": "unbound",
+          "kappa": "object [8]",
+          "lambda": "unbound",
+          "omega": "object {\"c\":0,\"a\":false,\"d\":8}",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "sigma": "function undefined",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "sigma"
+        ]
+      }
+    },
+    {
+      "source": "for (const entry of kappa) {\n  if (kappa.length > 0) kappa[kappa.length - 1] = 2.5;\n  delta.unshift(((-5) << entry));\n}\ntry {\n  let delta = [iota];\n} catch (error) {\n  console.log(error.name, error.message, error instanceof RangeError);\n} finally {\n  omega.c = 0;\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "object [-1280,9.5,1,-2,4]",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "string \"***ab\"",
+          "item": "unbound",
+          "kappa": "object [2.5]",
+          "lambda": "unbound",
+          "omega": "object {\"c\":0,\"a\":false,\"d\":8}",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "sigma": "function undefined",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "sigma"
+        ]
+      }
+    }
+  ]
+}

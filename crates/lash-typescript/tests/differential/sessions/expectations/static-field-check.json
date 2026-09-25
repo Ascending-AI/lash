@@ -1,0 +1,24 @@
+{
+  "id": "static-field-check",
+  "about": "reading a field an object literal's type lacks, which the linker refuses as TypeScript does",
+  "probe": [
+    "shape"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const shape = { a: 1 };\nconsole.log(shape.missing);\n",
+      "reject": "TS_LINK_ERROR",
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "shape": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

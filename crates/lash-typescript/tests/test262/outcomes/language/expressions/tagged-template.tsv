@@ -1,0 +1,23 @@
+# test262-path	class	qualifier
+test/language/expressions/tagged-template/cache-different-functions-same-site.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-differing-expressions-eval.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-differing-expressions-new-function.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-differing-expressions.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-differing-raw-strings.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-differing-string-count.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-eval-inner-function.js	refused	TS_EVAL_UNSUPPORTED
+test/language/expressions/tagged-template/cache-identical-source-eval.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-identical-source-new-function.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-identical-source.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-same-site-top-level.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/cache-same-site.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/call-expression-argument-list-evaluation.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/call-expression-context-strict.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/chained-application.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/constructor-invocation.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/tagged-template/invalid-escape-sequences.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/member-expression-argument-list-evaluation.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/member-expression-context.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/template-object-frozen-strict.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/template-object-template-map.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED
+test/language/expressions/tagged-template/template-object.js	refused	TS_TAGGED_TEMPLATE_UNSUPPORTED

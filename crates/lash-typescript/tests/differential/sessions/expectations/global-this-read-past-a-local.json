@@ -1,0 +1,32 @@
+{
+  "id": "global-this-read-past-a-local",
+  "about": "a function local of the same name does not answer a globalThis read (FIG-3620)",
+  "probe": [
+    "depth",
+    "measure"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "globalThis.depth = 1;\nfunction measure() {\n  const depth = 9;\n  return [depth, globalThis.depth];\n}\nconsole.log(measure());\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[9,1]"
+        ],
+        "probes": {
+          "depth": "number 1",
+          "measure": "function undefined"
+        },
+        "closures": [
+          "measure"
+        ]
+      }
+    }
+  ]
+}

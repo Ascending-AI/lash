@@ -1,0 +1,21 @@
+# test262-path	excluding-census-row
+test/built-ins/JSON/isRawJSON/basic.js	feature:json-parse-with-source
+test/built-ins/JSON/isRawJSON/builtin.js	feature:json-parse-with-source
+test/built-ins/JSON/isRawJSON/length.js	feature:json-parse-with-source
+test/built-ins/JSON/isRawJSON/name.js	feature:json-parse-with-source
+test/built-ins/JSON/isRawJSON/not-a-constructor.js	feature:json-parse-with-source
+test/built-ins/JSON/isRawJSON/prop-desc.js	feature:json-parse-with-source
+test/built-ins/JSON/parse/reviver-call-args-after-forward-modification.js	feature:json-parse-with-source
+test/built-ins/JSON/parse/reviver-context-source-array-literal.js	feature:json-parse-with-source
+test/built-ins/JSON/parse/reviver-context-source-object-literal.js	feature:json-parse-with-source
+test/built-ins/JSON/parse/reviver-context-source-primitive-literal.js	feature:json-parse-with-source
+test/built-ins/JSON/parse/reviver-forward-modifies-object.js	feature:json-parse-with-source
+test/built-ins/JSON/rawJSON/basic.js	feature:json-parse-with-source
+test/built-ins/JSON/rawJSON/builtin.js	feature:json-parse-with-source
+test/built-ins/JSON/rawJSON/illegal-empty-and-start-end-chars.js	feature:json-parse-with-source
+test/built-ins/JSON/rawJSON/invalid-JSON-text.js	feature:json-parse-with-source
+test/built-ins/JSON/rawJSON/length.js	feature:json-parse-with-source
+test/built-ins/JSON/rawJSON/name.js	feature:json-parse-with-source
+test/built-ins/JSON/rawJSON/not-a-constructor.js	feature:json-parse-with-source
+test/built-ins/JSON/rawJSON/prop-desc.js	feature:json-parse-with-source
+test/built-ins/JSON/rawJSON/returns-expected-object.js	feature:json-parse-with-source

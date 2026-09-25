@@ -1,0 +1,30 @@
+{
+  "id": "optional-and-nullish-temporaries",
+  "about": "optional chaining and nullish coalescing bind only authored names",
+  "probe": [
+    "deep",
+    "got",
+    "missing"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const deep = JSON.parse('{\"a\":{\"b\":1}}');\nconst got = deep?.a?.b ?? 0;\nconst missing = deep?.x?.y ?? \"none\";\nconsole.log(got, missing);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1 none"
+        ],
+        "probes": {
+          "deep": "object {\"a\":{\"b\":1}}",
+          "got": "number 1",
+          "missing": "string \"none\""
+        },
+        "closures": []
+      }
+    }
+  ]
+}

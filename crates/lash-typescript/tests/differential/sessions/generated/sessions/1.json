@@ -1,0 +1,70 @@
+{
+  "seed": 1,
+  "probe": [
+    "alpha",
+    "count",
+    "error",
+    "iota",
+    "j",
+    "kappa",
+    "lambda",
+    "phi",
+    "rho",
+    "tau",
+    "theta",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "var kappa = 7;\nconsole.log(kappa);\nfor (let j = 0; j < 2; j++) {\n  var alpha = new Date(Date.UTC(2024, 3, 3));\n}\ntry {\n  {\n    console.log('x', kappa);\n  }\n  let theta = [kappa, (-(kappa ** 2)), (-kappa)];\n  throw new Error('x');\n} catch (error) {\n  console.log(error.name, error.message, error instanceof RangeError);\n}\nvar lambda = new RangeError('b.c');\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "7",
+          "x 7",
+          "Error x false"
+        ],
+        "probes": {
+          "alpha": "object \"2024-04-03T00:00:00.000Z\"",
+          "count": "unbound",
+          "error": "unbound",
+          "iota": "unbound",
+          "j": "unbound",
+          "kappa": "number 7",
+          "lambda": "object {}",
+          "phi": "unbound",
+          "rho": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let phi = { d: [8, 6, Math.sign(kappa)] };\nvar zeta = alpha;\nlet tau = JSON.parse(JSON.stringify(phi));\nvar rho = kappa;\nfunction iota(count) {\n  return count <= 1 ? 1 : count + iota(count - 1);\n}\nconsole.log(iota(4));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "10"
+        ],
+        "probes": {
+          "alpha": "object \"2024-04-03T00:00:00.000Z\"",
+          "count": "unbound",
+          "error": "unbound",
+          "iota": "function undefined",
+          "j": "unbound",
+          "kappa": "number 7",
+          "lambda": "object {}",
+          "phi": "object {\"d\":[8,6,1]}",
+          "rho": "number 7",
+          "tau": "object {\"d\":[8,6,1]}",
+          "theta": "unbound",
+          "zeta": "object \"2024-04-03T00:00:00.000Z\""
+        },
+        "closures": [
+          "iota"
+        ]
+      }
+    }
+  ]
+}

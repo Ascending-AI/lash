@@ -1,0 +1,158 @@
+{
+  "seed": 54,
+  "probe": [
+    "alpha",
+    "chi",
+    "delta",
+    "field",
+    "gamma",
+    "i",
+    "index",
+    "iota",
+    "lambda",
+    "omega",
+    "phi",
+    "problem",
+    "psi",
+    "rho",
+    "slot",
+    "step",
+    "tau",
+    "theta",
+    "turn1",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "for (const field in { e: 10, c: 'ab' }) {\n  console.log(field);\n}\nswitch (((9.5 * 7) - (false ? 12 : 6)) % 3) {\n  case 0: {\n    if (true) {\n      console.warn(('  pad '.length >> 4), 7, '  pad ');\n    } else {\n      let alpha = 'Lash'.padStart(5, '*');\n    }\n    let turn1 = 0;\n    do {\n      turn1++;\n      console.log('  pad '.split(',').reverse().join('|').padStart(5, '*').length);\n      let iota = { c: 5 };\n    } while (turn1 < 2);\n    break;\n  }\n  case 1: {\n    switch (12 % 3) {\n      case 0: {\n        let theta = false;\n        let iota = { a: 7, h: true };\n        break;\n      }\n      case 1: {\n        console.log((3.5 * 2.5));\n        break;\n      }\n      default: {\n        console.log('Lash', 7, 'Lash');\n      }\n    }\n    break;\n  }\n  default: {\n    const phi = { c: `${10}:${'hi'}` };\n  }\n}\nfor (let step = 0; step < 1; step++) {\n  console.info((step instanceof Error));\n  {\n    const chi = !false;\n    let delta = [2, 4.5];\n    const phi = 'hi'.padStart(5, '*');\n  }\n}\ntry {\n  console.warn(false);\n  throw new SyntaxError('x', { cause: 1 });\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n}\nfor (let step = 0; step < 1; step++) {\n  switch (2 % 3) {\n    case 0: {\n      let gamma = 'ab';\n    }\n    case 1: {\n      console.log(step, (step * (Array.from({ length: 3 }, (slot, index) => index * 2).length - 'b.c'.length)), Math.min(step, 5));\n      let phi = { h: true, f: ('hi' + JSON.stringify(step)), d: false };\n      break;\n    }\n    default: {\n      let gamma = [step, 1];\n    }\n  }\n  {\n    console.warn(JSON.stringify(step), 'zz'.indexOf('b'));\n    let rho = JSON.stringify(step);\n    const zeta = ['ab'];\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "e",
+          "c",
+          "false",
+          "false",
+          "SyntaxError x false",
+          "0 -1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const { a: omega, b: lambda = 0 } = { a: 'hi', b: 0 };\nconst tau = [];\nfor (let i = 0; i < 3; i++) {\n  console.info(false, tau, lambda);\n  const zeta = ['ab', (7).toFixed(1).trimStart(), omega.replace(/[a-z]/g, '_')];\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false [] 0",
+          "false [] 0",
+          "false [] 0"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "lambda": "number 0",
+          "omega": "string \"hi\"",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "object []",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
+      "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "lambda": "number 0",
+          "omega": "string \"hi\"",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "object []",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "if (true) {\n  {\n    console.warn(false);\n    let psi = !false;\n  }\n  tau.reverse();\n}\nconsole.log((tau.join('-') + 'hi'), omega);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false",
+          "hi hi"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "lambda": "number 0",
+          "omega": "string \"hi\"",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "object []",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

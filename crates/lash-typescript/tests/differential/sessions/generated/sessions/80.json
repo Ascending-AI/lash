@@ -1,0 +1,155 @@
+{
+  "seed": 80,
+  "probe": [
+    "alpha",
+    "beta",
+    "count",
+    "entry",
+    "field",
+    "gamma",
+    "i",
+    "iota",
+    "kappa",
+    "n",
+    "phi",
+    "psi",
+    "rho",
+    "shared2",
+    "sigma",
+    "step",
+    "theta",
+    "turn1",
+    "turn3",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "let turn1 = 0;\nwhile (turn1 < 3) {\n  turn1++;\n  for (const field in { e: 'a,b' }) {\n    console.log(field);\n    const gamma = ['hi'.padStart(5, '*'), field];\n  }\n}\nlet beta = (false && false);\nfor (const entry of []) {\n  console.log(2, (entry + entry).padStart(5, '*').toLowerCase());\n  const gamma = (n) => entry.indexOf('b');\n  console.log(gamma(9.5));\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "e",
+          "e",
+          "e"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "boolean false",
+          "count": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "shared2": "unbound",
+          "sigma": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "number 3",
+          "turn3": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log(turn1, beta, false);\nfor (const entry of [4.5, 7]) {\n  const [kappa, ...zeta] = [7.5, turn1, 12];\n}\nglobalThis.shared2 = Math.sign(turn1);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3 false false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "boolean false",
+          "count": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "shared2": "number 1",
+          "sigma": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "number 3",
+          "turn3": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const alpha = 'a,b';\nconst rho = (!alpha.includes('a') || !beta);\nfor (let step = 0; step < 2; step++) {\n  globalThis.shared2 = Number.parseInt('  pad ' + '7', 10);\n  let turn3 = 0;\n  while (turn3 < 3) {\n    turn3++;\n    let kappa = { ...{ b: false } };\n  }\n}\nconst psi = String(((-shared2) ** 2));\nconst phi = ['b.c', psi];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "string \"a,b\"",
+          "beta": "boolean false",
+          "count": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "phi": "object [\"b.c\",\"NaN\"]",
+          "psi": "string \"NaN\"",
+          "rho": "boolean true",
+          "shared2": "number null",
+          "sigma": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "number 3",
+          "turn3": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "function sigma(count) {\n  return count <= 1 ? 1 : count + sigma(count - 1);\n}\nconsole.log(sigma(2));\nphi.reverse();\nfor (const entry of psi) {\n  let theta = { e: sigma(3), b: `${12}:${entry.slice(0, 2)}`, d: rho };\n}\nswitch (shared2 % 3) {\n  case 0: {\n    let kappa = [];\n    for (let i = 0; i < 2; i++) {\n      let iota = beta;\n    }\n    break;\n  }\n  default: {\n    const iota = new Date(1540715623000);\n    console.log(iota.toISOString(), iota.getUTCDay(), iota.getTime() > 0, iota instanceof Date);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3",
+          "2018-10-28T08:33:43.000Z 0 true true"
+        ],
+        "probes": {
+          "alpha": "string \"a,b\"",
+          "beta": "boolean false",
+          "count": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "phi": "object [\"NaN\",\"b.c\"]",
+          "psi": "string \"NaN\"",
+          "rho": "boolean true",
+          "shared2": "number null",
+          "sigma": "function undefined",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "number 3",
+          "turn3": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "sigma"
+        ]
+      }
+    }
+  ]
+}

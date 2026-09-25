@@ -1,0 +1,60 @@
+{
+  "id": "mutation-through-session-globals",
+  "about": "a later cell mutates the objects and arrays earlier cells bound",
+  "probe": [
+    "holder",
+    "queue"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const holder = { count: 1 };\nconst queue = [1];\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "holder": "object {\"count\":1}",
+          "queue": "object [1]"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "holder.count += 1;\nholder.extra = \"x\";\nqueue.push(2);\nconsole.log(holder, queue);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "{\"count\":2,\"extra\":\"x\"} [1,2]"
+        ],
+        "probes": {
+          "holder": "object {\"count\":2,\"extra\":\"x\"}",
+          "queue": "object [1,2]"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "console.log(holder.count, queue.length);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 2"
+        ],
+        "probes": {
+          "holder": "object {\"count\":2,\"extra\":\"x\"}",
+          "queue": "object [1,2]"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

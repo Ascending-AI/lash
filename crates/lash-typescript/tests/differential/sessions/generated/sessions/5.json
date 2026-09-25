@@ -1,0 +1,120 @@
+{
+  "seed": 5,
+  "probe": [
+    "chi",
+    "delta",
+    "entry",
+    "field",
+    "gamma",
+    "iota",
+    "item",
+    "kappa",
+    "lambda",
+    "omega",
+    "phi",
+    "psi",
+    "rest",
+    "rho",
+    "sigma",
+    "tau",
+    "turn1"
+  ],
+  "cells": [
+    {
+      "source": "{\n  console.info('hi', 'hi', 8);\n  const chi = 'x';\n}\ntry {\n  for (const field in { d: false, c: 'Lash'.trimEnd(), a: (11 === 6) }) {\n    console.log(field);\n  }\n} catch {\n  console.log('caught');\n} finally {\n  console.log(`${9}:${(typeof 8)}`.length, 7);\n}\nfor (const entry of []) {\n  let turn1 = 0;\n  while (turn1 < 1) {\n    turn1++;\n    let lambda = { ...{ d: 2, a: false } };\n  }\n}\nconst omega = ['  pad ', 'a,b', 'b.c'];\nconst { a: rho, b: gamma = 0 } = { a: 'zz', b: Number.parseInt('  pad ' + '7', 10) };\nconsole.log(omega, `${gamma}:${rho}`);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "hi hi 8",
+          "d",
+          "c",
+          "a",
+          "8 7",
+          "[\"  pad \",\"a,b\",\"b.c\"] NaN:zz"
+        ],
+        "probes": {
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "number null",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "object [\"  pad \",\"a,b\",\"b.c\"]",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "string \"zz\"",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "turn1": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log(false);\n{\n  {\n    const tau = new Error('ab');\n    console.log(tau.name, tau.message, String(tau), tau instanceof Error);\n    omega.reverse();\n    omega.pop();\n  }\n  const lambda = (item, ...rest) => omega.length + rest.length;\n  console.log(lambda((!false ? 'x'.length : (7 & gamma))));\n}\nfor (const field in omega) {\n  console.log(field);\n  let tau = [[5], [2]].flat().includes(2);\n}\nfor (const field in omega) {\n  console.log(field);\n}\n{\n  const delta = new URLSearchParams('b=2&a=1&b=3');\n  console.log(delta.toString(), delta.get('b'), delta.getAll('b'), delta.size, delta.has('q'));\n  omega.push(rho);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false",
+          "Error ab Error: ab true",
+          "2",
+          "0",
+          "1",
+          "0",
+          "1",
+          "b=2&a=1&b=3 2 [\"2\",\"3\"] 3 false"
+        ],
+        "probes": {
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "number null",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "object [\"b.c\",\"a,b\",\"zz\"]",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "string \"zz\"",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "turn1": "unbound"
+        }
+      }
+    },
+    {
+      "source": "omega.reverse();\n{\n  const sigma = new Map([['b', 11], ['a', 11]]);\n  console.log(sigma.size, sigma.get('a'), sigma.has('Lash'), [...sigma.keys()], sigma instanceof Map);\n  switch (gamma % 3) {\n    case 0: {\n      omega.push('x');\n      break;\n    }\n    case 1: {\n      const chi = [('zz'.length ** 2), gamma, 3];\n    }\n    default: {\n      sigma.delete('hi');\n    }\n  }\n}\nlet iota = ('  pad '.padStart(5, '*').slice(0, 2) === 'ab'.split(',').reverse().join('|'));\n{\n  const { a: kappa, b: psi = 0 } = { a: 'x', b: 8 };\n  const phi = new URL('https://example.com/p?x=1');\n  let rho = phi;\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 11 false [\"b\",\"a\"] true"
+        ],
+        "probes": {
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "number null",
+          "iota": "boolean false",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "object [\"zz\",\"a,b\",\"b.c\"]",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "string \"zz\"",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "turn1": "unbound"
+        }
+      }
+    }
+  ]
+}

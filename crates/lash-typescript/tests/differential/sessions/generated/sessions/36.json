@@ -1,0 +1,90 @@
+{
+  "seed": 36,
+  "probe": [
+    "entry",
+    "gamma",
+    "iota",
+    "lambda",
+    "omega",
+    "phi",
+    "rest",
+    "rho",
+    "tau",
+    "theta",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "for (const entry of [String(3), ('ab' + 'x')]) {\n  let lambda = (6 < Math.max(Math.min(5, 7), (-2)));\n}\nlet theta = Math.max(Math.floor(1), 12);\nlet phi = { ...{ e: [], d: ('zz' + JSON.stringify(theta)) } };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "entry": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "object {\"e\":[],\"d\":\"zz12\"}",
+          "rest": "unbound",
+          "rho": "unbound",
+          "tau": "unbound",
+          "theta": "number 12",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log(theta);\nfor (const entry of []) {\n  phi.e.push(9);\n  if ((5 >= 7)) { continue; }\n}\nconsole.log(('Lash' + 'b.c').toLowerCase(), theta);\nlet iota = 2;\nif (true) {\n  const rho = /(?<head>[a-z])(?<tail>[a-z]*)/;\n  console.log(rho.test('x'), rho.source, rho.flags, rho.lastIndex, String(rho));\n  console.log(rho, iota, theta);\n} else {\n  if ((1 === iota)) {\n    phi.d = 'hi';\n  } else {\n    let tau = 'a,b';\n    let zeta = phi;\n  }\n  if (false) {\n    iota = 11;\n  }\n}\n{\n  {\n    const omega = new Set([4, 1, 4]);\n    console.log(omega.size, omega.has(1), [...omega.union(new Set([7]))], omega instanceof Set);\n    const gamma = new RangeError('a,b');\n    console.log(gamma.name, gamma.message, String(gamma), gamma instanceof Error);\n    const iota = (value, ...rest) => 'Lash'.indexOf('b') + rest.length;\n    console.log(iota('Lash'.indexOf('b')));\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "12",
+          "lashb.c 12",
+          "true (?<head>[a-z])(?<tail>[a-z]*)  0 /(?<head>[a-z])(?<tail>[a-z]*)/",
+          "/(?<head>[a-z])(?<tail>[a-z]*)/ 2 12",
+          "2 true [4,1,7] true",
+          "RangeError a,b RangeError: a,b true",
+          "-1"
+        ],
+        "probes": {
+          "entry": "unbound",
+          "gamma": "unbound",
+          "iota": "number 2",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "object {\"e\":[],\"d\":\"zz12\"}",
+          "rest": "unbound",
+          "rho": "unbound",
+          "tau": "unbound",
+          "theta": "number 12",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "phi.g = 9;\nphi.g = phi.g;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "entry": "unbound",
+          "gamma": "unbound",
+          "iota": "number 2",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "object {\"e\":[],\"d\":\"zz12\",\"g\":9}",
+          "rest": "unbound",
+          "rho": "unbound",
+          "tau": "unbound",
+          "theta": "number 12",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

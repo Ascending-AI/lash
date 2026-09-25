@@ -1,0 +1,4 @@
+# test262-path	class	qualifier
+test/language/statements/expression/S12.4_A1.js	pass	-
+test/language/statements/expression/S12.4_A2_T1.js	refused	TS_EVAL_UNSUPPORTED
+test/language/statements/expression/S12.4_A2_T2.js	refused	TS_EVAL_UNSUPPORTED

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	DataView.prototype.getInt16	skip	ticket-ruling:FIG-1413:DataView.prototype.getInt16	-

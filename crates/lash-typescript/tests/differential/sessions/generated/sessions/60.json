@@ -1,0 +1,162 @@
+{
+  "seed": 60,
+  "probe": [
+    "alpha",
+    "chi",
+    "delta",
+    "entry",
+    "error",
+    "gamma",
+    "index",
+    "iota",
+    "item",
+    "kappa",
+    "lambda",
+    "omega",
+    "problem",
+    "psi",
+    "rho",
+    "slot",
+    "theta",
+    "total",
+    "turn1",
+    "turn2",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "console.log(`${8}:${'  pad '}`);\nfor (const entry of ['b.c'.padStart(5, '*'), 'zz']) {\n  console.log(true);\n  console.log(entry, entry, entry);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "8:  pad ",
+          "true",
+          "**b.c **b.c **b.c",
+          "true",
+          "zz zz zz"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "total": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "try {\n  if ((7 !== 10)) {\n    const zeta = { ...{ f: 7.5 } };\n    const delta = new Date(1591047987000);\n    console.log(delta.toISOString(), delta.getUTCDay(), delta.getTime() > 0, delta instanceof Date);\n  } else {\n    console.log(12, 8);\n  }\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n}\nlet iota = [((2 >> 8) + 8)];\n{\n  const rho = /(?<first>[a-z])(b)?/.exec('hi');\n  let turn1 = 0;\n  do {\n    turn1++;\n    iota.pop();\n  } while (turn1 < 1);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2020-06-01T21:46:27.000Z 1 true true"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "object []",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "total": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let turn2 = 0;\nwhile (turn2 < 1) {\n  turn2++;\n  const iota = { g: [Math.abs(turn2), 'hi'.indexOf('b'), Math.round(10)], d: true, a: 'Lash' };\n}\nswitch (turn2 % 3) {\n  case 0: {\n    let gamma = '  pad ';\n    iota.reverse();\n  }\n  case 1: {\n    iota[0] = turn2;\n    try {\n      let kappa = { ...{ d: false, f: (-Array.from({ length: 1 }, (slot, index) => index * 2).length) } };\n      iota.splice(0, 1);\n      throw new Error('x', { cause: 1 });\n    } catch (error) {\n      console.log(error.name, error.message, error instanceof RangeError);\n    }\n    break;\n  }\n  default: {\n    try {\n      const theta = new URL('https://example.com/q?x=1');\n      console.log(theta.href, theta.pathname, theta.searchParams.get('x'), theta.origin);\n      throw new Error('a,b');\n    } catch {\n      console.log('caught');\n    }\n  }\n}\nlet chi = /(?<first>[a-z])(b)?/.exec('ab');\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "Error x false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "object [\"ab\",\"a\",\"b\"]",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "object []",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "total": "unbound",
+          "turn1": "unbound",
+          "turn2": "number 1",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const [lambda, ...omega] = [turn2, 3, 1];\niota.push((iota.indexOf(2.5) + 4));\nconst alpha = 'b.c'.padStart(5, '*').slice(0, 2);\nfor (const entry of omega) {\n  console.log([[2], [2]].flat().includes(2), lambda);\n}\nlet psi = JSON.parse(JSON.stringify(omega));\nfinish(alpha);\n",
+      "node": {
+        "outcome": "finish",
+        "finish": "**",
+        "prints": [
+          "true 1",
+          "true 1"
+        ],
+        "probes": {
+          "alpha": "string \"**\"",
+          "chi": "object [\"ab\",\"a\",\"b\"]",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "object [3]",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "number 1",
+          "omega": "object [3,1]",
+          "problem": "unbound",
+          "psi": "object [3,1]",
+          "rho": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "total": "unbound",
+          "turn1": "unbound",
+          "turn2": "number 1",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

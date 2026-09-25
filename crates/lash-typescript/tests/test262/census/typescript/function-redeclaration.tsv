@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	function-redeclaration	rejected	TS_FUNCTION_REDECLARATION_UNSUPPORTED	function f() { } function f() { }

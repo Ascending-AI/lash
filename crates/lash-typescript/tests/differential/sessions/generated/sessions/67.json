@@ -1,0 +1,158 @@
+{
+  "seed": 67,
+  "probe": [
+    "alpha",
+    "chi",
+    "delta",
+    "entry",
+    "error",
+    "field",
+    "gamma",
+    "i",
+    "index",
+    "iota",
+    "kappa",
+    "local",
+    "n",
+    "phi",
+    "problem",
+    "psi",
+    "rho",
+    "sigma",
+    "slot",
+    "tau",
+    "theta",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "try {\n  switch (Math.min((11 % 5), 10) % 3) {\n    case 0: {\n      let rho = new RegExp('[a-z]+', 'i');\n      break;\n    }\n    default: {\n      console.log(5, true, 'x');\n    }\n  }\n  for (let i = 0; i < 1; i++) {\n    let iota = { e: (i * Array.from({ length: 0 }, (slot, index) => index * 2).length), d: 'x' };\n  }\n  throw new TypeError('Lash');\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n}\nswitch (((10 | 2) ** 2) % 3) {\n  case 0: {\n    try {\n      console.warn(((6 % Math.round(2)) !== Math.abs(4)), Math.floor(4));\n      const phi = (n) => { const local = 3; return 1; };\n      console.log(phi(Number.parseInt('b.c' + '7', 10)));\n    } catch (error) {\n      console.log(error.name, error.message, error instanceof RangeError);\n    }\n    const chi = { a: ((false ? 0 : 1.5) !== Math.min(2.5, 11)), d: false, e: ['ab'.indexOf('b')] };\n  }\n  default: {\n    const zeta = 'ab';\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "5 true x",
+          "TypeError Lash false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "local": "unbound",
+          "n": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "var kappa = ['  pad '];\nvar alpha = kappa;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "object [\"  pad \"]",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "object [\"  pad \"]",
+          "local": "unbound",
+          "n": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "switch ('x'.indexOf('b') % 3) {\n  case 0: {\n    console.warn(kappa);\n    break;\n  }\n  case 1: {\n    kappa.push('Lash'.padStart(5, '*').toLowerCase());\n    let psi = [Array.from({ length: 0 }, (slot, index) => index * 2).length];\n    break;\n  }\n  default: {\n    const [zeta, ...delta] = [12, Math.max(0, 8), 9];\n  }\n}\nfor (const field in alpha) {\n  console.log(field);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0"
+        ],
+        "probes": {
+          "alpha": "object [\"  pad \"]",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "object [\"  pad \"]",
+          "local": "unbound",
+          "n": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "alpha.unshift('ab'.padStart(5, '*').toUpperCase());\nkappa[0] = 'b.c';\nconst [sigma, ...theta] = [9, (0.5 ** 2), Math.sign(2)];\nconst tau = ('a,b'.replace(/[a-z]/g, '_').slice(0, 2) + String(9).trimStart());\nconst gamma = 12;\nfor (const entry of tau) {\n  theta.splice(0, 1);\n  if (true) { continue; }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "object [\"b.c\",\"  pad \"]",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "number 12",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "kappa": "object [\"b.c\",\"  pad \"]",
+          "local": "unbound",
+          "n": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "number 9",
+          "slot": "unbound",
+          "tau": "string \"_,9\"",
+          "theta": "object []",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

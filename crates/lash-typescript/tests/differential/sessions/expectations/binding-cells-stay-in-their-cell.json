@@ -1,0 +1,63 @@
+{
+  "id": "binding-cells-stay-in-their-cell",
+  "about": "closures share the bindings they assign, per call and per iteration, and only the values they leave reach the session (FIG-3707)",
+  "probe": [
+    "counts",
+    "counter",
+    "a",
+    "b",
+    "c",
+    "fns",
+    "i",
+    "f"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const counts = [];\n{\n  const counter = () => { let c = 0; return () => { c += 1; return c; }; };\n  const a = counter();\n  const b = counter();\n  a();\n  a();\n  b();\n  counts.push(a(), b());\n  const fns = [];\n  for (let i = 0; i < 3; i++) {\n    fns.push(() => i);\n    i += 0;\n  }\n  counts.push(...fns.map((f) => f()));\n}\nconsole.log(JSON.stringify(counts));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[3,2,0,1,2]"
+        ],
+        "probes": {
+          "counts": "object [3,2,0,1,2]",
+          "counter": "unbound",
+          "a": "unbound",
+          "b": "unbound",
+          "c": "unbound",
+          "fns": "unbound",
+          "i": "unbound",
+          "f": "unbound"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "counts.push(counts.length);\nconsole.log(JSON.stringify(counts));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[3,2,0,1,2,5]"
+        ],
+        "probes": {
+          "counts": "object [3,2,0,1,2,5]",
+          "counter": "unbound",
+          "a": "unbound",
+          "b": "unbound",
+          "c": "unbound",
+          "fns": "unbound",
+          "i": "unbound",
+          "f": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

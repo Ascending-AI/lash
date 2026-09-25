@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Math.sumPrecise	rejected	TS_METHOD_UNSUPPORTED	Math.sumPrecise([1, 2]);

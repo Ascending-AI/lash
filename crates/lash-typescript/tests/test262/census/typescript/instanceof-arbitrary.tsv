@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	instanceof-arbitrary	rejected	TS_INSTANCEOF_UNSUPPORTED	const b = 'a' instanceof String;

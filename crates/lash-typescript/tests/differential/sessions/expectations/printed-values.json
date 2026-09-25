@@ -1,0 +1,45 @@
+{
+  "id": "printed-values",
+  "about": "console.log renders objects and arrays as JSON and everything else as ToString",
+  "probe": [
+    "record",
+    "list"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const record = { a: 1, b: [true, null] };\nconst list = [\"x\", 2];\nconsole.log(record, list, \"text\", 3.5, undefined, null, new Map([[\"k\", 1]]));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "{\"a\":1,\"b\":[true,null]} [\"x\",2] text 3.5 undefined null [object Map]"
+        ],
+        "probes": {
+          "record": "object {\"a\":1,\"b\":[true,null]}",
+          "list": "object [\"x\",2]"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "console.log(JSON.stringify(record), list.length);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "{\"a\":1,\"b\":[true,null]} 2"
+        ],
+        "probes": {
+          "record": "object {\"a\":1,\"b\":[true,null]}",
+          "list": "object [\"x\",2]"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

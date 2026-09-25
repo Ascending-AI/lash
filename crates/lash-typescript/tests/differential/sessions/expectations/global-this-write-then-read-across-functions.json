@@ -1,0 +1,57 @@
+{
+  "id": "global-this-write-then-read-across-functions",
+  "about": "one function's globalThis write is what another function's globalThis read sees, and nothing exists before the write runs (FIG-3620)",
+  "probe": [
+    "readLater",
+    "writeLater",
+    "later"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "function readLater() { return globalThis.later; }\nfunction writeLater() { globalThis.later = 5; }\nconsole.log(readLater(), \"later\" in globalThis);\nwriteLater();\nconsole.log(readLater(), \"later\" in globalThis);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "undefined false",
+          "5 true"
+        ],
+        "probes": {
+          "readLater": "function undefined",
+          "writeLater": "function undefined",
+          "later": "number 5"
+        },
+        "closures": [
+          "readLater",
+          "writeLater"
+        ]
+      }
+    },
+    {
+      "source": "console.log(later, typeof later);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "5 number"
+        ],
+        "probes": {
+          "readLater": "function undefined",
+          "writeLater": "function undefined",
+          "later": "number 5"
+        },
+        "closures": [
+          "readLater",
+          "writeLater"
+        ]
+      }
+    }
+  ]
+}

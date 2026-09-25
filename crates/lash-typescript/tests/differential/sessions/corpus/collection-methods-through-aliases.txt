@@ -1,0 +1,20 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/collection-methods-through-aliases.json.
+
+session collection-methods-through-aliases
+about a Map, Set or URLSearchParams not written as one (an alias, a field) iterates as itself (FIG-3608)
+probe out map alias box value key
+cell
+const out = [];
+{
+  const map = new Map([['k', 1], ['j', 2]]);
+  const alias = map;
+  alias.forEach((value, key) => { out.push(key + value); });
+  const box = { set: new Set([4, 5]), params: new URLSearchParams('a=1') };
+  box.set.forEach((value) => { out.push(value * 2); });
+  box.params.forEach((value, key) => { out.push(key); });
+  console.log([...alias.keys()], [...alias.values()], [...box.params.entries()]);
+}
+console.log(out);
+end

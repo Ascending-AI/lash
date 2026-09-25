@@ -1,0 +1,16 @@
+# test262-path	excluding-census-row
+test/built-ins/Map/prototype/getOrInsert/does-not-have-mapdata-internal-slot-set.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsert/does-not-have-mapdata-internal-slot.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsert/getOrInsert.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsert/length.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsert/name.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsert/returns-value-normalized-zero-key.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsertComputed/callbackfn-throws.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsertComputed/canonical-key-passed-to-callback.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsertComputed/check-callback-fn-args.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsertComputed/check-state-after-callback-fn-throws.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsertComputed/different-types-function-callbackfn-does-not-throw.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsertComputed/does-not-have-mapdata-internal-slot-set.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsertComputed/getOrInsertComputed.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsertComputed/overwrites-mutation-from-callbackfn.js	feature:upsert
+test/built-ins/Map/prototype/getOrInsertComputed/returns-value-normalized-zero-key.js	feature:upsert

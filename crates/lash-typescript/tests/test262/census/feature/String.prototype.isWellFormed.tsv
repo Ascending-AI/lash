@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	String.prototype.isWellFormed	rejected	TS_METHOD_UNSUPPORTED	'a'.isWellFormed();

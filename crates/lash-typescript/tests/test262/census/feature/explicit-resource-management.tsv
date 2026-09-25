@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	explicit-resource-management	skip	ticket-ruling:FIG-1413:explicit-resource-management — using/dispose semantics are a second, implicit termination path competing with the process finally-block contract that already owns durable cleanup	-

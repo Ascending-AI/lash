@@ -1,0 +1,67 @@
+{
+  "seed": 81,
+  "probe": [
+    "beta",
+    "chi",
+    "delta",
+    "index",
+    "iota",
+    "lambda",
+    "n",
+    "omega",
+    "rho",
+    "scaled",
+    "sigma",
+    "slot",
+    "theta"
+  ],
+  "cells": [
+    {
+      "source": "const lambda = (typeof 9).replaceAll('b', 'B');\nconst sigma = { f: '  pad ' };\nswitch (3 % 3) {\n  case 0: {\n    {\n      const lambda = (n) => { const scaled = (Math.max(5.5, n) ** 2); return 5.5; };\n      console.log(lambda(11));\n    }\n    const { a: delta, b: iota = 0 } = { a: `${10}:${lambda}`.split(',').reverse().join('|'), b: 4 };\n    break;\n  }\n  default: {\n    const theta = ((3 | lambda.length) >= (lambda.includes('a') ? (11 - 4) : Array.from({ length: 2 }, (slot, index) => index * 2).length));\n  }\n}\n{\n  const { a: rho, b: beta = 0 } = { a: 'a,b', b: 3 };\n  {\n    const omega = /(?<first>[a-z])(b)?/.exec('hi');\n    console.log(omega?.[0] ?? 'none', omega?.index ?? -1, omega?.groups?.first ?? '-', omega === null);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "5.5",
+          "h 0 h false"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "lambda": "string \"numBer\"",
+          "n": "unbound",
+          "omega": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "object {\"f\":\"  pad \"}",
+          "slot": "unbound",
+          "theta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "sigma.f = lambda.split(',').reverse().join('|').replace(/[a-z]/g, '_');\nconst chi = { g: 0 };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "beta": "unbound",
+          "chi": "object {\"g\":0}",
+          "delta": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "lambda": "string \"numBer\"",
+          "n": "unbound",
+          "omega": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "object {\"f\":\"___B__\"}",
+          "slot": "unbound",
+          "theta": "unbound"
+        }
+      }
+    }
+  ]
+}

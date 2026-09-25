@@ -1,0 +1,26 @@
+{
+  "id": "computed-literal-keys",
+  "about": "a computed key that is a string literal is that key, so a later field write links (FIG-3608)",
+  "probe": [
+    "keyed"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const keyed = { ['q']: 1, r: 2 };\nkeyed.q = 7;\nconsole.log(keyed.q, keyed);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "7 {\"q\":7,\"r\":2}"
+        ],
+        "probes": {
+          "keyed": "object {\"q\":7,\"r\":2}"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

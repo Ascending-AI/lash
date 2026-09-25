@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	WeakRef	skip	ticket-ruling:FIG-1413:WeakRef	-

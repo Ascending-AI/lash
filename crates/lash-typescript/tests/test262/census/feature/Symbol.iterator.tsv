@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Symbol.iterator	skip	ticket-ruling:FIG-1413:Symbol.iterator	-

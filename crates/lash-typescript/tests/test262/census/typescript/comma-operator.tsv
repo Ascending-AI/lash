@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	comma-operator	rejected	TS_SEQUENCE_UNSUPPORTED	const x = (1, 2);

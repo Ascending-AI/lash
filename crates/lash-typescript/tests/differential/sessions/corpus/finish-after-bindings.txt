@@ -1,0 +1,11 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/finish-after-bindings.json.
+
+session finish-after-bindings
+about a finished cell keeps the bindings it made before finishing
+probe made
+cell
+const made = [1];
+finish(made.length);
+end

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	private-names-outside-classes	rejected	TS_PRIVATE_NAME_UNSUPPORTED	function f(o: any) { return #x in o; }

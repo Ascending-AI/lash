@@ -1,0 +1,9 @@
+# test262-path	excluding-census-row
+test/built-ins/Math/sumPrecise/length.js	feature:Math.sumPrecise
+test/built-ins/Math/sumPrecise/name.js	feature:Math.sumPrecise
+test/built-ins/Math/sumPrecise/prop-desc.js	feature:Math.sumPrecise
+test/built-ins/Math/sumPrecise/sum-is-NaN.js	feature:Math.sumPrecise
+test/built-ins/Math/sumPrecise/sum-is-infinite.js	feature:Math.sumPrecise
+test/built-ins/Math/sumPrecise/sum-is-minus-zero.js	feature:Math.sumPrecise
+test/built-ins/Math/sumPrecise/sum.js	feature:Math.sumPrecise
+test/built-ins/Math/sumPrecise/throws-on-non-number.js	feature:Math.sumPrecise

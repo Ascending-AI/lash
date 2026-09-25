@@ -1,0 +1,22 @@
+# test262-path	excluding-census-row
+test/built-ins/Object/prototype/__defineSetter__/define-existing.js	feature:__setter__
+test/built-ins/Object/prototype/__defineSetter__/define-new.js	feature:__setter__
+test/built-ins/Object/prototype/__defineSetter__/define-non-configurable.js	feature:__setter__
+test/built-ins/Object/prototype/__defineSetter__/define-non-extensible.js	feature:__setter__
+test/built-ins/Object/prototype/__defineSetter__/key-invalid.js	feature:__setter__
+test/built-ins/Object/prototype/__defineSetter__/length.js	feature:__setter__
+test/built-ins/Object/prototype/__defineSetter__/name.js	feature:__setter__
+test/built-ins/Object/prototype/__defineSetter__/prop-desc.js	feature:__setter__
+test/built-ins/Object/prototype/__defineSetter__/this-non-obj.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/key-invalid.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/length.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/lookup-not-found.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/lookup-own-acsr-w-setter.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/lookup-own-acsr-wo-setter.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/lookup-own-data.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/lookup-proto-acsr-w-setter.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/lookup-proto-acsr-wo-setter.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/lookup-proto-data.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/name.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/prop-desc.js	feature:__setter__
+test/built-ins/Object/prototype/__lookupSetter__/this-non-obj.js	feature:__setter__

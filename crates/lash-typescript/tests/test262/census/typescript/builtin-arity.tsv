@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	builtin-arity	rejected	TS_EXPRESSION_UNSUPPORTED	isNaN(1, 2);

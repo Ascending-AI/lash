@@ -1,0 +1,17 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/global-this-write-then-read-across-functions.json.
+
+session global-this-write-then-read-across-functions
+about one function's globalThis write is what another function's globalThis read sees, and nothing exists before the write runs (FIG-3620)
+probe readLater writeLater later
+deviation closure-boundary
+cell
+function readLater() { return globalThis.later; }
+function writeLater() { globalThis.later = 5; }
+console.log(readLater(), "later" in globalThis);
+writeLater();
+console.log(readLater(), "later" in globalThis);
+cell
+console.log(later, typeof later);
+end

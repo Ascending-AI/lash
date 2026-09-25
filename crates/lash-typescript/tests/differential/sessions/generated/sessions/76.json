@@ -1,0 +1,126 @@
+{
+  "seed": 76,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "count",
+    "delta",
+    "error",
+    "index",
+    "iota",
+    "item",
+    "lambda",
+    "local",
+    "omega",
+    "phi",
+    "psi",
+    "rho",
+    "slot",
+    "tau",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "var omega = 3;\nvar psi = [Array.from({ length: 3 }, (slot, index) => index * 2).length, 0, 11];\nfunction alpha(count) {\n  return 3.5;\n}\nconsole.log(alpha(3));\npsi.splice(0, 1);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3.5"
+        ],
+        "probes": {
+          "alpha": "function undefined",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "error": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "local": "unbound",
+          "omega": "number 3",
+          "phi": "unbound",
+          "psi": "object [0,11]",
+          "rho": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "alpha"
+        ]
+      }
+    },
+    {
+      "source": "psi.reverse();\nif (true) {\n  if (false) {\n    let delta = psi;\n  }\n}\nvar iota = 0.5;\nfunction zeta(count) {\n  return Math.min(omega, Math.max(...psi, 1));\n}\nconsole.log(zeta(iota));\nconst tau = true;\n{\n  console.log(psi, (('ab' + '  pad ').includes('a') || true));\n  const chi = (item) => { const local = 11; return Math.min(...psi, 1); };\n  console.log(chi(((omega < omega) ? 9 : chi(3))));\n  try {\n    let phi = tau;\n    psi.reverse();\n  } catch (error) {\n    console.log(error.name, error.message, error instanceof RangeError);\n  } finally {\n    const lambda = '  pad '.toLowerCase();\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3",
+          "[11,0] true",
+          "0"
+        ],
+        "probes": {
+          "alpha": "function undefined",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "error": "unbound",
+          "index": "unbound",
+          "iota": "number 0.5",
+          "item": "unbound",
+          "lambda": "unbound",
+          "local": "unbound",
+          "omega": "number 3",
+          "phi": "unbound",
+          "psi": "object [0,11]",
+          "rho": "unbound",
+          "slot": "unbound",
+          "tau": "boolean true",
+          "zeta": "function undefined"
+        },
+        "closures": [
+          "alpha",
+          "zeta"
+        ]
+      }
+    },
+    {
+      "source": "try {\n  if (tau) {\n    let lambda = { f: String(omega), d: 3 };\n    console.log(omega, tau);\n  } else {\n    psi[0] = Math.max((-omega), 6.5);\n    let beta = new Map(Object.entries({ z: 8, y: 5 }));\n  }\n} catch {\n  console.log('caught');\n}\nlet rho = 'hi';\npsi.reverse();\npsi.sort();\nthrow new Error('b.c');\n",
+      "node": {
+        "outcome": "throw",
+        "error": "Error",
+        "prints": [
+          "3 true"
+        ],
+        "probes": {
+          "alpha": "function undefined",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "error": "unbound",
+          "index": "unbound",
+          "iota": "number 0.5",
+          "item": "unbound",
+          "lambda": "unbound",
+          "local": "unbound",
+          "omega": "number 3",
+          "phi": "unbound",
+          "psi": "object [0,11]",
+          "rho": "string \"hi\"",
+          "slot": "unbound",
+          "tau": "boolean true",
+          "zeta": "function undefined"
+        },
+        "closures": [
+          "alpha",
+          "zeta"
+        ]
+      }
+    }
+  ]
+}

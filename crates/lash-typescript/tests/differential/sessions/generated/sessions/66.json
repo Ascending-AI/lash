@@ -1,0 +1,127 @@
+{
+  "seed": 66,
+  "probe": [
+    "beta",
+    "entry",
+    "gamma",
+    "i",
+    "iota",
+    "j",
+    "kappa",
+    "omega",
+    "phi",
+    "psi",
+    "rest",
+    "sigma",
+    "tau",
+    "theta",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "for (let i = 0; i < 1; i++) {\n  let psi = (4.5 === 7);\n}\nlet beta = true;\nlet tau = { ...{ d: 6 }, e: `${4}:${'a,b'}`.slice(0, 2) };\nfor (const entry of []) {\n  for (let j = 0; j < 3; j++) {\n    tau.e = (('  pad ' + '  pad ') + `${2.5}:${'Lash'}`);\n    if (Object.hasOwn(tau, 'd')) { continue; }\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "beta": "boolean true",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "tau": "object {\"d\":6,\"e\":\"4:\"}",
+          "theta": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "outer: while (true) { break outer; }\n",
+      "reject": "TS_LABEL_UNSUPPORTED",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "beta": "boolean true",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "tau": "object {\"d\":6,\"e\":\"4:\"}",
+          "theta": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "tau.g = 'zz';\nconst phi = ('  pad ' + 'a,b');\nlet theta = 0;\ntau.h = Object.keys(tau).join('');\ntau.f = theta;\nswitch (Number.parseInt(phi + '7', 10) % 3) {\n  case 0: {\n    const omega = new URLSearchParams({ q: 'a b', r: '+' });\n    console.log(omega.toString(), omega.get('b'), omega.getAll('b'), omega.size, omega.has('q'));\n    const kappa = { d: (-Number.parseInt(phi + '7', 10)), h: 'Lash', f: [(theta ** 2), (9.5 % 10), (4 + theta)] };\n    break;\n  }\n  case 1: {\n    if (('ab' === tau.g)) {\n      const gamma = (value, ...rest) => 10 + rest.length;\n      console.log(gamma(Math.abs(Math.min(theta, theta))));\n      const iota = new URLSearchParams({ q: 'a b', r: '+' });\n    }\n    tau.h = phi;\n    break;\n  }\n  default: {\n    const iota = JSON.parse(JSON.stringify(tau));\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "beta": "boolean true",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "string \"  pad a,b\"",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "tau": "object {\"d\":6,\"e\":\"4:\",\"g\":\"zz\",\"h\":\"deg\",\"f\":0}",
+          "theta": "number 0",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.info(beta);\ntau.f = 12;\n{\n  const beta = new Set([2, 5, 2]);\n  console.log(beta.size, beta.has(1), [...beta.union(new Set([7]))], beta instanceof Set);\n  for (const entry of beta) {\n    if (beta.size < 6) beta.add(12);\n    console.log(tau);\n    const sigma = phi.indexOf('b');\n  }\n  const theta = /(?<first>[a-z])(b)?/.exec('a,b');\n  console.log(theta?.[0] ?? 'none', theta?.index ?? -1, theta?.groups?.first ?? '-', theta === null);\n}\nfinish(((6 >> theta) !== theta));\n",
+      "node": {
+        "outcome": "finish",
+        "finish": true,
+        "prints": [
+          "true",
+          "2 false [2,5,7] true",
+          "{\"d\":6,\"e\":\"4:\",\"g\":\"zz\",\"h\":\"deg\",\"f\":12}",
+          "{\"d\":6,\"e\":\"4:\",\"g\":\"zz\",\"h\":\"deg\",\"f\":12}",
+          "{\"d\":6,\"e\":\"4:\",\"g\":\"zz\",\"h\":\"deg\",\"f\":12}",
+          "a 0 a false"
+        ],
+        "probes": {
+          "beta": "boolean true",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "string \"  pad a,b\"",
+          "psi": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "tau": "object {\"d\":6,\"e\":\"4:\",\"g\":\"zz\",\"h\":\"deg\",\"f\":12}",
+          "theta": "number 0",
+          "value": "unbound"
+        }
+      }
+    }
+  ]
+}

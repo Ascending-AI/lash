@@ -1,0 +1,49 @@
+{
+  "id": "projected-value-shared-across-a-reload",
+  "about": "an object holding a host projection, bound under two names, stays one object in later cells",
+  "host": {
+    "report": {
+      "n": 1,
+      "title": "t"
+    }
+  },
+  "probe": [
+    "holder",
+    "alias"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const holder = { doc: report, n: 1 };\nconst alias = holder;\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "holder": "object {\"doc\":{\"n\":1,\"title\":\"t\"},\"n\":1}",
+          "alias": "object {\"doc\":{\"n\":1,\"title\":\"t\"},\"n\":1}"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "alias.n = 2;\nholder.n = holder.n + 10;\nconsole.log(holder.n, alias.n, holder === alias, holder.doc.title);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "12 12 true t"
+        ],
+        "probes": {
+          "holder": "object {\"doc\":{\"n\":1,\"title\":\"t\"},\"n\":12}",
+          "alias": "object {\"doc\":{\"n\":1,\"title\":\"t\"},\"n\":12}"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "durable-regexp-match",
+  "about": "a RegExp match bound at the top level keeps its index and groups after a reload (FIG-3608)",
+  "probe": [
+    "found"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const found = /(?<word>[a-z]+)/.exec('  lash');\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "found": "object [\"lash\",\"lash\"]"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "console.log(found.index, found.groups.word);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 lash"
+        ],
+        "probes": {
+          "found": "object [\"lash\",\"lash\"]"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

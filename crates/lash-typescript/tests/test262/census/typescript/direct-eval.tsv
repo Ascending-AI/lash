@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	direct-eval	rejected	TS_EVAL_UNSUPPORTED	eval('1');

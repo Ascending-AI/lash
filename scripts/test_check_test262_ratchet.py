@@ -79,8 +79,8 @@ class RatchetTest(unittest.TestCase):
     def test_parse_shards_unions_the_record_files(self):
         outcomes = ratchet.parse_shards(
             [
-                ("outcomes/built-ins.tsv", "a.js\tpass\t-\nb.js\tfail\tFIG-1\n"),
-                ("outcomes/language.tsv", "c.js\trefused\tTS_X\n"),
+                ("outcomes/built-ins/Object/propertyIsolation.tsv", "a.js\tpass\t-\nb.js\tfail\tFIG-1\n"),
+                ("outcomes/language/expressions/assignment.tsv", "c.js\trefused\tTS_X\n"),
             ]
         )
         self.assertEqual(
@@ -96,8 +96,8 @@ class RatchetTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             ratchet.parse_shards(
                 [
-                    ("outcomes/built-ins.tsv", "a.js\tpass\t-\n"),
-                    ("outcomes/language.tsv", "a.js\tfail\tFIG-1\n"),
+                    ("outcomes/built-ins/Object.tsv", "a.js\tpass\t-\n"),
+                    ("outcomes/language/statements.tsv", "a.js\tfail\tFIG-1\n"),
                 ]
             )
 

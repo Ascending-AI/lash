@@ -1,0 +1,60 @@
+{
+  "id": "global-this-in-a-process-body",
+  "about": "a process body cannot read or write session state through globalThis, which it has no live view of (FIG-3620)",
+  "probe": [
+    "budget",
+    "spend",
+    "record"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "var budget = 1;\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "budget": "number 1",
+          "spend": "unbound",
+          "record": "unbound"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "const spend = async () => globalThis.budget;\n",
+      "reject": "TS_NON_LIFTABLE_CAPTURE",
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "budget": "number 1",
+          "spend": "unbound",
+          "record": "unbound"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "const record = async () => {\n  globalThis.budget = 2;\n  return 1;\n};\n",
+      "reject": "TS_NON_LIFTABLE_CAPTURE",
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "budget": "number 1",
+          "spend": "unbound",
+          "record": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Intl.NumberFormat-unified	skip	ticket-ruling:FIG-1413:Intl.NumberFormat-unified	-

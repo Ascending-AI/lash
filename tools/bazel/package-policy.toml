@@ -431,11 +431,13 @@ queued_claim_atomicity = { srcs = ["tests/support/queued_claim_atomicity.rs"] }
 old_module_fixture = { srcs = ["tests/fixtures/module-artifact-old.json"] }
 
 [filegroups.lash-internal-typescript]
-session_oracle_corpus = { srcs = [
+# FIG-3727: the corpora are shard trees — one file per session, generated
+# session or census row — so parallel corpus changes never meet in a file.
+session_oracle_corpus = { glob = [
     "README.md",
-    "tests/differential/sessions/expectations.json",
-    "tests/differential/sessions/generated.json",
-    "tests/test262/census.tsv",
+    "tests/differential/sessions/expectations/**",
+    "tests/differential/sessions/generated/**",
+    "tests/test262/census/**",
 ] }
 
 # --- trybuild fixtures ---------------------------------------------------------

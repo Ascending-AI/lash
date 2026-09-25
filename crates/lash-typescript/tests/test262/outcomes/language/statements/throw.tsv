@@ -1,0 +1,15 @@
+# test262-path	class	qualifier
+test/language/statements/throw/S12.13_A1.js	pass	-
+test/language/statements/throw/S12.13_A2_T1.js	pass	-
+test/language/statements/throw/S12.13_A2_T2.js	pass	-
+test/language/statements/throw/S12.13_A2_T3.js	pass	-
+test/language/statements/throw/S12.13_A2_T4.js	pass	-
+test/language/statements/throw/S12.13_A2_T5.js	pass	-
+test/language/statements/throw/S12.13_A2_T6.js	pass	-
+test/language/statements/throw/S12.13_A2_T7.js	refused	TS_NEW_UNSUPPORTED
+test/language/statements/throw/S12.13_A3_T1.js	pass	-
+test/language/statements/throw/S12.13_A3_T2.js	pass	-
+test/language/statements/throw/S12.13_A3_T3.js	pass	-
+test/language/statements/throw/S12.13_A3_T4.js	refused	TS_NEW_UNSUPPORTED
+test/language/statements/throw/S12.13_A3_T5.js	pass	-
+test/language/statements/throw/S12.13_A3_T6.js	pass	-

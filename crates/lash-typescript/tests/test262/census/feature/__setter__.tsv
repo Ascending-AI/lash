@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	__setter__	rejected	TS_PROTOTYPE_MUTATION_UNSUPPORTED	const o: any = {}; o.__defineSetter__('x', (v: number) => v);

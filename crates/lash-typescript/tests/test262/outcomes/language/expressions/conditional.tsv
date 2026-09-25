@@ -1,0 +1,20 @@
+# test262-path	class	qualifier
+test/language/expressions/conditional/S11.12_A1.js	refused	TS_EVAL_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A2.1_T1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A2.1_T2.js	refused	TS_UNKNOWN_BINDING
+test/language/expressions/conditional/S11.12_A2.1_T3.js	refused	TS_UNKNOWN_BINDING
+test/language/expressions/conditional/S11.12_A2.1_T4.js	refused	TS_UNKNOWN_BINDING
+test/language/expressions/conditional/S11.12_A2.1_T5.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A2.1_T6.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A3_T1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A3_T2.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A3_T3.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A3_T4.js	pass	-
+test/language/expressions/conditional/S11.12_A4_T1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A4_T2.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A4_T3.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/conditional/S11.12_A4_T4.js	pass	-
+test/language/expressions/conditional/coalesce-expr-ternary.js	refused	TS_METHOD_UNSUPPORTED
+test/language/expressions/conditional/in-branch-1.js	pass	-
+test/language/expressions/conditional/in-branch-2.js	pass	-
+test/language/expressions/conditional/in-condition.js	pass	-

@@ -1,0 +1,45 @@
+{
+  "id": "failed-cell",
+  "about": "a cell that throws after binding a name",
+  "probe": [
+    "kept",
+    "lost",
+    "poisoned"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const kept = 1;\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "kept": "number 1",
+          "lost": "unbound",
+          "poisoned": "unbound"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "const lost = 2;\nthrow new RangeError(\"stop\");\nlet poisoned = 3;\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "throw",
+        "prints": [],
+        "error": "RangeError",
+        "probes": {
+          "kept": "number 1",
+          "lost": "number 2",
+          "poisoned": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "seed": 84,
+  "probe": [
+    "chi",
+    "count",
+    "field",
+    "gamma",
+    "iota",
+    "j",
+    "omega",
+    "sigma",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "let sigma = new Map(Object.entries({ z: 11, y: 1.5 }));\nlet gamma = String(5);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "chi": "unbound",
+          "count": "unbound",
+          "field": "unbound",
+          "gamma": "string \"5\"",
+          "iota": "unbound",
+          "j": "unbound",
+          "omega": "unbound",
+          "sigma": "object {}",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const chi = /(?<first>[a-z])(b)?/.exec('hi');\nfunction iota(count) {\n  return gamma.indexOf('b');\n}\nconsole.log(iota((3 & 5)));\nconsole.warn([...sigma.entries()], chi === null ? 'none' : chi[0]);\nconsole.info(chi === null ? 'none' : chi[0]);\nconsole.log(gamma, gamma, 1);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "-1",
+          "[[\"z\",11],[\"y\",1.5]] h",
+          "h",
+          "5 5 1"
+        ],
+        "probes": {
+          "chi": "object [\"h\",\"h\",null]",
+          "count": "unbound",
+          "field": "unbound",
+          "gamma": "string \"5\"",
+          "iota": "function undefined",
+          "j": "unbound",
+          "omega": "unbound",
+          "sigma": "object {}",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "iota"
+        ]
+      }
+    },
+    {
+      "source": "for (const field in { b: [] }) {\n  console.log(field);\n  const omega = (1).toFixed(1);\n}\nfor (let j = 0; j < 2; j++) {\n  let zeta = { b: false, f: 5, e: true };\n}\nfor (let j = 0; j < 2; j++) {\n  let sigma = true;\n}\nfor (const field in { ['c']: [12, 5, 0], ['b']: 'a,b'.includes('a'), ['g']: [7, 12, 10] }) {\n  console.log(field);\n}\nif ((sigma instanceof Error)) {\n  sigma.delete('b.c');\n}\nsigma.set('ab', 2.5);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "b",
+          "c",
+          "b",
+          "g"
+        ],
+        "probes": {
+          "chi": "object [\"h\",\"h\",null]",
+          "count": "unbound",
+          "field": "unbound",
+          "gamma": "string \"5\"",
+          "iota": "function undefined",
+          "j": "unbound",
+          "omega": "unbound",
+          "sigma": "object {}",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "iota"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/concat/15.4.4.4-5-b-iii-3-b-1.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/concat/15.4.4.4-5-c-i-1.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/concat/Array.prototype.concat_no-prototype.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/concat/Array.prototype.concat_non-array.js	refused	TS_CLASS_UNSUPPORTED
+test/built-ins/Array/prototype/concat/S15.4.4.4_A1_T1.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/concat/S15.4.4.4_A1_T2.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/concat/S15.4.4.4_A1_T3.js	refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
+test/built-ins/Array/prototype/concat/S15.4.4.4_A1_T4.js	refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
+test/built-ins/Array/prototype/concat/S15.4.4.4_A2_T1.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/concat/S15.4.4.4_A2_T2.js	fail	FIG-3700
+test/built-ins/Array/prototype/concat/S15.4.4.4_A3_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/concat/S15.4.4.4_A3_T2.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/concat/S15.4.4.4_A3_T3.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/concat/call-with-boolean.js	refused	TS_INSTANCEOF_UNSUPPORTED
+test/built-ins/Array/prototype/concat/create-ctor-non-object.js	refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
+test/built-ins/Array/prototype/concat/create-ctor-poisoned.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/concat/create-non-array.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/concat/length.js	pass	-
+test/built-ins/Array/prototype/concat/name.js	pass	-
+test/built-ins/Array/prototype/concat/prop-desc.js	pass	-

@@ -1,0 +1,30 @@
+{
+  "id": "exotic-values-are-not-arrays",
+  "about": "Array.isArray and instanceof Array answer for every exotic without crossing the host boundary (FIG-3608)",
+  "probe": [
+    "tags",
+    "link",
+    "match"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "{\n  const tags = new Set([1]);\n  const link = new URL('https://example.com/');\n  const match = /(a)/.exec('a');\n  console.log(Array.isArray(tags), link instanceof Array, new Date(0) instanceof Array, /a/ instanceof Array, Array.isArray(match));\n}\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false false false false true"
+        ],
+        "probes": {
+          "tags": "unbound",
+          "link": "unbound",
+          "match": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "seed": 68,
+  "probe": [
+    "alpha",
+    "chi",
+    "item",
+    "lambda",
+    "omega",
+    "rho",
+    "tau",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "let tau = ['Lash'.indexOf('b'), ((2 % 5) ** 2), 0];\nconsole.log((0 === 10), 'zz', [[3], [2]].flat().includes(2));\ntau.push(...[1, 5]);\n{\n  const tau = /(?<first>[a-z])(b)?/.exec('x');\n  console.log(tau?.[0] ?? 'none', tau?.index ?? -1, tau?.groups?.first ?? '-', tau === null);\n}\ntau.push(tau.length);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false zz true",
+          "x 0 x false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "rho": "unbound",
+          "tau": "object [-1,4,0,1,5,5]",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "if (!false) {\n  console.log(tau.join('-').trim().replace(/[a-z]/g, '_'));\n}\nconst rho = (item) => 5.5;\nconsole.log(rho(7));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "-1-4-0-1-5-5",
+          "5.5"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "rho": "function undefined",
+          "tau": "object [-1,4,0,1,5,5]",
+          "value": "unbound"
+        },
+        "closures": [
+          "rho"
+        ]
+      }
+    },
+    {
+      "source": "console.log(tau, (tau.indexOf((false ? 0 : 8)) !== 5));\nif (false) {\n  {\n    console.info('  pad '.replaceAll('b', 'B').padStart(5, '*'), String(11));\n    const chi = (tau.findLastIndex((value) => value < value) >= 0);\n    const omega = [];\n  }\n  const alpha = ('a,b'.trimEnd().toLowerCase() === 'a,b'.trimStart());\n}\nvar lambda = tau;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[-1,4,0,1,5,5] true"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "item": "unbound",
+          "lambda": "object [-1,4,0,1,5,5]",
+          "omega": "unbound",
+          "rho": "function undefined",
+          "tau": "object [-1,4,0,1,5,5]",
+          "value": "unbound"
+        },
+        "closures": [
+          "rho"
+        ]
+      }
+    }
+  ]
+}

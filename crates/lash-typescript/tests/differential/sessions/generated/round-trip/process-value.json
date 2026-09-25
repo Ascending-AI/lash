@@ -1,0 +1,19 @@
+{
+  "name": "process-value",
+  "create": "const value = async () => {\n  return 1;\n};",
+  "uses": "console.log(typeof value);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "function"
+      ],
+      "probes": {}
+    }
+  ]
+}

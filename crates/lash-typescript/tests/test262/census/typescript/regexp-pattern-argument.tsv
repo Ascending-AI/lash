@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	regexp-pattern-argument	rejected	TS_NEW_UNSUPPORTED	const r = new RegExp(null);
