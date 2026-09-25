@@ -212,7 +212,6 @@ registration fails CI if a refusal stops firing.
 | TS2358 | `'a' instanceof String;` | `TS_INSTANCEOF_UNSUPPORTED` | validate |
 | TS1101 | `with ({}) { }` | `TS_WITH_UNSUPPORTED` | validate |
 | TS2695 | `(1, 2);` | `TS_SEQUENCE_UNSUPPORTED` | validate |
-| TS2488 | `const [a] = null;` | `TS_METHOD_UNSUPPORTED` | run time |
 
 A code in the right-hand column often covers more than the shape `tsc`
 rejects, and occasionally less. The splits are recorded here so the
@@ -247,14 +246,13 @@ its owner:
   authored function called short (`function f(a, b) { } f(1);`) is not
   refused — ECMA supplies `undefined` — while every arity miss on the
   listed builtin and method surface is.
-- The `TS_METHOD_UNSUPPORTED` runtime refusal of `const [a] = null;`
-  covers every non-iterable (`undefined`, `5`, a plain object — all
-  TS2488) and spreads of them. Three neighbouring shapes `tsc` also
+- `const [a] = null;` and every other non-iterable destructure or spread
+  (`undefined`, `5`, a plain object — all TS2488) is not refused at all:
+  it throws ECMA's `TypeError` at run time (FIG-3653, FIG-3654), the same
+  fault plain JavaScript raises. The neighbouring shapes `tsc` also
   rejects — `const { p } = null` (TS2339), `for...of` over `null`
   (TS18050), a member write on a built-in value (`arr.x = 2`, TS2339) —
-  fault generically at run time (`can't index null`,
-  `` `for` expects a list or tuple ``, `can't assign` on a list) instead
-  of with a named refusal; those are FIG-3653's divergence class, not
+  throw their ECMA `TypeError` the same way, so none of this is
   registered strictness.
 
 ## Consequences

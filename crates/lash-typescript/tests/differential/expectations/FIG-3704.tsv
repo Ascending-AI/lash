@@ -26,10 +26,10 @@ FIG-3704	24	accept	"JSON.parse('{\"a\":{\"b\":1}}',(k,v)=>typeof v==='object'&&v
 FIG-3704	25	accept	"(() => { const log=[]; JSON.parse('{\"x\":{\"y\":1}}',(k,v)=>{log.push(k);return v;}); return log.join(','); })()"	"y,x,"	-
 FIG-3704	26	accept	"JSON.parse('4',7)"	"4"	-
 FIG-3704	27	accept	"new Date(0).toUTCString()"	"Thu, 01 Jan 1970 00:00:00 GMT"	-
-FIG-3704	28	accept	"new Date(0).toString()"	"Thu Jan 01 1970 01:00:00 GMT+0100 (Central European Standard Time)"	-
+FIG-3704	28	accept	"new Date(0).toString()"	"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"	-
 FIG-3704	29	accept	"new Date(NaN).toUTCString()"	"Invalid Date"	-
-FIG-3704	30	accept	"String(new Date(0))"	"Thu Jan 01 1970 01:00:00 GMT+0100 (Central European Standard Time)"	-
-FIG-3704	31	accept	"new Date(0) + ''"	"Thu Jan 01 1970 01:00:00 GMT+0100 (Central European Standard Time)"	-
+FIG-3704	30	accept	"String(new Date(0))"	"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"	-
+FIG-3704	31	accept	"new Date(0) + ''"	"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)"	-
 FIG-3704	32	accept	"[...new Set([1,2]).union(new Map([[2,'a'],[3,'b']]))].join(',')"	"1,2,3"	-
 FIG-3704	33	accept	"[...new Set([3,2,1,0]).intersection(new Set([1,3,5]))].join(',')"	"1,3"	-
 FIG-3704	34	accept	"new Set([2]).isSubsetOf(new Map([[2,'a']]))"	"true"	-

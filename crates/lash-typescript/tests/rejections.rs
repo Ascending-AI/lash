@@ -674,10 +674,10 @@ fn a_multi_use_code_gives_advice_that_matches_the_actual_refusal() {
 // here moves that boundary. `rejects_with` above is the TS1101 pin — the
 // dialect is strict-only, where `with` is already a syntax error. The
 // refusals that fire only at run time — `TS_OBJECT_STRING_COERCION` on
-// `{a: 1} + 1` (tsc TS2365), `TS_CONSTRUCTOR_UNSUPPORTED` on
-// `new Map(1, 2)` (TS2554), and the `TS_METHOD_UNSUPPORTED` of
-// `const [a] = null;` (TS2488) — are pinned by the same-named census
-// probes.
+// `{a: 1} + 1` (tsc TS2365) and `TS_CONSTRUCTOR_UNSUPPORTED` on
+// `new Map(1, 2)` (TS2554) — are pinned by the same-named census
+// probes. `const [a] = null;` (TS2488) no longer refuses: it throws
+// ECMA's `TypeError` at run time (FIG-3654), so it has no probe.
 // tsc TS2304.
 rejection_test!(
     rejects_an_undeclared_name_tsc_also_rejects,
