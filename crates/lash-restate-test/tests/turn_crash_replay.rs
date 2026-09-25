@@ -1,14 +1,17 @@
-//! The turn crash matrix on Restate, keyed to journal points.
+//! The turn crash matrix on Restate, keyed to journal points (FIG-3678).
 //!
 //! A real lash turn — one LLM call that asks for a tool, the tool, a second
-//! LLM call that answers — runs in a handler on the server double. A clean
-//! run fixes the reference: its journal and its answer. Then, for every
-//! journal point of the turn's handler and of the tool child's dispatch
-//! handler, a fresh backend under the same seed drops the handler just before
-//! the server stores that frame and replays the invocation. Every crash must
-//! reach the reference answer, and each effect runs exactly once unless its
-//! result was the frame the crash lost — then at least once, never more than
-//! twice.
+//! LLM call that answers — is accepted through the session's durable ingress
+//! and driven by the engine: the session's `LashSession` drive admits it and
+//! runs its root in a `LashTurn` workflow. A clean run fixes the reference:
+//! its journals and its answer. Then, for every journal point of the drive,
+//! of the root's workflow and of the tool child's dispatch handler, a fresh
+//! backend under the same seed drops the handler just before the server
+//! stores that frame and replays the invocation. Every crash must reach the
+//! reference answer, and each effect runs exactly once unless its result was
+//! the frame the crash lost — then at least once, never more than twice.
+//! There are no known divergences: a crash point that does not recover fails
+//! the matrix.
 
 #![expect(
     clippy::unwrap_used,
@@ -16,17 +19,20 @@
     reason = "test assertions; a failed unwrap is the test failure"
 )]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use lash_core::engine::{DriveRequestId, RootOutcome};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
+use lash_restate_test::{
+    CrashPoint, CrashRule, RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig,
+    TURN_DRIVER_SERVICE,
+};
 use serde_json::json;
 
-const TURN_HOST: &str = "LashTestHandlerHost";
 const DISPATCH: &str = "EffectGroupDispatch";
 const TOOL: &str = "count_call";
 
@@ -148,48 +154,34 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .open()
         .await
         .expect("open the session");
-    let turn_id = lash::TurnId::from("turn-1");
-    let admitted = lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
-        .expect("admit the turn scope");
-    let answer = Arc::new(Mutex::new(None));
-    let attempt: lash_restate_test::HandlerAttempt = {
-        let answer = Arc::clone(&answer);
-        Arc::new(move |scoped| {
-            let session = session.clone();
-            let turn_id = turn_id.clone();
-            let answer = Arc::clone(&answer);
-            Box::pin(async move {
-                let output = session
-                    .turn(lash::TurnInput::text("count once"))
-                    .turn_id(turn_id)
-                    .advanced()
-                    .run_with_scope(scoped)
-                    .await;
-                *answer.lock().unwrap() = Some(match output {
-                    Ok(output) => match output.result.assistant_message() {
-                        Some(message) => message.to_owned(),
-                        None => format!(
-                            "no message: {:?} activities={:?}",
-                            output.result.outcome, output.activities
-                        ),
-                    },
-                    Err(error) => {
-                        let error = error.to_string();
-                        format!("error: {}", error.split(':').next().unwrap_or_default())
-                    }
-                });
-            })
-        })
-    };
+    let session_id = lash_core::SessionId::from("turn-crash-replay");
+    let receipt = session
+        .durable()
+        .enqueue(lash::TurnInput::text("count once"))
+        .id("turn-1")
+        .send()
+        .await
+        .expect("accept the turn input");
+    // The acceptance scheduled the drive under the input's own request; the
+    // attach names the same request, so it waits on that one drive.
+    let request = DriveRequestId::new(receipt.input_id.to_string());
     let server = backend.server();
-    let completed = tokio::time::timeout(
+    let drive = tokio::time::timeout(
         std::time::Duration::from_secs(8),
-        backend.run_in_handler(admitted, attempt),
+        backend.attach_drive(&session_id, request),
     )
     .await;
-    match completed {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => *answer.lock().unwrap() = Some(format!("stuck: {error}")),
+    let answer = match drive {
+        Ok(Ok(outcome)) => match outcome.ran.as_slice() {
+            [RootOutcome::Committed { outcome, .. }] => match outcome {
+                lash_core::facade_support::TurnOutcome::Finished(
+                    lash_core::facade_support::TurnFinish::AssistantMessage { text },
+                ) => text.clone(),
+                other => format!("no message: {other:?}"),
+            },
+            other => format!("drive ran {other:?}, stopped {:?}", outcome.stop),
+        },
+        Ok(Err(error)) => format!("stuck: {error}"),
         Err(_) => {
             let stuck: Vec<_> = server
                 .invocations()
@@ -208,9 +200,9 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
                     )
                 })
                 .collect();
-            *answer.lock().unwrap() = Some(format!("stuck: {stuck:?}"));
+            format!("stuck: {stuck:?}")
         }
-    }
+    };
     server.settle().await;
     let mut views = server.invocations();
     views.sort_by(|left, right| left.id.cmp(&right.id));
@@ -227,11 +219,6 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
             (view.id, service, entries)
         })
         .collect();
-    let answer = answer
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("the turn recorded an answer");
     Run {
         answer,
         llm_calls: llm_calls.load(Ordering::SeqCst),
@@ -278,30 +265,6 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
     points
 }
 
-/// Crash points where lash itself does not recover yet (FIG-3678), pinned so
-/// a fix flips this test:
-///
-/// * when the turn-input claim's run (command 2) re-executes after a crash,
-///   the claim the lost attempt already made can still hold the input, and
-///   the turn stops with a runtime error — a race, on some runs.
-const KNOWN_DIVERGENCES: &[(&str, Divergence)] = &[
-    (
-        "LashTestHandlerHost BeforeCommand { index: 2 }",
-        Divergence::Sometimes,
-    ),
-    (
-        "LashTestHandlerHost BeforeRunResult { name: Some(\"lash:turn-crash-replay:turn-1:accept_turn_input:claim_accepted_turn_input\") }",
-        Divergence::Sometimes,
-    ),
-];
-
-/// Whether a pinned divergence fails on every run or only on some.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Divergence {
-    Always,
-    Sometimes,
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
     let seed = 0x3665;
@@ -313,22 +276,22 @@ async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
     if let Some((_, _, entries)) = reference
         .journals
         .iter()
-        .find(|(_, service, _)| service == TURN_HOST)
+        .find(|(_, service, _)| service == TURN_DRIVER_SERVICE)
     {
         for (index, entry) in entries.iter().filter(|(ty, _)| ty.is_command()).enumerate() {
-            println!("turn host command {index}: {entry:?}");
+            println!("root workflow command {index}: {entry:?}");
         }
     }
     let mut cases = 0;
     let mut violations = Vec::new();
-    for service in [TURN_HOST, DISPATCH] {
+    for service in [SESSION_DRIVER_SERVICE, TURN_DRIVER_SERVICE, DISPATCH] {
         let points = crash_points(&reference, service);
         assert!(!points.is_empty(), "{service} has journal points");
         for (rule, lost_run) in points {
             let label = format!("{service} {:?}", rule.point);
             let run = run_turn(seed, Some(rule)).await;
             cases += 1;
-            let lost_llm = lost_run.is_some() && service == TURN_HOST;
+            let lost_llm = lost_run.is_some() && service == TURN_DRIVER_SERVICE;
             let lost_tool = lost_run.is_some() && service == DISPATCH;
             let expected_llm = if lost_llm {
                 reference.llm_calls..=reference.llm_calls + 1
@@ -356,35 +319,17 @@ async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
     for violation in &violations {
         println!("{violation}");
     }
-    let unexplained: Vec<_> = violations
-        .iter()
-        .filter(|violation| {
-            !KNOWN_DIVERGENCES
-                .iter()
-                .any(|(known, _)| violation.starts_with(known))
-        })
-        .collect();
     assert!(
-        unexplained.is_empty(),
-        "crash points that did not recover:\n{unexplained:#?}"
+        violations.is_empty(),
+        "crash points that did not recover (FIG-3678):\n{violations:#?}"
     );
-    for (known, divergence) in KNOWN_DIVERGENCES {
-        if *divergence == Divergence::Always {
-            assert!(
-                violations
-                    .iter()
-                    .any(|violation| violation.starts_with(known)),
-                "`{known}` recovers now: drop it from KNOWN_DIVERGENCES (FIG-3678)"
-            );
-        }
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn one_seed_reproduces_the_turn_journals_and_ids() {
     let first = run_turn(7, None).await;
     let second = run_turn(7, None).await;
-    // One seed gives the turn — driven by one handler — the same id and the
+    // One seed gives the root — driven by one workflow — the same id and the
     // same journal of commands and notifications, and the same answer.
     // Invocations that race each other stay as concurrent as on a real
     // server: a durable-wait index read may land before or after another
@@ -395,7 +340,7 @@ async fn one_seed_reproduces_the_turn_journals_and_ids() {
     let turn_journal = |run: &Run| {
         run.journals
             .iter()
-            .find(|(_, service, _)| service == TURN_HOST)
+            .find(|(_, service, _)| service == TURN_DRIVER_SERVICE)
             .map(|(id, _, entries)| (id.clone(), entries.clone()))
     };
     assert_eq!(turn_journal(&first), turn_journal(&second));

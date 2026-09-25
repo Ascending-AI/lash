@@ -105,6 +105,23 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "session_send__test",
+    crate_features = [],
+    crate_name = "session_send",
+    crate_root = "tests/session_send.rs",
+    declared_features = [],
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "start_gate_peek__test",
     crate_features = [],
     crate_name = "start_gate_peek",
@@ -183,6 +200,7 @@ lash_batch_test(
         ":lash-restate-test__unit_test",
         ":server_semantics__test",
         ":session_driver__test",
+        ":session_send__test",
         ":start_gate_peek__test",
         ":suspended_turn__test",
         ":tool_child_drift__test",
