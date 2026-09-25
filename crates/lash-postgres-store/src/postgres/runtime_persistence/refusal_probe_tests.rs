@@ -5,6 +5,33 @@
 
 use super::*;
 
+fn new_arrival_wake() -> lash_core_execution::ProcessWakeDelivery {
+    let process_id = || lash_core_execution::ProcessId::from("refusal-probe-process");
+    lash_core_execution::ProcessWakeDelivery {
+        version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: "refusal-probe-process-wake-1".to_string(),
+        target_session_id: SessionId::from("refusal-probe"),
+        process_id: process_id(),
+        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core_execution::RuntimeInvocation {
+            attribution: lash_core_execution::RuntimeAttribution::for_session("refusal-probe"),
+            subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core_execution::QueuedWorkAuthority::default(),
+        input: "new arrival".to_string(),
+        created_at_ms: 1,
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
     let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
@@ -49,17 +76,8 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
     // retains its session-execution lease row lock. Enqueue takes the distinct
     // history-mutation advisory lock and is allowed to finish here.
     store
-        .enqueue_queued_work(QueuedWorkBatchDraft::new(
-            "refusal-probe",
-            DeliveryPolicy::EarliestSafeBoundary,
-            lash_core_execution::runtime::TurnWorkPayload::agent_frame_task(
-                lash_core_execution::facade_support::frame_node_id(
-                    &SessionId::from("refusal-probe"),
-                    "frame",
-                ),
-                "new arrival",
-                None,
-            ),
+        .enqueue_queued_work(lash_core_execution::runtime::process_wake_batch_draft(
+            new_arrival_wake(),
         ))
         .await
         .unwrap();

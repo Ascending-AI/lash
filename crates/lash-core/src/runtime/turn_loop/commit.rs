@@ -189,7 +189,7 @@ impl PreparedTurn {
                 staged_usage.deltas(),
                 commit_effects.claim_settlement,
                 session_execution_lease.map(SessionExecutionLeaseGuard::fence),
-                commit_effects.enqueued_queue_batches,
+                commit_effects.pending_follow_on,
                 queued_run,
                 // Any active-turn input that missed the turn's final
                 // checkpoint must become the next ordinary user turn.
@@ -278,7 +278,7 @@ impl CommittedTurn {
         trace_turn_id: &TurnId,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<PostCommitDelivery, crate::StoreError> {
-        let (enqueued_queue_batches, confirmed_usage) = self.accepted.into_parts();
+        let confirmed_usage = self.accepted.into_confirmed_usage();
         self.staged_usage.confirm_identities(&confirmed_usage)?;
         if self.release_session_execution_lease
             && let Some(lease) = session_execution_lease
@@ -297,7 +297,6 @@ impl CommittedTurn {
         Ok(PostCommitDelivery {
             turn: self.turn,
             events: self.events,
-            enqueued_queue_batches,
             post_commit_delivery_failed: false,
         })
     }
@@ -337,8 +336,13 @@ pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
 /// The terminal turn a logical run commits when it refuses to switch agent
 /// frames again.
 pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
+    /// The typed failure the terminal carries.
+    pub(in crate::runtime) code: crate::TurnFailureCode,
     pub(in crate::runtime) message: String,
     pub(in crate::runtime) trace_turn_id: TurnId,
+    /// The input the failed turn was owed, recorded as its delivered input: a
+    /// follow-on that never ran still answers its task (ADR 0101 §3).
+    pub(in crate::runtime) delivered_task: Option<String>,
     pub(in crate::runtime) sinks: TurnSinks<'error>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) claims: LogicalTurnClaims,
@@ -572,7 +576,15 @@ impl LashRuntime {
         );
 
         let Some(session) = self.session.as_ref() else {
+            // A store-less session keeps the head's follow-on resident: the
+            // same one path writes and clears it (ADR 0101 §3).
+            let pending_follow_on = crate::runtime::logical_turn::follow_on_after_turn(
+                &self.state,
+                &assembled.outcome,
+                &trace_turn_id,
+            )?;
             self.state.apply_snapshot(&assembled.state);
+            self.state.pending_follow_on = pending_follow_on.map(Box::new);
             let observation_revision =
                 crate::runtime::observation::observation_revision(&self.state);
             self.resident_session
@@ -593,7 +605,6 @@ impl LashRuntime {
             .await;
             return Ok(PhysicalTurnExecution {
                 turn: assembled,
-                enqueued_queue_batches: Vec::new(),
                 post_commit_delivery_failed: false,
                 withheld_terminal_work: None,
             });
@@ -644,13 +655,25 @@ impl LashRuntime {
                     TurnOutcome::Stopped(TurnStop::Cancelled { .. })
                 )),
             );
+        // The follow-on this turn's terminal commit leaves on the head: a frame
+        // switch writes it, and any other outcome of the turn it names clears
+        // it (ADR 0101 §3).
+        let pending_follow_on = match crate::runtime::logical_turn::follow_on_after_turn(
+            &self.state,
+            prepared.outcome(),
+            &trace_turn_id,
+        ) {
+            Ok(pending_follow_on) => pending_follow_on,
+            Err(err) => {
+                self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
+                return Err(err);
+            }
+        };
         let commit_effects = claims.commit_effects(
             prepared.outcome(),
             &self.journaled_drive_claims,
             &self.queued_run_reacquired,
-            &self.state.session_id,
-            &trace_turn_id,
-            Some(self.state.effective_protocol_turn_options().clone()),
+            pending_follow_on,
         );
         let queued_run = self
             .queued_run
@@ -684,6 +707,8 @@ impl LashRuntime {
                     TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })
                 );
                 let progress = if switched || (!cancelled && !withheld.is_empty()) {
+                    // A switch advances the run to its follow-on, whose input
+                    // is the head's pending follow-on, not a member row.
                     QueuedRunProgress::Advance {
                         position: run.position.next(&run.scope)?,
                         members: if switched {
@@ -692,7 +717,6 @@ impl LashRuntime {
                             withheld.clone()
                         },
                         withheld_members: if switched { withheld } else { Vec::new() },
-                        include_outbox: switched,
                     }
                 } else {
                     QueuedRunProgress::Settle {
@@ -908,7 +932,6 @@ impl LashRuntime {
         );
         Ok(PhysicalTurnExecution {
             turn: delivery.turn,
-            enqueued_queue_batches: delivery.enqueued_queue_batches,
             post_commit_delivery_failed: delivery.post_commit_delivery_failed,
             withheld_terminal_work: None,
         })
@@ -1052,8 +1075,10 @@ impl LashRuntime {
         context: LogicalTurnErrorContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let LogicalTurnErrorContext {
+            code,
             message,
             trace_turn_id,
+            delivered_task,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             claims,
@@ -1077,7 +1102,7 @@ impl LashRuntime {
             &mut turn_observation_cursor(&scoped_effect_controller, &trace_turn_id, "terminal"),
             Some(TerminalDiagnostic {
                 kind: TerminalDiagnosticKind::Runtime,
-                code: Some(crate::TurnFailureCode::AgentFrameSwitchLimit.into()),
+                code: Some(code.into()),
                 message,
                 retryable: Some(false),
                 activity: TerminalActivityTarget::ForTurn {
@@ -1088,21 +1113,36 @@ impl LashRuntime {
             TurnStop::RuntimeError,
         );
 
-        let messages = crate::MessageSequence::from_base(
+        let delivered = delivered_task
+            .map(|task| {
+                let id = format!("m_turn_{trace_turn_id}_input");
+                Message {
+                    parts: shared_parts(vec![Part::text(format!("{id}.p0"), task, None)]),
+                    id,
+                    role: MessageRole::User,
+                    origin: Some(crate::MessageOrigin::TurnInput {
+                        turn_id: trace_turn_id.clone(),
+                        input_id: None,
+                    }),
+                }
+            })
+            .into_iter()
+            .collect();
+        let messages = crate::MessageSequence::from_base_and_delta(
             self.state
                 .read_model()
                 .map_err(|error| {
                     RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
                 })?
                 .messages,
+            delivered,
         );
+        // The terminal commits under its own turn's scope, so a follow-on's
+        // terminal is that follow-on's commit and clears its fact.
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
-            self.queued_run
-                .as_ref()
-                .map(|run| run.scope.clone())
-                .unwrap_or_else(|| self.state.turn_scope(&trace_turn_id)),
+            self.state.turn_scope(&trace_turn_id),
             self.host.core.durability.commit_budget,
         );
         turn_pipeline.apply_prepared_messages(&messages);

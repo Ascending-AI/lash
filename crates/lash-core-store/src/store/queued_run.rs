@@ -19,6 +19,10 @@ pub enum QueuedRunOrigin {
     Explicit,
 }
 
+/// The separator between a logical run's root turn id and a later physical
+/// turn's index.
+const PHYSICAL_TURN_SEPARATOR: &str = ":agent-frame:";
+
 /// Initial physical execution position, retained before any effect executes.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QueuedRunPosition {
@@ -32,8 +36,21 @@ impl QueuedRunPosition {
         if physical_ordinal == 0 {
             root.clone()
         } else {
-            TurnId::from(format!("{root}:agent-frame:{physical_ordinal}"))
+            TurnId::from(format!("{root}{PHYSICAL_TURN_SEPARATOR}{physical_ordinal}"))
         }
+    }
+
+    /// The inverse of [`Self::derive_turn_id`]: the logical run's root turn
+    /// and this physical turn's index within it.
+    pub fn split_turn_id(turn_id: &TurnId) -> (TurnId, u64) {
+        turn_id
+            .as_str()
+            .rsplit_once(PHYSICAL_TURN_SEPARATOR)
+            .and_then(|(root, index)| {
+                let parsed = index.parse::<u64>().ok()?;
+                (parsed > 0 && parsed.to_string() == index).then(|| (TurnId::from(root), parsed))
+            })
+            .unwrap_or_else(|| (turn_id.clone(), 0))
     }
 
     pub fn next(&self, scope: &ExecutionScope) -> Result<Self, StoreError> {
@@ -221,15 +238,13 @@ pub enum QueuedRunTerminal {
     },
 }
 
-/// Admission progress carried by the physical commit. New outbox batch IDs
-/// are resolved by the store in the same transaction that creates them.
+/// Admission progress carried by the physical commit.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum QueuedRunProgress {
     Advance {
         position: QueuedRunPosition,
         members: Vec<QueuedRunMember>,
         withheld_members: Vec<QueuedRunMember>,
-        include_outbox: bool,
     },
     Settle {
         terminal: QueuedRunTerminal,
@@ -285,11 +300,7 @@ impl QueuedRunAdmission {
             .collect()
     }
 
-    pub fn advance(
-        &self,
-        commit: &QueuedRunCommit,
-        outbox: &[crate::QueuedWorkBatch],
-    ) -> Result<Self, StoreError> {
+    pub fn advance(&self, commit: &QueuedRunCommit) -> Result<Self, StoreError> {
         let session_id = self.scope.session_id().ok_or_else(|| {
             StoreError::Backend("queued admission has no session identity".into())
         })?;
@@ -316,7 +327,6 @@ impl QueuedRunAdmission {
                 position,
                 members,
                 withheld_members,
-                include_outbox,
             } => {
                 if position != &self.position.next(&self.scope)? {
                     return Err(StoreError::QueuedRunConflict {
@@ -324,15 +334,7 @@ impl QueuedRunAdmission {
                     });
                 }
                 next.position = position.clone();
-                let mut members = members.clone();
-                if *include_outbox {
-                    members.extend(
-                        outbox
-                            .iter()
-                            .map(|batch| QueuedRunMember::Batch(batch.batch_id.clone())),
-                    );
-                }
-                next.members = Some(members);
+                next.members = Some(members.clone());
                 next.withheld_members = withheld_members.clone();
             }
             QueuedRunProgress::Settle { terminal } => {

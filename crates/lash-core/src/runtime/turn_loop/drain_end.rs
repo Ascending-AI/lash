@@ -239,17 +239,21 @@ impl LashRuntime {
                     // the store can derive — claim a frame only when the
                     // committed leaf exists to derive it from, and claim no leaf
                     // the head does not record.
-                    let (frame, leaf) = meta
+                    let (frame, leaf, pending_follow_on) = meta
                         .map(|meta| {
                             (
                                 meta.current_frame_node_id
                                     .filter(|_| meta.leaf_node_id.is_some()),
                                 meta.leaf_node_id,
+                                meta.pending_follow_on,
                             )
                         })
                         .unwrap_or_default();
                     commit.current_frame_node_id = frame;
                     commit.graph_base_leaf_node_id = leaf;
+                    // The drain end carries the head's pending follow-on
+                    // unchanged (ADR 0101 §3).
+                    commit.pending_follow_on = pending_follow_on;
                 }
                 Err(error) => {
                     tracing::warn!(

@@ -83,10 +83,10 @@ use crate::plugin::{PluginSpec, StaticPluginFactory};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::store::{PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt};
 use crate::{
-    CheckpointKind, LeaseOwnerIdentity, PendingTurnInputDraft, QueuedWorkBatchDraft,
-    QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeEffectController, RuntimePersistence,
-    SessionExecutionLease, SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
-    SessionHeadMeta, StoreError, TurnInputClaim,
+    CheckpointKind, LeaseOwnerIdentity, PendingTurnInputDraft, QueuedWorkClaim,
+    QueuedWorkClaimBoundary, RuntimeEffectController, RuntimePersistence, SessionExecutionLease,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionHeadMeta, StoreError,
+    TurnInputClaim,
 };
 
 mod after_commit_redrive;
@@ -1612,18 +1612,13 @@ async fn seed_reference_ingress(
         .await
         .expect("seed active-turn input");
     store
-        .enqueue_queued_work(
-            QueuedWorkBatchDraft::new(
-                &identity.session_id,
-                crate::DeliveryPolicy::EarliestSafeBoundary,
-                crate::TurnWorkPayload::agent_frame_task(
-                    crate::session_graph::frame_node_id(&identity.session_id, "trace-frame"),
-                    "trace-source",
-                    None,
-                ),
-            )
-            .with_source_key("trace-derived-queued-work"),
-        )
+        .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
+            &identity.session_id,
+            "trace-derived-queued-work",
+            1,
+            "trace-source",
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+        ))
         .await
         .expect("seed queued work");
 }

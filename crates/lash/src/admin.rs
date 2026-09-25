@@ -676,12 +676,11 @@ impl SessionAdmin {
         instructions: Option<String>,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<bool> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .compact_context(instructions, scoped_effect_controller)
+        Box::pin(self.with_writer(async |runtime: &mut LashRuntime| {
+            Box::pin(runtime.compact_context(instructions, scoped_effect_controller))
                 .await
                 .map_err(Into::into)
-        })
+        }))
         .await
     }
 

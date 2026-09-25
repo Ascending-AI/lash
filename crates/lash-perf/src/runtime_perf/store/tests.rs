@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::SessionCommitStore;
-use lash_core::runtime::{DeliveryPolicy, QueuedWorkBatchDraft, RuntimeSessionState};
+use lash_core::runtime::RuntimeSessionState;
 use lash_sansio::SessionId;
 
 fn test_state(session_id: &SessionId) -> RuntimeSessionState {
@@ -82,24 +82,16 @@ async fn rejected_commits_do_not_change_the_instrumentation_counter() {
         .root_store(&SessionId::from("root"))
         .await
         .expect("create the root session store");
-    let mut commit =
-        RuntimeCommit::persisted_state_for_test(&test_state(&SessionId::from("root")), &[]);
-    commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
-        "other-session",
-        DeliveryPolicy::AfterCurrentTurnCommit,
-        lash_core::runtime::TurnWorkPayload::agent_frame_task(
-            lash_core::facade_support::frame_node_id(
-                &SessionId::from("other-session"),
-                "follow-frame",
-            ),
-            "follow-on task",
-            None,
-        ),
-    )];
+    // A commit for another session reaches the root-bound store and is
+    // refused by its session binding.
+    let commit = RuntimeCommit::persisted_state_for_test(
+        &state_with_one_pending_node(&SessionId::from("other-session")),
+        &[],
+    );
 
     let error = SessionCommitStore::commit_runtime_state(store.as_ref(), commit)
         .await
-        .expect_err("cross-session queue batch must reject the commit");
+        .expect_err("a cross-session commit must be rejected");
 
     assert!(matches!(error, StoreError::SessionBindingMismatch { .. }));
     assert_eq!(store.graph_node_count(), 0);

@@ -28,7 +28,6 @@ mod recorded_assembly;
 pub use recorded_assembly::{RecordedTurnAssembly, classify_output_state};
 type FinalCommitResult = Result<
     (
-        Vec<crate::QueuedWorkBatch>,
         Vec<crate::store::RuntimeUsageDeltaIdentity>,
         crate::TurnCancelInputOutcome,
     ),
@@ -341,7 +340,7 @@ impl TurnBoundary {
         usage_deltas: &[crate::store::RuntimeUsageDelta],
         claim_settlement: TurnClaimSettlement,
         current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
-        enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
+        pending_follow_on: Option<crate::store::PendingFollowOn>,
         queued_run: Option<Box<crate::store::QueuedRunCommit>>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
@@ -387,7 +386,7 @@ impl TurnBoundary {
                 outcome: &returned_turn.outcome,
                 claim_settlement,
                 current_session_lease_fence,
-                enqueued_queue_batches,
+                pending_follow_on,
                 queued_run,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
@@ -404,13 +403,10 @@ impl TurnBoundary {
             commit_result.is_ok(),
         )
         .await;
-        let enqueued_queue_batches = commit_result?;
+        let (confirmed_usage, turn_cancel_input_outcome) = commit_result?;
         returned_turn.state = self.final_state_mut().to_snapshot();
-        returned_turn.turn_cancel_input_outcome = enqueued_queue_batches.2;
-        Ok(AcceptedTurnCommit::new(
-            enqueued_queue_batches.0,
-            enqueued_queue_batches.1,
-        ))
+        returned_turn.turn_cancel_input_outcome = turn_cancel_input_outcome;
+        Ok(AcceptedTurnCommit::new(confirmed_usage))
     }
 
     pub(super) fn into_final_state(self) -> RuntimeSessionState {
@@ -530,7 +526,7 @@ impl TurnBoundary {
             outcome,
             claim_settlement,
             current_session_lease_fence,
-            enqueued_queue_batches,
+            pending_follow_on,
             queued_run,
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
@@ -552,6 +548,10 @@ impl TurnBoundary {
         let terminal_message_id = format!("m_turn_{turn_id}_assistant");
         let state = self.final_state_mut();
         state.apply_snapshot(returned_state);
+        // The follow-on the head owes after this commit: written by a frame
+        // switch, cleared by the follow-on's own terminal commit (ADR 0101
+        // §3). A store-less session keeps the same fact resident.
+        state.pending_follow_on = pending_follow_on.map(Box::new);
         for delta in usage_deltas {
             crate::store::merge_token_ledger_entry_checked(
                 &mut state.token_ledger,
@@ -623,7 +623,6 @@ impl TurnBoundary {
                 operation,
                 claim_settlement,
                 current_session_lease_fence,
-                enqueued_queue_batches,
                 queued_run,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
@@ -640,7 +639,6 @@ impl TurnBoundary {
             // stays resident for the next same-frame restore (FIG-2521).
             state.discard_runtime_snapshots_retaining_accepted_execution();
             Ok((
-                Vec::new(),
                 usage_deltas
                     .iter()
                     .map(|delta| delta.identity.clone())
@@ -665,7 +663,6 @@ impl TurnBoundary {
         operation: crate::OperationId,
         mut claim_settlement: TurnClaimSettlement,
         current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
-        enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         queued_run: Option<Box<crate::store::QueuedRunCommit>>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
@@ -721,7 +718,6 @@ impl TurnBoundary {
         commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();
         commit.undelivered_turn_input_claims =
             std::mem::take(&mut claim_settlement.undelivered_turn_inputs);
-        commit.enqueued_queue_batches = enqueued_queue_batches;
         if queued_run.is_some() {
             commit.session_execution_lease_fence = current_session_lease_fence.clone();
         }
@@ -781,16 +777,11 @@ impl TurnBoundary {
                 Err(err) => return Err(err),
             }
         };
-        let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         let committed_usage_delta_identities = result.committed_usage_delta_identities.clone();
         let turn_cancel_input_outcome = result.turn_cancel_input_outcome.clone();
         state.apply_persisted_commit_result(result);
         state.mark_node_ids_persisted(persisted_node_ids);
-        Ok((
-            enqueued_queue_batches,
-            committed_usage_delta_identities,
-            turn_cancel_input_outcome,
-        ))
+        Ok((committed_usage_delta_identities, turn_cancel_input_outcome))
     }
 }
 

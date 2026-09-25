@@ -166,12 +166,31 @@ lash_store_sql::statements! {
     /// the fork and there is nothing to share.
     pub(crate) struct SessionsStatements @ "sessions" {
         /// The published head of `?1`.
-        select_meta = "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+        select_meta = "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref,
+                pending_follow_on_json
          FROM sessions WHERE session_id = ?1";
 
         /// The published head of `?1`, row-locked.
-        select_meta_for_update = "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+        select_meta_for_update = "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref,
+                pending_follow_on_json
          FROM sessions WHERE session_id = ?1 FOR UPDATE";
+
+        /// The follow-on `?1`'s head owes (ADR 0101 §3), row-locked: every
+        /// claim reads it inside its transaction, and the lock orders the read
+        /// against a head commit or a recovery raise.
+        select_pending_follow_on_for_share = "SELECT pending_follow_on_json FROM sessions
+         WHERE session_id = ?1 FOR SHARE";
+
+        /// The follow-on `?1`'s head owes, row-locked for the recovery raise
+        /// and the commit that decides against it.
+        select_pending_follow_on_for_update = "SELECT pending_follow_on_json FROM sessions
+         WHERE session_id = ?1 FOR UPDATE";
+
+        /// Raise `?1`'s pending follow-on to `?2`, only while the head still
+        /// owes the follow-on `?3`. The head revision does not move.
+        raise_pending_follow_on = "UPDATE sessions SET pending_follow_on_json = ?2
+         WHERE session_id = ?1
+           AND (pending_follow_on_json::jsonb ->> 'follow_on_turn_id') = ?3";
 
         /// The published revision of `?1`.
         select_revision = "SELECT head_revision FROM sessions WHERE session_id = ?1";
@@ -203,13 +222,15 @@ lash_store_sql::statements! {
         /// already settled the question and the shared verdict has authorized
         /// exactly this publication.
         upsert_cas = "INSERT INTO sessions
-             (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+             (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id,
+              pending_follow_on_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?7)
              ON CONFLICT (session_id) DO UPDATE SET
                 head_revision = EXCLUDED.head_revision,
                 head_json = EXCLUDED.head_json,
                 checkpoint_ref = EXCLUDED.checkpoint_ref,
-                leaf_node_id = EXCLUDED.leaf_node_id
+                leaf_node_id = EXCLUDED.leaf_node_id,
+                pending_follow_on_json = EXCLUDED.pending_follow_on_json
              WHERE sessions.head_revision = ?6";
 
         insert_fork = "INSERT INTO sessions

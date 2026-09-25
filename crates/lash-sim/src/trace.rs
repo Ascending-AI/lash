@@ -252,7 +252,7 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.exec-code-observed.v1"
         | "sim.oracle.failed-attempt-usage-ledgered.v1"
         | "sim.oracle.frame-switch-ordering.v1"
-        | "sim.oracle.frame-switch-outbox-atomicity.v1"
+        | "sim.oracle.frame-switch-follow-on-atomicity.v1"
         | "sim.oracle.frame-switch-seed.v1"
         | "sim.oracle.generated-final-value-semantic-channel.v1"
         | "sim.oracle.generated-runtime-provider-matrix.v1"

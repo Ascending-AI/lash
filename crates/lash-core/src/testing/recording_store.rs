@@ -49,7 +49,6 @@ pub struct RecordingStore {
     session_admission_count: AtomicUsize,
     abandoned_queued_work_claim_count: AtomicUsize,
     abandoned_turn_input_claim_count: AtomicUsize,
-    fail_next_exact_queue_claim: AtomicBool,
     claim_hook: Mutex<Option<ClaimHook>>,
     forged_head: Mutex<Option<crate::SessionHeadMeta>>,
     attachment_intents: Mutex<Vec<crate::store::AttachmentIntent>>,
@@ -122,7 +121,6 @@ impl RecordingStore {
             session_admission_count: AtomicUsize::new(0),
             abandoned_queued_work_claim_count: AtomicUsize::new(0),
             abandoned_turn_input_claim_count: AtomicUsize::new(0),
-            fail_next_exact_queue_claim: AtomicBool::new(false),
             claim_hook: Mutex::new(None),
             forged_head: Mutex::new(None),
             attachment_intents: Mutex::new(Vec::new()),
@@ -166,30 +164,6 @@ impl RecordingStore {
                 .load(Ordering::SeqCst),
             self.abandoned_turn_input_claim_count.load(Ordering::SeqCst),
         )
-    }
-
-    /// Fail the next exact claim of a committed run's queued batches: a
-    /// queued-run selection that resumes a committed selection holding queued
-    /// batches answers a backend error, and a claim by batch ids claims
-    /// nothing.
-    pub fn fail_next_exact_queue_claim(&self) {
-        self.fail_next_exact_queue_claim
-            .store(true, Ordering::SeqCst);
-    }
-
-    /// Whether `session_id`'s pending queued run is a committed selection
-    /// holding queued batches: the re-claim the exact-claim fault targets.
-    async fn resumes_committed_batches(&self, session_id: &SessionId) -> Result<bool, StoreError> {
-        Ok(self
-            .inner
-            .pending_queued_run(session_id)
-            .await?
-            .and_then(|run| run.members)
-            .is_some_and(|members| {
-                members
-                    .iter()
-                    .any(|member| matches!(member, crate::store::QueuedRunMember::Batch(_)))
-            }))
     }
 
     /// Run `hook` as the next queued-work or turn-input claim reaches the
@@ -409,16 +383,6 @@ impl RuntimePersistenceDecorator for RecordingStore {
         policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<crate::store::SelectedQueuedRun, StoreError> {
         self.run_claim_hook();
-        if self.fail_next_exact_queue_claim.load(Ordering::SeqCst)
-            && self.resumes_committed_batches(&fence.session_id).await?
-            && self
-                .fail_next_exact_queue_claim
-                .swap(false, Ordering::SeqCst)
-        {
-            return Err(StoreError::Backend(
-                "injected committed handoff claim failure".into(),
-            ));
-        }
         self.inner
             .select_queued_run(fence, scope, owner, max_inputs, configuration, policy)
             .await
@@ -478,12 +442,6 @@ impl RuntimePersistenceDecorator for RecordingStore {
         policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
         self.run_claim_hook();
-        if self
-            .fail_next_exact_queue_claim
-            .swap(false, Ordering::SeqCst)
-        {
-            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
-        }
         self.inner
             .claim_ready_queued_work_by_batch_ids(
                 session_id,

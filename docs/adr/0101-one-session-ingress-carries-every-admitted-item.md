@@ -4,9 +4,9 @@
 
 Accepted 2026-09-23 (FIG-3540) as the design freeze for the one-ingress
 cutover. **Not yet implemented**: the FIG-3540 cutover PR series builds it, after
-FIG-3532, FIG-3513 and FIG-3531 land. The pending follow-on (§3, FIG-3542) may
-land ahead of the table cutover. Nothing below describes current behaviour
-unless it says so. The FIG-3540 arc note is the frozen design this ADR records.
+FIG-3532, FIG-3513 and FIG-3531 land. The pending follow-on (§3) is implemented
+(FIG-3542), ahead of the table cutover; its note says what differs until then.
+Nothing else below describes current behaviour unless it says so. The FIG-3540 arc note is the frozen design this ADR records.
 
 Supersedes [ADR 0010](0010-pending-turn-input-is-admission-evidence.md).
 Strengthens [ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md).
@@ -254,6 +254,19 @@ PendingFollowOn {
   own.
 * **Store-less sessions** carry the same field in memory, so the claimless
   in-memory branch and the `if claimed` guard are gone: one path.
+
+*Implemented (FIG-3542), ahead of the table cutover.* The claims it refuses
+are today's turn-input and queued-work claims: an idle claim meets
+`QueuedWorkClaimRefusal::FollowOnPending` (or claims nothing), and a direct
+turn's drive stays queued. The recovery bound is `max_follow_on_recoveries`
+on `QueuedWorkBatchingConfig` and the exhaustion is
+`TurnFailureCode::FollowOnRecoveryExhausted`. Recovery runs at the queued-drain
+entry, the one place a redriven turn starts today
+(`turn_loop/follow_on_recovery.rs`): the drain's own queued run resumes a
+follow-on it owns, and a follow-on no run owns (a direct turn's switch) is
+driven as its own logical run. The raise is a fenced head write that moves no
+revision. S5 moves this call to drive admission (O6), where it becomes the
+drive's first journaled step.
 
 ### 4. Session commands are a lane applied at turn boundaries
 

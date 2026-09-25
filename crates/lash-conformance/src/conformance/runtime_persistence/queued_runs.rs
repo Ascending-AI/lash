@@ -79,7 +79,6 @@ pub async fn queued_run_active_turn_member_reclaims_after_lane_rotation(
             position: selected.admission.position.next(&admission.scope).unwrap(),
             members: vec![QueuedRunMember::Input(input.input_id.clone())],
             withheld_members: Vec::new(),
-            include_outbox: false,
         },
     }));
     store.commit_runtime_state(advance).await.unwrap();
@@ -338,7 +337,6 @@ async fn queued_run_advance_repair_case(store: Arc<dyn RuntimePersistence>, host
             position: first.admission.position.next(&admission.scope).unwrap(),
             members: vec![member.clone()],
             withheld_members: Vec::new(),
-            include_outbox: false,
         },
     }));
     state.head_revision = store
@@ -429,7 +427,6 @@ async fn queued_run_advance_repair_case(store: Arc<dyn RuntimePersistence>, host
             position: second.admission.position.next(&admission.scope).unwrap(),
             members: vec![member],
             withheld_members: Vec::new(),
-            include_outbox: false,
         },
     }));
     state.head_revision = store
@@ -1544,7 +1541,6 @@ pub async fn queued_run_cancelled_follow_on_receipt_retains_withheld_members(
             position: selected.admission.position.next(&admission.scope).unwrap(),
             members: vec![QueuedRunMember::Input(current.input_id.clone())],
             withheld_members: vec![QueuedRunMember::Input(withheld.input_id.clone())],
-            include_outbox: false,
         },
     }));
     let head = store.commit_runtime_state(advance).await.unwrap();
@@ -1722,7 +1718,7 @@ pub async fn queued_run_frozen_batches_survive_takeover_and_changed_limits(
     clippy::expect_used,
     reason = "conformance fixtures fail at the violated durable invariant"
 )]
-pub async fn queued_run_continuation_commits_outbox_and_retains_receipts(
+pub async fn queued_run_continuation_advances_and_retains_receipts(
     store: Arc<dyn RuntimePersistence>,
 ) {
     use lash_core::store::{
@@ -1771,13 +1767,6 @@ pub async fn queued_run_continuation_commits_outbox_and_retains_receipts(
     advance
         .completed_turn_input_claims
         .push(selected.inputs.into_iter().next().unwrap().completion());
-    advance
-        .enqueued_queue_batches
-        .push(checkpoint_claims::queued_draft(
-            &session_id,
-            "outbox",
-            DeliveryPolicy::AfterCurrentTurnCommit,
-        ));
     let position = QueuedRunPosition {
         physical_ordinal: 1,
         turn_index: 2,
@@ -1790,7 +1779,6 @@ pub async fn queued_run_continuation_commits_outbox_and_retains_receipts(
             position: position.clone(),
             members: Vec::new(),
             withheld_members: Vec::new(),
-            include_outbox: true,
         },
     }));
     let mut invalid_position = advance.clone();
@@ -1809,7 +1797,6 @@ pub async fn queued_run_continuation_commits_outbox_and_retains_receipts(
         .await
         .unwrap()
         .expect("committed continuation stays discoverable after initial work settles");
-    let batch_id = receipt.enqueued_queue_batches[0].batch_id.clone();
     assert_eq!(pending.position, position);
     assert_eq!(
         pending.initial_members,
@@ -1817,8 +1804,8 @@ pub async fn queued_run_continuation_commits_outbox_and_retains_receipts(
     );
     assert_eq!(
         pending.members,
-        Some(vec![QueuedRunMember::Batch(batch_id.clone())]),
-        "outbox IDs publish atomically with admission progress"
+        Some(Vec::new()),
+        "admission progress publishes atomically with the physical commit"
     );
     store
         .release_session_execution_lease(&lease.authority())
@@ -1837,10 +1824,7 @@ pub async fn queued_run_continuation_commits_outbox_and_retains_receipts(
         .await
         .unwrap();
     assert!(selected.inputs.is_empty());
-    assert_eq!(
-        selected.queued.first().unwrap().batches[0].batch_id,
-        batch_id
-    );
+    assert!(selected.queued.is_empty());
     state.head_revision = receipt.head_revision;
     let mut settle = RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
@@ -1848,9 +1832,6 @@ pub async fn queued_run_continuation_commits_outbox_and_retains_receipts(
         crate::OperationId::new(admission.scope.clone(), "physical-1"),
     );
     settle.session_execution_lease_fence = Some(successor.authority());
-    settle
-        .completed_queue_claims
-        .push(selected.queued.into_iter().next().unwrap().completion());
     settle.queued_run = Some(Box::new(QueuedRunCommit {
         scope: admission.scope.clone(),
         expected_revision: selected.admission.revision,
@@ -2031,7 +2012,6 @@ pub async fn queued_run_exact_selection_never_commits_a_partial_claim(
                     position: replay.admission.position.next(&admission.scope).unwrap(),
                     members: Vec::new(),
                     withheld_members: Vec::new(),
-                    include_outbox: false,
                 },
             }));
             store.commit_runtime_state(advance).await.unwrap();
@@ -2124,7 +2104,6 @@ pub async fn queued_run_advance_rejects_unassigned_members_but_keeps_checkpoint_
             },
             members: vec![QueuedRunMember::Input(later.input_id.clone())],
             withheld_members: Vec::new(),
-            include_outbox: false,
         },
     }));
     assert!(
@@ -2254,7 +2233,6 @@ pub async fn queued_run_advance_rejects_unassigned_members_but_keeps_checkpoint_
                 QueuedRunMember::Batch(batches[0].batch_id.clone()),
                 QueuedRunMember::Batch(batches[1].batch_id.clone()),
             ],
-            include_outbox: false,
         },
     }));
     store.commit_runtime_state(next).await.unwrap();
@@ -2305,7 +2283,6 @@ pub async fn queued_run_advance_rejects_unassigned_members_but_keeps_checkpoint_
             position: grouped.admission.position.next(&admission.scope).unwrap(),
             members: joined.clone(),
             withheld_members: Vec::new(),
-            include_outbox: false,
         },
     }));
     store.commit_runtime_state(rejoin).await.unwrap();

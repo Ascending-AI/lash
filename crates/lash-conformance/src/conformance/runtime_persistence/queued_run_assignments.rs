@@ -193,7 +193,6 @@ pub async fn queued_run_checkpoint_assignment_survives_lane_rotation(
                 unrelated_batch.batch_id.clone(),
             )],
             withheld_members: Vec::new(),
-            include_outbox: false,
         },
     }));
     assert!(

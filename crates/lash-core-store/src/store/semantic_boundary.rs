@@ -56,10 +56,6 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
             !commit.undelivered_turn_input_claims.is_empty(),
         ),
         (
-            "enqueued_queue_batches",
-            !commit.enqueued_queue_batches.is_empty(),
-        ),
-        (
             "interrupted_turn_input_turn_id",
             commit.interrupted_turn_input_turn_id.is_some(),
         ),
@@ -120,7 +116,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         completed_queue_claims: _,        // refused non-empty by validation
         completed_turn_input_claims: _,   // refused non-empty by validation
         undelivered_turn_input_claims: _, // refused non-empty by validation
-        enqueued_queue_batches: _,        // refused non-empty by validation
+        pending_follow_on: _,             // head fact carried unchanged; the store refuses a change
         interrupted_turn_input_turn_id: _, // refused present by validation
         interrupted_turn_input_cancellation: _, // refused present by validation
         interrupted_turn_cancel_intent: _, // transient CAS predicate

@@ -350,7 +350,10 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         "retrying one invalidation incident preserves its decision identity"
     );
 
-    let recovered = runtime
+    // The switch committed its follow-on onto the head before the restore
+    // failed, so the next direct turn reloads and then waits behind it
+    // (ADR 0101 §3); the next drain runs the follow-on in its frame.
+    let held = runtime
         .run_turn_assembled(
             TurnInput::text("use the reloaded state"),
             CancellationToken::new(),
@@ -362,15 +365,42 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         )
         .await
         .expect("next use reloads durable resident state");
-    assert_eq!(
-        recovered.assistant_output.safe_text,
-        "resident state reloaded"
+    assert!(
+        matches!(held.outcome, TurnOutcome::Queued { .. }),
+        "{:?}",
+        held.outcome
     );
     assert_eq!(
         *runtime.resident_session.validity(),
         ResidentSessionState::Valid
     );
     assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
+    let follow_on = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            lash_core::testing::runtime_helpers::host_queued_scope(
+                &runtime.host.core,
+                &SessionId::from("root"),
+                &TurnId::from("after-post-commit-restore-failure-drain"),
+            ),
+        ))
+        .await
+        .expect("the drain runs")
+        .ran()
+        .expect("the drain answers the owed follow-on");
+    assert_eq!(
+        follow_on.assistant_output.safe_text,
+        "resident state reloaded"
+    );
+    assert_eq!(
+        lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
+            .await
+            .expect("load the head")
+            .expect("head")
+            .pending_follow_on,
+        None,
+        "the follow-on's terminal commit cleared it"
+    );
 }
 
 #[tokio::test]

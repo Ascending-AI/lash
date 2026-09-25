@@ -425,14 +425,12 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     }
     let queued = factory
         .open
-        .enqueue_queued_work(
-            queued_draft(
-                &SessionId::from("root"),
-                "survives reopen",
-                DeliveryPolicy::EarliestSafeBoundary,
-            )
-            .with_source_key("reopen:queued"),
-        )
+        .enqueue_queued_work(keyed_queued_draft(
+            &SessionId::from("root"),
+            "survives reopen",
+            DeliveryPolicy::EarliestSafeBoundary,
+            "reopen:queued",
+        ))
         .await
         .expect("enqueue queued work");
     let attachment = AttachmentId::parse("reopen-attachment").expect("valid attachment id");

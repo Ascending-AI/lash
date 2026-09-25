@@ -28,6 +28,7 @@ mod lease_timings;
 mod load;
 mod maintenance;
 mod park;
+pub mod pending_follow_on;
 mod preflight;
 mod queued_run;
 pub mod queued_work;
@@ -116,6 +117,10 @@ pub use park::{
     ParkId, ParkReason, ParkReasonCode, ParkSummary, ProcessPark, ProcessParkKey, ProcessParkQuery,
     ProcessParkWrite, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause,
     UnsettledTurnCounts,
+};
+pub use pending_follow_on::{
+    DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnBlocked, FollowOnClaim, FollowOnRecovery,
+    PendingFollowOn, follow_on_blocks_claim, validate_follow_on_head_write,
 };
 pub use preflight::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
@@ -308,6 +313,9 @@ pub struct SessionHead {
     pub head_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame_node_id: Option<crate::FrameNodeId>,
+    /// The follow-on the head owes (ADR 0101 §3); its own head column.
+    #[serde(skip)]
+    pub pending_follow_on: Option<PendingFollowOn>,
     pub graph: crate::SessionGraph,
     pub config: crate::PersistedSessionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -349,9 +357,21 @@ pub struct SessionHeadMeta {
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub checkpoint_ref: Option<BlobRef>,
     pub leaf_node_id: Option<crate::NodeId>,
+    /// The follow-on the head owes, from the `pending_follow_on_json` column
+    /// (ADR 0101 §3). It is not part of [`SessionHeadPayload`].
+    pub pending_follow_on: Option<PendingFollowOn>,
 }
 
 impl SessionHeadMeta {
+    /// Attach the `pending_follow_on_json` column a store read beside the
+    /// payload.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    pub fn with_pending_follow_on(mut self, pending_follow_on: Option<PendingFollowOn>) -> Self {
+        self.pending_follow_on = pending_follow_on;
+        self
+    }
+
     /// The session's identity is owned by the row key the caller bound the
     /// query to, never by the payload: `session_id` is taken from
     /// `session_id` and the payload's copy is a checked redundancy. A payload
@@ -389,6 +409,7 @@ impl SessionHeadMeta {
             current_frame_node_id: payload.current_frame_node_id,
             checkpoint_ref,
             leaf_node_id,
+            pending_follow_on: None,
         })
     }
 
@@ -420,6 +441,8 @@ pub struct PersistedSessionRead {
     pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
     pub current_frame_node_id: Option<crate::FrameNodeId>,
+    /// The follow-on the head owes (ADR 0101 §3).
+    pub pending_follow_on: Option<PendingFollowOn>,
     pub graph: crate::SessionGraph,
     pub checkpoint_ref: Option<BlobRef>,
     pub checkpoint: Option<HydratedSessionCheckpoint>,
@@ -644,7 +667,8 @@ impl RuntimeCommit {
             completed_queue_claims,
             completed_turn_input_claims,
             undelivered_turn_input_claims,
-            enqueued_queue_batches,
+            // Carried unchanged from the head; the store refuses a change.
+            pending_follow_on: _,
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
             interrupted_turn_cancel_intent,
@@ -657,7 +681,6 @@ impl RuntimeCommit {
             completed_queue_claims.is_empty()
                 && completed_turn_input_claims.is_empty()
                 && undelivered_turn_input_claims.is_empty()
-                && enqueued_queue_batches.is_empty()
                 && interrupted_turn_input_turn_id.is_none()
                 && interrupted_turn_input_cancellation.is_none()
                 && interrupted_turn_cancel_intent.is_none()
@@ -825,7 +848,7 @@ impl RuntimeCommit {
             completed_queue_claims: Vec::new(),
             completed_turn_input_claims: Vec::new(),
             undelivered_turn_input_claims: Vec::new(),
-            enqueued_queue_batches: Vec::new(),
+            pending_follow_on: state.pending_follow_on.as_deref().cloned(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
             interrupted_turn_cancel_intent: None,
@@ -1012,6 +1035,7 @@ impl Default for SessionHead {
             session_id: default_root_session_id(),
             head_revision: 0,
             current_frame_node_id: None,
+            pending_follow_on: None,
             graph: crate::SessionGraph::default(),
             config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
             checkpoint_ref: None,
@@ -1232,6 +1256,22 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError>;
+
+    /// Raise the head's pending follow-on recovery count by one (ADR 0101 §3).
+    ///
+    /// A drive that recovers a pending follow-on calls this before the
+    /// follow-on's first effect. Implementations must, in one transaction,
+    /// validate `lease` with the ordinary session-execution fence, refuse with
+    /// [`StoreError::FollowOnNotPending`] unless the head's
+    /// `pending_follow_on_json` names `follow_on_turn_id`, and write the fact
+    /// back with `attempts` raised by one. The head revision does not move:
+    /// the raise changes no other head fact, and nothing ever lowers the count.
+    /// Returns the raised fact.
+    async fn raise_pending_follow_on_attempts(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+        follow_on_turn_id: &crate::TurnId,
+    ) -> Result<PendingFollowOn, StoreError>;
 
     /// Admit `binding.session_id` to this store and bind this handle to it.
     ///

@@ -1029,16 +1029,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::persistence::QueuedCheckpointWork| {
         let _ = &value.turn_causes;
     });
-    // W0650: lash::persistence::QueuedTurnWork [struct]
-    type_witness::<lash::persistence::QueuedTurnWork>();
-    // W0651: lash::persistence::QueuedTurnWork::input [field]
-    field_witness(|value: &lash::persistence::QueuedTurnWork| {
-        let _ = &value.input;
-    });
-    // W0653: lash::persistence::QueuedTurnWork::turn_causes [field]
-    field_witness(|value: &lash::persistence::QueuedTurnWork| {
-        let _ = &value.turn_causes;
-    });
     // W0654: lash::process::WakeDelivery::claim_token [function]
     let _ = lash::process::WakeDelivery::claim_token;
     // W0655: lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch [variant]

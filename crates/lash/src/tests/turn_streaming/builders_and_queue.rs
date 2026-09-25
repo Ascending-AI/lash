@@ -1,5 +1,39 @@
 use super::*;
 
+/// Queued turn work for the builder tests: one durable process wake from
+/// `process` whose `input` is the text the model sees. Each call site names a
+/// distinct process, so every wake in a session has its own source.
+fn process_wake_draft(
+    session_id: &SessionId,
+    process: &str,
+    input: impl Into<String>,
+) -> crate::persistence::QueuedWorkBatchDraft {
+    let process_id = || lash_core::ProcessId::from(process);
+    lash_core::runtime::process_wake_batch_draft(lash_core::ProcessWakeDelivery {
+        version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: format!("{process}-wake-1"),
+        target_session_id: session_id.clone(),
+        process_id: process_id(),
+        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core::RuntimeInvocation {
+            attribution: lash_core::RuntimeAttribution::for_session(session_id.clone()),
+            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core::QueuedWorkAuthority::default(),
+        input: input.into(),
+        created_at_ms: 1,
+    })
+}
+
 /// The standard core over `backend`: a scope an advanced turn brings must
 /// be lent by the host the core controls turns through.
 fn standard_core_over(backend: lash_core::Backend) -> Result<LashCore> {
@@ -490,21 +524,11 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
     .expect("read the opened session\'s store")
     .expect("opened session retains its in-memory store");
     let selected = store
-        .enqueue_queued_work(
-            crate::persistence::QueuedWorkBatchDraft::new(
-                session_id,
-                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(
-                        &SessionId::from(session_id),
-                        "selected-start",
-                    ),
-                    "selected queued builder",
-                    None,
-                ),
-            )
-            .with_source_key("selected-turn-start"),
-        )
+        .enqueue_queued_work(process_wake_draft(
+            &SessionId::from(session_id),
+            "selected-turn-start",
+            "selected queued builder",
+        ))
         .await?;
     let selected_output = session
         .queued_turn()
@@ -520,21 +544,11 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
     );
 
     let scoped_selected = store
-        .enqueue_queued_work(
-            crate::persistence::QueuedWorkBatchDraft::new(
-                session_id,
-                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(
-                        &SessionId::from(session_id),
-                        "scoped-selected-start",
-                    ),
-                    "scoped selected queued builder",
-                    None,
-                ),
-            )
-            .with_source_key("scoped-selected-turn-start"),
-        )
+        .enqueue_queued_work(process_wake_draft(
+            &SessionId::from(session_id),
+            "scoped-selected-turn-start",
+            "scoped selected queued builder",
+        ))
         .await?;
     let scoped_selected_output = session
         .queued_turn()
@@ -836,16 +850,8 @@ pub(super) async fn refused_automatic_drain_does_not_block_a_direct_turn() -> Re
     .expect("opened session retains its store");
     let delayed = store
         .enqueue_queued_work(
-            crate::persistence::QueuedWorkBatchDraft::new(
-                &session_id,
-                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(&session_id, "delayed"),
-                    "delayed work",
-                    None,
-                ),
-            )
-            .with_available_at_ms(u64::MAX / 2),
+            process_wake_draft(&session_id, "delayed", "delayed work")
+                .with_available_at_ms(u64::MAX / 2),
         )
         .await?;
 
@@ -1141,17 +1147,10 @@ pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -
             })
             .await?;
         store
-            .enqueue_queued_work(crate::persistence::QueuedWorkBatchDraft::new(
-                session.session_id(),
-                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(
-                        &session.session_id(),
-                        "oversized-frame",
-                    ),
-                    "w".repeat(64 * 1024),
-                    None,
-                ),
+            .enqueue_queued_work(process_wake_draft(
+                &session.session_id(),
+                "oversized-frame",
+                "w".repeat(64 * 1024),
             ))
             .await?;
     }
@@ -1252,25 +1251,13 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
     .await
     .expect("read the opened session\'s store")
     .expect("opened session retains its in-memory store");
-    let enqueue = |source_key: &'static str, merge_key: &'static str| {
+    let enqueue = |process: &'static str, merge_key: &'static str| {
         let store = Arc::clone(&store);
         async move {
             store
                 .enqueue_queued_work(
-                    crate::persistence::QueuedWorkBatchDraft::new(
-                        session_id,
-                        lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                        crate::persistence::TurnWorkPayload::agent_frame_task(
-                            lash_core::facade_support::frame_node_id(
-                                &SessionId::from(session_id),
-                                "selected-refusal-frame",
-                            ),
-                            source_key,
-                            None,
-                        ),
-                    )
-                    .with_source_key(source_key)
-                    .with_merge_key(merge_key),
+                    process_wake_draft(&SessionId::from(session_id), process, process)
+                        .with_merge_key(merge_key),
                 )
                 .await
                 .expect("enqueue selected-refusal row")
@@ -1330,9 +1317,9 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
             .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![
-            (Some("selected-a1"), 1),
-            (Some("selected-b1"), 2),
-            (Some("selected-a2"), 3),
+            (Some("process:selected-a1:event:1:wake"), 1),
+            (Some("process:selected-b1:event:1:wake"), 2),
+            (Some("process:selected-a2:event:1:wake"), 3),
         ]
     );
     Ok(())
@@ -1373,23 +1360,11 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
     .await
     .expect("read the opened session\'s store")
     .expect("opened session retains its in-memory store");
-    for source_key in ["interrupted-w1", "interrupted-w2"] {
+    for process in ["interrupted-w1", "interrupted-w2"] {
         store
             .enqueue_queued_work(
-                crate::persistence::QueuedWorkBatchDraft::new(
-                    session_id,
-                    lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                    crate::persistence::TurnWorkPayload::agent_frame_task(
-                        lash_core::facade_support::frame_node_id(
-                            &SessionId::from(session_id),
-                            "interrupted-frame",
-                        ),
-                        source_key,
-                        None,
-                    ),
-                )
-                .with_source_key(source_key)
-                .with_merge_key("interrupted-key"),
+                process_wake_draft(&SessionId::from(session_id), process, process)
+                    .with_merge_key("interrupted-key"),
             )
             .await
             .expect("enqueue interrupted composition row");
@@ -1512,21 +1487,11 @@ pub(super) async fn selected_queued_turn_reports_claimed_now_and_already_satisfi
     .expect("read the opened session\'s store")
     .expect("opened session retains its in-memory store");
     let batch = store
-        .enqueue_queued_work(
-            crate::persistence::QueuedWorkBatchDraft::new(
-                session_id,
-                lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(
-                        &SessionId::from(session_id),
-                        "selected-outcome-frame",
-                    ),
-                    "selected-outcome-task",
-                    None,
-                ),
-            )
-            .with_source_key("selected-outcome-source"),
-        )
+        .enqueue_queued_work(process_wake_draft(
+            &SessionId::from(session_id),
+            "selected-outcome-source",
+            "selected-outcome-task",
+        ))
         .await
         .expect("enqueue selected outcome row");
 
@@ -1678,21 +1643,11 @@ pub(super) async fn selected_queued_turn_deduplicates_present_claimable_id() -> 
     .expect("read the opened session\'s store")
     .expect("opened session retains its in-memory store");
     let batch = store
-        .enqueue_queued_work(
-            crate::persistence::QueuedWorkBatchDraft::new(
-                session_id,
-                lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(
-                        &SessionId::from(session_id),
-                        "selected-duplicate-present-frame",
-                    ),
-                    "selected-duplicate-present-task",
-                    None,
-                ),
-            )
-            .with_source_key("selected-duplicate-present-source"),
-        )
+        .enqueue_queued_work(process_wake_draft(
+            &SessionId::from(session_id),
+            "selected-duplicate-present-source",
+            "selected-duplicate-present-task",
+        ))
         .await
         .expect("enqueue duplicate-selected row");
 
@@ -1795,23 +1750,11 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
     .await
     .expect("read the opened session\'s store")
     .expect("opened session retains its in-memory store");
-    for source_key in ["claim-a1", "claim-a2", "claim-b1", "claim-b2"] {
+    for process in ["claim-a1", "claim-a2", "claim-b1", "claim-b2"] {
         store
             .enqueue_queued_work(
-                crate::persistence::QueuedWorkBatchDraft::new(
-                    session_id,
-                    lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                    crate::persistence::TurnWorkPayload::agent_frame_task(
-                        lash_core::facade_support::frame_node_id(
-                            &SessionId::from(session_id),
-                            "two-claims-frame",
-                        ),
-                        source_key,
-                        None,
-                    ),
-                )
-                .with_source_key(source_key)
-                .with_merge_key("two-claims-key"),
+                process_wake_draft(&SessionId::from(session_id), process, process)
+                    .with_merge_key("two-claims-key"),
             )
             .await
             .expect("enqueue two-claim row");
@@ -1979,27 +1922,15 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
     .await
     .expect("read the opened session\'s store")
     .expect("opened session retains its in-memory store");
-    for source_key in [
+    for process in [
         "selected-limit-w1",
         "selected-limit-w2",
         "selected-limit-w3",
     ] {
         store
             .enqueue_queued_work(
-                crate::persistence::QueuedWorkBatchDraft::new(
-                    session_id,
-                    lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                    crate::persistence::TurnWorkPayload::agent_frame_task(
-                        lash_core::facade_support::frame_node_id(
-                            &SessionId::from(session_id),
-                            "selected-limit-frame",
-                        ),
-                        source_key,
-                        None,
-                    ),
-                )
-                .with_source_key(source_key)
-                .with_merge_key("selected-limit-key"),
+                process_wake_draft(&SessionId::from(session_id), process, process)
+                    .with_merge_key("selected-limit-key"),
             )
             .await
             .expect("enqueue selected row-limit row");
@@ -2116,21 +2047,11 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
     .expect("read the opened session\'s store")
     .expect("opened session retains its in-memory store");
     store
-        .enqueue_queued_work(
-            crate::persistence::QueuedWorkBatchDraft::new(
-                session_id,
-                lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(
-                        &SessionId::from(session_id),
-                        "busy-frame",
-                    ),
-                    "busy-w1",
-                    None,
-                ),
-            )
-            .with_source_key("busy-w1"),
-        )
+        .enqueue_queued_work(process_wake_draft(
+            &SessionId::from(session_id),
+            "busy-w1",
+            "busy-w1",
+        ))
         .await
         .expect("enqueue busy selected row");
     // Batch ids are the store's to mint; read them back in enqueue order.
@@ -2393,21 +2314,11 @@ pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_sc
     .expect("read the opened session\'s store")
     .expect("session store");
     let receipt = store
-        .enqueue_queued_work(
-            crate::persistence::QueuedWorkBatchDraft::new(
-                session_id,
-                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(
-                        &SessionId::from(session_id),
-                        "selected-handler",
-                    ),
-                    "selected handler",
-                    None,
-                ),
-            )
-            .with_source_key("selected-handler-batch"),
-        )
+        .enqueue_queued_work(process_wake_draft(
+            &SessionId::from(session_id),
+            "selected-handler-batch",
+            "selected handler",
+        ))
         .await?;
 
     let outcome = session

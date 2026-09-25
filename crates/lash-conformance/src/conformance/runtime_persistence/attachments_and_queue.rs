@@ -143,25 +143,21 @@ pub async fn queued_work_source_keys_are_idempotent_and_list_ordered(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let first = store
-        .enqueue_queued_work(
-            queued_draft(
-                &SessionId::from("root"),
-                "first",
-                DeliveryPolicy::EarliestSafeBoundary,
-            )
-            .with_source_key("source:first"),
-        )
+        .enqueue_queued_work(keyed_queued_draft(
+            &SessionId::from("root"),
+            "first",
+            DeliveryPolicy::EarliestSafeBoundary,
+            "source:first",
+        ))
         .await
         .expect("enqueue first batch");
     let replay = store
-        .enqueue_queued_work(
-            queued_draft(
-                &SessionId::from("root"),
-                "different replay payload",
-                DeliveryPolicy::EarliestSafeBoundary,
-            )
-            .with_source_key("source:first"),
-        )
+        .enqueue_queued_work(keyed_queued_draft(
+            &SessionId::from("root"),
+            "different replay payload",
+            DeliveryPolicy::EarliestSafeBoundary,
+            "source:first",
+        ))
         .await
         .expect("replay first batch");
     let second = store
@@ -213,12 +209,12 @@ pub async fn concurrent_queued_work_source_key_enqueues_report_one_inserted_and_
     store: Arc<dyn RuntimePersistence>,
 ) {
     let draft = || {
-        queued_draft(
+        keyed_queued_draft(
             &SessionId::from("concurrent-queued-work-source-key"),
             "concurrent idempotent enqueue",
             DeliveryPolicy::EarliestSafeBoundary,
+            "source:concurrent-idempotent-enqueue",
         )
-        .with_source_key("source:concurrent-idempotent-enqueue")
     };
     let barrier = Arc::new(tokio::sync::Barrier::new(3));
     let left_store = Arc::clone(&store);
@@ -268,12 +264,12 @@ pub async fn decorated_queued_work_source_key_replay_reports_absorbed(
 ) {
     let store = crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(store);
     let draft = || {
-        queued_draft(
+        keyed_queued_draft(
             &SessionId::from("decorated-queued-work-source-key"),
             "decorated source-key replay",
             DeliveryPolicy::EarliestSafeBoundary,
+            "source:decorated-replay",
         )
-        .with_source_key("source:decorated-replay")
     };
 
     let first = store
@@ -801,36 +797,36 @@ pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
 ) {
     let a1 = store
         .enqueue_queued_work(
-            queued_draft(
+            keyed_queued_draft(
                 &SessionId::from("exact-key-break"),
                 "a1",
                 DeliveryPolicy::EarliestSafeBoundary,
+                "exact-a1",
             )
-            .with_source_key("exact-a1")
             .with_merge_key("a"),
         )
         .await
         .expect("enqueue exact A1");
     let _b1 = store
         .enqueue_queued_work(
-            queued_draft(
+            keyed_queued_draft(
                 &SessionId::from("exact-key-break"),
                 "b1",
                 DeliveryPolicy::EarliestSafeBoundary,
+                "exact-b1",
             )
-            .with_source_key("exact-b1")
             .with_merge_key("b"),
         )
         .await
         .expect("enqueue exact B1");
     let a2 = store
         .enqueue_queued_work(
-            queued_draft(
+            keyed_queued_draft(
                 &SessionId::from("exact-key-break"),
                 "a2",
                 DeliveryPolicy::EarliestSafeBoundary,
+                "exact-a2",
             )
-            .with_source_key("exact-a2")
             .with_merge_key("a"),
         )
         .await
@@ -862,7 +858,7 @@ pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
             .iter()
             .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
             .collect::<Vec<_>>(),
-        vec![(Some("exact-a1"), 1)],
+        vec![(Some("process:exact-a1:event:1:wake"), 1)],
         "an exact claim must preserve enqueue order and stop at the physical B key break"
     );
     assert_eq!(
@@ -873,7 +869,10 @@ pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
             .iter()
             .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
             .collect::<Vec<_>>(),
-        vec![(Some("exact-b1"), 2), (Some("exact-a2"), 3)],
+        vec![
+            (Some("process:exact-b1:event:1:wake"), 2),
+            (Some("process:exact-a2:event:1:wake"), 3)
+        ],
         "the key-break row and later requested row must remain queued in physical order"
     );
     release_session_execution_lease_for_test(&store, &lease).await;

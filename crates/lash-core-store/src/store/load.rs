@@ -9,6 +9,7 @@ fn persisted_session_state_from_read(
             session_id: read.session_id.clone(),
             head_revision: read.head_revision,
             current_frame_node_id: read.current_frame_node_id.clone(),
+            pending_follow_on: read.pending_follow_on.clone(),
             graph: read.graph.clone(),
             config: read.config.clone(),
             checkpoint_ref: read.checkpoint_ref.clone(),

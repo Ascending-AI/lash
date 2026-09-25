@@ -522,8 +522,7 @@ impl TerminalProcessWake {
                 process_id: wake.process_id.clone(),
                 sequence: wake.sequence,
             }),
-            crate::QueuedWorkPayload::AgentFrameTask { .. }
-            | crate::QueuedWorkPayload::SessionCommand { .. } => None,
+            crate::QueuedWorkPayload::SessionCommand { .. } => None,
         }
     }
 

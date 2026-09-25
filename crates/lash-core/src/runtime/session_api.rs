@@ -351,9 +351,16 @@ impl LashRuntime {
         };
         let requires_hydration = match store.load_session_head_meta().await {
             Ok(Some(head)) => {
-                self.state.head_revision != head.head_revision
+                let moved = self.state.head_revision != head.head_revision
                     || head.leaf_node_id != self.state.session_graph.leaf_node_id
-                    || head.checkpoint_ref != self.state.checkpoint_ref
+                    || head.checkpoint_ref != self.state.checkpoint_ref;
+                // A recovery raise rewrites the pending follow-on without
+                // moving the head revision (ADR 0101 §3), so the fact is
+                // taken from the head even when nothing else moved.
+                if !moved {
+                    self.state.pending_follow_on = head.pending_follow_on.map(Box::new);
+                }
+                moved
             }
             Ok(None) => {
                 if self.state.checkpoint_ref.is_some() {
@@ -426,6 +433,7 @@ impl LashRuntime {
             empty.session_graph = crate::SessionGraph::default();
             empty.agent_frames.clear();
             empty.current_frame_node_id = None;
+            empty.pending_follow_on = None;
             empty.checkpoint_ref = None;
             empty.checkpoint_components =
                 crate::RuntimeSessionState::new(empty.policy.clone()).checkpoint_components;
@@ -465,6 +473,7 @@ impl LashRuntime {
             session_id: read.session_id.clone(),
             head_revision: read.head_revision,
             current_frame_node_id: read.current_frame_node_id.clone(),
+            pending_follow_on: read.pending_follow_on.clone(),
             graph: read.graph,
             config: read.config.clone(),
             checkpoint_ref: read.checkpoint_ref.clone(),
@@ -691,6 +700,13 @@ impl LashRuntime {
         request: crate::OpenAgentFrameRequest,
     ) -> Result<crate::OpenAgentFrameResult, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
+        // A pending follow-on owns the session's frame until its turn commits
+        // (ADR 0101 §3); the store's frame invariant is the backstop.
+        if let Some(pending) = self.state.pending_follow_on.as_ref() {
+            return Err(super::runtime_error_from_store_commit(
+                pending.pending_error(&self.state.session_id),
+            ));
+        }
         open_agent_frame_in_state_with_clock(
             &mut self.state,
             request,

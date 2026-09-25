@@ -151,7 +151,6 @@ fn turn_input_completions(
 
 pub(super) struct PhysicalTurnExecution {
     pub(super) turn: AssembledTurn,
-    pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     pub(super) post_commit_delivery_failed: bool,
     /// Claimed at this turn's terminal checkpoint and withheld from it, for
     /// the logical run to start a follow-on turn with.
@@ -205,10 +204,6 @@ impl LogicalTurnClaims {
         self
     }
 
-    pub(super) fn is_empty(&self) -> bool {
-        self.queued.is_empty() && self.turn_inputs.is_empty()
-    }
-
     /// Whether this turn leaves withheld work for a follow-on turn, given
     /// whether it committed as cancelled. A cancelled turn settles withheld
     /// turn input through the undelivered disposition instead of carrying it
@@ -242,11 +237,8 @@ impl LogicalTurnClaims {
         outcome: &TurnOutcome,
         journaled_drive_claims: &std::collections::BTreeSet<String>,
         reacquired: &ReacquiredClaims,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-        protocol_turn_options: Option<crate::ProtocolTurnOptions>,
+        pending_follow_on: Option<crate::store::PendingFollowOn>,
     ) -> LogicalTurnCommitEffects {
-        let claimed = !self.is_empty();
         let completed_queue_claims = queued_work_completions(&self.queued, &reacquired.queued);
         let completed_turn_input_claims =
             turn_input_completions(&self.turn_inputs, &reacquired.turn_inputs);
@@ -262,25 +254,6 @@ impl LogicalTurnClaims {
             .chain(&reacquired.turn_inputs)
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
-        let enqueued_queue_batches = match outcome {
-            TurnOutcome::AgentFrameSwitch {
-                frame_key, task, ..
-            } if claimed => {
-                vec![
-                    crate::QueuedWorkBatchDraft::new(
-                        session_id,
-                        crate::DeliveryPolicy::AfterCurrentTurnCommit,
-                        crate::TurnWorkPayload::agent_frame_task(
-                            crate::session_graph::frame_node_id(session_id, frame_key.as_str()),
-                            task.clone(),
-                            protocol_turn_options,
-                        ),
-                    )
-                    .with_source_key(format!("agent-frame-handoff:{turn_id}")),
-                ]
-            }
-            _ => Vec::new(),
-        };
         // A cancelled turn never delivers the input it withheld from its
         // terminal checkpoint: it starts no follow-on for it (FIG-3531).
         let cancelled = matches!(outcome, TurnOutcome::Stopped(TurnStop::Cancelled { .. }));
@@ -304,14 +277,51 @@ impl LogicalTurnClaims {
             )
             .with_undelivered_turn_inputs(undelivered_turn_inputs)
             .with_journaled_drive_claims(journaled_drive_claims.clone()),
-            enqueued_queue_batches,
+            pending_follow_on,
         }
     }
 }
 
 pub(super) struct LogicalTurnCommitEffects {
     pub(super) claim_settlement: TurnClaimSettlement,
-    pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
+    /// The follow-on the head owes once this turn commits (ADR 0101 §3).
+    pub(super) pending_follow_on: Option<crate::store::PendingFollowOn>,
+}
+
+/// The follow-on the terminal commit of physical turn `turn_id` leaves on the
+/// head (ADR 0101 §3).
+///
+/// A frame switch owes the switched frame one follow-on turn, the next
+/// physical turn of the same logical run; its chain depth counts this switch,
+/// continuing the depth the turn itself was owed with. Every other outcome
+/// leaves nothing: a turn commits only while the head owes nothing or owes
+/// this very turn, and this commit is that follow-on's terminal record.
+pub(super) fn follow_on_after_turn(
+    state: &RuntimeSessionState,
+    outcome: &TurnOutcome,
+    turn_id: &TurnId,
+) -> Result<Option<crate::store::PendingFollowOn>, RuntimeError> {
+    let TurnOutcome::AgentFrameSwitch {
+        frame_key, task, ..
+    } = outcome
+    else {
+        return Ok(None);
+    };
+    let chain_depth = state
+        .pending_follow_on
+        .as_ref()
+        .filter(|owed| owed.is_turn(turn_id))
+        .map_or(0, |owed| owed.chain_depth)
+        .saturating_add(1);
+    crate::store::PendingFollowOn::after_switch(
+        turn_id,
+        crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str()),
+        task.clone(),
+        Some(state.effective_protocol_turn_options().clone()),
+        chain_depth,
+    )
+    .map(Some)
+    .map_err(super::runtime_error_from_store_commit)
 }
 
 pub(super) struct PreparedLogicalTurn {
@@ -328,6 +338,10 @@ pub(super) struct PreparedLogicalTurn {
 pub(super) enum LogicalTurnStart {
     Input(TurnInput),
     Prepared(PreparedLogicalTurn),
+    /// A recovered follow-on whose recovery bound is spent (ADR 0101 §3): it
+    /// never runs, and commits as the failed turn carrying
+    /// `FollowOnRecoveryExhausted` with its task as the delivered input.
+    ExhaustedFollowOn(crate::store::PendingFollowOn),
 }
 
 impl LogicalTurnStart {
@@ -352,6 +366,11 @@ impl LogicalTurnStart {
                 prepared.turn_context.clone(),
                 prepared.trace_turn_id.clone(),
             ),
+            Self::ExhaustedFollowOn(owed) => (
+                owed.options.as_deref().cloned(),
+                crate::TurnContext::default(),
+                owed.follow_on_turn_id.clone(),
+            ),
         }
     }
 }
@@ -373,7 +392,7 @@ impl LashRuntime {
             return;
         }
         for claim in &claims.queued {
-            let work = claim.materialize_queued_turn_work();
+            let work = claim.materialize_queued_checkpoint_work();
             super::turn_loop::emit_queued_work_started(
                 observer,
                 &mut cursor,
@@ -499,8 +518,12 @@ impl LashRuntime {
                 ),
             ));
         }
-        let root_trace_turn_id = if let Some(run) = &self.queued_run {
-            TurnId::from(run.scope.id())
+        // The first physical turn's id. Every later turn of this logical run
+        // counts on from it: a follow-on takes the id its committed switch
+        // wrote on the head, and a terminal-checkpoint follow-on takes the next
+        // physical index (ADR 0101 §3).
+        let mut turn_trace_turn_id = if let Some(run) = &self.queued_run {
+            run.position.turn_id.clone()
         } else if supplied_trace_turn_id.is_empty() {
             TurnId::from(scoped_effect_controller.scope_id())
         } else {
@@ -515,11 +538,9 @@ impl LashRuntime {
         let mut follow_on_turns = 0usize;
 
         loop {
-            let turn_trace_turn_id = self
-                .queued_run
-                .as_ref()
-                .map(|run| run.position.turn_id.clone())
-                .unwrap_or_else(|| agent_frame_follow_turn_id(&root_trace_turn_id, turns.len()));
+            if let Some(run) = &self.queued_run {
+                turn_trace_turn_id = run.position.turn_id.clone();
+            }
             // A frame switch creates a new physical turn identity, but it does
             // not create new effect authority. Every frame in this admitted
             // run therefore keeps the controller's exact execution scope.
@@ -538,32 +559,66 @@ impl LashRuntime {
                 announce_queued_work,
             );
             announce_queued_work = true;
-            let at_queued_frame_limit = self.queued_run.as_ref().is_some_and(|run| {
-                run.position.physical_ordinal >= MAX_AGENT_FRAME_SWITCHES as u64
-                    && run.last_commit.as_ref().is_some_and(|commit| {
-                        matches!(
-                            commit.progress,
-                            crate::store::QueuedRunProgress::Advance {
-                                include_outbox: true,
-                                ..
-                            }
-                        )
+            // A follow-on that must not run commits its failure as its
+            // terminal record instead, whatever drive reached it (ADR 0101
+            // §3): its recovery bound is spent, or its chain passed
+            // MAX_AGENT_FRAME_SWITCHES switches (the chain bound travels with
+            // the follow-on).
+            let terminal = match &start {
+                LogicalTurnStart::ExhaustedFollowOn(owed) => Some((
+                    crate::TurnFailureCode::FollowOnRecoveryExhausted,
+                    format!(
+                        "follow-on turn `{}` was recovered {} times, past the host's bound; it \
+                         commits failed instead of running",
+                        owed.follow_on_turn_id, owed.attempts
+                    ),
+                    owed.task.clone(),
+                )),
+                _ => self
+                    .state
+                    .pending_follow_on
+                    .as_ref()
+                    .filter(|owed| {
+                        owed.is_turn(&turn_trace_turn_id)
+                            && owed.chain_depth as usize >= MAX_AGENT_FRAME_SWITCHES
                     })
-            });
-            if at_queued_frame_limit {
+                    .map(|owed| {
+                        (
+                            crate::TurnFailureCode::AgentFrameSwitchLimit,
+                            format!(
+                                "logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"
+                            ),
+                            owed.task.clone(),
+                        )
+                    }),
+            };
+            if let Some((code, message, task)) = terminal {
                 let terminal = Box::pin(self.finish_logical_turn_error(LogicalTurnErrorContext {
-                    message: format!("logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"),
+                    code,
+                    message,
                     trace_turn_id: turn_trace_turn_id,
+                    delivered_task: Some(task),
                     sinks: TurnSinks { observer },
                     scoped_effect_controller: turn_effect_controller,
                     claims,
                     session_execution_lease: session_execution_lease.as_ref(),
-                })).await;
+                }))
+                .await;
+                if let Some(withheld) = carried_withheld.take() {
+                    self.abandon_withheld_terminal_work(withheld).await;
+                }
                 let mut terminal = match terminal {
                     Ok(terminal) => terminal,
-                    Err(error) => {
+                    Err(error) if turns.is_empty() || self.queued_run.is_some() => {
                         self.invalidate_resident_session_state();
                         return Err(error);
+                    }
+                    Err(error) => {
+                        self.record_follow_on_failure(&mut turns, error);
+                        return Ok(AgentFrameRun {
+                            turns,
+                            acceptance: None,
+                        });
                     }
                 };
                 frame_stopwatch.stamp(&mut terminal.turn, self.host.core.clock.as_ref());
@@ -637,6 +692,14 @@ impl LashRuntime {
                     }))
                     .await
                 }
+                // Committed as its terminal above; it never executes.
+                LogicalTurnStart::ExhaustedFollowOn(owed) => Err(RuntimeError::new(
+                    RuntimeErrorCode::FollowOnPending,
+                    format!(
+                        "follow-on turn `{}` commits its exhaustion before any execution",
+                        owed.follow_on_turn_id
+                    ),
+                )),
             };
             let execution = match execution_result {
                 Ok(execution) => execution,
@@ -661,8 +724,11 @@ impl LashRuntime {
                 // so it issues no further journaled effect (the repair's cancel
                 // gate peek is one), and its turn id is the one its redrive
                 // carries, so the inputs routed to it are not orphaned.
+                //
+                // A follow-on that fails before its commit stays owed on the
+                // head (ADR 0101 §3): the next drive recovers it.
                 Err(err) if turns.is_empty() => {
-                    if !parks(&err) {
+                    if !parks(&err) && !self.owes_follow_on(&turn_trace_turn_id) {
                         self.defer_orphaned_turn_inputs_after_teardown(
                             &turn_trace_turn_id,
                             session_execution_lease
@@ -680,7 +746,7 @@ impl LashRuntime {
                     return Err(err);
                 }
                 Err(err) => {
-                    if !parks(&err) {
+                    if !parks(&err) && !self.owes_follow_on(&turn_trace_turn_id) {
                         self.defer_orphaned_turn_inputs_after_teardown(
                             &turn_trace_turn_id,
                             session_execution_lease
@@ -703,7 +769,6 @@ impl LashRuntime {
             };
             let PhysicalTurnExecution {
                 mut turn,
-                enqueued_queue_batches,
                 post_commit_delivery_failed,
                 withheld_terminal_work,
             } = execution;
@@ -713,12 +778,6 @@ impl LashRuntime {
                 carried.turn_inputs.extend(withheld.turn_inputs);
             }
             frame_stopwatch.stamp(&mut turn, self.host.core.clock.as_ref());
-            let switched_frame = match &turn.outcome {
-                TurnOutcome::AgentFrameSwitch {
-                    frame_key, task, ..
-                } => Some((frame_key.clone(), task.clone())),
-                _ => None,
-            };
             turns.push(turn);
             if self.queued_run.is_some() {
                 let store = self
@@ -752,15 +811,10 @@ impl LashRuntime {
                             "queued continuation awaits a live execution lane",
                         )
                     })?;
-                let frame_limit_due = pending.position.physical_ordinal
-                    >= MAX_AGENT_FRAME_SWITCHES as u64
-                    && matches!(
-                        pending.last_commit.as_ref().map(|commit| &commit.progress),
-                        Some(crate::store::QueuedRunProgress::Advance {
-                            include_outbox: true,
-                            ..
-                        })
-                    );
+                let frame_limit_due = self.state.pending_follow_on.as_ref().is_some_and(|owed| {
+                    owed.is_turn(&pending.position.turn_id)
+                        && owed.chain_depth as usize >= MAX_AGENT_FRAME_SWITCHES
+                });
                 if post_commit_delivery_failed
                     || (turns.len() >= MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS && !frame_limit_due)
                 {
@@ -788,16 +842,20 @@ impl LashRuntime {
                     )
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
-                announce_queued_work = matches!(
-                    pending.last_commit.as_ref().map(|commit| &commit.progress),
-                    Some(crate::store::QueuedRunProgress::Advance {
-                        include_outbox: true,
-                        ..
-                    })
-                );
-                let (mut input, next_claims) =
-                    self.queued_run_input(selection, announce_queued_work)?;
-                input.protocol_turn_options = follow_protocol_turn_options.clone();
+                // Work withheld from a terminal checkpoint already announced
+                // its start at the boundary that claimed it (FIG-3157), and a
+                // follow-on claims nothing.
+                announce_queued_work = false;
+                let (mut input, next_claims) = self.queued_run_input(selection, false)?;
+                // A follow-on runs under the options its switch recorded.
+                if !self
+                    .state
+                    .pending_follow_on
+                    .as_ref()
+                    .is_some_and(|owed| owed.is_turn(&pending.position.turn_id))
+                {
+                    input.protocol_turn_options = follow_protocol_turn_options.clone();
+                }
                 input.turn_context = follow_turn_context.clone();
                 claims = next_claims;
                 start = LogicalTurnStart::Input(input);
@@ -813,153 +871,29 @@ impl LashRuntime {
                     acceptance: None,
                 });
             }
-            let Some((frame_key, task)) = switched_frame else {
-                // FIG-3157: the turn ended on its committed answer. Work it
-                // claimed at the terminal checkpoint starts the next turn now
-                // — no idle gap, no wait for the user, the same session
-                // execution lease and generation throughout.
-                let Some(withheld) = carried_withheld.take() else {
-                    return Ok(AgentFrameRun {
-                        turns,
-                        acceptance: None,
-                    });
-                };
-                // The claim is only generation-valid while the lease that
-                // fenced it is live (ADR 0029). A run whose lane lapsed hands
-                // the rows back instead, for a successor to reclaim.
-                let lane_live = session_execution_lease
+            // A committed frame switch owes its follow-on, which runs next,
+            // in this run, under the id the switch wrote (ADR 0101 §3). The
+            // one path for every session: durable or store-less, the fact is
+            // on the resident head.
+            if let Some(owed) = self.state.pending_follow_on.as_deref().cloned() {
+                // A lane that lapsed is never silently reacquired for the
+                // follow-on: it stays owed on the head, and the next drive
+                // recovers it (ADR 0101 §3).
+                if session_execution_lease
                     .as_ref()
-                    .is_some_and(|guard| !guard.is_lost());
-                if !lane_live {
-                    self.abandon_withheld_terminal_work(withheld).await;
-                    return Ok(AgentFrameRun {
-                        turns,
-                        acceptance: None,
-                    });
-                }
-                if follow_on_turns >= MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS {
-                    // Bounded like an agent-frame chain: hand the rows back so
-                    // a later drain takes them instead of running forever.
-                    self.abandon_withheld_terminal_work(withheld).await;
-                    return Ok(AgentFrameRun {
-                        turns,
-                        acceptance: None,
-                    });
-                }
-                follow_on_turns += 1;
-                let mut input = TurnInput::items(Vec::new());
-                input.protocol_turn_options = follow_protocol_turn_options.clone();
-                input.turn_context = follow_turn_context.clone();
-                claims = LogicalTurnClaims::new(withheld.queued, withheld.turn_inputs);
-                announce_queued_work = false;
-                start = LogicalTurnStart::Input(input);
-                continue;
-            };
-
-            let next = async {
-                if enqueued_queue_batches.is_empty() {
-                    let mut input = turn_input_from_text(task);
-                    input.protocol_turn_options = follow_protocol_turn_options.clone();
-                    input.turn_context = follow_turn_context.clone();
-                    return Ok((input, LogicalTurnClaims::new(Vec::new(), Vec::new())));
-                }
-                let lease = session_execution_lease.as_ref().ok_or_else(|| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::StoreCommitFailed,
-                        "claimed agent-frame handoff requires a session execution lease",
-                    )
-                })?;
-                let store = self
-                    .session
-                    .as_ref()
-                    .and_then(|session| session.history_store())
-                    .ok_or_else(|| {
+                    .is_some_and(SessionExecutionLeaseGuard::is_lost)
+                {
+                    self.record_follow_on_failure(
+                        &mut turns,
                         RuntimeError::new(
-                            RuntimeErrorCode::StoreCommitFailed,
-                            "claimed agent-frame handoff requires a runtime persistence store",
-                        )
-                    })?;
-                let batch_ids = enqueued_queue_batches
-                    .iter()
-                    .map(|batch| batch.batch_id.clone())
-                    .collect::<Vec<_>>();
-                let claim_policy = self
-                    .host
-                    .core
-                    .durability
-                    .queued_work_batching
-                    .claim_policy(self.max_context_tokens());
-                let claim = store
-                    .claim_ready_queued_work_by_batch_ids(
-                        &self.state.session_id,
-                        &lease.fence(),
-                        &self.runtime_lease_owner,
-                        crate::QueuedWorkClaimBoundary::Idle,
-                        &batch_ids,
-                        claim_policy,
-                    )
-                    .await
-                    .map_err(super::runtime_error_from_store_commit)?
-                    .ok_or_else(|| {
-                        RuntimeError::new(
-                            RuntimeErrorCode::StoreCommitFailed,
+                            RuntimeErrorCode::SessionExecutionLeaseLost,
                             format!(
-                                "failed to claim committed agent-frame handoff batch `{}`",
-                                batch_ids.join(",")
+                                "follow-on turn `{}` awaits a live execution lane; the next \
+                                 drive recovers it",
+                                owed.follow_on_turn_id
                             ),
-                        )
-                    })?;
-                let target_matches = claim.batches.iter().all(|batch| {
-                    batch.items.iter().all(|item| {
-                        matches!(
-                            &item.payload,
-                            crate::QueuedWorkPayload::AgentFrameTask {
-                                frame_id: target,
-                                ..
-                            } if Some(target.as_str())
-                                == self.state.current_frame_node_id.as_deref()
-                        )
-                    })
-                });
-                if !target_matches {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::StoreCommitFailed,
-                        format!(
-                            "agent-frame handoff did not target frame node id derived from frame key `{}`",
-                            frame_key.as_str()
                         ),
-                    ));
-                }
-                let materialized = claim.materialize_queued_turn_work();
-                let follow_turn_id = agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
-                crate::trace::emit_trace(
-                    &self.host.core.tracing.trace_sink,
-                    &self.host.core.tracing.trace_context,
-                    lash_trace::TraceContext::default()
-                        .for_session(self.state.session_id.clone())
-                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                        .for_turn_index(self.state.turn_index + 1)
-                        .for_turn(follow_turn_id),
-                    lash_trace::TraceEvent::Custom {
-                        name: "queued_work.claimed".to_string(),
-                        payload: super::turn_loop::queued_work_trace_payload(
-                            crate::QueuedWorkClaimBoundary::Idle,
-                            &claim,
-                            &materialized.turn_causes,
-                        ),
-                    },
-                    self.host.core.clock.as_ref(),
-                );
-                Ok((
-                    materialized.input,
-                    LogicalTurnClaims::new(vec![claim], Vec::new()),
-                ))
-            }
-            .await;
-            let (mut input, next_claims) = match next {
-                Ok(next) => next,
-                Err(err) => {
-                    self.record_follow_on_failure(&mut turns, err);
+                    );
                     if let Some(withheld) = carried_withheld.take() {
                         self.abandon_withheld_terminal_work(withheld).await;
                     }
@@ -968,71 +902,87 @@ impl LashRuntime {
                         acceptance: None,
                     });
                 }
+                turn_trace_turn_id = owed.follow_on_turn_id.clone();
+                start =
+                    LogicalTurnStart::Input(follow_on_input(&owed, follow_turn_context.clone()));
+                claims = LogicalTurnClaims::new(Vec::new(), Vec::new());
+                continue;
+            }
+            // FIG-3157: the turn ended on its committed answer. Work it
+            // claimed at the terminal checkpoint starts the next turn now
+            // — no idle gap, no wait for the user, the same session
+            // execution lease and generation throughout.
+            let Some(withheld) = carried_withheld.take() else {
+                return Ok(AgentFrameRun {
+                    turns,
+                    acceptance: None,
+                });
             };
-            input.protocol_turn_options = follow_protocol_turn_options.clone();
-            input.turn_context = follow_turn_context.clone();
-
-            if turns.len() >= MAX_AGENT_FRAME_SWITCHES {
-                let terminal_trace_turn_id =
-                    agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
-                let terminal_effect_controller = scoped_effect_controller.clone();
-                let terminal_stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-                Self::emit_physical_turn_start(
-                    observer,
-                    &scoped_effect_controller,
-                    &terminal_trace_turn_id,
-                    &next_claims,
-                    true,
-                );
-                let terminal_result = Box::pin(self.finish_logical_turn_error(
-                        LogicalTurnErrorContext {
-                            message: format!(
-                                "logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"
-                            ),
-                            trace_turn_id: terminal_trace_turn_id,
-                            sinks: TurnSinks { observer },
-                            scoped_effect_controller: terminal_effect_controller,
-                            claims: next_claims,
-                            session_execution_lease: session_execution_lease.as_ref(),
-                        },
-                    ))
-                    .await;
-                if let Some(withheld) = carried_withheld.take() {
-                    self.abandon_withheld_terminal_work(withheld).await;
-                }
-                let mut terminal = match terminal_result {
-                    Ok(terminal) => terminal,
-                    Err(err) => {
-                        self.record_follow_on_failure(&mut turns, err);
-                        return Ok(AgentFrameRun {
-                            turns,
-                            acceptance: None,
-                        });
-                    }
-                };
-                terminal_stopwatch.stamp(&mut terminal.turn, self.host.core.clock.as_ref());
-                turns.push(terminal.turn);
+            // The claim is only generation-valid while the lease that
+            // fenced it is live (ADR 0029). A run whose lane lapsed hands
+            // the rows back instead, for a successor to reclaim.
+            let lane_live = session_execution_lease
+                .as_ref()
+                .is_some_and(|guard| !guard.is_lost());
+            if !lane_live {
+                self.abandon_withheld_terminal_work(withheld).await;
                 return Ok(AgentFrameRun {
                     turns,
                     acceptance: None,
                 });
             }
-
-            claims = next_claims;
+            if follow_on_turns >= MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS {
+                // Bounded like an agent-frame chain: hand the rows back so
+                // a later drain takes them instead of running forever.
+                self.abandon_withheld_terminal_work(withheld).await;
+                return Ok(AgentFrameRun {
+                    turns,
+                    acceptance: None,
+                });
+            }
+            follow_on_turns += 1;
+            turn_trace_turn_id = next_physical_turn_id(&turn_trace_turn_id)
+                .map_err(super::runtime_error_from_store_commit)?;
+            let mut input = TurnInput::items(Vec::new());
+            input.protocol_turn_options = follow_protocol_turn_options.clone();
+            input.turn_context = follow_turn_context.clone();
+            claims = LogicalTurnClaims::new(withheld.queued, withheld.turn_inputs);
+            announce_queued_work = false;
             start = LogicalTurnStart::Input(input);
         }
     }
 }
 
-pub(super) fn turn_input_from_text(text: String) -> TurnInput {
-    TurnInput::text(text)
+/// The input of the follow-on `owed`: its task, under the protocol turn
+/// options the switch recorded (ADR 0101 §3).
+pub(super) fn follow_on_input(
+    owed: &crate::store::PendingFollowOn,
+    turn_context: crate::TurnContext,
+) -> TurnInput {
+    let mut input = TurnInput::text(owed.task.clone());
+    input.protocol_turn_options = owed.options.as_deref().cloned();
+    input.turn_context = turn_context;
+    input.trace_turn_id = Some(owed.follow_on_turn_id.clone());
+    input
 }
 
-pub(super) fn agent_frame_follow_turn_id(
-    root_turn_id: &TurnId,
-    completed_turn_count: usize,
-) -> TurnId {
-    crate::store::QueuedRunPosition::derive_turn_id(root_turn_id, completed_turn_count as u64)
+/// The next physical turn of the logical run `current` belongs to.
+pub(super) fn next_physical_turn_id(current: &TurnId) -> Result<TurnId, crate::StoreError> {
+    let (root, index) = crate::store::QueuedRunPosition::split_turn_id(current);
+    let next = crate::StoreError::checked_monotonic_increment("physical_turn_index", index)?;
+    Ok(crate::store::QueuedRunPosition::derive_turn_id(&root, next))
+}
+
+impl LashRuntime {
+    /// Whether the head owes `turn_id` as its pending follow-on: such a turn
+    /// that ends without committing stays owed, with the input pinned to it,
+    /// for the next drive to recover (ADR 0101 §3).
+    fn owes_follow_on(&self, turn_id: &TurnId) -> bool {
+        self.state
+            .pending_follow_on
+            .as_ref()
+            .is_some_and(|owed| owed.is_turn(turn_id))
+    }
 }
 
 /// Whether `err` parked its turn on a replay refusal (FIG-3586).

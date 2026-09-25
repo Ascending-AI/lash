@@ -200,6 +200,7 @@ impl CurrentSessionCapability {
             policy: state.effective_policy().clone(),
             agent_frames: state.agent_frames.clone(),
             current_frame_node_id: state.current_frame_node_id.clone(),
+            pending_follow_on: state.pending_follow_on.clone(),
             session_graph,
             turn_index: state.turn_index,
             token_usage: state.token_usage.clone(),

@@ -91,10 +91,6 @@ impl LashRuntime {
         // inputs, queued work, or trigger deliveries; those remain external
         // ingress and are picked up by their fenced claim paths.
         let input_trace_turn_id = input.trace_turn_id.clone();
-        let queued_turn_work = materialize_initial_claims
-            .then(|| queued_claims.first())
-            .flatten()
-            .map(crate::QueuedWorkClaim::materialize_queued_turn_work);
         let pending_turn_input = materialize_initial_claims
             .then(|| turn_input_claims.first())
             .flatten()
@@ -106,16 +102,6 @@ impl LashRuntime {
             input = work.clone();
             // Retain host controls installed on the initially materialized input. The claim is
             // rematerialized here to refresh durable payloads, not to erase live run policy.
-            input.turn_context = turn_context;
-            if input.trace_turn_id.is_none() {
-                input.trace_turn_id = input_trace_turn_id.clone();
-            }
-        }
-        if let Some(work) = queued_turn_work.as_ref()
-            && input.items.is_empty()
-        {
-            let turn_context = input.turn_context.clone();
-            input = work.input.clone();
             input.turn_context = turn_context;
             if input.trace_turn_id.is_none() {
                 input.trace_turn_id = input_trace_turn_id;
@@ -256,7 +242,7 @@ impl LashRuntime {
         let initial_turn_causes: Vec<_> = queued_claims
             .iter()
             .filter(|_| materialize_initial_claims)
-            .flat_map(|claim| claim.materialize_queued_turn_work().turn_causes)
+            .flat_map(|claim| claim.materialize_queued_checkpoint_work().turn_causes)
             .collect();
         turn_delta.extend(
             initial_turn_causes

@@ -182,7 +182,27 @@ pub(super) async fn run_crash_matrix_case(
     // re-prompts the finishing turn. It is withheld from that delivery and
     // drives a follow-on turn of the same logical run, so each seeded batch
     // that lands renders its own terminal output instead of replacing one.
-    let terminal_follow_on_turns = part_count("trace-source");
+    // The seeded work is a process wake, rendered as its event with the wake
+    // input last. A wake claimed at a mid-turn checkpoint is delivered into
+    // that turn; one withheld at the terminal checkpoint opens its own turn,
+    // so its event directly follows a finished turn's output.
+    let messages: Vec<(bool, bool)> = read_model
+        .messages
+        .iter()
+        .map(|message| {
+            let content = |matches: fn(&str) -> bool| {
+                message.parts.iter().any(|part| matches(&part.content()))
+            };
+            (
+                content(|text| text == "trace turn complete"),
+                content(|text| text.ends_with("Wake input:\ntrace-source")),
+            )
+        })
+        .collect();
+    let terminal_follow_on_turns = messages
+        .windows(2)
+        .filter(|pair| pair[0].0 && pair[1].1)
+        .count();
     assert_eq!(
         part_count("trace turn complete"),
         1 + drain_turns + terminal_follow_on_turns,

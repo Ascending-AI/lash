@@ -455,17 +455,12 @@ async fn session_store_factory_claimable_queued_work_peek(
         .await
         .expect("create claim-fence conformance store");
     fenced_store
-        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+        .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
             &fenced_request.session_id,
+            "claim-fence",
+            1,
+            "claim fence",
             crate::DeliveryPolicy::EarliestSafeBoundary,
-            crate::TurnWorkPayload::agent_frame_task(
-                crate::session_graph::frame_node_id(
-                    &fenced_request.session_id,
-                    "claim-fence-frame",
-                ),
-                "claim fence",
-                None,
-            ),
         ))
         .await
         .expect("enqueue claim-fenced queued work");

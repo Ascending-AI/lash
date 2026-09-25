@@ -185,6 +185,10 @@ struct ReferenceModel {
     live_uncommitted_attachment_refs: BTreeSet<crate::AttachmentId>,
     attachment_session_sequence: u64,
     operation_sequence: u64,
+    /// The last process-wake sequence a generated enqueue used. It only
+    /// rises: a settled wake raises its process's floor, so a later enqueue
+    /// is always a fresh wake.
+    wake_sequence: u64,
 }
 
 struct PendingUsageConfirmation {
@@ -471,7 +475,11 @@ async fn apply_operation(
             value,
             coalesce,
         } => {
-            let draft = queued_draft(*slot, *value, *coalesce);
+            // A process wake is the one turn-work payload, and a settled wake
+            // raises its process's floor: every generated enqueue is a fresh
+            // wake of its slot's process, at the next sequence.
+            model.wake_sequence += 1;
+            let draft = sequenced_queued_draft(*slot, *value, *coalesce, model.wake_sequence);
             let key = draft.source_key.clone().expect("property source key");
             let result = store.enqueue_queued_work(draft.clone()).await;
             match model.work.get(&key) {
@@ -1424,17 +1432,41 @@ fn owner(index: u8) -> LeaseOwnerIdentity {
     )
 }
 
+/// Queued work the dedicated laws enqueue outside the generated model: a wake
+/// of its own process, so it never meets a generated wake's floor.
 fn queued_draft(slot: u8, value: u8, coalesce: bool) -> QueuedWorkBatchDraft {
-    let draft = QueuedWorkBatchDraft::new(
-        SESSION_ID,
-        DeliveryPolicy::EarliestSafeBoundary,
-        crate::TurnWorkPayload::agent_frame_task(
-            crate::session_graph::frame_node_id(&session_id(), &format!("property-frame-{value}")),
-            format!("property-work-{value}"),
-            None,
-        ),
+    wake_draft(
+        &format!("runtime-property-fixture-{slot}"),
+        value,
+        coalesce,
+        1,
     )
-    .with_source_key(format!("runtime-property-work-{slot}"));
+}
+
+/// The generated model's queued work: a wake of the slot's process at
+/// `sequence`.
+fn sequenced_queued_draft(
+    slot: u8,
+    value: u8,
+    coalesce: bool,
+    sequence: u64,
+) -> QueuedWorkBatchDraft {
+    wake_draft(
+        &format!("runtime-property-work-{slot}"),
+        value,
+        coalesce,
+        sequence,
+    )
+}
+
+fn wake_draft(process: &str, value: u8, coalesce: bool, sequence: u64) -> QueuedWorkBatchDraft {
+    let draft = crate::conformance::helpers::process_wake_work(
+        &session_id(),
+        process,
+        sequence,
+        &format!("property-work-{value}"),
+        DeliveryPolicy::EarliestSafeBoundary,
+    );
     if coalesce {
         draft.with_merge_key("runtime-property-coalesced")
     } else {

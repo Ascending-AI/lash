@@ -146,8 +146,12 @@ pub struct RuntimeCommit {
     /// `interrupted_turn_input_turn_id`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub undelivered_turn_input_claims: Vec<crate::turn_input_vocabulary::TurnInputClaim>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
+    /// The follow-on the head owes once this commit publishes (ADR 0101 §3):
+    /// the value the head holds after the write, not a delta. A frame-switch
+    /// commit writes it, the follow-on's terminal commit clears or replaces
+    /// it, and every other commit carries the head's value unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_follow_on: Option<super::PendingFollowOn>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interrupted_turn_input_turn_id: Option<TurnId>,
     /// Exact cancellation evidence returned by the authoritative turn gate.
@@ -682,8 +686,10 @@ pub struct RuntimeCommitReceipt {
     /// Bounded failure evidence owned by this durable turn settlement.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<crate::TurnFailureEvidence>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
+    /// The follow-on the head owes after this commit (ADR 0101 §3), so a
+    /// replayed switch commit returns the fact it wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_follow_on: Option<super::PendingFollowOn>,
     /// Canonical input applications settled by this idempotent turn commit.
     ///
     /// Keeping these identities in the durable turn-commit result lets hosts
@@ -714,7 +720,11 @@ pub struct RuntimeCommitReceipt {
 /// existed carry no `schema_version` at all and are refused as
 /// [`StoreError::MissingRecordSchemaVersion`], matching the exact-version
 /// refusal every other durable record follows.
-pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 1;
+///
+/// Version 2 (FIG-3542) replaces the frame-handoff `enqueued_queue_batches`
+/// with the `pending_follow_on` the commit left on the head. A version-1
+/// receipt is refused, not converted.
+pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 2;
 
 /// Stable record-kind label the receipt's decode refusals carry.
 pub const RUNTIME_COMMIT_RECEIPT_RECORD_KIND: &str = "RuntimeCommitReceipt";

@@ -63,16 +63,26 @@ struct ExpandMigration {
     statements: &'static str,
 }
 
-/// The expand catalog this build carries. Pre-1.0 there is exactly one step:
-/// component 133 gains the ledger itself and becomes 134 (FIG-3816). Newer
-/// schema generations append to this list; steps are never removed or edited —
-/// the ledger names them permanently.
-static EXPAND_MIGRATIONS: &[ExpandMigration] = &[ExpandMigration {
-    id: "0134-migrations-ledger",
-    from_version: 133,
-    to_version: 134,
-    statements: MIGRATIONS_TABLE_DDL,
-}];
+/// The expand catalog this build carries. Pre-1.0 the first step let
+/// component 133 gain the ledger itself and become 134 (FIG-3816); the second
+/// adds `lash_sessions.pending_follow_on_json`, the frame-handoff follow-on a
+/// session head carries, and becomes 135 (FIG-3542). Newer schema generations
+/// append to this list; steps are never removed or edited — the ledger names
+/// them permanently.
+static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
+    ExpandMigration {
+        id: "0134-migrations-ledger",
+        from_version: 133,
+        to_version: 134,
+        statements: MIGRATIONS_TABLE_DDL,
+    },
+    ExpandMigration {
+        id: "0135-pending-follow-on",
+        from_version: 134,
+        to_version: 135,
+        statements: "ALTER TABLE lash_sessions ADD COLUMN IF NOT EXISTS pending_follow_on_json TEXT",
+    },
+];
 
 /// The phase a migrate run is asked to execute.
 ///

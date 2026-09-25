@@ -326,143 +326,6 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
 }
 
 #[tokio::test]
-pub(super) async fn fig1123_committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_it()
- {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
-    let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let captured_call_index = Arc::clone(&call_index);
-    let transport = TestProvider::builder()
-        .kind("mock")
-        .requires_streaming(true)
-        .complete(move |_| {
-            let call_index = Arc::clone(&captured_call_index);
-            async move {
-                match call_index.fetch_add(1, Ordering::SeqCst) {
-                    0 => Ok(LlmResponse {
-                        parts: vec![LlmOutputPart::ToolCall {
-                            call_id: "switch-call".to_string(),
-                            tool_name: "terminal_tool_0".to_string(),
-                            input_json: "{}".to_string(),
-                            replay: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    }),
-                    1 => Ok(LlmResponse {
-                        parts: vec![LlmOutputPart::Text {
-                            text: "recovered follow-on".to_string(),
-                            response_meta: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    }),
-                    index => panic!("unexpected provider call {index}"),
-                }
-            }
-        })
-        .build();
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(TerminalControlTool {
-            controls: vec![lash_core::ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("recovery-frame")
-                    .expect("non-empty caller material"),
-                initial_nodes: Vec::new(),
-                task: Some("recover this handoff".to_string()),
-            }],
-        }),
-        transport,
-        test_host_config(&backend),
-        runtime_store,
-    )
-    .await;
-    let inbound =
-        enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "start switch").await;
-    store.fail_next_exact_queue_claim();
-
-    let first = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("handoff-crash-window"),
-            ),
-        ))
-        .await
-        .expect_err("the committed handoff remains pending after selection fails");
-    assert_eq!(first.code, lash_core::RuntimeErrorCode::QueuedRunPending);
-    let pending = lash_core::store::QueuedWorkStore::pending_queued_run(
-        store.as_ref(),
-        &SessionId::from("root"),
-    )
-    .await
-    .expect("pending admission")
-    .expect("retained handoff");
-    assert_eq!(pending.position.physical_ordinal, 1);
-    assert_eq!(
-        pending.position.turn_id,
-        TurnId::from("handoff-crash-window:agent-frame:1")
-    );
-
-    let inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(
-        store.as_ref(),
-        &SessionId::from("root"),
-    )
-    .await
-    .expect("list inbound input after switch commit");
-    assert!(
-        inputs
-            .iter()
-            .all(|input| input.input.input_id != inbound.input_id)
-    );
-    let queued = lash_core::store::QueuedWorkStore::list_pending_queued_work(
-        store.as_ref(),
-        &SessionId::from("root"),
-    )
-    .await
-    .expect("list committed handoff");
-    assert_eq!(queued.len(), 1);
-    let expected_frame_id = lash_core::session_graph::frame_node_id(
-        &SessionId::from("root"),
-        lash_core::FrameKey::from_caller_material("recovery-frame")
-            .expect("non-empty caller material")
-            .as_str(),
-    );
-    assert!(matches!(
-        &queued[0].items[0].payload,
-        lash_core::testing::runtime_internals::QueuedWorkPayload::AgentFrameTask { frame_id, task, .. }
-            if frame_id == &expected_frame_id && task == "recover this handoff"
-    ));
-
-    let recovered = runtime
-        .stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            host_queued_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("handoff-crash-window"),
-            ),
-        ))
-        .await
-        .expect("pump recovery succeeds")
-        .ran()
-        .expect("pump runs durable handoff");
-    assert_eq!(recovered.assistant_output.safe_text, "recovered follow-on");
-    assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("queue after recovery")
-        .is_empty()
-    );
-}
-
-#[tokio::test]
 pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_handoff() {
     let backend = memory_backend().await;
     const SESSION_ID: &str = "mid-chain-cancellation";
@@ -539,6 +402,15 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
         .await
         .expect("queue after cancellation")
         .is_empty()
+    );
+    assert!(
+        lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
+            .await
+            .expect("load the head")
+            .expect("head")
+            .pending_follow_on
+            .is_none(),
+        "a cancelled follow-on is its own terminal and clears the fact"
     );
 }
 
@@ -1288,20 +1160,15 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
         1,
         "a lapsed retained lane must not be silently reacquired for the follow-on turn"
     );
-    let pending = lash_core::store::QueuedWorkStore::list_queued_work(
-        store.as_ref(),
-        &SessionId::from("root"),
-    )
-    .await
-    .expect("list committed handoff batch");
-    assert!(
-        pending
-            .iter()
-            .any(|batch| batch.items.iter().any(|item| matches!(
-                item.payload,
-                lash_core::testing::runtime_internals::QueuedWorkPayload::AgentFrameTask { .. }
-            ))),
-        "the loud claim failure must leave the committed handoff batch claimable"
+    assert_eq!(
+        lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
+            .await
+            .expect("load the head")
+            .expect("head")
+            .pending_follow_on
+            .map(|owed| owed.follow_on_turn_id),
+        Some(admitted.position.turn_id.clone()),
+        "the loud lane failure leaves the follow-on owed on the head, for the run to resume"
     );
     let final_lease = lash_core::store::SessionExecutionLeaseStore::get_session_execution_lease(
         store.as_ref(),
@@ -1952,13 +1819,26 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
     .expect("pending admission")
     .expect("terminalization remains pending");
     assert_eq!(pending.position.physical_ordinal, switch_count as u64);
-    let queued = lash_core::store::QueuedWorkStore::list_queued_work(
-        store.as_ref(),
-        &SessionId::from("root"),
-    )
-    .await
-    .expect("list queued work");
-    assert_eq!(queued.len(), 1, "only the uncommitted handoff remains");
+    assert!(
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from("root"),
+        )
+        .await
+        .expect("list queued work")
+        .is_empty(),
+        "a frame handoff is never a queue row"
+    );
+    assert_eq!(
+        lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
+            .await
+            .expect("load the head")
+            .expect("head")
+            .pending_follow_on
+            .map(|owed| owed.follow_on_turn_id),
+        Some(pending.position.turn_id.clone()),
+        "only the uncommitted follow-on remains owed"
+    );
 }
 
 #[tokio::test]

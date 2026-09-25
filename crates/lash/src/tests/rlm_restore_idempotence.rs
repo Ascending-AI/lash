@@ -535,6 +535,49 @@ fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController
     lash_core::testing::runtime_helpers::host_turn_scope(&runtime.host.core, &session_id, turn_id)
 }
 
+/// The switch committed its follow-on onto the session head, so a direct turn
+/// meeting it is held behind it (ADR 0101 §3, FIG-3542); the next drain
+/// recovers the owed follow-on on the reloaded resident state and answers it.
+async fn run_owed_follow_on(
+    runtime: &mut LashRuntime,
+    label: &str,
+    held_turn: &str,
+) -> lash_core::facade_support::AssembledTurn {
+    let held = runtime
+        .run_turn_assembled(
+            TurnInput::text("held behind the follow-on"),
+            tokio_util::sync::CancellationToken::new(),
+            turn_scope(runtime, &TurnId::from(held_turn)),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{label}: the held turn is admitted: {error:?}"));
+    assert!(
+        matches!(held.outcome, TurnOutcome::Queued { .. }),
+        "{label}: a direct turn waits behind the owed follow-on: {:?}",
+        held.outcome
+    );
+    let view = runtime
+        .read_view()
+        .expect("test runtime frame scope resolves");
+    let session_id = SessionId::from(view.session_id());
+    let drain_id = TurnId::from(format!("{held_turn}-drain"));
+    runtime
+        .stream_next_queued_work(lash_core::facade_support::TurnOptions::new(
+            tokio_util::sync::CancellationToken::new(),
+            lash_core::testing::runtime_helpers::host_queued_scope(
+                &runtime.host.core,
+                &session_id,
+                &drain_id,
+            ),
+        ))
+        .await
+        .unwrap_or_else(|error| {
+            panic!("{label}: resident reload on the same frame must succeed: {error:?}")
+        })
+        .ran()
+        .unwrap_or_else(|| panic!("{label}: the drain answers the owed follow-on"))
+}
+
 /// (a) A follow-on turn fails after an agent-frame switch; the next turn must
 /// reload the invalidated resident state on the frame the plugin already
 /// holds and re-bind that frame's projected seed instead of rejecting it.
@@ -589,19 +632,7 @@ async fn follow_on_failure_then_resident_reload(backend: Backend) {
         backend.label
     );
 
-    let run = runtime
-        .run_turn_assembled(
-            TurnInput::text("continue"),
-            tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, &TurnId::from("fig2521-after-reload")),
-        )
-        .await
-        .unwrap_or_else(|error| {
-            panic!(
-                "{}: resident reload on the same frame must succeed: {error:?}",
-                backend.label
-            )
-        });
+    let run = run_owed_follow_on(&mut runtime, backend.label, "fig2521-after-reload").await;
     assert!(
         matches!(run.outcome, TurnOutcome::Finished(_)),
         "{}: {:?}",
@@ -864,19 +895,12 @@ async fn follow_on_failure_discards_the_uncommitted_execution(backend: Backend) 
         backend.label
     );
 
-    let run = runtime
-        .run_turn_assembled(
-            TurnInput::text("read"),
-            tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, &TurnId::from("fig2521-after-follow-on-failure")),
-        )
-        .await
-        .unwrap_or_else(|error| {
-            panic!(
-                "{}: resident reload on the same frame must succeed: {error:?}",
-                backend.label
-            )
-        });
+    let run = run_owed_follow_on(
+        &mut runtime,
+        backend.label,
+        "fig2521-after-follow-on-failure",
+    )
+    .await;
     assert_eq!(script.calls.load(Ordering::SeqCst), 3, "{}", backend.label);
     assert_eq!(
         run.outcome,

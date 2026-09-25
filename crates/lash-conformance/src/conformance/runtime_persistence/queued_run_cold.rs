@@ -197,13 +197,6 @@ pub async fn queued_run_cold_process_driver(
                 .iter()
                 .map(|claim| claim.completion())
                 .collect();
-            advance
-                .enqueued_queue_batches
-                .push(checkpoint_claims::queued_draft(
-                    &session_id,
-                    "outbox-after-first-turn",
-                    DeliveryPolicy::AfterCurrentTurnCommit,
-                ));
             advance.queued_run = Some(Box::new(QueuedRunCommit {
                 scope: admission.scope.clone(),
                 expected_revision: admission.revision,
@@ -211,7 +204,6 @@ pub async fn queued_run_cold_process_driver(
                     position: admission.position.next(&admission.scope).unwrap(),
                     members: Vec::new(),
                     withheld_members: Vec::new(),
-                    include_outbox: true,
                 },
             }));
             let advanced = store.commit_runtime_state(advance.clone()).await.unwrap();
@@ -220,12 +212,7 @@ pub async fn queued_run_cold_process_driver(
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(
-                admission.members,
-                Some(vec![QueuedRunMember::Batch(
-                    advanced.enqueued_queue_batches[0].batch_id.clone()
-                )])
-            );
+            assert_eq!(admission.members, Some(Vec::new()));
             commit = Some(advance);
             receipt = Some(advanced);
             if action == "queued_terminal" {

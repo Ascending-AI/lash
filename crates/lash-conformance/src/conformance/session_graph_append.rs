@@ -479,9 +479,11 @@ async fn append_conformance_runtime(
 ///
 /// Integrator class (ADR 0051): **conformance-suite embedders**.
 pub async fn append_receipt_mixed_usage_envelope(store: Arc<dyn crate::RuntimePersistence>) {
-    lash_core::testing::conformance_support::append_receipt_mixed_usage_envelope_conformance(
-        crate::StoreLawBackend::new().into_backend(),
-        store,
+    Box::pin(
+        lash_core::testing::conformance_support::append_receipt_mixed_usage_envelope_conformance(
+            crate::StoreLawBackend::new().into_backend(),
+            store,
+        ),
     )
     .await;
 }

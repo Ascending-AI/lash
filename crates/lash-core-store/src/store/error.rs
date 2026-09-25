@@ -43,6 +43,41 @@ pub enum StoreError {
     QueuedRunConflict { session_id: crate::SessionId },
     #[error("session {session_id} queued run execution configuration changed")]
     QueuedRunConfigurationChanged { session_id: crate::SessionId },
+    /// A pending follow-on owns the session (ADR 0101 §3, FIG-3542): no other
+    /// turn commits and no other head write changes the fact until the
+    /// follow-on's own terminal commit.
+    #[error(
+        "session {session_id} owes follow-on turn `{follow_on_turn_id}` (recovered {attempts} \
+         times); nothing else commits until it does"
+    )]
+    FollowOnPending {
+        session_id: crate::SessionId,
+        follow_on_turn_id: crate::TurnId,
+        attempts: u32,
+    },
+    /// A head write would leave a pending follow-on whose frame is not the
+    /// head's current frame.
+    #[error(
+        "session {session_id} pending follow-on targets frame `{follow_on_frame_id}` but the \
+         head's current frame is {current_frame_node_id:?}"
+    )]
+    FollowOnFrameNotCurrent {
+        session_id: crate::SessionId,
+        follow_on_frame_id: String,
+        current_frame_node_id: Option<String>,
+    },
+    /// A head write broke the pending follow-on's write rules.
+    #[error("session {session_id} pending follow-on write refused: {reason}")]
+    FollowOnHeadInvariant {
+        session_id: crate::SessionId,
+        reason: String,
+    },
+    /// A recovering drive named a follow-on the head no longer owes.
+    #[error("session {session_id} no longer owes follow-on turn `{follow_on_turn_id}`")]
+    FollowOnNotPending {
+        session_id: crate::SessionId,
+        follow_on_turn_id: crate::TurnId,
+    },
 
     /// Capturing dirty executor state failed before any store commit was
     /// attempted. The current execution must abort, but no publication is
@@ -67,14 +102,14 @@ pub enum StoreError {
     )]
     CommitNodeBudgetExceeded { node_count: usize, max_nodes: usize },
     #[error(
-        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_manifest_bytes}, queue batches: {queue_batch_bytes}, agent frame: {agent_frame_bytes}, usage deltas: {usage_delta_bytes}, durable turn result: {turn_result_bytes})"
+        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_manifest_bytes}, pending follow-on: {follow_on_bytes}, agent frame: {agent_frame_bytes}, usage deltas: {usage_delta_bytes}, durable turn result: {turn_result_bytes})"
     )]
     CommitByteBudgetExceeded {
         session_config_bytes: usize,
         graph_delta_bytes: usize,
         checkpoint_bytes: usize,
         attachment_manifest_bytes: usize,
-        queue_batch_bytes: usize,
+        follow_on_bytes: usize,
         agent_frame_bytes: usize,
         usage_delta_bytes: usize,
         turn_result_bytes: usize,
@@ -807,6 +842,10 @@ impl StoreError {
             Self::SelectedQueuedRunIncomplete { .. } => "SelectedQueuedRunIncomplete",
             Self::QueuedRunConflict { .. } => "QueuedRunConflict",
             Self::QueuedRunConfigurationChanged { .. } => "QueuedRunConfigurationChanged",
+            Self::FollowOnPending { .. } => "FollowOnPending",
+            Self::FollowOnFrameNotCurrent { .. } => "FollowOnFrameNotCurrent",
+            Self::FollowOnHeadInvariant { .. } => "FollowOnHeadInvariant",
+            Self::FollowOnNotPending { .. } => "FollowOnNotPending",
             Self::HeadRevisionConflict { .. } => "HeadRevisionConflict",
             Self::TurnCancelIntentChanged { .. } => "TurnCancelIntentChanged",
             Self::TurnCancelBindingMismatch { .. } => "TurnCancelBindingMismatch",

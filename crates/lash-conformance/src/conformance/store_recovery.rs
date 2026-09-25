@@ -62,16 +62,13 @@ fn owner(id: impl Into<String>) -> crate::LeaseOwnerIdentity {
 }
 
 fn queued_work(session_id: &SessionId, source: &str) -> crate::QueuedWorkBatchDraft {
-    crate::QueuedWorkBatchDraft::new(
+    crate::conformance::helpers::process_wake_work(
         session_id,
+        &format!("{session_id}:{source}"),
+        1,
+        source,
         crate::DeliveryPolicy::EarliestSafeBoundary,
-        crate::TurnWorkPayload::agent_frame_task(
-            crate::session_graph::frame_node_id(session_id, &format!("frame:{source}")),
-            source,
-            None,
-        ),
     )
-    .with_source_key(format!("{session_id}:{source}"))
 }
 
 #[expect(

@@ -14,8 +14,8 @@ use lash_core::{
     facade_support::TraceSinkError, facade_support::TurnStop,
 };
 use lash_sim::oracles::{
-    FrameSwitchCommitObservation, FrameSwitchSeedObservation,
-    frame_switch_follow_on_precedes_pending, frame_switch_outbox_is_atomic, frame_switch_seeds,
+    FrameSwitchCommitObservation, FrameSwitchSeedObservation, frame_switch_follow_on_is_atomic,
+    frame_switch_follow_on_precedes_pending, frame_switch_seeds,
     logical_turn_claims_settle_exactly_once,
 };
 use serde_json::{Value, json};
@@ -402,11 +402,19 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .pending_turn_inputs()
         .await
         .expect("pending inputs at switch commit");
-    let queued_at_commit = session
-        .durable()
-        .queued_work()
-        .await
-        .expect("outbox at switch commit");
+    let head_store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        lash::Backend::session_store_factory(&engine.backend()).as_ref(),
+        &SessionId::from("logical-turn-sim"),
+    )
+    .await
+    .expect("open the sim session store")
+    .expect("the sim session exists");
+    let owed_at_commit =
+        lash_core::store::SessionCommitStore::load_session_head_meta(head_store.as_ref())
+            .await
+            .expect("head at switch commit")
+            .expect("the switch committed a head")
+            .pending_follow_on;
     let inbound_completed = pending_at_commit
         .iter()
         .all(|input| input.input.input_id != first.input_id);
@@ -419,25 +427,18 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
             .expect("non-empty caller material")
             .as_str(),
     );
-    let follow_on_enqueued = queued_at_commit.iter().any(|batch| {
-        batch.items.iter().any(|item| {
-            matches!(
-                &item.payload,
-                lash_core::runtime::QueuedWorkPayload::AgentFrameTask { frame_id, task, .. }
-                    if frame_id.as_str() == expected_frame_id.as_str()
-                        && task == "run seeded follow-on"
-            )
-        })
+    let follow_on_owed = owed_at_commit.is_some_and(|owed| {
+        owed.frame_id.as_str() == expected_frame_id.as_str() && owed.task == "run seeded follow-on"
     });
     assert!(
         second_still_pending,
         "unrelated queued input must remain pending"
     );
     assert!(
-        frame_switch_outbox_is_atomic(&[FrameSwitchCommitObservation {
+        frame_switch_follow_on_is_atomic(&[FrameSwitchCommitObservation {
             turn_id: TurnId::from("first"),
             inbound_claim_completed: inbound_completed,
-            follow_on_enqueued,
+            follow_on_owed,
         }])
         .is_passed()
     );
@@ -1025,6 +1026,34 @@ await control.continue_as({
     );
 }
 
+/// Queued turn work a terminal checkpoint withholds: one process wake.
+fn withheld_wake(session_id: &SessionId) -> lash_core::runtime::QueuedWorkBatchDraft {
+    let process_id = lash_core::runtime::ProcessId::from("withheld-at-terminal");
+    lash_core::runtime::process_wake_batch_draft(lash_core::runtime::ProcessWakeDelivery {
+        version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: "withheld-at-terminal-wake".to_string(),
+        target_session_id: session_id.clone(),
+        process_id: process_id.clone(),
+        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core::runtime::RuntimeInvocation {
+            attribution: lash_core::runtime::RuntimeAttribution::for_session(session_id.as_str()),
+            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
+                process_id,
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core::runtime::QueuedWorkAuthority::default(),
+        input: "work withheld at terminal checkpoint".to_string(),
+        created_at_ms: 1,
+    })
+}
+
 #[tokio::test]
 async fn terminal_checkpoint_withheld_claim_is_traced_once() {
     let engine = sim_engine().await;
@@ -1052,15 +1081,7 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
                             .unwrap()
                             .unwrap();
                         store
-                            .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
-                                &session_id,
-                                lash_core::DeliveryPolicy::EarliestSafeBoundary,
-                                lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                                    lash_core::session_graph::frame_node_id(&session_id, "root"),
-                                    "work withheld at terminal checkpoint",
-                                    None,
-                                ),
-                            ))
+                            .enqueue_queued_work(withheld_wake(&session_id))
                             .await
                             .unwrap();
                     }

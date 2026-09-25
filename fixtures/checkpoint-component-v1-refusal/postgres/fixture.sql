@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 16.15
+-- Dumped from database version 16.15 (Debian 16.15-1.pgdg13+2)
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -170,6 +170,24 @@ CREATE TABLE lash_durable_read_fixture.lash_lashlang_artifacts (
     namespace text NOT NULL,
     artifact_ref text NOT NULL,
     artifact_bytes bytea NOT NULL
+);
+
+
+--
+-- Name: lash_migrations; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_migrations (
+    phase text NOT NULL,
+    migration text NOT NULL,
+    release text NOT NULL,
+    state text NOT NULL,
+    from_version integer,
+    to_version integer NOT NULL,
+    started_at_ms bigint NOT NULL,
+    finished_at_ms bigint,
+    CONSTRAINT ck_lash_migrations_phase CHECK ((phase = ANY (ARRAY['expand'::text, 'backfill'::text, 'contract'::text]))),
+    CONSTRAINT ck_lash_migrations_state CHECK ((state = ANY (ARRAY['running'::text, 'applied'::text])))
 );
 
 
@@ -703,7 +721,8 @@ CREATE TABLE lash_durable_read_fixture.lash_sessions (
     head_revision bigint DEFAULT 0 NOT NULL,
     head_json text NOT NULL,
     checkpoint_ref text,
-    leaf_node_id text
+    leaf_node_id text,
+    pending_follow_on_json text
 );
 
 
@@ -1083,6 +1102,12 @@ INSERT INTO lash_durable_read_fixture.lash_lashlang_artifacts VALUES ('process_e
 
 
 --
+-- Data for Name: lash_migrations; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_node_anchors; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1222,7 +1247,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 133);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 135);
 
 
 --
@@ -1255,7 +1280,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fi
 -- Data for Name: lash_sessions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 3, '{"config": {"model": {"id": "", "limits": {"context_window_tokens": 1}, "variant": "provider_default"}, "prompt": {}, "generation": {}, "provider_id": "", "tool_access": {"mode": "ambient"}, "turn_budget": "unbounded", "config_revision": 0}, "session_id": "durable-read-fixture", "schema_version": 11, "current_frame_node_id": "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940"}', '2434987d35bc0578e36407a67e58ef45fdef8c9e26851eb6e404eca657ed33d2', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9');
+INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 3, '{"config": {"model": {"id": "", "limits": {"context_window_tokens": 1}, "variant": "provider_default"}, "prompt": {}, "generation": {}, "provider_id": "", "tool_access": {"mode": "ambient"}, "turn_budget": "unbounded", "config_revision": 0}, "session_id": "durable-read-fixture", "schema_version": 11, "current_frame_node_id": "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940"}', '2434987d35bc0578e36407a67e58ef45fdef8c9e26851eb6e404eca657ed33d2', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9', NULL);
 
 
 --
@@ -1481,6 +1506,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_graph_nodes
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_lashlang_artifacts
     ADD CONSTRAINT lash_lashlang_artifacts_pkey PRIMARY KEY (namespace, artifact_ref);
+
+
+--
+-- Name: lash_migrations lash_migrations_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_migrations
+    ADD CONSTRAINT lash_migrations_pkey PRIMARY KEY (phase, migration);
 
 
 --

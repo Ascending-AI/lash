@@ -119,6 +119,7 @@ mod attachments_and_queue;
 mod checkpoint_claims;
 mod enqueue_sequence_identity;
 mod leases;
+mod pending_follow_on;
 mod queue_redrive;
 mod queued_run_assignments;
 mod queued_run_cold;
@@ -141,6 +142,7 @@ pub mod runtime_persistence_macro_support {
     pub use super::checkpoint_claims::*;
     pub use super::enqueue_sequence_identity::*;
     pub use super::leases::*;
+    pub use super::pending_follow_on::*;
     pub use super::queue_redrive::*;
     pub use super::queued_run_assignments::*;
     pub use super::queued_run_composition::*;

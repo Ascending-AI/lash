@@ -447,16 +447,6 @@ fn drain_area_witnesses() {
     });
     // W0123: lash::persistence::ProtocolEvent::typed [function]
     let _ = lash::persistence::ProtocolEvent::typed::<()>(String::new(), ());
-    // W0124: lash::persistence::QueuedWorkPayload::AgentFrameTask::protocol_turn_options [field]
-    field_witness(|value: &lash::persistence::QueuedWorkPayload| {
-        if let lash::persistence::QueuedWorkPayload::AgentFrameTask {
-            protocol_turn_options,
-            ..
-        } = value
-        {
-            let _ = protocol_turn_options;
-        }
-    });
     // W0125: lash::persistence::RuntimeSessionState::effective_protocol_turn_options [function]
     let _ = lash::persistence::RuntimeSessionState::effective_protocol_turn_options;
     // W0126: lash::persistence::RuntimeSessionState::protocol_turn_options [field]

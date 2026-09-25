@@ -104,6 +104,8 @@ impl RuntimeErrorCode {
             Self::QueuedRunFailed => Terminal,
             // the admitted configuration differs; nothing changes until the host restores or abandons it.
             Self::QueuedRunConfigurationChanged => Terminal,
+            // a follow-on owns the session; it runs first, then a redrive finds the head free.
+            Self::FollowOnPending => Redrivable,
             // a newer commit moved the head; a redrive reloads it and re-establishes authority.
             Self::StoreCommitSuperseded => Redrivable,
             // the session is gone.

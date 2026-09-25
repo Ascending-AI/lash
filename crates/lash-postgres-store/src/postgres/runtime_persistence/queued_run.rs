@@ -280,7 +280,7 @@ impl PostgresSessionStore {
             QueuedRunProgress::ForgetUnworked if admission.can_forget_unworked() => {}
             _ => return Err(conflict(&fence.session_id)),
         }
-        let next = admission.advance(&settlement, &[])?;
+        let next = admission.advance(&settlement)?;
         if admission.terminal.is_some() {
             return Ok(next);
         }
@@ -356,6 +356,27 @@ impl PostgresSessionStore {
                     .ok_or_else(|| conflict(&fence.session_id))?;
                 if admission.terminal.is_some() {
                     return Err(conflict(&fence.session_id));
+                }
+                // Only the run whose next physical turn is the pending
+                // follow-on selects while one is owed (ADR 0101 §3).
+                if super::claim_support::follow_on_blocks_claim_tx(
+                    tx,
+                    &fence.session_id,
+                    lash_core_execution::store::FollowOnClaim::QueuedRun {
+                        turn_id: &admission.position.turn_id,
+                    },
+                )
+                .await?
+                {
+                    return Ok(SelectedQueuedRun {
+                        admission,
+                        inputs: Vec::new(),
+                        queued: Vec::new(),
+                        already_satisfied: Vec::new(),
+                        refusal: Some(QueuedWorkClaimRefusal::FollowOnPending),
+                        reacquired_inputs: Vec::new(),
+                        reacquired_queued: Vec::new(),
+                    });
                 }
                 if let Some(members) = &admission.members {
                     if &admission.configuration != configuration {

@@ -335,6 +335,33 @@ fn restore_queued_work_claim(path: &Path) {
         .expect("disarm the claim-suppression trigger");
 }
 
+fn backstop_wake(session_id: &SessionId) -> lash_core_execution::ProcessWakeDelivery {
+    let process_id = || lash_core_execution::ProcessId::from("backstop-process");
+    lash_core_execution::ProcessWakeDelivery {
+        version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: "backstop-process-wake-1".to_string(),
+        target_session_id: session_id.clone(),
+        process_id: process_id(),
+        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core_execution::RuntimeInvocation {
+            attribution: lash_core_execution::RuntimeAttribution::for_session(session_id.clone()),
+            subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core_execution::QueuedWorkAuthority::default(),
+        input: "task".to_string(),
+        created_at_ms: 1,
+    }
+}
+
 #[expect(
     clippy::expect_used,
     reason = "test fixture wiring: a failure here is a broken fixture, and panicking names it"
@@ -342,18 +369,8 @@ fn restore_queued_work_claim(path: &Path) {
 async fn enqueue_one(store: &Store, session_id: &SessionId) -> lash_core_execution::BatchId {
     store
         .enqueue_queued_work(
-            lash_core_execution::runtime::QueuedWorkBatchDraft::new(
-                session_id.as_str(),
-                lash_core_execution::runtime::DeliveryPolicy::EarliestSafeBoundary,
-                lash_core_execution::runtime::QueuedWorkBatchPayloads::from(
-                    lash_core_execution::runtime::TurnWorkPayload::agent_frame_task(
-                        lash_core_execution::facade_support::frame_node_id(session_id, "frame"),
-                        "task",
-                        None,
-                    ),
-                ),
-            )
-            .with_merge_key("backstop"),
+            lash_core_execution::runtime::process_wake_batch_draft(backstop_wake(session_id))
+                .with_merge_key("backstop"),
         )
         .await
         .expect("enqueue the backstop batch")

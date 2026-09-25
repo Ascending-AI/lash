@@ -207,7 +207,6 @@ pub async fn session_store_factory_retains_assigned_input_tombstone(
                 .expect("next position"),
             members: selected.admission.members.expect("initial selection"),
             withheld_members: Vec::new(),
-            include_outbox: false,
         },
     }));
     store

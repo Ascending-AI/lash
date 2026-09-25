@@ -1465,8 +1465,7 @@ pub(super) fn queued_work_payload_cannot_encode_persisted_turn_input() {
         payload: &lash_core::testing::runtime_internals::QueuedWorkPayload,
     ) -> lash_core::store::QueuedWorkClass {
         match payload {
-            lash_core::testing::runtime_internals::QueuedWorkPayload::ProcessWake { .. }
-            | lash_core::testing::runtime_internals::QueuedWorkPayload::AgentFrameTask { .. } => {
+            lash_core::testing::runtime_internals::QueuedWorkPayload::ProcessWake { .. } => {
                 lash_core::store::QueuedWorkClass::TurnWork
             }
             lash_core::testing::runtime_internals::QueuedWorkPayload::SessionCommand { .. } => {

@@ -518,7 +518,7 @@ mod tests {
                 graph_delta_bytes: 2,
                 checkpoint_bytes: 3,
                 attachment_manifest_bytes: 5,
-                queue_batch_bytes: 0,
+                follow_on_bytes: 0,
                 agent_frame_bytes: 0,
                 usage_delta_bytes: 0,
                 turn_result_bytes: 0,

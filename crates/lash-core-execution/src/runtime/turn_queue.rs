@@ -30,6 +30,7 @@ pub struct QueuedWorkBatchingConfig {
     max_rows: std::num::NonZeroUsize,
     max_pending_age: std::time::Duration,
     max_turn_input_claim: std::num::NonZeroUsize,
+    max_follow_on_recoveries: u32,
     /// `None` selects the documented Lash default,
     /// [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime), so the
     /// configuration stays `const`-constructible.
@@ -48,6 +49,7 @@ impl PartialEq for QueuedWorkBatchingConfig {
             && self.max_rows == other.max_rows
             && self.max_pending_age == other.max_pending_age
             && self.max_turn_input_claim == other.max_turn_input_claim
+            && self.max_follow_on_recoveries == other.max_follow_on_recoveries
             && std::sync::Arc::ptr_eq(&self.drain_policy(), &other.drain_policy())
     }
 }
@@ -92,8 +94,23 @@ impl QueuedWorkBatchingConfig {
             max_pending_age: Self::DEFAULT_MAX_PENDING_AGE,
             max_turn_input_claim: std::num::NonZeroUsize::new(Self::DEFAULT_MAX_TURN_INPUT_CLAIM)
                 .expect("default turn-input claim bound is non-zero"),
+            max_follow_on_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             drain_policy: None,
         }
+    }
+
+    /// Sets how many times a drive may recover a pending follow-on before the
+    /// follow-on commits as a failed turn carrying
+    /// `FollowOnRecoveryExhausted` (ADR 0101 §3). The count is never reset.
+    pub const fn with_max_follow_on_recoveries(mut self, max_follow_on_recoveries: u32) -> Self {
+        self.max_follow_on_recoveries = max_follow_on_recoveries;
+        self
+    }
+
+    /// The pending follow-on recovery bound (default
+    /// [`DEFAULT_MAX_FOLLOW_ON_RECOVERIES`](crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES)).
+    pub const fn max_follow_on_recoveries(&self) -> u32 {
+        self.max_follow_on_recoveries
     }
 
     /// Selects one of the two shipped drain shapes.
@@ -251,6 +268,32 @@ mod wire_tests {
 mod typed_payload_tests {
     use super::*;
 
+    fn wake(sequence: u64) -> crate::ProcessWakeDelivery {
+        crate::ProcessWakeDelivery {
+            version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            wake_id: format!("process-1-wake-{sequence}"),
+            target_session_id: SessionId::from("s"),
+            process_id: crate::ProcessId::from("process-1"),
+            process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+            sequence,
+            event_type: "process.wake".to_string(),
+            event_invocation: crate::RuntimeInvocation {
+                attribution: crate::RuntimeAttribution::for_session("s"),
+                subject: crate::RuntimeSubject::ProcessEvent {
+                    process_id: crate::ProcessId::from("process-1"),
+                    sequence,
+                    event_type: "process.wake".to_string(),
+                },
+                caused_by: None,
+                replay: None,
+            },
+            process_caused_by: None,
+            authority: crate::QueuedWorkAuthority::default(),
+            input: "task".to_string(),
+            created_at_ms: 1,
+        }
+    }
+
     #[test]
     fn queued_work_typed_payloads_preserve_command_wire_shape() {
         let draft = QueuedWorkBatchDraft::new(
@@ -273,12 +316,7 @@ mod typed_payload_tests {
     #[test]
     fn queued_work_typed_payloads_reject_empty_mixed_and_multiple_commands() {
         let command = serde_json::json!({"type": "session_command", "command": {"kind": "refresh_tool_catalog", "reason": "refresh"}});
-        let turn = serde_json::to_value(QueuedWorkPayload::agent_frame_task(
-            crate::facade_support::frame_node_id(&SessionId::from("s"), "f"),
-            "task",
-            None,
-        ))
-        .unwrap();
+        let turn = serde_json::to_value(QueuedWorkPayload::process_wake(wake(1))).unwrap();
         for payloads in [
             serde_json::json!([]),
             serde_json::json!([command.clone(), turn.clone()]),
@@ -309,18 +347,8 @@ mod typed_payload_tests {
         let command = SessionCommand::RefreshToolCatalog {
             reason: "wire-pin".into(),
         };
-        let turn = QueuedWorkPayload::agent_frame_task(
-            crate::facade_support::frame_node_id(&SessionId::from("s"), "f"),
-            "task",
-            None,
-        );
-        let turn_work = || {
-            TurnWorkPayload::agent_frame_task(
-                crate::facade_support::frame_node_id(&SessionId::from("s"), "f"),
-                "task",
-                None,
-            )
-        };
+        let turn = QueuedWorkPayload::process_wake(wake(1));
+        let turn_work = || TurnWorkPayload::process_wake(wake(1));
         let mut command_draft =
             QueuedWorkBatchDraft::new("s", DeliveryPolicy::EarliestSafeBoundary, command.clone());
         command_draft.source_key = Some("source".into());

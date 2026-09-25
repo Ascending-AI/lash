@@ -268,7 +268,7 @@ pub struct RuntimeCommitBudgetMeasurement {
     pub checkpoint_bytes: usize,
     /// Raw UTF-8 byte length of the committed attachment ids.
     pub attachment_manifest_bytes: usize,
-    pub queue_batch_bytes: usize,
+    pub follow_on_bytes: usize,
     /// Persisted JSON encoding of the selected Agent Frame identity.
     pub agent_frame_bytes: usize,
     pub usage_delta_bytes: usize,
@@ -292,7 +292,7 @@ pub fn measure_runtime_commit_budget(
         graph_delta_bytes: measurement.graph_delta_bytes,
         checkpoint_bytes: measurement.checkpoint_bytes,
         attachment_manifest_bytes: measurement.attachment_manifest_bytes,
-        queue_batch_bytes: measurement.queue_batch_bytes,
+        follow_on_bytes: measurement.follow_on_bytes,
         agent_frame_bytes: measurement.agent_frame_bytes,
         usage_delta_bytes: measurement.usage_delta_bytes,
         turn_result_bytes: measurement.turn_result_bytes,

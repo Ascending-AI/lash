@@ -90,6 +90,16 @@ impl QueuedWorkStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+        if super::claim_support::follow_on_blocks_claim_tx(
+            &mut tx,
+            session_id,
+            lash_core_execution::store::FollowOnClaim::Idle,
+        )
+        .await?
+        {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(None);
+        }
         // The fence is validated live, so its fencing token is the
         // currently-live session-lease generation; claims pin it and are
         // claimable only across a different generation (ADR 0029).
@@ -154,6 +164,18 @@ impl QueuedWorkStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+        if super::claim_support::follow_on_blocks_claim_tx(
+            &mut tx,
+            session_id,
+            lash_core_execution::store::FollowOnClaim::Idle,
+        )
+        .await?
+        {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(QueuedWorkClaimOutcome::Refused(
+                QueuedWorkClaimRefusal::FollowOnPending,
+            ));
+        }
         let generation = session_execution_lease.fencing_token;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let (selected_rows, mut selected_batches, candidates) =
@@ -264,6 +286,16 @@ impl QueuedWorkStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+        if super::claim_support::follow_on_blocks_claim_tx(
+            &mut tx,
+            session_id,
+            lash_core_execution::store::FollowOnClaim::Checkpoint { turn_id },
+        )
+        .await?
+        {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok((None, None));
+        }
         let input = claim_pending_turn_inputs_postgres_tx(
             &mut tx,
             session_id,
@@ -332,6 +364,19 @@ impl QueuedWorkStore for PostgresSessionStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
+        if super::claim_support::follow_on_blocks_claim_tx(
+            &mut tx,
+            session_id,
+            lash_core_execution::store::FollowOnClaim::Idle,
+        )
+        .await?
+        {
+            tx.rollback().await.map_err(store_sqlx_error)?;
+            return Ok(lash_core_execution::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                Vec::new(),
+            ));
+        }
         let result = claim_selected_queued_work_postgres_tx(
             &mut tx,
             session_id,

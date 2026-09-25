@@ -90,8 +90,8 @@ pub const GENERATED_FINAL_VALUE_ORACLE: &str =
 pub const FRAME_SWITCH_SEED_ORACLE: &str = "sim.oracle.frame-switch-seed.v1";
 pub const LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE: &str =
     "sim.oracle.logical-turn-claim-exactly-once.v1";
-pub const FRAME_SWITCH_OUTBOX_ATOMICITY_ORACLE: &str =
-    "sim.oracle.frame-switch-outbox-atomicity.v1";
+pub const FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE: &str =
+    "sim.oracle.frame-switch-follow-on-atomicity.v1";
 pub const FRAME_SWITCH_ORDERING_ORACLE: &str = "sim.oracle.frame-switch-ordering.v1";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -105,7 +105,8 @@ pub struct FrameSwitchSeedObservation {
 pub struct FrameSwitchCommitObservation {
     pub turn_id: TurnId,
     pub inbound_claim_completed: bool,
-    pub follow_on_enqueued: bool,
+    /// Whether the head owed the follow-on once the switch commit was visible.
+    pub follow_on_owed: bool,
 }
 
 mod agent_contracts;
@@ -126,7 +127,7 @@ use agent_contracts::*;
 use contract_facts::*;
 use frame_switch::*;
 pub use frame_switch::{
-    frame_switch_follow_on_precedes_pending, frame_switch_outbox_is_atomic, frame_switch_seeds,
+    frame_switch_follow_on_is_atomic, frame_switch_follow_on_precedes_pending, frame_switch_seeds,
     generated_final_value_semantic_channel, generated_suspend_resume,
     logical_turn_claims_settle_exactly_once,
 };

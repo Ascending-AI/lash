@@ -106,6 +106,13 @@ impl QueuedWorkStore for Store {
                         &session_execution_lease,
                         now,
                     )?;
+                    if super::claim_support::follow_on_blocks_claim_conn(
+                        tx,
+                        &session_id,
+                        lash_core_execution::store::FollowOnClaim::Idle,
+                    )? {
+                        return Ok(TxOutcome::Commit(None));
+                    }
                     // The fence is validated live, so its fencing token is the
                     // currently-live session-lease generation; claims pin it and
                     // are claimable only across a different generation (ADR 0029).
@@ -173,6 +180,15 @@ impl QueuedWorkStore for Store {
                         &session_execution_lease,
                         now,
                     )?;
+                    if super::claim_support::follow_on_blocks_claim_conn(
+                        tx,
+                        &session_id,
+                        lash_core_execution::store::FollowOnClaim::Idle,
+                    )? {
+                        return Ok(TxOutcome::Commit(QueuedWorkClaimOutcome::Refused(
+                            QueuedWorkClaimRefusal::FollowOnPending,
+                        )));
+                    }
                     let generation = session_execution_lease.fencing_token;
                     let (candidate_rows, candidate_batches, candidates) =
                         scan_queued_work_candidates_sqlite(
@@ -302,6 +318,13 @@ impl QueuedWorkStore for Store {
                         &session_execution_lease,
                         now,
                     )?;
+                    if super::claim_support::follow_on_blocks_claim_conn(
+                        tx,
+                        &session_id,
+                        lash_core_execution::store::FollowOnClaim::Checkpoint { turn_id: &turn_id },
+                    )? {
+                        return Ok(TxOutcome::Commit((None, None)));
+                    }
                     let input = claim_pending_turn_inputs_sqlite_conn(
                         tx,
                         now,
@@ -372,16 +395,26 @@ impl QueuedWorkStore for Store {
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome = claim_selected_queued_work_sqlite_conn(
+                let outcome = super::claim_support::follow_on_blocks_claim_conn(
                     tx,
-                    now,
                     &session_id,
-                    &fence,
-                    &owner,
-                    boundary,
-                    &batch_ids,
-                    policy,
-                );
+                    lash_core_execution::store::FollowOnClaim::Idle,
+                )
+                .and_then(|blocked| {
+                    if blocked {
+                        return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
+                    }
+                    claim_selected_queued_work_sqlite_conn(
+                        tx,
+                        now,
+                        &session_id,
+                        &fence,
+                        &owner,
+                        boundary,
+                        &batch_ids,
+                        policy,
+                    )
+                });
                 match outcome {
                     Ok(value) if value.claim.is_some() => Ok(TxOutcome::Commit(Ok(value))),
                     Ok(value) => Ok(TxOutcome::Rollback(Ok(value))),

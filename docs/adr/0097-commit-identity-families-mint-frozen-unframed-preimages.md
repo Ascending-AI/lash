@@ -2,9 +2,10 @@
 
 Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) changes the
 `lash.intent` typed payload at its reject-and-recreate cutover. The two
-completed-claim lists become one, `enqueued_queue_batches` is removed, and the
-pending follow-on (a session-head field) takes its place; the config carries
-`config_revision`. The serializer, the unframed grammar and the domain label are
+completed-claim lists become one and the config carries `config_revision`.
+Implemented ahead of it (FIG-3542): `enqueued_queue_batches` is removed, and the
+pending follow-on (a session-head field, present only when the commit leaves
+one) takes its place. The serializer, the unframed grammar and the domain label are
 unchanged, as in the append-message generation 5 cutover below.
 
 Lash has two coordinated durable-identity registries. `BLAKE3_DOMAINS`

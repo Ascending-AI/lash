@@ -88,6 +88,23 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "follow_on_crash_replay__test",
+    crate_features = [],
+    crate_name = "follow_on_crash_replay",
+    crate_root = "tests/follow_on_crash_replay.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "follow_on_crash_replay", "//crates/lash-restate-test:follow_on_crash_replay__test"),
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "process_crash_replay__test",
     crate_features = [],
     crate_name = "process_crash_replay",
@@ -215,6 +232,7 @@ lash_batch_test(
     tests = [
         ":admission_invariant__test",
         ":drop__test",
+        ":follow_on_crash_replay__test",
         ":lash-restate-test__unit_test",
         ":process_crash_replay__test",
         ":server_semantics__test",

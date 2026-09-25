@@ -48,7 +48,7 @@ fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommit
         realized_node_timestamps: Vec::new(),
         committed_usage_delta_identities: Vec::new(),
         failure_evidence: Vec::new(),
-        enqueued_queue_batches: Vec::new(),
+        pending_follow_on: None,
         turn_input_applications: Vec::new(),
         turn_cancel_input_outcome: Default::default(),
         receipt_replayed: false,

@@ -169,8 +169,20 @@ lash_store_sql::statements! {
     /// the fork and there is nothing to share.
     pub(crate) struct SessionHeadStatements @ "session_head" {
         /// The published head of `?1`.
-        select_meta = "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+        select_meta = "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref,
+                    pending_follow_on_json
              FROM session_head WHERE session_id = ?1";
+
+        /// The follow-on `?1`'s head owes (ADR 0101 §3), read by every claim
+        /// inside its write transaction.
+        select_pending_follow_on = "SELECT pending_follow_on_json FROM session_head WHERE session_id = ?1";
+
+        /// Raise `?1`'s pending follow-on to `?2`, only while the head still
+        /// owes the follow-on `?3` (the recovery bound's fenced write). The
+        /// head revision does not move.
+        raise_pending_follow_on = "UPDATE session_head SET pending_follow_on_json = ?2
+             WHERE session_id = ?1
+               AND json_extract(pending_follow_on_json, '$.follow_on_turn_id') = ?3";
 
         /// The published revision of `?1`, read inside the write transaction
         /// so the commit's head verdict decides over what is actually stored.
@@ -194,8 +206,9 @@ lash_store_sql::statements! {
         /// database-wide single-writer lock — and re-read under the same lock
         /// before the shared head verdict authorized this write.
         upsert = "INSERT OR REPLACE INTO session_head
-                         (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-                         VALUES (?1, ?2, ?3, ?4, ?5)";
+                         (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref,
+                          pending_follow_on_json)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 
         insert_fork = "INSERT INTO session_head
                  (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
