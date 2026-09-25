@@ -81,7 +81,7 @@ fn coercing_operand_count(chunk: &Chunk, instruction: Instruction) -> Option<usi
 /// The callee operand of a call instruction's operand window, when the
 /// instruction is a call: `[function, args..]`, `[receiver, function,
 /// args..]`, `[function, arguments]` or `[receiver, function, arguments]`.
-fn call_coercion_callee<'w>(instruction: Instruction, window: &'w [Value]) -> Option<&'w Value> {
+fn call_coercion_callee(instruction: Instruction, window: &[Value]) -> Option<&Value> {
     match instruction {
         Instruction::Call { .. } | Instruction::CallDynamic => window.first(),
         Instruction::CallMethod { .. } | Instruction::CallMethodDynamic => window.get(1),
