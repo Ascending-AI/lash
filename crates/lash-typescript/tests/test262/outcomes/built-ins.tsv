@@ -7013,7 +7013,7 @@ test/built-ins/Object/getOwnPropertyNames/15.2.3.4-1.js	refused	TS_METHOD_UNSUPP
 test/built-ins/Object/getOwnPropertyNames/15.2.3.4-2-1.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Object/getOwnPropertyNames/15.2.3.4-2-2.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Object/getOwnPropertyNames/15.2.3.4-2-3.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Object/getOwnPropertyNames/15.2.3.4-2-4.js	refused	TS_UNKNOWN_BINDING
+test/built-ins/Object/getOwnPropertyNames/15.2.3.4-2-4.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Object/getOwnPropertyNames/15.2.3.4-3-1.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-1.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-2.js	refused	TS_METHOD_UNSUPPORTED
@@ -10552,10 +10552,10 @@ test/built-ins/eval/name.js	pass	-
 test/built-ins/eval/no-construct.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/eval/no-proto.js	pass	-
 test/built-ins/eval/prop-desc.js	refused	TS_THIS_UNSUPPORTED
-test/built-ins/global/10.2.1.1.3-4-16-s.js	refused	TS_UNKNOWN_BINDING
-test/built-ins/global/10.2.1.1.3-4-18-s.js	refused	TS_UNKNOWN_BINDING
-test/built-ins/global/10.2.1.1.3-4-22.js	refused	TS_UNKNOWN_BINDING
-test/built-ins/global/10.2.1.1.3-4-27.js	refused	TS_UNKNOWN_BINDING
+test/built-ins/global/10.2.1.1.3-4-16-s.js	pass	-
+test/built-ins/global/10.2.1.1.3-4-18-s.js	pass	-
+test/built-ins/global/10.2.1.1.3-4-22.js	pass	-
+test/built-ins/global/10.2.1.1.3-4-27.js	pass	-
 test/built-ins/global/S10.2.3_A1.1_T1.js	pass	-
 test/built-ins/global/S10.2.3_A1.1_T2.js	pass	-
 test/built-ins/global/S10.2.3_A1.1_T3.js	pass	-

@@ -19,6 +19,17 @@ impl Lowerer {
     ) -> Result<AssignTarget, Diagnostic> {
         match target {
             TsAssignTarget::Ident(name) | TsAssignTarget::ParenIdent(name) => {
+                // `eval` and `arguments` are never simple assignment
+                // targets in strict code: ECMA-262 makes it an early
+                // SyntaxError, which the parser misses only where the name
+                // sits inside a destructuring pattern.
+                if matches!(name.as_str(), "eval" | "arguments") {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::SyntaxError,
+                        format!("`{name}` cannot be an assignment target in strict mode"),
+                        None,
+                    ));
+                }
                 let Some(binding) = self
                     .scopes
                     .iter()
@@ -153,6 +164,10 @@ impl Lowerer {
             && is_javascript_builtin_global(owner)
             && !self.has_binding(owner)
         {
+            // A boundary dropped the name for holding a function: a member
+            // read is refused by name rather than answered from a fresh
+            // built-in.
+            self.refuse_expired_global_read(owner)?;
             let name = match property {
                 MemberProperty::Field(field) => field.as_str(),
                 MemberProperty::Index(_) => "",

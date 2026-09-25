@@ -223,7 +223,43 @@ fn lower_pass(
     }
     lowerer.scopes.push(ambient_scope);
     lowerer.scopes.push(Scope::default());
-    let expressions = lowerer.lower_statements(&program.statements, true)?;
+    // A bare write to an advertised built-in (`Object = x`, `Math ??= y`,
+    // `for (JSON of xs)`, `{ n: Number } = now`) lands on the global
+    // property the name spells: the cell binds it as a session slot ahead
+    // of lowering and, where the session holds no value for it yet, seeds
+    // the built-in object the name answered before any write — so a read
+    // anywhere in the program, inside a function included, sees ECMA's
+    // value. A `let`/`const`/`function`/`enum` of the same name at the top
+    // level shadows the property and keeps its own binding; a `var`
+    // deliberately binds through the property itself.
+    let root_declared = super::binding::root_declaration_names(&program.statements);
+    let mut seeds = Vec::new();
+    for name in super::binding::builtin_global_writes(&program.statements) {
+        if !root_declared.contains(&name) && lowerer.ensure_global_binding(&name)? {
+            seeds.push(name);
+        }
+    }
+    let mut expressions = seeds
+        .into_iter()
+        .map(|name| LashExpr::If {
+            condition: Box::new(super::constructs::js_unary(
+                lashlang::JavaScriptUnaryOp::Not,
+                LashExpr::BuiltinCall {
+                    name: "__typescript_global_has".into(),
+                    args: vec![LashExpr::String(name.clone().into())],
+                },
+            )),
+            then_block: Box::new(LashExpr::Assign {
+                target: lashlang::AssignTarget::variable(name.as_str().into()),
+                expr: Box::new(Lowerer::stdlib_call(
+                    "Lash.Builtin",
+                    vec![LashExpr::String(name.into())],
+                )),
+            }),
+            else_block: Box::new(LashExpr::Undefined),
+        })
+        .collect::<Vec<_>>();
+    expressions.extend(lowerer.lower_statements(&program.statements, true)?);
     Ok((lowerer, LashExpr::Block(expressions)))
 }
 

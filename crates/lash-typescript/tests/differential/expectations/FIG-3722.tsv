@@ -1,0 +1,22 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3722	1	accept	"JSON === JSON"	"true"	-
+FIG-3722	2	accept	"Object.is(Math, Math)"	"true"	-
+FIG-3722	3	accept	"Math.max === Math.max"	"true"	-
+FIG-3722	4	accept	"[].constructor === Array"	"true"	-
+FIG-3722	5	accept	"Array.isArray(Math)"	"false"	-
+FIG-3722	6	accept	"typeof Object === 'function' && typeof Math === 'object'"	"true"	-
+FIG-3722	7	accept	"(() => { const o = JSON; return o === JSON && Object.is(o, JSON); })()"	"true"	-
+FIG-3722	8	accept	"(() => { const keep = Object; Object = 12; const read = Object === 12 && typeof Object === 'number'; Object = keep; return read && Object === keep; })()"	"true"	-
+FIG-3722	9	accept	"(() => { const keep = Object; Object = 8; const read = globalThis.Object === 8; Object = keep; return read; })()"	"true"	-
+FIG-3722	10	accept	"(() => { const keep = Object; const read = () => Object; Object = 5; const r = read() === 5; Object = keep; return r; })()"	"true"	-
+FIG-3722	11	accept	"(() => { const keep = Number; const w = (v) => { Number = v; }; w(7); const read = Number === 7; Number = keep; return read && typeof Number === 'function'; })()"	"true"	-
+FIG-3722	12	accept	"(() => { Object ??= 9; return typeof Object === 'function' && Array.isArray([]); })()"	"true"	-
+FIG-3722	13	accept	"(() => { const keep = Number; ({ n: Number } = { n: 9 }); const r = Number === 9; Number = keep; return r; })()"	"true"	-
+FIG-3722	14	accept	"(() => { const keep = Map; for (Map of [4]) {} const r = Map === 4; Map = keep; return r; })()"	"true"	-
+FIG-3722	15	accept	"(() => { const keep = Set; [Set] = [6]; const r = Set === 6; Set = keep; return r; })()"	"true"	-
+FIG-3722	16	accept	"(() => { const keep = Object; Object = 9; const r = 'Object' in globalThis; Object = keep; return r; })()"	"true"	-
+FIG-3722	17	accept	"(() => { try { NaN = 12; return 'no'; } catch (e) { return e.name; } })()"	"TypeError"	-
+FIG-3722	18	accept	"(() => { try { undefined = 12; return 'no'; } catch (e) { return e.name; } })()"	"TypeError"	-
+FIG-3722	19	accept	"(() => { try { Infinity = 12; return 'no'; } catch (e) { return e.name; } })()"	"TypeError"	-
+FIG-3722	20	reject	"(() => { eval = 1; return eval; })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+FIG-3722	21	reject	"(() => { ({ x: arguments } = { x: 1 }); return arguments; })()"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR

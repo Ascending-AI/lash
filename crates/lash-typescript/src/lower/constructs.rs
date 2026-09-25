@@ -1079,6 +1079,10 @@ impl Lowerer {
                 None,
             ));
         }
+        // A boundary dropped the name for holding a function: `x instanceof
+        // Name` is refused by name rather than answered from a fresh
+        // built-in.
+        self.refuse_expired_global_read(constructor)?;
         match constructor.as_str() {
             "Array" => Ok(Self::stdlib_call(
                 "Array.isArray",

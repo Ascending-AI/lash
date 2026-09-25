@@ -268,6 +268,42 @@ impl Lowerer {
             })),
         ])))
     }
+
+    /// A bare write to `NaN`, `undefined`, or `Infinity` — the global
+    /// object's non-writable value properties. Strict code evaluates the
+    /// right-hand side and then throws the `TypeError` the non-writable
+    /// global property raises, exactly as Node does.
+    pub(super) fn builtin_global_constant_write(
+        &mut self,
+        target: &TsAssignTarget,
+        value: &Expr,
+    ) -> Result<Option<LashExpr>, Diagnostic> {
+        let (TsAssignTarget::Ident(name) | TsAssignTarget::ParenIdent(name)) = target else {
+            return Ok(None);
+        };
+        if !matches!(name.as_str(), "NaN" | "undefined" | "Infinity") || self.has_binding(name) {
+            return Ok(None);
+        }
+        let ignored = self.temporary("constant_write_value");
+        Ok(Some(LashExpr::Block(vec![
+            LashExpr::Assign {
+                target: AssignTarget::variable(ignored.into()),
+                expr: Box::new(self.lower_expr(value)?),
+            },
+            LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
+                name: "__typescript_heap_new".into(),
+                args: vec![
+                    LashExpr::String("TypeError".into()),
+                    LashExpr::String(
+                        format!(
+                            "Cannot assign to read only property '{name}' of object '#<Object>'"
+                        )
+                        .into(),
+                    ),
+                ],
+            })),
+        ])))
+    }
 }
 
 /// The value of a built-in's non-writable numeric constant.

@@ -6649,12 +6649,12 @@ test/language/statements/for-of/dstr/obj-id-init-fn-name-fn.js	pass	-
 test/language/statements/for-of/dstr/obj-id-init-in.js	pass	-
 test/language/statements/for-of/dstr/obj-id-init-let.js	refused	TS_TEMPORAL_DEAD_ZONE
 test/language/statements/for-of/dstr/obj-id-init-order.js	pass	-
-test/language/statements/for-of/dstr/obj-id-init-simple-strict.js	refused	TS_UNKNOWN_BINDING
+test/language/statements/for-of/dstr/obj-id-init-simple-strict.js	pass	-
 test/language/statements/for-of/dstr/obj-id-init-yield-ident-invalid.js	pass	-
 test/language/statements/for-of/dstr/obj-id-put-const.js	refused	TS_ASSIGN_CONST
 test/language/statements/for-of/dstr/obj-id-put-let.js	refused	TS_TEMPORAL_DEAD_ZONE
 test/language/statements/for-of/dstr/obj-id-put-unresolvable-strict.js	refused	TS_UNKNOWN_BINDING
-test/language/statements/for-of/dstr/obj-id-simple-strict.js	refused	TS_UNKNOWN_BINDING
+test/language/statements/for-of/dstr/obj-id-simple-strict.js	pass	-
 test/language/statements/for-of/dstr/obj-prop-elem-init-assignment-missing.js	pass	-
 test/language/statements/for-of/dstr/obj-prop-elem-init-assignment-null.js	pass	-
 test/language/statements/for-of/dstr/obj-prop-elem-init-assignment-truthy.js	pass	-
