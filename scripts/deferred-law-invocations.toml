@@ -115,6 +115,22 @@ ticket = "FIG-3561"
 reason = "moved from active to parked by #2166: on main the trace law always drove the deleted native controller, so this leg never traced Restate; on its own controller the recording context cannot host the reference turn's effect group, and the crash laws run outside any handler, so the server double cannot host them until they run through a handler turn runner"
 
 [[deferred]]
+file = "crates/lash-restate/src/tests/turn_crash_on_the_double.rs"
+claimant = "lash_restate::tests::turn_crash_on_the_double"
+suite = "turn_crash_generation_redrive_tests"
+recipe = "parked"
+ticket = "FIG-3672"
+reason = "the redrive of a pre-cutover turn is refused before any effect, but the refused execution returns where the crashed execution's journal holds its next command, so Restate reports a journal mismatch and retries the invocation instead of ending it"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/turn_crash_on_the_double.rs"
+claimant = "lash_restate::tests::turn_crash_on_the_double"
+suite = "turn_crash_cancel_closure_tests"
+recipe = "parked"
+ticket = "FIG-3672"
+reason = "seven of the eight closure cuts recover; a crash inside the store write that applies the input effects and consumes the authorization leaves it committed but unjournaled, and the redrive, reading the committed state, diverges from its journal"
+
+[[deferred]]
 file = "crates/lash-postgres-store/tests/conformance/effect_host.rs"
 claimant = "conformance::effect_host"
 suite = "effect_group_close_race_tests"

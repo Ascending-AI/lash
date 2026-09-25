@@ -615,6 +615,25 @@ impl LiveConformanceHarness {
         Arc::new(self.stores.clone())
     }
 
+    /// A maker of fresh, unbound conformance handles on this endpoint's
+    /// session catalog: the store a crash law's runtime commits through and
+    /// the law reads and stamps back, over the same database the endpoint's
+    /// handlers read.
+    pub(super) fn law_persistence(
+        &self,
+    ) -> impl Fn(&str) -> Arc<lash_sqlite_store::Store> + Send + Sync + 'static + use<> {
+        let stores = self.stores.clone();
+        move |_scenario| {
+            let stores = stores.clone();
+            Arc::new(super::conformance_and_poison::sync_await(async move {
+                stores
+                    .open_store()
+                    .await
+                    .expect("open a conformance handle on the endpoint's session catalog")
+            }))
+        }
+    }
+
     /// A maker of session-store factories over this endpoint's store set.
     pub(super) fn session_catalog_factory(
         &self,

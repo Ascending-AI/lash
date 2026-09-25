@@ -9,6 +9,34 @@
 //! controller the turn runs on — the host's own on the in-process tiers, a
 //! handler-bound one on Restate — so one law body states the contract on
 //! every tier.
+//!
+//! # Crashing a turn
+//!
+//! A crash law picks *where* a turn dies; the runner owns *how* it dies and is
+//! recovered, with the tier's own mechanism. Three ways to name the point, each
+//! crossed with any runner:
+//!
+//! - **A panic inside the attempt**
+//!   ([`ConformanceTurnRunner::run_crashed_then_redriven_turn`]): the attempt
+//!   itself panics before its turn commits, at a point it reaches in its own
+//!   task.
+//! - **A trigger fired from outside the attempt**
+//!   ([`ConformanceTurnRunner::run_turn_until_crash`] with a
+//!   [`ConformanceCrash`]): the law parks the turn at any point it observes — a
+//!   seam of the crash matrix's `SeamControl`, a store write, a journal entry —
+//!   and fires the trigger. The runner then kills the execution where it
+//!   stands, the way the process running it dies, and leaves the turn open.
+//!   The law can inspect or change durable state before its next
+//!   [`ConformanceTurnRunner::run_turn`] of the same scope, which is the tier's
+//!   recovery of the crashed turn.
+//! - **A journal cut**
+//!   ([`ConformanceTurnRunner::run_cut_then_redriven_turn`]): the tier cuts the
+//!   attempt at an effect named by its replay key.
+//!
+//! The recovery is the tier's own. In process it is a fresh driver over the
+//! same host and store. On Restate it is a redelivery of the same invocation,
+//! which replays the journal the crashed execution left. The law asserts only
+//! the outcome both must reach.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -78,6 +106,39 @@ pub enum JournalCutPoint {
     BeforeEffect,
 }
 
+/// The instant a crash law kills a turn's execution: fired from outside the
+/// attempt, at a point the law chose (see the module docs).
+///
+/// Cloning shares the trigger, and it fires once. Every execution of the
+/// crashing attempt races the same trigger, because Restate may run an
+/// attempt more than once before it dies.
+#[derive(Clone, Debug, Default)]
+pub struct ConformanceCrash {
+    fired: tokio_util::sync::CancellationToken,
+}
+
+impl ConformanceCrash {
+    /// A trigger that has not fired.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Kill the execution the trigger was handed to.
+    pub fn fire(&self) {
+        self.fired.cancel();
+    }
+
+    /// Whether the trigger fired.
+    pub fn has_fired(&self) -> bool {
+        self.fired.is_cancelled()
+    }
+
+    /// Resolves once the trigger fires.
+    pub async fn fired(&self) {
+        self.fired.cancelled().await;
+    }
+}
+
 /// Runs a [`ConformanceTurnAttempt`] where the tier runs turns.
 #[async_trait::async_trait]
 pub trait ConformanceTurnRunner: Send + Sync {
@@ -96,6 +157,22 @@ pub trait ConformanceTurnRunner: Send + Sync {
         crashing: ConformanceTurnAttempt,
         redrive: ConformanceTurnAttempt,
     );
+
+    /// Runs `attempt` until `crash` fires, then kills that execution where it
+    /// stands, the way the process running it dies, and leaves the turn to
+    /// the tier's recovery: the law's next [`run_turn`](Self::run_turn) of the
+    /// same scope recovers it — a fresh driver over the same host in process,
+    /// a redelivery of the same invocation replaying its journal on Restate.
+    /// Panics when the attempt ended before the crash fired. A runner that
+    /// cannot crash a turn says so by panicking.
+    async fn run_turn_until_crash(
+        &self,
+        _admitted: crate::AdmittedScope,
+        _attempt: ConformanceTurnAttempt,
+        _crash: ConformanceCrash,
+    ) {
+        panic!("this tier's turn runner cannot crash a turn from outside its attempt");
+    }
 
     /// The replay keys of every effect the tier journaled for `scope`'s
     /// turn, or `None` when this runner cannot read them. A law finds the
@@ -206,6 +283,31 @@ impl ConformanceTurnRunner for HostTurnRunner {
             .scoped(admitted)
             .expect("scope the redriven conformance turn on its host");
         redrive(scoped).await;
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: an unscoped host is a fixture defect"
+    )]
+    async fn run_turn_until_crash(
+        &self,
+        admitted: crate::AdmittedScope,
+        attempt: ConformanceTurnAttempt,
+        crash: ConformanceCrash,
+    ) {
+        let scoped = self
+            .host
+            .scoped(admitted)
+            .expect("scope the crashing conformance turn on its host");
+        // Dropping the attempt's future mid-poll is the in-process tier's
+        // crash: its task dies where it stands, as an aborted worker's does.
+        tokio::select! {
+            biased;
+            () = crash.fired() => {}
+            end = attempt(scoped) => {
+                panic!("the crashing attempt ended ({end:?}) before its crash fired")
+            }
+        }
     }
 
     #[expect(

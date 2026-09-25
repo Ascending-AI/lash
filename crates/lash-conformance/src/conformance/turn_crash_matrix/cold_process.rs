@@ -477,12 +477,12 @@ pub async fn cold_process_real_turn_driver(
     // A cancellation cut lands on the controller's own turn-control
     // promises, so the controller crosses the seam.
     let effect_controller: Arc<dyn RuntimeEffectController> = if action.is_cancel_crash() {
-        Arc::new(SeamEffectController {
-            inner: effect_controller,
+        SeamLayer {
             control: control.clone(),
             executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             journal_faults: None,
-        })
+        }
+        .over(effect_controller)
     } else {
         effect_controller
     };

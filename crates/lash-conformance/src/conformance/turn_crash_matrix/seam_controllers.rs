@@ -16,17 +16,48 @@ use crate::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 
-pub(crate) struct SeamEffectController {
-    pub(super) inner: Arc<dyn RuntimeEffectController>,
+/// The crash matrix's effect seam: an [`EffectLayer`](crate::testing::EffectLayer)
+/// that records the turn's effect, group and turn-control operations on its
+/// [`SeamControl`], counts external executions, and crashes or fails them where
+/// the control is armed. Every group operation lands on the controller it
+/// layers, so durable effect-group state stays in the substrate under test.
+///
+/// [`SeamLayer::over`] layers a controller a law holds;
+/// [`SeamLayer::over_scoped`] layers the controller a tier's turn runner lends,
+/// which on Restate is borrowed from the turn's handler.
+#[derive(Clone)]
+pub(crate) struct SeamLayer {
     pub(super) control: SeamControl,
     pub(super) executions: Arc<std::sync::atomic::AtomicUsize>,
-    /// The wrapped controller's journal fault injector, when it is a
+    /// The layered controller's journal fault injector, when it is a
     /// journaled controller exposing one (FIG-3524).
     pub(super) journal_faults:
         Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
 }
 
-impl SeamEffectController {
+impl SeamLayer {
+    /// `inner` behind this seam.
+    pub(crate) fn over(
+        self,
+        inner: Arc<dyn RuntimeEffectController>,
+    ) -> Arc<dyn RuntimeEffectController> {
+        crate::testing::LayeredEffectHost::layer_controller(inner, Arc::new(self))
+    }
+
+    /// The controller a turn runner lent, behind this seam for as long as the
+    /// runner's borrow lives.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: the runner lent a validated scope"
+    )]
+    pub(crate) fn over_scoped<'run>(
+        self,
+        scoped: crate::ScopedEffectController<'run>,
+    ) -> crate::ScopedEffectController<'run> {
+        crate::testing::LayeredEffectHost::layer_scoped(scoped, Arc::new(self))
+            .expect("layer the lent controller behind the crash seam")
+    }
+
     /// The typed store error an armed `ToolAttempt` error-return substitutes
     /// for the real `execute_effect` call: the journal's own `Store`
     /// vocabulary where the controller exposes one, the generic runtime-store
@@ -55,87 +86,10 @@ fn session_retirement_refusal(envelope: &RuntimeEffectEnvelope) -> RuntimeEffect
 }
 
 #[async_trait::async_trait]
-impl crate::AwaitEventResolver for SeamEffectController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.inner.await_event_authority_binding_id()
-    }
-
-    async fn prepare_completion_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
-        self.inner
-            .prepare_completion_key(scope, wait, may_defer)
-            .await
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        resolution: crate::Resolution,
-    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
-        match turn_control_resolution_operation(key) {
-            Some(operation) => {
-                self.control
-                    .around(operation, self.inner.resolve_await_event(key, resolution))
-                    .await
-            }
-            None => self.inner.resolve_await_event(key, resolution).await,
-        }
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
-        self.inner.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<crate::Resolution, crate::RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for SeamEffectController {
-    async fn drive_independent_effect_work<'work>(
-        &self,
-        work: Vec<crate::IndependentEffectWork<'work>>,
-    ) {
-        self.inner.drive_independent_effect_work(work).await;
-    }
-
+impl crate::testing::EffectLayer for SeamLayer {
     async fn execute_effect(
         &self,
+        inner: &dyn RuntimeEffectController,
         envelope: RuntimeEffectEnvelope,
         executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
@@ -181,11 +135,11 @@ impl RuntimeEffectController for SeamEffectController {
                     .control
                     .around(
                         TurnSeamOperation::Effect(EffectOperation::StartGatePeek),
-                        self.inner.execute_effect(envelope, executor),
+                        inner.execute_effect(envelope, executor),
                     )
                     .await;
             }
-            return self.inner.execute_effect(envelope, executor).await;
+            return inner.execute_effect(envelope, executor).await;
         };
         let operation = TurnSeamOperation::Effect(operation);
         // FIG-3524: an armed error-return makes the tool-attempt seam fail
@@ -222,7 +176,7 @@ impl RuntimeEffectController for SeamEffectController {
         if !counts_external_execution {
             return self
                 .control
-                .around(operation, self.inner.execute_effect(envelope, executor))
+                .around(operation, inner.execute_effect(envelope, executor))
                 .await;
         }
         let executions = Arc::clone(&self.executions);
@@ -247,114 +201,65 @@ impl RuntimeEffectController for SeamEffectController {
             }
         });
         self.control
-            .around(operation, self.inner.execute_effect(envelope, wrapped))
+            .around(operation, inner.execute_effect(envelope, wrapped))
             .await
     }
 
     async fn open_effect_group(
         &self,
+        inner: &dyn RuntimeEffectController,
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
         let operation = TurnSeamOperation::Effect(EffectOperation::GroupOpen {
             children: group.children().len(),
         });
         self.control
-            .around(operation, self.inner.open_effect_group(group))
+            .around(operation, inner.open_effect_group(group))
             .await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
-    }
-
-    /// The group child's bound controller is the substrate's, but its seam
-    /// traffic is still the turn's: a child's tool attempts cross this seam
-    /// on every tier, not only where the host happens to build the child's
-    /// controller over it.
-    fn group_child_scoped_controller(
-        &self,
-        admitted: crate::AdmittedScope,
-        binding: crate::GroupChildBinding,
-    ) -> Result<Option<crate::ScopedEffectController<'static>>, crate::RuntimeError> {
-        let Some(bound) = self
-            .inner
-            .group_child_scoped_controller(admitted, binding)?
-        else {
-            return Ok(None);
-        };
-        let Some(controller) = bound.owned_controller() else {
-            return Ok(Some(bound));
-        };
-        let seam: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-            inner: controller,
-            control: self.control.clone(),
-            executions: Arc::clone(&self.executions),
-            journal_faults: self.journal_faults.clone(),
-        });
-        crate::ScopedEffectController::shared(seam, bound.admitted_scope().clone()).map(Some)
     }
 
     async fn await_next_settlement(
         &self,
+        inner: &dyn RuntimeEffectController,
         handle: &mut lash_core::EffectGroupHandle,
         cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.control
             .around_completion(
                 TurnSeamOperation::Effect(EffectOperation::GroupSettle),
-                self.inner.await_next_settlement(handle, cancel),
+                inner.await_next_settlement(handle, cancel),
             )
             .await
     }
 
     async fn close_effect_group(
         &self,
+        inner: &dyn RuntimeEffectController,
         handle: lash_core::EffectGroupHandle,
         disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.control
             .around(
                 TurnSeamOperation::Effect(EffectOperation::GroupClose),
-                self.inner.close_effect_group(handle, disposition),
+                inner.close_effect_group(handle, disposition),
             )
             .await
     }
 
-    // A rank read is a view on a durable fact, not a turn-seam operation — the
-    // golden trace names lifecycle operations, so the read forwards without
-    // `around` (FIG-3411 part 2).
-    async fn read_group_settlement(
+    async fn resolve_await_event(
         &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
+        inner: &dyn crate::AwaitEventResolver,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        match turn_control_resolution_operation(key) {
+            Some(operation) => {
+                self.control
+                    .around(operation, inner.resolve_await_event(key, resolution))
+                    .await
+            }
+            None => inner.resolve_await_event(key, resolution).await,
+        }
     }
 }
 
