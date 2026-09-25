@@ -82,7 +82,7 @@ reason = "proves nothing without a live PostgreSQL or S3 server; the service job
 packages = ["lash-sim"]
 kinds = ["unit-test"]
 tags = ["dev-deferred"]
-reason = "the generated-profile, minimizer and replay-artifact cases run 109--213 s; too slow for the developer loop, still in the PR Bazel partition"
+reason = "the generated-profile, minimizer and replay-artifact cases run 109--213 s, and the serial-lane determinism sweep is bounded to 4 of its 20 seeds per run (LASH_SIM_SERIAL_LANE_SEEDS) after measuring ~74--118 s at all twenty; too slow for the developer loop, still in the PR Bazel partition"
 shards = 8
 timeout = "long"
 

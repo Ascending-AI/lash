@@ -211,6 +211,12 @@ The deferred cross-backend suites run in their named service gates.
   cover the complete point set per PR, while the full soak runs 256 seeds to
   vary the deterministic 1-to-8-commit prefix. Reports explicitly list any
   scenario omitted by a caller-supplied seed bound.
+- The serial-engine determinism unit test runs a bounded seed set per PR
+  (`LASH_SIM_SERIAL_LANE_SEEDS`, default 4): the twenty-seed sweep it used to
+  pay on every run now lives in the confidence gate's sim unit suite and in
+  `just sim-serial-sweep`, which sets the variable to the full count. The
+  generated lanes still run the same `sim.oracle.serial-engine-determinism.v1`
+  oracle on every seed they execute.
 
 ## Search fleet
 

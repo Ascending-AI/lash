@@ -269,13 +269,34 @@ fn full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler(
     );
 }
 
+// Seeds the per-PR run of `serial_engine_lane_is_deterministic_across_seeds`
+// covers; the full `SERIAL_LANE_SWEEP_SEEDS`-seed sweep runs in the
+// confidence gate's sim unit suite and via `just sim-serial-sweep`, or
+// anywhere with `LASH_SIM_SERIAL_LANE_SEEDS` set.
+const SERIAL_LANE_PER_PR_SEEDS: usize = 4;
+const SERIAL_LANE_SWEEP_SEEDS: u64 = 20;
+
 /// The serial lane on the server double delivers one boundary sequence,
 /// reaches one outcome and grants the server's turn in one order, with no
-/// stall preemption, per seed: twenty seeds, each run twice (five under
-/// `LASH_QUICK`).
+/// stall preemption, per seed: `SERIAL_LANE_PER_PR_SEEDS` seeds (one under
+/// `LASH_QUICK`; the full `SERIAL_LANE_SWEEP_SEEDS`-seed sweep under
+/// `LASH_SIM_SERIAL_LANE_SEEDS`), each run twice.
 #[test]
 fn serial_engine_lane_is_deterministic_across_seeds() {
-    for seed in 0_u64..crate::quick_seed_sweep(20) as u64 {
+    let seeds = std::env::var("LASH_SIM_SERIAL_LANE_SEEDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| crate::quick_seed_sweep(SERIAL_LANE_PER_PR_SEEDS));
+    assert!(
+        seeds > 0,
+        "LASH_SIM_SERIAL_LANE_SEEDS must be greater than zero"
+    );
+    eprintln!(
+        "serial-lane determinism coverage is bounded: seeds={seeds} \
+         omitted_seeds=all seeds outside seeds 0..{seeds}; \
+         the full sweep is LASH_SIM_SERIAL_LANE_SEEDS={SERIAL_LANE_SWEEP_SEEDS}"
+    );
+    for seed in 0_u64..seeds as u64 {
         let run = || {
             run_serial_lane(generate_workload(seed, "fast-random", 48).expect("workload"))
                 .expect("serial lane run")
