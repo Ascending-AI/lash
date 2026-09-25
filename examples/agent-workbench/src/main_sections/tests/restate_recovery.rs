@@ -1155,6 +1155,11 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     harness.shutdown(data_dir).await;
 }
 
+/// How long the surviving process sleeps before it settles.
+const REVOKED_PROCESS_AWAIT_SLEEP: Duration = Duration::from_secs(90);
+/// Slack past the process's own sleep for it to wake, settle and publish.
+const REVOKED_PROCESS_AWAIT_SETTLE_MARGIN: Duration = Duration::from_secs(45);
+
 async fn live_restate_session_delete_revokes_process_await_without_cancelling_process_inner() {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
@@ -1169,16 +1174,17 @@ async fn live_restate_session_delete_revokes_process_await_without_cancelling_pr
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-revoked-process-await-e2e")
         .complete(|_| async {
-            Ok(text_response(
+            Ok(text_response(&format!(
                 r#"<typescript>
-const survive_revocation = async () => {
-  await sleep(90000);
+const survive_revocation = async () => {{
+  await sleep({sleep_ms});
   return "survived session deletion";
-};
-const handle = await processes.start({ definition: survive_revocation, label: "survive_revocation" });
+}};
+const handle = await processes.start({{ definition: survive_revocation, label: "survive_revocation" }});
 finish(await handle);
 </typescript>"#,
-            ))
+                sleep_ms = REVOKED_PROCESS_AWAIT_SLEEP.as_millis(),
+            )))
         })
         .build()
         .into_handle();
@@ -1216,6 +1222,15 @@ finish(await handle);
         Duration::from_secs(20),
     )
     .await;
+    // The process was already sleeping when it was seen running, so its own
+    // sleep bounds when it settles. How soon the session delete lands is
+    // Restate's business: on its default inactivity timeout the turn reads as
+    // suspended after about a minute, and with every await suspending it does
+    // at once, so the terminal deadline must come from the process, not from
+    // the turn.
+    let process_settles_by = tokio::time::Instant::now()
+        + REVOKED_PROCESS_AWAIT_SLEEP
+        + REVOKED_PROCESS_AWAIT_SETTLE_MARGIN;
 
     let execution_scope = lash::runtime::ExecutionScope::session_delete(&deleted_session_id);
     let delete_invocation_id = restate::submit_session_delete(
@@ -1288,8 +1303,8 @@ finish(await handle);
                 || failure.contains("is being deleted")),
         "revoked turn must terminalize as the typed retirement refusal: {turn_status:#?}"
     );
-    let process_terminal = tokio::time::timeout(
-        Duration::from_secs(45),
+    let process_terminal = tokio::time::timeout_at(
+        process_settles_by,
         harness
             .state
             .core
