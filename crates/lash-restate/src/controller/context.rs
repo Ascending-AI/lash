@@ -30,7 +30,7 @@ pub use super::process_scheduling::ProcessWorkflowStartFailure;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::durable_wait::{
-    LashDurableWaitIndexClient, LashDurableWaitWorkflowClient, RestateDurableWaitAddress,
+    LashDurableWaitRegistryClient, LashDurableWaitWorkflowClient, RestateDurableWaitAddress,
     RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupChildMembershipRequest, RestateDurableWaitGroupRequest,
     RestateDurableWaitResolveRefusal, RestateDurableWaitResolveRequest,
@@ -42,9 +42,9 @@ use crate::effect_group::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupCloseRequest,
     EffectGroupCloseResponse, EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
     EffectGroupDispatchClient, EffectGroupDispatchRequest, EffectGroupDrainBlockersRequest,
-    EffectGroupDrainBlockersResponse, EffectGroupIndexClient, EffectGroupOpenRequest,
-    EffectGroupOpenResponse, EffectGroupPayloadClient, EffectGroupPayloadGetResponse,
-    EffectGroupProbeResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
+    EffectGroupDrainBlockersResponse, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupPayloadClient, EffectGroupPayloadGetResponse, EffectGroupProbeResponse,
+    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupStateClient,
 };
 use crate::process::{
     LashProcessWorkflowClient, RestateProcessAwaitRequest, RestateProcessCancelRequest,
@@ -556,7 +556,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     {
         Box::pin(async {
             Err(TerminalError::new(
-                "EffectGroupIndex/probe is not registered",
+                "EffectGroupState/probe is not registered",
             ))
         })
     }
@@ -586,7 +586,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     {
         Box::pin(async {
             Err(TerminalError::new(
-                "EffectGroupIndex/open is not registered",
+                "EffectGroupState/open is not registered",
             ))
         })
     }
@@ -617,7 +617,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     {
         Box::pin(async {
             Err(TerminalError::new(
-                "EffectGroupIndex/read_rank is not registered",
+                "EffectGroupState/read_rank is not registered",
             ))
         })
     }
@@ -650,7 +650,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     {
         Box::pin(async {
             Err(TerminalError::new(
-                "EffectGroupIndex/close is not registered",
+                "EffectGroupState/close is not registered",
             ))
         })
     }
@@ -666,7 +666,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run,
     {
-        unregistered_group_index("LashDurableWaitIndex/group_child_membership")
+        unregistered_group_index("LashDurableWaitRegistry/group_child_membership")
     }
 
     /// The §4 boundary decision for one group child's final record.
@@ -684,7 +684,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run,
     {
-        unregistered_group_index("EffectGroupIndex/commit_child")
+        unregistered_group_index("EffectGroupState/commit_child")
     }
 
     /// §4's admission fence for one recorded group child (FIG-3470): the
@@ -704,7 +704,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run,
     {
-        unregistered_group_index("EffectGroupIndex/admit_semantic")
+        unregistered_group_index("EffectGroupState/admit_semantic")
     }
 
     /// The lower-commit siblings that still owe their settlement seats — the
@@ -723,7 +723,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run,
     {
-        unregistered_group_index("EffectGroupIndex/drain_blockers")
+        unregistered_group_index("EffectGroupState/drain_blockers")
     }
 
     /// Await an effect group's wait (its readiness or one of its ranks),
@@ -1033,7 +1033,7 @@ macro_rules! impl_restate_controller_context {
                             },
                             on_cancel => {
                                 let resolve_request = self
-                                    .object_client::<LashDurableWaitIndexClient>(
+                                    .object_client::<LashDurableWaitRegistryClient>(
                                         durable_wait_index_object_key(&address),
                                     )
                                     .resolve(Json(RestateDurableWaitResolveRequest {
@@ -1104,7 +1104,7 @@ macro_rules! impl_restate_controller_context {
                                     // turn-gate loser is released: nobody is
                                     // left to resolve it.
                                     let resolve = self
-                                        .object_client::<LashDurableWaitIndexClient>(
+                                        .object_client::<LashDurableWaitRegistryClient>(
                                             durable_wait_index_object_key(&event_address),
                                         )
                                         .resolve(Json(RestateDurableWaitResolveRequest {
@@ -1156,7 +1156,7 @@ macro_rules! impl_restate_controller_context {
                                 // event workflow stays parked with nobody left
                                 // to resolve it.
                                 let resolve = self
-                                    .object_client::<LashDurableWaitIndexClient>(
+                                    .object_client::<LashDurableWaitRegistryClient>(
                                         durable_wait_index_object_key(&event_address),
                                     )
                                     .resolve(Json(RestateDurableWaitResolveRequest {
@@ -1322,7 +1322,7 @@ macro_rules! impl_restate_controller_context {
                         let replay_key = request.key.key_id.clone();
                         let address = RestateDurableWaitAddress::for_key(&request.key);
                         let resolve = self
-                            .object_client::<LashDurableWaitIndexClient>(
+                            .object_client::<LashDurableWaitRegistryClient>(
                                 durable_wait_index_object_key(&address),
                             )
                             .resolve(Json(request))
@@ -1340,7 +1340,7 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
-                    let client = self.object_client::<LashDurableWaitIndexClient>(session_id);
+                    let client = self.object_client::<LashDurableWaitRegistryClient>(session_id);
                     let request = if revoke {
                         client.revoke_all()
                     } else {
@@ -1361,7 +1361,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let request = self
-                        .object_client::<LashDurableWaitIndexClient>(session_id)
+                        .object_client::<LashDurableWaitRegistryClient>(session_id)
                         .is_revoked(Json(()));
                     let call = request.call();
                     Box::pin(async move {
@@ -1378,7 +1378,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<LashDurableWaitIndexClient>(index_key)
+                        .object_client::<LashDurableWaitRegistryClient>(index_key)
                         .begin_effect(Json(RestateDurableWaitEffectRequest {
                             replay_key: replay_key.clone(),
                         }))
@@ -1398,7 +1398,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<LashDurableWaitIndexClient>(index_key)
+                        .object_client::<LashDurableWaitRegistryClient>(index_key)
                         .end_effect(Json(RestateDurableWaitEffectRequest {
                             replay_key: replay_key.clone(),
                         }))
@@ -1418,7 +1418,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<LashDurableWaitIndexClient>(index_key)
+                        .object_client::<LashDurableWaitRegistryClient>(index_key)
                         .record_group(Json(RestateDurableWaitGroupRequest { group_key }))
                         .call();
                     Box::pin(async move {
@@ -1435,7 +1435,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .object_client::<EffectGroupStateClient>(group_key)
                         .probe()
                         .call();
                     Box::pin(async move {
@@ -1471,7 +1471,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .object_client::<EffectGroupStateClient>(group_key)
                         .open(Json(request))
                         .call();
                     Box::pin(async move {
@@ -1506,7 +1506,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .object_client::<EffectGroupStateClient>(group_key)
                         .read_rank(Json(request))
                         .call();
                     Box::pin(async move {
@@ -1541,7 +1541,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .object_client::<EffectGroupStateClient>(group_key)
                         .close(Json(request))
                         .call();
                     Box::pin(async move {
@@ -1558,7 +1558,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<LashDurableWaitIndexClient>(index_key)
+                        .object_client::<LashDurableWaitRegistryClient>(index_key)
                         .group_child_membership(Json(
                             RestateDurableWaitGroupChildMembershipRequest {
                                 replay_key: replay_key.clone(),
@@ -1584,7 +1584,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .object_client::<EffectGroupStateClient>(group_key)
                         .commit_child(Json(request))
                         .call();
                     Box::pin(async move { call.await.map(|Json(response)| response) })
@@ -1606,7 +1606,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .object_client::<EffectGroupStateClient>(group_key)
                         .admit_semantic(Json(request))
                         .call();
                     Box::pin(async move { call.await.map(|Json(response)| response) })
@@ -1621,7 +1621,7 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .object_client::<EffectGroupStateClient>(group_key)
                         .drain_blockers(Json(EffectGroupDrainBlockersRequest { commit_seq }))
                         .call();
                     Box::pin(async move { call.await.map(|Json(response)| response) })

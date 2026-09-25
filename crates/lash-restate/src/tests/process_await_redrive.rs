@@ -1654,7 +1654,7 @@ pub(super) async fn durable_wait_workflow_rejects_an_inconsistent_key_preimage_b
 #[tokio::test]
 pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_before_state_write() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitIndexImpl.serve())
+        .bind(LashDurableWaitRegistryImpl.serve())
         .build();
     let scope = durable_turn_scope("fig2005-forged-session", "fig2005-forged-turn");
     let mut key = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
@@ -1671,7 +1671,7 @@ pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_befo
 
     let output = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "register",
         fig1943_invocation_with_state(
             &object_key,
@@ -1728,7 +1728,7 @@ pub(super) fn durable_wait_register_and_sweep_derive_the_same_address_for_every_
 #[tokio::test]
 pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitIndexImpl.serve())
+        .bind(LashDurableWaitRegistryImpl.serve())
         .build();
     let object_key = "fig1943-session";
     let key = restate_await_event_key(
@@ -1740,7 +1740,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 
     let registered = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "register",
         fig1943_invocation_with_state(
             object_key,
@@ -1767,7 +1767,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     let terminal = Resolution::Ok(serde_json::json!({ "tool_result": "complete" }));
     let resolved = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "resolve",
         fig1943_invocation_with_state(
             object_key,
@@ -1789,7 +1789,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 
     let cancelled = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "cancel_all",
         fig1943_invocation_with_state(object_key, &(), &state),
         vec![
@@ -1805,7 +1805,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 
     let reregistered = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "register",
         fig1943_invocation_with_state(object_key, &RestateDurableWaitIndexRequest { key }, &state),
     )
@@ -1820,14 +1820,14 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 #[tokio::test]
 pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_terminals() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitIndexImpl.serve())
+        .bind(LashDurableWaitRegistryImpl.serve())
         .build();
     let object_key = "fig2946-session";
     let mut state = BTreeMap::new();
 
     let mint_probe = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "is_revoked",
         fig1943_invocation_with_state(object_key, &(), &state),
     )
@@ -1843,7 +1843,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
 
     let unknown = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "outstanding",
         fig1943_invocation_with_state(object_key, &(), &state),
     )
@@ -1867,7 +1867,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
     .expect("derive FIG-2946 control key");
     let registered = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "register",
         fig1943_invocation_with_state(
             object_key,
@@ -1883,7 +1883,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
 
     let pending = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "outstanding",
         fig1943_invocation_with_state(object_key, &(), &state),
     )
@@ -1896,7 +1896,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
 
     let settled = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "settle",
         fig1943_invocation_with_state(
             object_key,
@@ -1917,7 +1917,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
 
     let terminal = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitIndex",
+        "LashDurableWaitRegistry",
         "outstanding",
         fig1943_invocation_with_state(object_key, &(), &state),
     )

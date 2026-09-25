@@ -27,7 +27,7 @@ use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::durable_wait::{
-    LASH_REPLAY_KEY_HEADER, LashDurableWaitIndexClient, RestateDurableWaitAddress,
+    LASH_REPLAY_KEY_HEADER, LashDurableWaitRegistryClient, RestateDurableWaitAddress,
     RestateDurableWaitResolveRequest, durable_wait_index_object_key,
 };
 use crate::process::{LashProcessWorkflowClient, RestateProcessAwaitRequest};
@@ -102,7 +102,7 @@ impl LashProcessAttach for LashProcessAttachImpl {
         // yet, so a terminal that beats the parked turn's registration is not
         // lost.
         let Json(_outcome) = ctx
-            .object_client::<LashDurableWaitIndexClient>(durable_wait_index_object_key(&address))
+            .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_object_key(&address))
             .resolve(Json(RestateDurableWaitResolveRequest { key, resolution }))
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()

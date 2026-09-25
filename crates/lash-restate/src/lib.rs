@@ -164,7 +164,7 @@ pub use durable_wait::RestateTurnCancelRaceOutcome;
 // crate's tests drive them one at a time.
 #[cfg(test)]
 pub(crate) use durable_wait::{
-    LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
+    LashDurableWaitRegistry, LashDurableWaitRegistryImpl, LashDurableWaitWorkflow,
     LashDurableWaitWorkflowImpl,
 };
 #[cfg(test)]

@@ -35,7 +35,7 @@ use sha2::{Digest, Sha256};
 
 use crate::RestateIngressClient;
 use crate::durable_wait::{
-    LASH_REPLAY_KEY_HEADER, LashDurableWaitIndexClient, LashDurableWaitWorkflowClient,
+    LASH_REPLAY_KEY_HEADER, LashDurableWaitRegistryClient, LashDurableWaitWorkflowClient,
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitGroupChildRequest,
     RestateDurableWaitResolveRequest, durable_wait_index_key_for_scope,
     durable_wait_index_object_key, restate_await_event_key,
@@ -83,8 +83,8 @@ pub enum EffectGroupDispatchState {
     },
 }
 
-mod index_record;
-pub use index_record::*;
+mod state_record;
+pub use state_record::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -506,15 +506,15 @@ fn phase(lifecycle: &EffectGroupLifecycle) -> EffectGroupPhase {
     }
 }
 
-fn store_index(ctx: &ObjectContext<'_>, record: EffectGroupIndexRecord) {
+fn store_index(ctx: &ObjectContext<'_>, record: EffectGroupStateRecord) {
     object_state::set_stamped(ctx, INDEX_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS, record);
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct EffectGroupIndex;
+pub(crate) struct EffectGroupState;
 
-#[restate_sdk::object(name = "EffectGroupIndex")]
-impl EffectGroupIndex {
+#[restate_sdk::object(name = "EffectGroupState")]
+impl EffectGroupState {
     #[handler]
     async fn probe(
         &self,
@@ -557,11 +557,11 @@ impl EffectGroupIndex {
             let shape_digest = request.shape.digest()?;
             store_index(
                 &ctx,
-                EffectGroupIndexRecord {
+                EffectGroupStateRecord {
                     shape_digest,
                     lifecycle: EffectGroupLifecycle::Preparing {
                         dispatch: EffectGroupDispatchState::Unadopted,
-                        live: EffectGroupIndexLiveRecord {
+                        live: EffectGroupStateLiveRecord {
                             shape: request.shape,
                             next_rank: 1,
                             next_commit_seq: 1,

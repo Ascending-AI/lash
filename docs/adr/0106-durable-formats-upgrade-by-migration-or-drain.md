@@ -169,8 +169,8 @@ arbitration and wake scheduling that ADR 0104 §1 deletes.
 - **Deleted:** `DURABLE_WAIT_INDEX_IDENTITY_EPOCH`, its refusal gate, the
   drain-and-recreate doctrine, and the exact-version refusal on effect groups.
   Identity-family validation stays.
-- **Renamed:** `LashDurableWaitIndex` becomes `LashDurableWaitRegistry`, and
-  `EffectGroupIndex` becomes `EffectGroupState` (FIG-3814).
+- **Renamed:** `LashDurableWaitRegistry` becomes `LashDurableWaitRegistry`, and
+  `EffectGroupState` becomes `EffectGroupState` (FIG-3814).
 
 ### 4. Per-surface policy
 

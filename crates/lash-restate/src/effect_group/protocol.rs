@@ -48,13 +48,13 @@ pub(crate) const EFFECT_GROUP_STATE_FORMATS: StoredValueFormats = StoredValueFor
 /// before the handler acts when it carries a stamp this build does not read.
 pub(super) async fn load_index(
     ctx: &ObjectContext<'_>,
-) -> Result<Option<EffectGroupIndexRecord>, TerminalError> {
+) -> Result<Option<EffectGroupStateRecord>, TerminalError> {
     object_state::get_stamped(ctx, INDEX_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS).await
 }
 
 pub(super) async fn load_index_shared(
     ctx: &SharedObjectContext<'_>,
-) -> Result<Option<EffectGroupIndexRecord>, TerminalError> {
+) -> Result<Option<EffectGroupStateRecord>, TerminalError> {
     object_state::get_stamped_shared(ctx, INDEX_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS).await
 }
 
@@ -65,7 +65,7 @@ pub(super) async fn load_index_shared(
 pub(crate) fn decode_index_state(
     group_key: &str,
     state: serde_json::Value,
-) -> Result<EffectGroupIndexRecord, TerminalError> {
+) -> Result<EffectGroupStateRecord, TerminalError> {
     object_state::decode_stamped_value(group_key, state, &EFFECT_GROUP_STATE_FORMATS)
 }
 
@@ -74,7 +74,7 @@ mod tests {
     use super::*;
 
     fn record_state(format: Option<u16>) -> serde_json::Value {
-        let body = serde_json::to_value(EffectGroupIndexRecord {
+        let body = serde_json::to_value(EffectGroupStateRecord {
             shape_digest: "shape-digest".to_owned(),
             lifecycle: EffectGroupLifecycle::Retired {
                 cleanup: EffectGroupCleanup::Complete,

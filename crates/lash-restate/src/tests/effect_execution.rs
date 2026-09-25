@@ -1694,7 +1694,7 @@ pub(super) async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink()
 }
 
 /// Every wait of a non-session scope is owned by that scope's own
-/// `LashDurableWaitIndex` object, keyed by the scope's journal identity, so a
+/// `LashDurableWaitRegistry` object, keyed by the scope's journal identity, so a
 /// scope-exact retirement can revoke and fence the whole scope in one keyed
 /// handler; session waits keep the session's object (FIG-2499 fix round 1).
 #[test]

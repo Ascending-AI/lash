@@ -894,7 +894,7 @@ impl LiveConformanceHarness {
         );
         let probe = ingress
             .call_object_empty_json::<crate::EffectGroupProbeResponse>(
-                crate::LashService::EffectGroupIndex,
+                crate::LashService::EffectGroupState,
                 &operation,
                 "probe",
             )
@@ -939,7 +939,7 @@ impl LiveConformanceHarness {
         let shape = witness_shape(&group_key, std::slice::from_ref(&child));
         let opened: EffectGroupOpenResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "open",
                 &EffectGroupOpenRequest {
@@ -952,7 +952,7 @@ impl LiveConformanceHarness {
         assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
         let adopted: EffectGroupProbeAdoptResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "probe_and_adopt",
                 &EffectGroupAdoptRequest {
@@ -981,7 +981,7 @@ impl LiveConformanceHarness {
             .to_owned();
         let recorded: EffectGroupRecordDispatchResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "record_dispatch",
                 &EffectGroupRecordDispatchRequest {
@@ -994,7 +994,7 @@ impl LiveConformanceHarness {
         assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
         let registered: crate::EffectGroupRegisterResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "register_children",
                 &crate::EffectGroupRegisterRequest {
@@ -1015,7 +1015,7 @@ impl LiveConformanceHarness {
 
         let closed: crate::EffectGroupCloseResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "close",
                 &crate::EffectGroupCloseRequest {
@@ -1045,7 +1045,7 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json(crate::LashService::EffectGroupIndex, &group_key, "retire")
+            .call_object_empty_json(crate::LashService::EffectGroupState, &group_key, "retire")
             .await
             .expect("the wait group tombstones");
         println!("EFFECT_GROUP_WITNESS unstarted-wait-child-release PASS");
@@ -1080,7 +1080,7 @@ impl LiveConformanceHarness {
         let shape = witness_shape(&group_key, std::slice::from_ref(&child));
         let opened: EffectGroupOpenResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "open",
                 &EffectGroupOpenRequest {
@@ -1093,7 +1093,7 @@ impl LiveConformanceHarness {
         assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
         let _: EffectGroupProbeAdoptResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "probe_and_adopt",
                 &EffectGroupAdoptRequest {
@@ -1122,7 +1122,7 @@ impl LiveConformanceHarness {
             .expect("the child parks on its admission before the dispatch records it");
         let recorded: EffectGroupRecordDispatchResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "record_dispatch",
                 &EffectGroupRecordDispatchRequest {
@@ -1135,7 +1135,7 @@ impl LiveConformanceHarness {
         assert_eq!(recorded, EffectGroupRecordDispatchResponse::Recorded);
         let registered: crate::EffectGroupRegisterResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "register_children",
                 &crate::EffectGroupRegisterRequest {
@@ -1149,7 +1149,7 @@ impl LiveConformanceHarness {
         assert_eq!(registered, crate::EffectGroupRegisterResponse::Registered);
         let closed: crate::EffectGroupCloseResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "close",
                 &crate::EffectGroupCloseRequest {
@@ -1177,7 +1177,7 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json(crate::LashService::EffectGroupIndex, &group_key, "retire")
+            .call_object_empty_json(crate::LashService::EffectGroupState, &group_key, "retire")
             .await
             .expect("the admitting group tombstones");
         println!("EFFECT_GROUP_WITNESS admitting-wait-child-release PASS");
@@ -1276,7 +1276,7 @@ impl LiveConformanceHarness {
 
         let opened: EffectGroupOpenResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "open",
                 &EffectGroupOpenRequest {
@@ -1715,7 +1715,7 @@ async fn run_design_witnesses(
     witness_executors.stage(&child, Arc::clone(&executions), "dispatcher-convergence");
     let opened: EffectGroupOpenResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &group_key,
             "open",
             &EffectGroupOpenRequest {
@@ -1754,7 +1754,7 @@ async fn run_design_witnesses(
     );
     let rank: EffectGroupReadRankResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &group_key,
             "read_rank",
             &EffectGroupReadRankRequest {
@@ -1768,7 +1768,7 @@ async fn run_design_witnesses(
     assert_eq!(executions.load(Ordering::SeqCst), 1, "child runs once");
     let reopened: EffectGroupOpenResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &group_key,
             "open",
             &EffectGroupOpenRequest {
@@ -1829,7 +1829,7 @@ async fn run_design_witnesses(
     assert_eq!(payload_put, EffectGroupPayloadPutResponse::Retired);
     let late_record: EffectGroupRecordSettlementResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &group_key,
             "record_settlement",
             &EffectGroupRecordSettlementRequest {
@@ -1859,7 +1859,7 @@ async fn run_design_witnesses(
     let admission_shape = witness_shape(&admission_group, std::slice::from_ref(&admission_child));
     let opened: EffectGroupOpenResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &admission_group,
             "open",
             &EffectGroupOpenRequest {
@@ -1872,7 +1872,7 @@ async fn run_design_witnesses(
     assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
     let adopted: EffectGroupProbeAdoptResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &admission_group,
             "probe_and_adopt",
             &EffectGroupAdoptRequest {
@@ -1911,7 +1911,7 @@ async fn run_design_witnesses(
         .expect("child reaches NotYetRecorded before dispatcher redrive");
     let recorded: EffectGroupRecordDispatchResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &admission_group,
             "record_dispatch",
             &EffectGroupRecordDispatchRequest {
@@ -1947,7 +1947,7 @@ async fn run_design_witnesses(
     );
     let retired: EffectGroupRetireResponse = ingress
         .call_object_empty_json(
-            crate::LashService::EffectGroupIndex,
+            crate::LashService::EffectGroupState,
             &admission_group,
             "retire",
         )
@@ -1971,7 +1971,7 @@ async fn run_design_witnesses(
     );
     let _: EffectGroupOpenResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &gap_group,
             "open",
             &EffectGroupOpenRequest {
@@ -1982,7 +1982,7 @@ async fn run_design_witnesses(
         .await
         .expect("send-record-gap witness opens");
     let _: EffectGroupRetireResponse = ingress
-        .call_object_empty_json(crate::LashService::EffectGroupIndex, &gap_group, "retire")
+        .call_object_empty_json(crate::LashService::EffectGroupState, &gap_group, "retire")
         .await
         .expect("send-record-gap witness tombstones");
     let executions_before_child = gap_executions.load(Ordering::SeqCst);
@@ -2027,7 +2027,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     let shape = witness_shape(&group_key, &children);
     let opened: EffectGroupOpenResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &group_key,
             "open",
             &EffectGroupOpenRequest {
@@ -2042,7 +2042,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     for child in &children {
         let committed: EffectGroupCommitChildResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "commit_child",
                 &EffectGroupCommitChildRequest {
@@ -2058,7 +2058,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     }
     let blockers: EffectGroupDrainBlockersResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &group_key,
             "drain_blockers",
             &EffectGroupDrainBlockersRequest {
@@ -2102,7 +2102,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     let stale_shape = witness_shape(&stale_group, std::slice::from_ref(&stale_child));
     let _: EffectGroupOpenResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &stale_group,
             "open",
             &EffectGroupOpenRequest {
@@ -2123,7 +2123,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
         loop {
             let probed = ingress
                 .call_object_json::<_, EffectGroupDrainBlockersResponse>(
-                    "EffectGroupIndex",
+                    "EffectGroupState",
                     &stale_group,
                     "drain_blockers",
                     &EffectGroupDrainBlockersRequest { commit_seq: 1 },
@@ -2163,7 +2163,7 @@ async fn overwrite_index_state(admin: &HarnessAdmin, group_key: &str, state: &se
                 .expect("build Restate admin client");
             let response = client
                 .post(format!(
-                    "{}/services/EffectGroupIndex/state",
+                    "{}/services/EffectGroupState/state",
                     admin_url.trim_end_matches('/')
                 ))
                 .json(&body)
@@ -2175,7 +2175,7 @@ async fn overwrite_index_state(admin: &HarnessAdmin, group_key: &str, state: &se
         }
         HarnessAdmin::InProcess { server } => {
             let request = HttpRequest::post(
-                format!("{}/services/EffectGroupIndex/state", server.ingress_url()),
+                format!("{}/services/EffectGroupState/state", server.ingress_url()),
                 serde_json::to_vec(&body).expect("encode the state modification"),
             )
             .with_header("content-type", "application/json");

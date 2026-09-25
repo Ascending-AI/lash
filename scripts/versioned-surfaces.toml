@@ -2418,12 +2418,12 @@ manifest = "engine:restate.effect_group_state_format"
 kind = "rust_serde_shapes"
 paths = [
   "crates/lash-restate/src/effect_group.rs",
-  "crates/lash-restate/src/effect_group/index_record.rs",
+  "crates/lash-restate/src/effect_group/state_record.rs",
   "crates/lash-restate/src/effect_group/shape.rs",
 ]
 must_cover = [
-  "EffectGroupIndexRecord",
-  "EffectGroupIndexLiveRecord",
+  "EffectGroupStateRecord",
+  "EffectGroupStateLiveRecord",
   "EffectGroupShape",
 ]
 

@@ -103,7 +103,7 @@ then open — never an overlap.
 Identity epoch 4 is such a cutover. Durable-wait requests and indexed state now
 carry the `AwaitEventKey` preimage so handlers derive addresses locally; epoch-3
 state has neither that request shape nor that indexed value. Operators must
-drain and recreate both `LashDurableWaitIndex` and `LashDurableWaitWorkflow`
+drain and recreate both `LashDurableWaitRegistry` and `LashDurableWaitWorkflow`
 state before opening the epoch-4 deployment. There is no tolerant decoder,
 address migration, or dual-deployment window.
 

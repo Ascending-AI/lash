@@ -586,7 +586,7 @@ mod tests {
     fn like_matches_prefixes_and_infixes() {
         assert!(like("LashProcessWorkflow", "Lash%"));
         assert!(like("LashProcessWorkflow", "%Process%"));
-        assert!(!like("EffectGroupIndex", "Lash%"));
+        assert!(!like("EffectGroupState", "Lash%"));
         assert!(like("exact", "exact"));
     }
 }

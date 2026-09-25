@@ -726,7 +726,7 @@ pub(super) async fn park_process_on_its_timer(
             .iter()
             .map(|call| (call.service.as_str(), call.handler.as_str()))
             .collect::<Vec<_>>(),
-        vec![("LashDurableWaitIndex", "begin_effect")],
+        vec![("LashDurableWaitRegistry", "begin_effect")],
         "the effect is recorded in the scope's index before its timer is journaled"
     );
     assert_eq!(
@@ -1347,7 +1347,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
             .iter()
             .map(|call| (call.service.as_str(), call.handler.as_str()))
             .collect::<Vec<_>>(),
-        vec![("LashDurableWaitIndex", "end_effect")],
+        vec![("LashDurableWaitRegistry", "end_effect")],
         "the completed effect is cleared from the scope's index before terminal delivery"
     );
     assert_eq!(

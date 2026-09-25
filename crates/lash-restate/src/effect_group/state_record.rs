@@ -42,7 +42,7 @@ pub enum EffectGroupCleanup {
         /// the tombstone. `Complete` is what says retirement holds none — the
         /// variant keeps it, not an `Option` on the index record. Boxed so the
         /// enum stays narrow once retirement is complete.
-        live: Box<EffectGroupIndexLiveRecord>,
+        live: Box<EffectGroupStateLiveRecord>,
     },
     Complete,
 }
@@ -61,12 +61,12 @@ pub enum EffectGroupCleanup {
 pub enum EffectGroupLifecycle {
     Preparing {
         dispatch: EffectGroupDispatchState,
-        live: EffectGroupIndexLiveRecord,
+        live: EffectGroupStateLiveRecord,
     },
     Ready {
         #[serde(with = "btree_map_as_pairs")]
         addresses: BTreeMap<usize, String>,
-        live: EffectGroupIndexLiveRecord,
+        live: EffectGroupStateLiveRecord,
     },
     Closed {
         effective: EffectGroupCloseDisposition,
@@ -80,7 +80,7 @@ pub enum EffectGroupLifecycle {
         reopened: bool,
         #[serde(with = "btree_map_as_pairs")]
         addresses: BTreeMap<usize, String>,
-        live: EffectGroupIndexLiveRecord,
+        live: EffectGroupStateLiveRecord,
     },
     Retired {
         cleanup: EffectGroupCleanup,
@@ -151,7 +151,7 @@ pub enum EffectGroupChildCommitState {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct EffectGroupIndexLiveRecord {
+pub struct EffectGroupStateLiveRecord {
     pub(crate) shape: EffectGroupShape,
     pub(crate) next_rank: u64,
     /// The final-commit counter: the position `record_settlement` allocates
@@ -167,17 +167,17 @@ pub struct EffectGroupIndexLiveRecord {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct EffectGroupIndexRecord {
+pub(crate) struct EffectGroupStateRecord {
     pub(crate) shape_digest: String,
     pub(crate) lifecycle: EffectGroupLifecycle,
 }
 
-impl EffectGroupIndexRecord {
+impl EffectGroupStateRecord {
     /// The live state a non-`Retired` phase always carries. `Retired` is the
     /// only variant that does not hold it in the phase fields — the pending
     /// cleanup's copy is reached through [`EffectGroupCleanup`], never this
     /// accessor — so it is also the only error.
-    pub(crate) fn live(&self) -> Result<&EffectGroupIndexLiveRecord, TerminalError> {
+    pub(crate) fn live(&self) -> Result<&EffectGroupStateLiveRecord, TerminalError> {
         match &self.lifecycle {
             EffectGroupLifecycle::Preparing { live, .. }
             | EffectGroupLifecycle::Ready { live, .. }
@@ -189,7 +189,7 @@ impl EffectGroupIndexRecord {
         }
     }
 
-    pub(crate) fn live_mut(&mut self) -> Result<&mut EffectGroupIndexLiveRecord, TerminalError> {
+    pub(crate) fn live_mut(&mut self) -> Result<&mut EffectGroupStateLiveRecord, TerminalError> {
         match &mut self.lifecycle {
             EffectGroupLifecycle::Preparing { live, .. }
             | EffectGroupLifecycle::Ready { live, .. }
@@ -205,7 +205,7 @@ impl EffectGroupIndexRecord {
 #[cfg(test)]
 #[test]
 fn completed_retirement_index_serializes_as_tombstone_only() {
-    let record = EffectGroupIndexRecord {
+    let record = EffectGroupStateRecord {
         shape_digest: "shape-digest".to_owned(),
         lifecycle: EffectGroupLifecycle::Retired {
             cleanup: EffectGroupCleanup::Complete,
@@ -227,7 +227,7 @@ fn completed_retirement_index_serializes_as_tombstone_only() {
 #[cfg(test)]
 #[test]
 fn retired_index_live_read_is_a_typed_terminal_error() {
-    let record = EffectGroupIndexRecord {
+    let record = EffectGroupStateRecord {
         shape_digest: "shape-digest".to_owned(),
         lifecycle: EffectGroupLifecycle::Retired {
             cleanup: EffectGroupCleanup::Complete,
@@ -304,8 +304,8 @@ pub(crate) fn decide_group_child_admission(
 mod admission_tests {
     use super::*;
 
-    fn live_record() -> EffectGroupIndexLiveRecord {
-        EffectGroupIndexLiveRecord {
+    fn live_record() -> EffectGroupStateLiveRecord {
+        EffectGroupStateLiveRecord {
             shape: EffectGroupShape {
                 wake: lash_core::GroupWakePolicy::All,
                 loser_disposition: LoserPolicy::RunToCompletion,

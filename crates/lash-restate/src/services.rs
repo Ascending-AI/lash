@@ -21,10 +21,10 @@ use restate_sdk::service::IntoServiceDefinition as _;
 
 use crate::RestateEffectHost;
 use crate::durable_wait::{
-    LashDurableWaitIndex as _, LashDurableWaitIndexImpl, LashDurableWaitWorkflow as _,
+    LashDurableWaitRegistry as _, LashDurableWaitRegistryImpl, LashDurableWaitWorkflow as _,
     LashDurableWaitWorkflowImpl,
 };
-use crate::effect_group::{EffectGroupDispatch, EffectGroupIndex, EffectGroupPayload};
+use crate::effect_group::{EffectGroupDispatch, EffectGroupPayload, EffectGroupState};
 use crate::ingress::RestateIngressClient;
 use crate::process::{LashProcessWorkflow as _, LashProcessWorkflowImpl, RestateProcessRunner};
 use crate::process_attach::{LashProcessAttach as _, LashProcessAttachImpl};
@@ -61,14 +61,14 @@ macro_rules! lash_services {
 lash_services! {
     /// Exact-address promises and deadline timers for every await-event key.
     DurableWaitWorkflow => "LashDurableWaitWorkflow",
-    /// The per-scope index that cancels, revokes and fences a scope's waits.
-    DurableWaitIndex => "LashDurableWaitIndex",
+    /// The per-scope registry that cancels, revokes and fences a scope's waits.
+    DurableWaitRegistry => "LashDurableWaitRegistry",
     /// The segment runner a process submission starts and awaits.
     ProcessWorkflow => "LashProcessWorkflow",
     /// Arms a process terminal for a caller parked on it.
     ProcessAttach => "LashProcessAttach",
     /// An effect group's lifecycle and settlement rank.
-    EffectGroupIndex => "EffectGroupIndex",
+    EffectGroupState => "EffectGroupState",
     /// An effect group's successful result bytes.
     EffectGroupPayload => "EffectGroupPayload",
     /// Sends an effect group's children and runs each one.
@@ -133,13 +133,13 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
         .iter()
         .fold(builder, |builder, service| match service {
             LashService::DurableWaitWorkflow => builder.bind(LashDurableWaitWorkflowImpl.serve()),
-            LashService::DurableWaitIndex => builder.bind(LashDurableWaitIndexImpl.serve()),
+            LashService::DurableWaitRegistry => builder.bind(LashDurableWaitRegistryImpl.serve()),
             LashService::ProcessWorkflow => match process_workflow.take() {
                 Some(process_workflow) => builder.bind(process_workflow),
                 None => builder,
             },
             LashService::ProcessAttach => builder.bind(LashProcessAttachImpl.serve()),
-            LashService::EffectGroupIndex => builder.bind(EffectGroupIndex),
+            LashService::EffectGroupState => builder.bind(EffectGroupState),
             LashService::EffectGroupPayload => builder.bind(EffectGroupPayload),
             // Dispatcher preflight and child runs retry `ctx.run` without a
             // cap: a child's failure is its recorded outcome, never a

@@ -208,7 +208,7 @@ fn validate_run_id(run_id: &str) -> Result<(), String> {
 async fn ensure_group_is_new(ingress: &RestateIngressClient, run_id: &str) -> AppResult<()> {
     let response: EffectGroupReadRankResponse = ingress
         .call_object_json(
-            "EffectGroupIndex",
+            "EffectGroupState",
             &group_key(run_id),
             "read_rank",
             &EffectGroupReadRankRequest {
@@ -235,7 +235,7 @@ async fn read_effect_group_report(
     for rank in 1..=CHILD_DURATIONS_MS.len() as u64 {
         let response: EffectGroupReadRankResponse = ingress
             .call_object_json(
-                "EffectGroupIndex",
+                "EffectGroupState",
                 &group_key,
                 "read_rank",
                 &EffectGroupReadRankRequest {

@@ -1038,7 +1038,7 @@ pub(super) async fn restate_workflows_and_wait_index_bind_with_required_handlers
     let discovery = discover_service(&service);
     let wait_workflow = LashDurableWaitWorkflowImpl.serve();
     let wait_workflow_discovery = discover_service(&wait_workflow);
-    let wait_index = LashDurableWaitIndexImpl.serve();
+    let wait_index = LashDurableWaitRegistryImpl.serve();
     let wait_index_discovery = discover_service(&wait_index);
     let endpoint = Endpoint::builder()
         .bind(service)
@@ -1203,7 +1203,7 @@ pub(super) async fn restate_workflows_and_wait_index_bind_with_required_handlers
     }));
     assert_eq!(
         wait_index_discovery.name.to_string(),
-        "LashDurableWaitIndex"
+        "LashDurableWaitRegistry"
     );
     for required in ["register", "settle", "resolve", "cancel_all", "revoke_all"] {
         assert!(

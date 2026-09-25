@@ -19,7 +19,7 @@ pub(super) async fn resolve_restate_await_event_via_ingress(
     let outcome = ingress
         .ingress
         .call_object_json::<_, RestateDurableWaitResolveResponse>(
-            crate::LashService::DurableWaitIndex.name(),
+            crate::LashService::DurableWaitRegistry.name(),
             &index_key,
             "resolve",
             &request,
@@ -44,7 +44,7 @@ pub(super) async fn update_restate_session_waits_via_ingress(
     ingress
         .ingress
         .call_object_empty(
-            crate::LashService::DurableWaitIndex.name(),
+            crate::LashService::DurableWaitRegistry.name(),
             session_id,
             handler,
         )
@@ -57,7 +57,7 @@ pub(super) async fn update_restate_session_waits_via_ingress(
         })
 }
 
-/// Whether the `LashDurableWaitIndex` object at `index_key` (a session's, or
+/// Whether the `LashDurableWaitRegistry` object at `index_key` (a session's, or
 /// a non-session scope's) has been revoked: the durable fence every mint,
 /// resolve, peek, await, effect, and group under it consults.
 pub(super) async fn restate_index_is_revoked_via_ingress(
@@ -67,7 +67,7 @@ pub(super) async fn restate_index_is_revoked_via_ingress(
     ingress
         .ingress
         .call_object_json::<_, bool>(
-            crate::LashService::DurableWaitIndex.name(),
+            crate::LashService::DurableWaitRegistry.name(),
             index_key,
             "is_revoked",
             &(),
@@ -114,7 +114,7 @@ pub(super) async fn update_restate_scope_waits_via_ingress(
     ingress
         .ingress
         .call_object_empty(
-            crate::LashService::DurableWaitIndex.name(),
+            crate::LashService::DurableWaitRegistry.name(),
             &index_key,
             handler,
         )
@@ -141,7 +141,7 @@ pub(super) async fn retire_restate_scope_via_ingress(
     let retired = ingress
         .ingress
         .call_object_json::<_, bool>(
-            crate::LashService::DurableWaitIndex.name(),
+            crate::LashService::DurableWaitRegistry.name(),
             &index_key,
             handler,
             &(),

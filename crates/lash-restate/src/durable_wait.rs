@@ -8,7 +8,7 @@
 //! One responsibility: every Lash await-event key is turned into an exact
 //! Restate address here, and the two services that own that address live here
 //! too — `LashDurableWaitWorkflow` owns the promise and its deadline timer,
-//! `LashDurableWaitIndex` owns the session-to-wait index that cancellation,
+//! `LashDurableWaitRegistry` owns the session-to-wait index that cancellation,
 //! revocation, and session deletion resolve through.
 //!
 //! Handler-scoped key derivation is deliberately pure: it validates and derives
@@ -218,7 +218,7 @@ impl RestateDurableWaitAddress {
     }
 }
 
-/// Which `LashDurableWaitIndex` object owns a wait: the session's object for
+/// Which `LashDurableWaitRegistry` object owns a wait: the session's object for
 /// a session-bearing scope, or the object of the exact non-session scope
 /// (a process or runtime operation, keyed by its journal identity). One
 /// object per scope is what lets a scope-exact retirement revoke every wait
@@ -254,7 +254,7 @@ impl RestateDurableWaitScope {
     }
 }
 
-/// The `LashDurableWaitIndex` object key that owns every wait of `scope`.
+/// The `LashDurableWaitRegistry` object key that owns every wait of `scope`.
 pub(crate) fn durable_wait_index_key_for_scope(scope: &ExecutionScope) -> String {
     RestateDurableWaitScope::for_scope(scope).index_key("")
 }
@@ -337,7 +337,7 @@ pub struct RestateDurableWaitResolveRequest {
     pub resolution: Resolution,
 }
 
-/// What `LashDurableWaitIndex/resolve` answers: the promise's first-writer
+/// What `LashDurableWaitRegistry/resolve` answers: the promise's first-writer
 /// outcome, or the typed refusal a completion delivered to a cancel-decided
 /// group child's key earns (ADR 0099 §4, W17).
 ///
@@ -635,7 +635,7 @@ where
     let entry = RestateDurableWaitAwakeableRequest { key, awakeable_id };
     let replay_key = entry.key.key_id.clone();
     let register = context
-        .object_client::<LashDurableWaitIndexClient>(session_id)
+        .object_client::<LashDurableWaitRegistryClient>(session_id)
         .register_awakeable(Json(entry.clone()))
         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
     let Json(registration) = register.call().await?;
@@ -660,7 +660,7 @@ where
 {
     let replay_key = entry.key.key_id.clone();
     let unregister = context
-        .object_client::<LashDurableWaitIndexClient>(session_id)
+        .object_client::<LashDurableWaitRegistryClient>(session_id)
         .unregister_awakeable(Json(entry))
         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
     let Json(()) = unregister.call().await?;
@@ -711,7 +711,7 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         let index_key = durable_wait_index_object_key(&address);
         let replay_key = request.key.key_id.clone();
         let registration = ctx
-            .object_client::<LashDurableWaitIndexClient>(index_key.clone())
+            .object_client::<LashDurableWaitRegistryClient>(index_key.clone())
             .register(Json(RestateDurableWaitIndexRequest {
                 key: request.key.clone(),
             }))
@@ -768,7 +768,7 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         // invocations never reach it; the module and migration docs therefore
         // require a pre-cutover drain/purge rather than claiming self-healing.
         let settle = ctx
-            .object_client::<LashDurableWaitIndexClient>(index_key)
+            .object_client::<LashDurableWaitRegistryClient>(index_key)
             .settle(Json(RestateDurableWaitSettleRequest {
                 key: request.key,
                 resolution: resolution.clone(),
@@ -812,7 +812,7 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
 /// Object serialization makes registration, cancellation, and revocation atomic for one
 /// session.
 #[restate_sdk::object]
-pub trait LashDurableWaitIndex {
+pub trait LashDurableWaitRegistry {
     async fn is_revoked(request: Json<()>) -> HandlerResult<Json<bool>>;
     /// Read registered waits that have no retained terminal.
     async fn outstanding() -> HandlerResult<Json<Vec<AwaitEventKey>>>;
@@ -888,7 +888,7 @@ pub trait LashDurableWaitIndex {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct LashDurableWaitIndexImpl;
+pub(crate) struct LashDurableWaitRegistryImpl;
 pub(crate) fn durable_wait_index_state_key(address: &RestateDurableWaitAddress) -> String {
     let classification = match address.classification {
         RestateDurableWaitClassification::DurableWait => "durable",
@@ -1182,7 +1182,7 @@ async fn scope_effects_and_groups_are_quiescent(
             .map(|group_key| (state_key, group_key))
     }) {
         let Json(unsettled) = ctx
-            .object_client::<crate::effect_group::EffectGroupIndexClient>(group_key.to_string())
+            .object_client::<crate::effect_group::EffectGroupStateClient>(group_key.to_string())
             .unsettled_children()
             .call()
             .await?;
@@ -1219,7 +1219,7 @@ pub(crate) fn split_cancellable_waits(
         .into_iter()
         .partition(|key| !key.wait.is_turn_control())
 }
-impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
+impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     async fn is_revoked(
         &self,
         ctx: ObjectContext<'_>,

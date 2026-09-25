@@ -298,7 +298,7 @@ impl EffectHost for RestateEffectHost {
             .controller
             .await_event_ingress
             .ingress
-            .call_object_empty_json(LashService::DurableWaitIndex, session_id, "outstanding")
+            .call_object_empty_json(LashService::DurableWaitRegistry, session_id, "outstanding")
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -374,7 +374,7 @@ impl EffectHost for RestateEffectHost {
     /// replay ledger is deleted here and the count is always 0. The promise
     /// half is real: a scope-exact retirement revokes every durable wait the
     /// scope owns and fences later mints, resolves, peeks, awaits, effects,
-    /// and groups under it through the scope's `LashDurableWaitIndex` object,
+    /// and groups under it through the scope's `LashDurableWaitRegistry` object,
     /// which survives restarts and redeploys. Session retirements stay a
     /// no-op: session promises are revoked through the session lever the
     /// host already calls. A [`lash_core::EffectRetirementGate::WhenQuiescent`] request
@@ -613,7 +613,7 @@ impl AwaitEventResolver for RestateEffectHostController {
     }
 
     /// Revoke every durable wait of a non-session `scope` and fence the
-    /// scope's `LashDurableWaitIndex` object, durably: the promise half of
+    /// scope's `LashDurableWaitRegistry` object, durably: the promise half of
     /// scope retirement on Restate. A session scope is refused as everywhere.
     async fn retire_await_events_for_scope(
         &self,
@@ -640,7 +640,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         self.await_event_ingress
             .ingress
             .call_object_json::<_, bool>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "revoke_all_if_quiescent",
                 &(),
@@ -706,7 +706,7 @@ impl RestateEffectHostController {
             .await_event_ingress
             .ingress
             .call_object_json::<_, bool>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "register_closure_participant",
                 &RestateTurnCancelClosureParticipantRequest {
@@ -746,7 +746,7 @@ impl RestateEffectHostController {
         self.await_event_ingress
             .ingress
             .call_object_json::<_, ()>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "release_closure_participant",
                 &RestateTurnCancelClosureParticipantRequest {
@@ -821,7 +821,7 @@ impl RestateEffectHostController {
         self.await_event_ingress
             .ingress
             .call_object_json::<_, bool>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "record_group",
                 &crate::durable_wait::RestateDurableWaitGroupRequest {
@@ -854,12 +854,12 @@ impl RestateEffectHostController {
         let shape = EffectGroupShape::from_group(&group, opener)?;
         let probe = ingress
             .call_object_empty_json::<EffectGroupProbeResponse>(
-                LashService::EffectGroupIndex,
+                LashService::EffectGroupState,
                 &group_key,
                 "probe",
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/probe", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupState/probe", error))?;
         // Opener liveness is this process's to judge; the endpoint's is routing.
         let local = self.group_executors.get().and_then(|executors| {
             (group.children().iter()).position(|child| executors.executor_for(child).is_none())
@@ -891,7 +891,7 @@ impl RestateEffectHostController {
         let content_checked = group.reopen() == lash_core::GroupReopen::RetainedContent;
         let opened = ingress
             .call_object_json::<_, EffectGroupOpenResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 &group_key,
                 "open",
                 &EffectGroupOpenRequest {
@@ -900,7 +900,7 @@ impl RestateEffectHostController {
                 },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/open", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupState/open", error))?;
         match opened {
             EffectGroupOpenResponse::OpenedFresh | EffectGroupOpenResponse::ReopenedPreparing => {
                 ingress
@@ -1052,7 +1052,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         })?;
         let mut read = ingress
             .call_object_json::<_, EffectGroupReadRankResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 handle.group_key(),
                 "read_rank",
                 &EffectGroupReadRankRequest {
@@ -1061,7 +1061,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupState/read_rank", error))?;
         if matches!(read, EffectGroupReadRankResponse::NotSettled) {
             let scope = ExecutionScope::runtime_operation(handle.group_key());
             let request = rank_wait_request(&scope, handle.group_key(), rank)?;
@@ -1110,7 +1110,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             }
             read = ingress
                 .call_object_json::<_, EffectGroupReadRankResponse>(
-                    LashService::EffectGroupIndex.name(),
+                    LashService::EffectGroupState.name(),
                     handle.group_key(),
                     "read_rank",
                     &EffectGroupReadRankRequest {
@@ -1119,7 +1119,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                     },
                 )
                 .await
-                .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
+                .map_err(|error| ingress_group_error("EffectGroupState/read_rank", error))?;
         }
         let record = match read {
             EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
@@ -1194,7 +1194,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         let ingress = &self.await_event_ingress.ingress;
         let read = ingress
             .call_object_json::<_, EffectGroupReadRankResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 group_key,
                 "read_rank",
                 &EffectGroupReadRankRequest {
@@ -1203,7 +1203,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupState/read_rank", error))?;
         let (record, child_replay_key) = match read {
             EffectGroupReadRankResponse::Settled {
                 settlement,
@@ -1269,13 +1269,13 @@ impl RuntimeEffectController for RestateEffectHostController {
             .await_event_ingress
             .ingress
             .call_object_json::<_, EffectGroupCloseResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 &group_key,
                 "close",
                 &EffectGroupCloseRequest { disposition },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/close", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupState/close", error))?;
         match response {
             EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => Ok(()),
             EffectGroupCloseResponse::WidenRefused => Err(group_shape_error(format!(
@@ -1317,7 +1317,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         let index_key = durable_wait_index_key_for_scope(&scope);
         let membership: Option<String> = ingress
             .call_object_json::<_, Option<String>>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "group_child_membership",
                 &crate::durable_wait::RestateDurableWaitGroupChildMembershipRequest {
@@ -1326,14 +1326,14 @@ impl RuntimeEffectController for RestateEffectHostController {
             )
             .await
             .map_err(|error| {
-                ingress_group_error("LashDurableWaitIndex/group_child_membership", error)
+                ingress_group_error("LashDurableWaitRegistry/group_child_membership", error)
             })?;
         let Some(group_key) = membership else {
             return Ok(Outcome::Ungrouped);
         };
         let response = ingress
             .call_object_json::<_, crate::effect_group::EffectGroupCommitChildResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 &group_key,
                 "commit_child",
                 &crate::effect_group::EffectGroupCommitChildRequest {
@@ -1341,7 +1341,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/commit_child", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupState/commit_child", error))?;
         Ok(match response {
             crate::effect_group::EffectGroupCommitChildResponse::Committed {
                 commit_seq, ..
@@ -1392,13 +1392,13 @@ impl RuntimeEffectController for RestateEffectHostController {
         let ingress = &self.await_event_ingress.ingress;
         let (wait_scope, positions) = match ingress
             .call_object_json::<_, crate::effect_group::EffectGroupDrainBlockersResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 group_key,
                 "drain_blockers",
                 &crate::effect_group::EffectGroupDrainBlockersRequest { commit_seq },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blockers", error))?
+            .map_err(|error| ingress_group_error("EffectGroupState/drain_blockers", error))?
         {
             crate::effect_group::EffectGroupDrainBlockersResponse::Admitted => return Ok(()),
             crate::effect_group::EffectGroupDrainBlockersResponse::Blocked {
@@ -1481,7 +1481,7 @@ mod tests {
     fn service_call_error(status: u16) -> crate::RestateHttpError {
         crate::RestateHttpError::Status {
             operation: "Restate object call",
-            url: "https://restate.invalid/EffectGroupIndex/group/probe".to_string(),
+            url: "https://restate.invalid/EffectGroupState/group/probe".to_string(),
             status,
             body: "not found".to_string(),
         }
@@ -1489,15 +1489,15 @@ mod tests {
 
     #[test]
     fn effect_group_ingress_404_is_restate_service_unregistered() {
-        let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(404));
+        let error = ingress_group_error("EffectGroupState/probe", service_call_error(404));
 
         assert_eq!(error.code, RuntimeErrorCode::EngineServiceUnregistered);
-        assert!(error.message.contains("EffectGroupIndex/probe"));
+        assert!(error.message.contains("EffectGroupState/probe"));
     }
 
     #[test]
     fn effect_group_ingress_non_registration_failure_stays_a_shape_error() {
-        let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(503));
+        let error = ingress_group_error("EffectGroupState/probe", service_call_error(503));
 
         assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
     }

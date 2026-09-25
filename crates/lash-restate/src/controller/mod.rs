@@ -632,7 +632,7 @@ where
             .context
             .effect_group_probe(group_key.clone())
             .await
-            .map_err(|error| effect_group_engine_error("EffectGroupIndex/probe", error))?;
+            .map_err(|error| effect_group_engine_error("EffectGroupState/probe", error))?;
         if matches!(probe, EffectGroupProbeResponse::Absent)
             && let Some(position) = self
                 .context
@@ -656,7 +656,7 @@ where
             .context
             .effect_group_open(group_key.clone(), open_request.clone())
             .await
-            .map_err(|error| effect_group_engine_error("EffectGroupIndex/open", error))?;
+            .map_err(|error| effect_group_engine_error("EffectGroupState/open", error))?;
         match opened {
             EffectGroupOpenResponse::OpenedFresh | EffectGroupOpenResponse::ReopenedPreparing => {
                 self.context
@@ -784,7 +784,7 @@ where
                 },
             )
             .await
-            .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
+            .map_err(|error| effect_group_engine_error("EffectGroupState/read_rank", error))?;
         if matches!(read, EffectGroupReadRankResponse::NotSettled) {
             let scope = ExecutionScope::runtime_operation(handle.group_key());
             let request = rank_wait_request(&scope, handle.group_key(), rank)?;
@@ -851,7 +851,7 @@ where
                     },
                 )
                 .await
-                .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
+                .map_err(|error| effect_group_engine_error("EffectGroupState/read_rank", error))?;
         }
         let record = match read {
             EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
@@ -932,7 +932,7 @@ where
             .context
             .effect_group_close(group_key.clone(), EffectGroupCloseRequest { disposition })
             .await
-            .map_err(|error| effect_group_engine_error("EffectGroupIndex/close", error))?;
+            .map_err(|error| effect_group_engine_error("EffectGroupState/close", error))?;
         match response {
             EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => Ok(()),
             EffectGroupCloseResponse::WidenRefused => Err(group_shape_error(format!(
