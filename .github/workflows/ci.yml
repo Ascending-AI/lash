@@ -503,6 +503,8 @@ jobs:
           python3 scripts/test_perf_duration_history_contract.py
           python3 scripts/test_ci_plan.py
           python3 scripts/test_ci_plan_hygiene.py
+          python3 scripts/test_check_upgrade_paths.py
+          python3 scripts/test_capture_release_fixtures.py
           python3 scripts/test_checkout_step.py
           python3 scripts/test_ci_workspace_cache.py
           python3 scripts/test_ci_artifact_provenance.py
@@ -1413,6 +1415,9 @@ jobs:
 
       - name: Check durable format registry
         run: python3 scripts/check_format_registry.py
+
+      - name: Check upgrade-path declarations
+        run: python3 scripts/check_upgrade_paths.py
 
   unicode-tests:
     name: Test deferred Unicode suites
