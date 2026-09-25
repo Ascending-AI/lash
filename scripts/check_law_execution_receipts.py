@@ -405,16 +405,20 @@ def crate_roots(crate: Path) -> list[tuple[str, Path]]:
     The first segment of ``module_path!()`` is the crate name: the ``[lib]``
     name (or the package name with ``-`` -> ``_``) for ``src/lib.rs``, the bin
     name for ``src/main.rs``/``[[bin]]``, the file stem for ``tests/*.rs``,
-    and the declared ``name`` for ``[[test]]``.
+    and the declared ``name`` for ``[[test]]``.  ``autobins = false`` and
+    ``autotests = false`` turn the auto-discovered roots off: a ``tests/*.rs``
+    file that only exists as a module of a declared ``[[test]]`` binary owes
+    its receipts under that binary's name, not its own stem (FIG-3813).
     """
     manifest = crate_manifest(crate)
-    package = manifest.get("package", {}).get("name", crate.name)
+    package = manifest.get("package", {})
+    package_name = package.get("name", crate.name)
     roots: list[tuple[str, Path]] = []
 
     lib = manifest.get("lib", {})
     lib_path = crate / lib.get("path", "src/lib.rs")
     if lib_path.is_file():
-        roots.append((lib.get("name", package.replace("-", "_")), lib_path))
+        roots.append((lib.get("name", package_name.replace("-", "_")), lib_path))
 
     bin_paths: set[Path] = set()
     for section in manifest.get("bin", []):
@@ -424,8 +428,12 @@ def crate_roots(crate: Path) -> list[tuple[str, Path]]:
             roots.append((name, path))
             bin_paths.add(path.resolve())
     main = crate / "src/main.rs"
-    if main.is_file() and main.resolve() not in bin_paths:
-        roots.append((package.replace("-", "_"), main))
+    if (
+        package.get("autobins", True)
+        and main.is_file()
+        and main.resolve() not in bin_paths
+    ):
+        roots.append((package_name.replace("-", "_"), main))
 
     test_paths: set[Path] = set()
     for section in manifest.get("test", []):
@@ -435,7 +443,7 @@ def crate_roots(crate: Path) -> list[tuple[str, Path]]:
             roots.append((name, path))
             test_paths.add(path.resolve())
     tests_dir = crate / "tests"
-    if tests_dir.is_dir():
+    if package.get("autotests", True) and tests_dir.is_dir():
         for path in sorted(tests_dir.glob("*.rs")):
             if path.resolve() not in test_paths:
                 roots.append((path.stem, path))
@@ -471,16 +479,19 @@ def root_prefix(crate: Path, root_file: Path) -> str:
 def cargo_test_paths(crate_root: Path) -> dict[str, Path]:
     """Bazel ``<name>__test`` target -> its Cargo test-root file."""
     mapping: dict[str, Path] = {}
+    autotests = True
     cargo_toml = crate_root / "Cargo.toml"
     if cargo_toml.is_file():
         manifest = crate_manifest(crate_root)
+        autotests = manifest.get("package", {}).get("autotests", True)
         for section in manifest.get("test", []):
             name = section.get("name")
-            path = section.get("path")
-            if name and path:
-                mapping[name] = crate_root / path
+            if name:
+                path = crate_root / section.get("path", f"tests/{name}.rs")
+                if path.is_file():
+                    mapping[name] = path
     tests_dir = crate_root / "tests"
-    if tests_dir.is_dir():
+    if autotests and tests_dir.is_dir():
         for path in sorted(tests_dir.glob("*.rs")):
             mapping.setdefault(path.stem, path)
     return mapping

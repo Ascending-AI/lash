@@ -322,6 +322,64 @@ mod sqlite {
         self.assertEqual(twice, {"laws": Counter(PLAIN_SUITE_ROWS)})
 
 
+class AutodiscoveryTests(unittest.TestCase):
+    """``autotests``/``autobins`` decide which files are compilation roots.
+
+    With ``autotests = false`` a ``tests/*.rs`` file is a module of whatever
+    declared ``[[test]]`` binary includes it, so its invocations claim under
+    that binary's module prefix (``integration::laws``), never under the
+    file's own stem -- the claimant shape the pg-store cargo-mode census
+    missed (FIG-3813).
+    """
+
+    def fixture(self, tmp: str) -> Path:
+        crate = Path(tmp) / "fakepkg"
+        (crate / "tests").mkdir(parents=True)
+        (crate / "Cargo.toml").write_text(
+            '[package]\nname = "fakepkg"\nautobins = false\nautotests = false\n'
+            '[[test]]\nname = "integration"\npath = "tests/main.rs"\n',
+            encoding="utf-8",
+        )
+        (crate / "tests" / "main.rs").write_text(
+            '#[path = "laws.rs"]\nmod laws;\n', encoding="utf-8"
+        )
+        (crate / "tests" / "laws.rs").write_text(
+            "plain_suite_tests!({ fixture });\n", encoding="utf-8"
+        )
+        return crate
+
+    def test_module_files_claim_under_the_declared_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            crate = self.fixture(tmp)
+            invocations = MODULE.invocations_in_crate(crate)
+        self.assertEqual(
+            [(inv.suite, inv.claimant) for inv in invocations],
+            [("plain_suite_tests", "integration::laws")],
+        )
+
+    def test_the_prefixed_claimants_receipts_satisfy_the_census(self) -> None:
+        macros = MODULE.macro_blocks(MACROS)
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = MODULE.expected_from_invocations(
+                MODULE.invocations_in_crate(self.fixture(tmp)), macros
+            )
+        observed = full_receipts("integration::laws")
+        self.assertEqual(MODULE.census_compare(expected, observed, ""), [])
+
+    def test_autobins_false_drops_src_main_rs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            crate = self.fixture(tmp)
+            (crate / "src").mkdir()
+            (crate / "src" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+            roots = dict(MODULE.crate_roots(crate))
+        self.assertEqual(roots, {"integration": crate / "tests" / "main.rs"})
+
+    def test_a_stem_label_stays_unresolvable_under_autotests_false(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            crate = self.fixture(tmp)
+            self.assertEqual(MODULE.cargo_test_paths(crate), {"integration": crate / "tests" / "main.rs"})
+
+
 class BazelLabelResolutionTests(unittest.TestCase):
     def test_unit_test_label_excludes_tests_main_integration_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -705,6 +763,25 @@ class RealTreeTests(unittest.TestCase):
             f"dropping {dropped_suite} rows must fail naming its laws: "
             f"{census_errors}",
         )
+
+    def test_autotests_off_modules_claim_under_the_declared_binary(self) -> None:
+        """FIG-3813: ``autotests = false`` keeps ``tests/*.rs`` modules out of
+        the claimant set -- the pg-store ``integration`` binary's module files
+        owe ``integration::<mod>`` receipts, so their own stems must not be
+        claimants (``process_prune_reclaim`` alone would report 0 receipts)."""
+        claimants = {
+            invocation.claimant
+            for invocation in MODULE.invocations_in_crate(
+                MODULE.ROOT / "crates/lash-postgres-store"
+            )
+        }
+        for module in (
+            "postgres_clock_contract",
+            "process_prune_reclaim",
+            "session_execution_lease_renewal",
+        ):
+            self.assertIn(f"integration::{module}", claimants)
+            self.assertNotIn(module, claimants)
 
 
 def recipe_block(justfile: str, recipe: str) -> str:
