@@ -153,7 +153,12 @@ async fn run_run(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     }
     let seeds = match seeds {
         Some(seeds) => seeds,
-        None => lash_sim::generator::default_seed_count(&profile).map_err(|err| err.to_string())?,
+        // The profile default answers to `LASH_QUICK` (AGENTS.md), floored at
+        // two seeds so an evidence lane still exercises more than one world.
+        None => lash_sim::quick_seed_sweep(
+            lash_sim::generator::default_seed_count(&profile).map_err(|err| err.to_string())?,
+        )
+        .max(2),
     };
     let max_boundaries = match max_boundaries {
         Some(max_boundaries) => max_boundaries,
@@ -279,7 +284,9 @@ async fn run_backend_faults(mut args: impl Iterator<Item = String>) -> Result<()
         ));
     }
     let seeds = if explicit_seeds.is_empty() {
-        lash_sim::sqlite_faults::sqlite_fault_seeds(seed_count.unwrap_or(4))
+        lash_sim::sqlite_faults::sqlite_fault_seeds(
+            seed_count.unwrap_or_else(|| lash_sim::quick_seed_sweep(4)),
+        )
     } else {
         explicit_seeds
     };

@@ -651,7 +651,7 @@ async fn generated_cross_backend_surface_differential_agrees() {
     let cases = std::env::var("LASH_CROSS_BACKEND_CASES")
         .ok()
         .and_then(|value| value.parse().ok())
-        .unwrap_or(DEFAULT_CASES);
+        .unwrap_or_else(|| lash_sim::quick_seed_sweep(DEFAULT_CASES));
     let runner_seed = std::env::var("LASH_CROSS_BACKEND_SEED")
         .ok()
         .and_then(|value| value.parse().ok())

@@ -35,7 +35,8 @@ async fn pending_tool_completion_on_the_restate_server_double(
 #[tokio::test]
 async fn pending_tool_completion_proof_runs_on_the_restate_server_double() {
     let started = std::time::Instant::now();
-    for seed in 0x5eed_7001_u64..0x5eed_7001 + 20 {
+    let seeds = crate::quick_seed_sweep(20) as u64;
+    for seed in 0x5eed_7001_u64..0x5eed_7001 + seeds {
         let (proof, trace, preemptions, watch) =
             pending_tool_completion_on_the_restate_server_double(seed).await;
         // A seed's run frees its server once the scenario is done with it:
@@ -66,7 +67,7 @@ async fn pending_tool_completion_proof_runs_on_the_restate_server_double() {
         assert_eq!(preemptions, 0, "seed {seed:#x}: no turn moved on a stall");
     }
     println!(
-        "pending-tool scenario on the Restate server double, serial: 20 seeds twice in {:?}",
+        "pending-tool scenario on the Restate server double, serial: {seeds} seeds twice in {:?}",
         started.elapsed()
     );
 }

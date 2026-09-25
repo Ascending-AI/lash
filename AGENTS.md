@@ -21,6 +21,18 @@ During an edit, run the narrowest command that proves the change:
   the change directly touches, excludes manual and pr-deferred tests, and
   widens for shared or unknown inputs. A docs-only diff needs no Rust build.
   Use `just test-changed` only when reverse-dependent test coverage adds value.
+  A failing command prints a ~40-line summary — per failing target the failed
+  tests, the first panic with `file:line`, and the full `test.log` path; each
+  command's raw output also lands in `.git/lash-validation/command-N.log`.
+  `--verbose` streams the full output instead.
+
+`LASH_QUICK=1` is the opt-in iteration knob for the heavy lanes: under it,
+`//crates/lash-typescript:test262_full` runs a deterministic tenth of each
+stratum plus every test in shards the diff touches (`scripts/dev-test.py`
+forwards it with `--test_env`), and `lash-sim` generated sweeps run a quarter
+of their seeds. It shortens iteration only — the full selection and sweeps
+stay the default and the release gate, and CI's full profile ignores the
+variable entirely.
 
 Bare `kiln test` runs `//:dev_tests`; `kiln test //:workspace_tests` runs the
 broader PR test partition. `kiln clippy` defaults to `//:workspace_clippy`.

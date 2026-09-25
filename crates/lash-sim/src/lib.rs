@@ -77,5 +77,25 @@ pub use runner::{
 };
 pub use stack_policy::{PRODUCT_STACK_BUDGET_BYTES, SIM_HARNESS_STACK_LIMIT_BYTES};
 
+/// `LASH_QUICK` (AGENTS.md): the opt-in iteration knob for the heavy
+/// generated-world lanes. When set -- any value but `0` -- every
+/// count-based seed sweep in this crate shrinks to a quarter of its seeds,
+/// at least one. An explicit `--seeds`/`--seed` or a named `LASH_*_SEEDS`
+/// override still wins: the knob sizes defaults, not decisions. CI never
+/// sets it; the full sweeps stay the gates.
+pub fn quick_enabled() -> bool {
+    std::env::var("LASH_QUICK").is_ok_and(|value| !value.is_empty() && value != "0")
+}
+
+/// The seed count a generated sweep runs under `quick_enabled`: a quarter of
+/// the full count, at least one.
+pub fn quick_seed_sweep(full: usize) -> usize {
+    if quick_enabled() {
+        (full / 4).max(1)
+    } else {
+        full
+    }
+}
+
 #[cfg(test)]
 mod runtime_feedback;

@@ -9,11 +9,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import shlex
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ElementTree
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +28,12 @@ LIVE_STORES = (
     "LASH_POSTGRES_DATABASE_URL", "LASH_REQUIRE_POSTGRES", "LASH_S3_ENDPOINT",
     "LASH_REQUIRE_S3",
 )
+# `LASH_QUICK` (AGENTS.md): the opt-in iteration knob for the heavy lanes.
+QUICK = "LASH_QUICK"
+# Comma-separated shards/paths the quick test262 selection keeps whole.
+QUICK_TEST262_INCLUDE = "LASH_TEST262_QUICK_INCLUDE"
+TEST262_PREFIX = "crates/lash-typescript/tests/test262/"
+SUMMARY_LINES = 40
 
 
 def git(*args: str) -> bytes:
@@ -93,6 +101,51 @@ def script_gates() -> dict[str, list[list[str]]]:
     return commands
 
 
+def quick_enabled() -> bool:
+    value = os.environ.get(QUICK, "")
+    return bool(value) and value != "0"
+
+
+def quick_test262_includes(paths: list[str]) -> set[str]:
+    """The test262 shards a changed file asks the quick subset to keep whole.
+
+    The quick selection samples ~10% of each stratum; a diff under
+    `test/<shard>/` or `outcomes/<shard>.tsv` keeps that shard's tests in the
+    run so the change actually exercises the area it edits. Any other test262
+    input (census.tsv, the harness, the shared runner) is selection-wide, so
+    it keeps every shard whole. The Rust side resolves shard names and `*`.
+    """
+    includes = set()
+    for path in paths:
+        if not path.startswith(TEST262_PREFIX):
+            continue
+        rest = path[len(TEST262_PREFIX):].split("/")
+        if rest[0] == "test" and len(rest) > 2:
+            includes.add(rest[1])
+        elif rest[0] == "outcomes" and rest[-1].endswith(".tsv"):
+            includes.add(rest[-1].removesuffix(".tsv"))
+        else:
+            includes.add("*")
+    # A selection-wide change keeps every shard; shard names add nothing.
+    return {"*"} if "*" in includes else includes
+
+
+def quick_test_args(paths: list[str]) -> list[str]:
+    """The `--test_env` flags that carry LASH_QUICK into remote test actions.
+
+    Emitting the env only when the knob is set keeps a full run's action keys
+    identical to CI's, and a quick run's cached verdicts useless to a full
+    run. CI never sets the knob; the full selection stays the gate.
+    """
+    if not quick_enabled():
+        return []
+    args = [f"--test_env={QUICK}=1"]
+    includes = sorted(quick_test262_includes(paths))
+    if includes:
+        args.append(f"--test_env={QUICK_TEST262_INCLUDE}={','.join(includes)}")
+    return args
+
+
 def select(paths: list[str], gates: dict[str, list[list[str]]]) -> tuple[list[str], bool, bool, list[list[str]]]:
     # `scripts/ci_plan.py` is the repository's one change classifier; this is
     # its dev-test projection plus the commands each part of it runs.
@@ -134,7 +187,7 @@ def plan(base: str, dependents: bool) -> dict:
     if builds:
         commands.append(["kiln", "build", *builds])
     if labels:
-        commands.append(["kiln", "test", *labels])
+        commands.append(["kiln", "test", *quick_test_args(paths), *labels])
     result = {
         "base": base,
         "head": git("rev-parse", "HEAD").decode().strip(),
@@ -157,7 +210,120 @@ def save(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
-def run(planned: dict) -> int:
+# Bazel's summary block: `//pkg:tgt  FAILED in 1.2s` followed by indented
+# artifact paths, and `FAIL: //pkg:tgt (see /path/test.log)` lines.
+_TARGET_STATUS = re.compile(
+    r"^(\s*)(//\S+)\s+.*\b(FAILED|TIMEOUT|FLAKY|NO STATUS)\b", re.MULTILINE)
+_SEE = re.compile(r"^FAIL:\s+(//\S+)\s+\((?:see|cached)\s+(\S+)\)", re.MULTILINE)
+
+
+def failed_targets(text: str) -> list[tuple[str, list[str]]]:
+    """Each failed Bazel label with the artifact paths printed beneath it."""
+    lines = text.splitlines()
+    targets: list[tuple[str, list[str]]] = []
+    for index, line in enumerate(lines):
+        label, artifacts = None, []
+        if match := _TARGET_STATUS.match(line):
+            label = match.group(2)
+        elif match := _SEE.match(line):
+            label, artifacts = match.group(1), [match.group(2)]
+        if label is None:
+            continue
+        follow = index + 1
+        while follow < len(lines) and (line := lines[follow]).startswith((" ", "\t")) and line.strip():
+            artifacts += [t for t in line.split() if "testlogs/" in t or t.endswith(("test.log", "test.xml"))]
+            follow += 1
+        targets.append((label, artifacts))
+    return targets
+
+
+def panic_line(text: str) -> str | None:
+    """The first Rust panic as `file:line: message`, else an assertion line."""
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if "panicked at" not in line:
+            continue
+        location = re.search(r"panicked at (\S+?:\d+:\d+)", line)
+        message = next((follow.strip() for follow in lines[index + 1:] if follow.strip()), "")
+        return f"{location.group(1)}: {message}" if location else line.strip()
+    for line in lines:
+        if re.search(r"AssertionError|assertion .* failed|assertion failed|assert_?eq!|assert_?ne!", line):
+            return line.strip()
+    return None
+
+
+def _libtest_names(text: str) -> list[str]:
+    names = re.findall(r"^test (\S+) \.\.\. FAILED\b", text, re.MULTILINE)
+    for block in re.findall(r"^failures:\s*\n((?:[ \t]+\S.*\n)+)", text, re.MULTILINE):
+        names += re.findall(r"^\s+(\S+)", block, re.MULTILINE)
+    return list(dict.fromkeys(names))
+
+
+def _xml_failures(path: Path) -> tuple[list[str], str | None]:
+    try:
+        root = ElementTree.parse(path).getroot()
+    except (OSError, ElementTree.ParseError):
+        return [], None
+    names, detail = [], None
+    for case in root.iter("testcase"):
+        node = next((case.find(kind) for kind in ("failure", "error") if case.find(kind) is not None), None)
+        if node is None:
+            continue
+        names.append(case.get("name") or "?")
+        if detail is None:
+            detail = panic_line(node.text or "") or (node.get("message") or "").strip() or None
+    return names, detail
+
+
+def target_failure(artifacts: list[str]) -> tuple[list[str], str | None, str | None]:
+    """Failing test names, first panic line, and log path for one target."""
+    log = next((a for a in artifacts if a.endswith("test.log")), None)
+    xml = next((a for a in artifacts if a.endswith("test.xml")), None)
+    if xml is None and log:
+        xml = log.removesuffix("test.log") + "test.xml"
+    names, detail = [], None
+    if xml and Path(xml).is_file():
+        names, detail = _xml_failures(Path(xml))
+    if not names and log and Path(log).is_file():
+        text = Path(log).read_text(errors="replace")
+        names, detail = _libtest_names(text), panic_line(text)
+    return names, detail, log
+
+
+def failure_summary(command: list[str], code: int, log_path: Path) -> str:
+    """The ~40-line digest printed when a validation command fails."""
+    try:
+        text = log_path.read_text(errors="replace")
+    except OSError:
+        text = ""
+    lines = [
+        f"dev-test: `{shlex.join(command)}` failed with exit {code}",
+        f"dev-test: full output: {log_path}",
+    ]
+    targets = failed_targets(text)
+    if targets:
+        lines.append("dev-test: failing targets:")
+        for label, artifacts in targets[:12]:
+            names, detail, log = target_failure(artifacts)
+            lines.append(f"  {label}")
+            if names:
+                shown = ", ".join(names[:8])
+                lines.append(f"    failing tests: {shown}{f' (+{len(names) - 8} more)' if len(names) > 8 else ''}")
+            if detail:
+                lines.append(f"    {detail}")
+            if log:
+                lines.append(f"    log: {log}")
+        if len(targets) > 12:
+            lines.append(f"  ... and {len(targets) - 12} more failing targets")
+    else:
+        lines.append("dev-test: last output lines:")
+        tail = [line for line in text.splitlines() if line.strip()][-16:]
+        lines += [f"  {line}" for line in tail]
+    lines.append("dev-test: rerun with --verbose to stream full output")
+    return "\n".join(lines[:SUMMARY_LINES])
+
+
+def run(planned: dict, verbose: bool) -> int:
     directory = Path(git("rev-parse", "--path-format=absolute", "--git-path", "lash-validation").decode().strip())
     directory.mkdir(mode=0o700, exist_ok=True)
     with (directory / "lock").open("a") as lock:
@@ -179,12 +345,25 @@ def run(planned: dict) -> int:
         process = None
         try:
             code = 0
-            for command in planned["commands"]:
+            for index, command in enumerate(planned["commands"]):
                 print("+ " + shlex.join(command), flush=True)
-                process = subprocess.Popen(command, cwd=ROOT, start_new_session=True)
+                log_path = directory / f"command-{index}.log"
+                if verbose:
+                    process = subprocess.Popen(command, cwd=ROOT, start_new_session=True)
+                else:
+                    # Command output goes to a per-command log; a failure
+                    # prints the digest of it, not the whole log.
+                    with log_path.open("wb") as sink:
+                        process = subprocess.Popen(
+                            command, cwd=ROOT, start_new_session=True,
+                            stdout=sink, stderr=subprocess.STDOUT)
                 code = process.wait()
                 if code:
+                    if not verbose:
+                        print(failure_summary(command, code, log_path))
                     break
+                if not verbose:
+                    print(f"dev-test: exit 0, output {log_path}", flush=True)
         except KeyboardInterrupt:
             if process is not None and process.poll() is None:
                 os.killpg(process.pid, signal.SIGTERM)
@@ -220,6 +399,7 @@ def main() -> int:
     parser.add_argument("--base", help="Comparison revision; defaults to merge-base with origin/main")
     parser.add_argument("--dependents", action="store_true", help="Include Bazel reverse dependencies")
     parser.add_argument("--dry-run", action="store_true", help="Print the exact plan as JSON without executing")
+    parser.add_argument("--verbose", action="store_true", help="Stream each command's output instead of logging it and summarizing failures")
     args = parser.parse_args()
     if any(os.environ.get(name) for name in LIVE_STORES):
         parser.error("live store URLs are not accepted; CI owns Postgres/S3/E2E")
@@ -236,7 +416,7 @@ def main() -> int:
     if args.dry_run:
         print(json.dumps(planned, indent=2))
         return 0
-    return run(planned)
+    return run(planned, args.verbose)
 
 
 if __name__ == "__main__":
