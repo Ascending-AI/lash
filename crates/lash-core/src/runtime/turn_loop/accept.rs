@@ -49,7 +49,7 @@ impl LashRuntime {
             mut input,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
-            cancel,
+            local_stop,
             queued_claims,
             turn_input_claims,
             materialize_initial_claims,
@@ -66,7 +66,7 @@ impl LashRuntime {
             while self
                 .drain_next_session_command_with_cancellation(
                     &lease.fence(),
-                    cancel.clone(),
+                    local_stop.immediate_token(),
                     scoped_effect_controller.controller(),
                 )
                 .await?
@@ -96,7 +96,7 @@ impl LashRuntime {
             input: input.clone(),
             sinks: TurnSinks { observer },
             scoped_effect_controller,
-            cancel: cancel.clone(),
+            local_stop: local_stop.clone(),
             queued_claims,
             turn_input_claims,
             materialize_initial_claims,
@@ -219,11 +219,8 @@ impl LashRuntime {
         opts: TurnOptions<'_>,
         session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
     ) -> Result<AgentFrameRun, RuntimeError> {
-        if let Some(hint) = opts.local_cancel_origin_hint() {
-            input.turn_context.set_local_cancel_origin_hint(hint);
-        }
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-        let cancel = opts.cancel.clone();
+        let local_stop = opts.local_stop().clone();
         let Some(store) = self
             .session
             .as_ref()
@@ -236,7 +233,7 @@ impl LashRuntime {
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
                 scoped_effect_controller,
-                cancel,
+                local_stop,
                 LogicalTurnClaims::new(Vec::new(), Vec::new()),
                 session_execution_lease,
                 stopwatch,
@@ -535,7 +532,7 @@ impl LashRuntime {
             opts.events_or_noop(),
             opts.turn_events_or_noop(),
             scoped_effect_controller,
-            cancel,
+            local_stop,
             LogicalTurnClaims::new(Vec::new(), vec![drive]),
             session_execution_lease,
             stopwatch,
@@ -690,6 +687,7 @@ impl LashRuntime {
         // FIG-3353: queued/prepared drives are turn execution too; a
         // `PreservePersisted` open refuses before claiming the lane.
         self.refuse_turn_execution_on_preserved_tool_surface()?;
+        let local_stop = LocalTurnStop::from_token(cancel, None);
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let mut session_execution_lease = self.claim_session_execution_lease().await?;
         if let Some(store) = self.session.as_ref().and_then(Session::history_store) {
@@ -726,7 +724,7 @@ impl LashRuntime {
             events,
             turn_events,
             scoped_effect_controller,
-            cancel,
+            local_stop,
             LogicalTurnClaims::new(
                 initial_queue_claim.into_iter().collect(),
                 initial_turn_input_claim.into_iter().collect(),

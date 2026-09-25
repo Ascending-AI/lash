@@ -361,6 +361,41 @@ paths = ["crates/lash-core-execution/src/session.rs"]
 symbols = ["ToolDispatchSurface", "tool_dispatch_surface"]
 
 [[surface]]
+constant = "INSTRUCTION_ACCOUNTING_VERSION"
+constant_path = "crates/lashlang/src/runtime/mod.rs"
+description = "instruction accounting that places a code cell's journaled cancel checkpoints: compiler emission, builtin cost charges, the cooperative-yield granularity and the checkpoint schedule (FIG-3672 P9)"
+outside_manifest = "an accounting, not a payload: a cell replays by re-execution, so its checkpoint peeks land where this accounting puts them; it is pinned into LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION, which the execution-environment sync stamps and refuses on mismatch"
+
+# The checkpoint schedule and the budget granularity it is sampled at.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/mod.rs"]
+symbols = ["CANCEL_CHECKPOINT_INSTRUCTIONS", "CANCEL_CHECKPOINT_INTERVAL_CAP", "cancel_checkpoint_reached", "COOPERATIVE_YIELD_INSTRUCTION_BUDGET"]
+
+# The builtin cost charges. Their call sites sit inside the builtins that
+# charge them; a change to what a builtin charges moves this version too.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/ops.rs"]
+symbols = ["charge_collection_work"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/vm/control.rs"]
+symbols = ["charge_intrinsic_work"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/vm/javascript_regexp.rs"]
+symbols = ["TYPESCRIPT_REGEXP_EXECUTION_FUEL", "TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION", "grant_regexp_fuel"]
+
+# What the compiler emits for a program: each emitted instruction is one unit
+# of the count the schedule reads.
+[[surface.guard]]
+kind = "file"
+paths = ["crates/lashlang/src/runtime/compiler/*.rs"]
+
+[[surface]]
 constant = "LASHLANG_REPLAY_KEY_GRAMMAR_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/replay_run.rs"
 description = "issue-ordinal replay-key grammar lashlang cells and process bodies journal their nested effects under (FIG-3586)"

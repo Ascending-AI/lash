@@ -1102,9 +1102,10 @@ async fn a_reopen_offering_a_retained_key_under_a_different_request_lends_nothin
     assert!(
         tokio::time::timeout(
             Duration::from_millis(2 * CRASH_LEASE_MS),
-            scoped
-                .controller()
-                .await_next_settlement(&mut handle, CancellationToken::new()),
+            scoped.controller().await_next_settlement(
+                &mut handle,
+                lash_core::TurnCancelWait::unobserved(CancellationToken::new())
+            ),
         )
         .await
         .is_err(),
@@ -1769,9 +1770,10 @@ pub(crate) async fn next(
 ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
     tokio::time::timeout(
         AWAIT_BUDGET,
-        scoped
-            .controller()
-            .await_next_settlement(handle, CancellationToken::new()),
+        scoped.controller().await_next_settlement(
+            handle,
+            lash_core::TurnCancelWait::unobserved(CancellationToken::new()),
+        ),
     )
     .await
     .unwrap_or_else(|_| {

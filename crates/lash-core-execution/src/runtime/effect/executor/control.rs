@@ -540,14 +540,18 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// Cancellation returns
     /// [`RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled`](crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled)
     /// and leaves the cursor and the durable rank untouched, so a later await
-    /// resumes at the same rank. Exhaustion has no code because it is the
-    /// caller's arithmetic: check
+    /// resumes at the same rank. `cancel` names what may cancel the await: its
+    /// execution's cooperative token, and — when it observes one — the turn's
+    /// cancellation gate, which the engine races the rank wait against the
+    /// way it races any wait it records (FIG-3672 P9: an `Immediate` stop, or
+    /// an escalation, wins; an `AfterStep` stop alone does not). Exhaustion
+    /// has no code because it is the caller's arithmetic: check
     /// [`EffectGroupHandle::is_exhausted`] rather than awaiting past the last
     /// child.
     async fn await_next_settlement(
         &self,
         handle: &mut EffectGroupHandle,
-        cancel: CancellationToken,
+        cancel: TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError>;
 
     /// Read the group's settlement at `rank` without advancing any caller

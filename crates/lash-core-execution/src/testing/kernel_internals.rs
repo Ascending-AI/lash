@@ -253,5 +253,5 @@ pub fn cancel_requested_gate_resolution(
 pub fn active_turn_internal_evidence(
     active: &crate::runtime::turn_control::ActiveTurnControl,
 ) -> crate::runtime::TurnCancellationEvidence {
-    active.internal_evidence()
+    active.internal_evidence(None)
 }

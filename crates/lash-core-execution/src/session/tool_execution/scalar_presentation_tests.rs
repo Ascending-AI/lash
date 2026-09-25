@@ -56,7 +56,7 @@ impl crate::RuntimeEffectController for JournalByEffectId {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: tokio_util::sync::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("JournalByEffectId"))
     }
@@ -244,7 +244,7 @@ impl crate::RuntimeEffectController for StableHashRecorder {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: tokio_util::sync::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("StableHashRecorder"))
     }
@@ -354,7 +354,7 @@ impl crate::RuntimeEffectController for DivergedPresentation {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: tokio_util::sync::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("DivergedPresentation"))
     }

@@ -71,7 +71,7 @@ pub async fn authorize_completion_deferral_for_test(
         scope,
         fence,
         observed.clone(),
-        false,
+        None,
         None,
     )?;
     store
@@ -80,7 +80,7 @@ pub async fn authorize_completion_deferral_for_test(
         .map_err(store_error)?;
     commit.turn_cancel_closure_settlement = Some(
         control
-            .settle_authorized(resolver.as_ref(), &authorization)
+            .settle_authorized(resolver.as_ref(), &authorization, None)
             .await?,
     );
     commit.interrupted_turn_cancel_intent = Some(observed);

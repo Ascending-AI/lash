@@ -923,8 +923,8 @@ fn processes_area_witnesses_b() {
     }
     // W0604: lash_core::facade_support::TurnContextFacadeOps [trait]
     fn trait_witness_0604<T: lash_core::facade_support::TurnContextFacadeOps>() {}
-    // W0605: lash_core::facade_support::TurnOptions::with_local_cancel_origin_hint [function]
-    let _ = lash_core::facade_support::TurnOptions::with_local_cancel_origin_hint;
+    // W0605: lash_core::facade_support::TurnOptions::with_local_stop [function]
+    let _ = lash_core::facade_support::TurnOptions::with_local_stop;
     // W0606: lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS [constant]
     let _ = lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
     // W0607: lash_core::facade_support::registry_transitions::ProcessLeaseRow::project [function]

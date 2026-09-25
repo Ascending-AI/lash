@@ -469,7 +469,7 @@ async fn crash_at(
                                 REFUSAL_WINDOW,
                                 probe_scoped.controller().await_next_settlement(
                                     &mut probe_handle,
-                                    CancellationToken::new(),
+                                    lash_core::TurnCancelWait::unobserved(CancellationToken::new())
                                 ),
                             )
                             .await
@@ -707,9 +707,10 @@ async fn redrive_different_opener(
     assert!(
         tokio::time::timeout(
             REFUSAL_WINDOW,
-            scoped
-                .controller()
-                .await_next_settlement(&mut handle, CancellationToken::new()),
+            scoped.controller().await_next_settlement(
+                &mut handle,
+                lash_core::TurnCancelWait::unobserved(CancellationToken::new())
+            ),
         )
         .await
         .is_err(),

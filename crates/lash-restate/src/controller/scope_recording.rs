@@ -322,7 +322,7 @@ where
     async fn await_next_settlement(
         &self,
         handle: &mut EffectGroupHandle,
-        cancel: tokio_util::sync::CancellationToken,
+        cancel: lash_core::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.inner.await_next_settlement(handle, cancel).await
     }

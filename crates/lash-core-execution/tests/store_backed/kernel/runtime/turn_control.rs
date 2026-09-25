@@ -43,9 +43,11 @@ mod tests {
             key: &crate::AwaitEventKey,
         ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
             if key == &self.base_key {
+                // The base, then its escalation: a base lash originated
+                // itself stays adoptable until its escalation is closed.
                 assert_eq!(
                     self.resolve_calls.load(Ordering::SeqCst),
-                    1,
+                    2,
                     "strict base read must follow effective settlement"
                 );
                 self.base_peeks.fetch_add(1, Ordering::SeqCst);
@@ -476,7 +478,7 @@ mod tests {
             .expect("active control");
         assert_eq!(
             active
-                .settle_before_commit(host.as_ref(), false, None)
+                .settle_before_commit(host.as_ref(), None, None)
                 .await
                 .expect("seal the completing turn"),
             None,
@@ -587,7 +589,7 @@ mod tests {
             "the owner honours the accepted policy, not the escalation's copy"
         );
         let settled = active
-            .settle_before_commit(host.as_ref(), false, None)
+            .settle_before_commit(host.as_ref(), None, None)
             .await
             .expect("settle the cancelled turn")
             .expect("the gate holds a cancellation");
@@ -687,7 +689,7 @@ mod tests {
             .expect("create completion gate");
         assert_eq!(
             active
-                .settle_before_commit(host.as_ref(), false, None)
+                .settle_before_commit(host.as_ref(), None, None)
                 .await
                 .expect("seal completion"),
             None
@@ -817,7 +819,7 @@ mod tests {
                 address.execution_scope(),
                 &lease.fence(),
                 observed.clone(),
-                false,
+                None,
                 None,
             )
             .expect("materialize closure authorization");
@@ -826,7 +828,7 @@ mod tests {
             .await
             .expect("authorize closure");
         let settlement = active
-            .settle_authorized(host.as_ref(), &authorization)
+            .settle_authorized(host.as_ref(), &authorization, None)
             .await
             .expect("settle cancellation gate");
         let winner = settlement
@@ -1040,7 +1042,7 @@ mod tests {
             .await
             .expect("active control");
         let observed = active
-            .settle_before_commit(host.as_ref(), false, None)
+            .settle_before_commit(host.as_ref(), None, None)
             .await
             .expect("settle")
             .expect("cancellation won");
@@ -1081,7 +1083,7 @@ mod tests {
         let assembled = TurnCancellationEvidence::internal("provider-cancelled:3");
 
         let settled = active
-            .settle_before_commit(host.as_ref(), true, Some(assembled.clone()))
+            .settle_before_commit(host.as_ref(), None, Some(assembled.clone()))
             .await
             .expect("settle")
             .expect("a locally cancelled turn settles cancelled");
@@ -1109,7 +1111,7 @@ mod tests {
             .expect("active control");
 
         let (seal, cancel) = tokio::join!(
-            active.settle_before_commit(host.as_ref(), false, None),
+            active.settle_before_commit(host.as_ref(), None, None),
             driver.request_cancel(request(address, "race-request")),
         );
         match (seal.expect("seal"), cancel.expect("cancel").outcome) {
@@ -1164,7 +1166,7 @@ mod tests {
                 address.execution_scope(),
                 &lease.fence(),
                 TurnCancelIntentSnapshot::Absent,
-                false,
+                None,
                 None,
             )
             .expect("assemble completion authorization");
@@ -1183,7 +1185,7 @@ mod tests {
         assert!(matches!(accepted.outcome, TurnCancelOutcome::Requested(_)));
 
         let settlement = active
-            .settle_authorized(host.as_ref(), &authorization)
+            .settle_authorized(host.as_ref(), &authorization, None)
             .await
             .expect("adopt the promise's actual winner");
         let settled = settlement
@@ -1293,7 +1295,7 @@ mod tests {
                 address.execution_scope(),
                 &lease.fence(),
                 observed.clone(),
-                false,
+                None,
                 Some(actual_winner.clone()),
             )
             .expect("materialize exact closure");
@@ -1302,7 +1304,7 @@ mod tests {
             .await
             .expect("authorize exact closure");
         let settlement = active
-            .settle_authorized(host.as_ref(), &authorization)
+            .settle_authorized(host.as_ref(), &authorization, None)
             .await
             .expect("settle against the actual promise owner");
         assert_eq!(settlement.base_cancellation(), Some(&actual_winner));
@@ -1388,7 +1390,7 @@ mod tests {
                 address.execution_scope(),
                 &lease.fence(),
                 TurnCancelIntentSnapshot::Absent,
-                false,
+                None,
                 None,
             )
             .expect("assemble completion authorization");
@@ -1481,7 +1483,7 @@ mod tests {
                 address.execution_scope(),
                 &lease.fence(),
                 TurnCancelIntentSnapshot::Absent,
-                true,
+                Some(&active.internal_evidence(None)),
                 None,
             )
             .expect("materialize cancellation closure");
@@ -1496,7 +1498,7 @@ mod tests {
             base_peeks: AtomicUsize::new(0),
         };
         let error = active
-            .settle_authorized(&resolver, &authorization)
+            .settle_authorized(&resolver, &authorization, None)
             .await
             .expect_err("missing authenticated base terminal must fail closed");
         assert_eq!(
@@ -1505,8 +1507,9 @@ mod tests {
         );
         assert_eq!(
             resolver.resolve_calls.load(Ordering::SeqCst),
-            1,
-            "the effective cancellation was settled before the strict base read failed"
+            2,
+            "the effective cancellation (base and escalation) was settled before the strict \
+             base read failed"
         );
         assert_eq!(resolver.base_peeks.load(Ordering::SeqCst), 1);
         assert_eq!(
@@ -1546,7 +1549,7 @@ mod tests {
             .expect("pending cancellation is visible before recovered effects");
         assert_eq!(observed, expected);
         let settled = recovered
-            .settle_before_commit(host.as_ref(), false, None)
+            .settle_before_commit(host.as_ref(), None, None)
             .await
             .expect("settle recovered turn")
             .expect("pending cancellation survives owner loss");
@@ -1710,7 +1713,7 @@ mod tests {
             .await
             .expect("active control after timed-out attach");
         active
-            .settle_before_commit(host.as_ref(), false, None)
+            .settle_before_commit(host.as_ref(), None, None)
             .await
             .expect("seal after timed-out attach");
         active
@@ -1753,7 +1756,7 @@ mod tests {
         assert_eq!(stop_evidence.mode, TurnCancelMode::AfterStep);
 
         // Mid-model-call observation (AfterLlm never honours after-step): the
-        // request is remembered as deferred, never as effective evidence.
+        // request is deferred, never honoured evidence.
         let observed = active
             .observe_pending_cancel(
                 &scoped_turn_controller(host.as_ref(), &address),
@@ -1764,8 +1767,6 @@ mod tests {
             .await
             .expect("peek after llm");
         assert_eq!(observed, None);
-        assert_eq!(active.evidence(), None);
-        assert_eq!(active.deferred_evidence(), Some(stop_evidence.clone()));
 
         let again = driver
             .request_cancel(request(address.clone(), "stop-2").mode(TurnCancelMode::AfterStep))
@@ -1806,13 +1807,13 @@ mod tests {
             .await
             .expect("peek after escalation");
         assert_eq!(observed, Some(abort_evidence.clone()));
-        assert_eq!(active.evidence(), Some(abort_evidence.clone()));
 
         let settled = active
-            .settle_before_commit(host.as_ref(), true, None)
+            .settle_before_commit(host.as_ref(), observed.as_ref(), None)
             .await
             .expect("settle");
         assert_eq!(settled, Some(abort_evidence));
+        let _ = stop_evidence;
     }
 
     #[tokio::test]
@@ -1936,7 +1937,7 @@ mod tests {
         );
 
         let settled = active
-            .settle_before_commit(host.as_ref(), false, None)
+            .settle_before_commit(host.as_ref(), None, None)
             .await
             .expect("settle from actual gate pair")
             .expect("cancellation won");
@@ -2039,7 +2040,7 @@ mod tests {
                 address.execution_scope(),
                 &lease.fence(),
                 after_gate_acceptance.clone(),
-                false,
+                None,
                 None,
             )
             .expect("materialize closure authorization");
@@ -2048,7 +2049,7 @@ mod tests {
             .await
             .expect("authorize closure");
         let settlement = active
-            .settle_authorized(host.as_ref(), &authorization)
+            .settle_authorized(host.as_ref(), &authorization, None)
             .await
             .expect("close and observe escalation before final commit");
         let settled = settlement
@@ -2145,9 +2146,8 @@ mod tests {
         assert_eq!(honoured.request_id, "stop-1");
         assert_eq!(honoured.mode, TurnCancelMode::AfterStep);
         assert_eq!(honoured.honoured_after_step, Some(2));
-        assert_eq!(active.evidence(), Some(honoured.clone()));
         let settled = active
-            .settle_before_commit(host.as_ref(), false, None)
+            .settle_before_commit(host.as_ref(), Some(&honoured), None)
             .await
             .expect("settle");
         assert_eq!(settled, Some(honoured));
@@ -2166,20 +2166,91 @@ mod tests {
         ));
     }
 
+    /// F7 (FIG-3672 P9): a host-local stop takes the gate mid-turn with
+    /// lash's internal evidence, which chose no undelivered-input policy. A
+    /// host request routed afterwards adopts it: its identity and its `Drop`
+    /// policy are what the turn settles, not the internal default.
     #[tokio::test]
-    async fn local_after_step_stop_resolves_the_own_gate_and_lands_at_commit() {
+    async fn a_routed_request_after_a_local_stop_keeps_its_drop_policy() {
+        let address = address("local-then-routed");
+        let (host, driver) = bound_driver(&address).await;
+        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+            .await
+            .expect("active control");
+        active
+            .request_local_stop(
+                host.await_event_resolver(),
+                TurnCancelMode::Immediate,
+                Some("user".to_string()),
+            )
+            .await
+            .expect("the local stop takes the gate");
+        let honoured = active
+            .observe_pending_cancel(
+                &scoped_turn_controller(host.as_ref(), &address),
+                TurnCancelPeekIdentity::AfterLlm {
+                    protocol_iteration: 0,
+                },
+            )
+            .await
+            .expect("peek after the model call")
+            .expect("the local stop is honoured");
+        assert!(honoured.is_internal());
+
+        let routed = driver
+            .request_cancel(
+                request(address.clone(), "host-drop").undelivered(TurnCancelDisposition::Drop),
+            )
+            .await
+            .expect("route the host request");
+        assert!(matches!(
+            routed.outcome,
+            TurnCancelOutcome::Requested(ref evidence)
+                if evidence.request_id == "host-drop"
+                    && evidence.undelivered == TurnCancelDisposition::Drop
+        ));
+        assert_eq!(
+            routed
+                .record
+                .as_ref()
+                .map(|record| record.request.undelivered),
+            Some(TurnCancelDisposition::Drop),
+            "the durable request row names the adopting request's policy"
+        );
+
+        let settled = active
+            .settle_before_commit(host.as_ref(), Some(&honoured), None)
+            .await
+            .expect("settle")
+            .expect("the turn settles cancelled");
+        assert_eq!(settled.request_id, "host-drop");
+        assert_eq!(settled.undelivered, TurnCancelDisposition::Drop);
+
+        // A host request can never pose as lash's own evidence.
+        let forged = driver
+            .request_cancel(request(address.clone(), "internal:forged"))
+            .await
+            .expect_err("the internal namespace is reserved");
+        assert_eq!(
+            forged.code,
+            crate::RuntimeErrorCode::InvalidTurnCancelRequest
+        );
+    }
+
+    #[tokio::test]
+    async fn a_local_after_step_stop_is_a_durable_request_that_lands_at_the_boundary() {
         let backend = crate::support::memory_backend().await;
         let host: Arc<dyn EffectHost> = backend.effect_host();
         let address = address("local-after-step");
-        let hint = TurnCancelOriginHint::default();
         let active = ActiveTurnControl::new(host.as_ref(), address.clone())
             .await
-            .expect("active control")
-            .with_local_cancel_origin(hint.clone());
-        hint.request_after_step(Some("shutdown".to_string()));
-        assert!(hint.after_step_requested());
+            .expect("active control");
         active
-            .resolve_local_after_step(host.as_ref())
+            .request_local_stop(
+                host.await_event_resolver(),
+                TurnCancelMode::AfterStep,
+                Some("shutdown".to_string()),
+            )
             .await
             .expect("resolve own gate");
         let honoured = active
@@ -2197,22 +2268,52 @@ mod tests {
         assert_eq!(honoured.honoured_after_step, Some(0));
         assert_eq!(honoured.request_id, format!("internal:{}", address.turn_id));
 
-        // Without a boundary the flag still settles the final commit as an
-        // after-step stop.
+        // Without a boundary the durable request still settles the final
+        // commit as an after-step stop.
         let commit_only = ActiveTurnControl::new(host.as_ref(), self::address("local-commit"))
             .await
-            .expect("active control")
-            .with_local_cancel_origin({
-                let hint = TurnCancelOriginHint::default();
-                hint.request_after_step(None);
-                hint
-            });
+            .expect("active control");
+        commit_only
+            .request_local_stop(host.await_event_resolver(), TurnCancelMode::AfterStep, None)
+            .await
+            .expect("resolve own gate");
         let settled = commit_only
-            .settle_before_commit(host.as_ref(), false, None)
+            .settle_before_commit(host.as_ref(), None, None)
             .await
             .expect("settle")
-            .expect("after-step flag settles as cancelled");
+            .expect("the local stop settles as cancelled");
         assert_eq!(settled.mode, TurnCancelMode::AfterStep);
         assert_eq!(settled.honoured_after_step, None);
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_local_stop_escalates_through_the_gate_pair() {
+        let backend = crate::support::memory_backend().await;
+        let host: Arc<dyn EffectHost> = backend.effect_host();
+        let address = address("forwarded-local-stop");
+        let active = Arc::new(
+            ActiveTurnControl::new(host.as_ref(), address.clone())
+                .await
+                .expect("active control"),
+        );
+        let stop = crate::runtime::LocalTurnStop::new();
+        let _forwarding = stop
+            .forward_to(Arc::clone(&active), Arc::clone(&host))
+            .await;
+        stop.request(TurnCancelMode::AfterStep, Some("shutdown".to_string()));
+        stop.request(TurnCancelMode::Immediate, Some("user".to_string()));
+        // The watch a step body runs sees the forwarded stop through the gate
+        // pair alone: the base gate's after-step request, then its escalation.
+        let watched = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            active.watch_immediate(host.await_event_resolver()),
+        )
+        .await
+        .expect("the forwarded stop reaches the gate pair")
+        .expect("watch the gate pair")
+        .expect("an escalated stop");
+        assert_eq!(watched.mode, TurnCancelMode::Immediate);
+        assert_eq!(watched.origin.as_deref(), Some("shutdown"));
+        assert_eq!(watched.request_id, format!("internal:{}", address.turn_id));
     }
 }

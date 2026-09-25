@@ -87,7 +87,7 @@ impl RuntimeEffectController for RecordingEffectHostController {
     async fn await_next_settlement(
         &self,
         _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        _cancel: lash_core::TurnCancelWait,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         Err(lash_core::effect_groups_unsupported(
             "RecordingEffectHostController",
@@ -378,7 +378,7 @@ pub async fn effect_controller_segmentation_vector(
         async fn await_next_settlement(
             &self,
             handle: &mut lash_core::EffectGroupHandle,
-            cancel: lash_core::CancellationToken,
+            cancel: lash_core::TurnCancelWait,
         ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
             self.inner.await_next_settlement(handle, cancel).await
         }

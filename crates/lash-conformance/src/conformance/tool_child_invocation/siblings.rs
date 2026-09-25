@@ -138,9 +138,10 @@ pub async fn timer_and_durable_wait_children_are_admitted_beside_a_tool_child(
     assert!(
         tokio::time::timeout(
             ABSENCE_BUDGET,
-            scoped
-                .controller()
-                .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new()),
+            scoped.controller().await_next_settlement(
+                &mut handle,
+                lash_core::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new())
+            ),
         )
         .await
         .is_err(),

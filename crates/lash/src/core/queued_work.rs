@@ -1,8 +1,8 @@
 use super::build_plugin_host;
 use crate::support::{
-    Arc, CancellationToken, LashRuntime, LiveReplayStore, PluginFactory, QueuedWorkRunHandle,
-    QueuedWorkRunRequest, RuntimeEnvironment, RuntimeHandle, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, async_trait,
+    Arc, LashRuntime, LiveReplayStore, PluginFactory, QueuedWorkRunHandle, QueuedWorkRunRequest,
+    RuntimeEnvironment, RuntimeHandle, SessionPolicy, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory, async_trait,
 };
 use lash_core::facade_support;
 use lash_sansio::SessionId;
@@ -161,8 +161,7 @@ impl NativeQueuedWorkRunHandle {
                     host: effect_host.as_ref(),
                     identity: None,
                 },
-                CancellationToken::new(),
-                lash_core::TurnCancelOriginHint::default(),
+                lash_core::LocalTurnStop::default(),
             )
             .await
             .map_err(|error| {

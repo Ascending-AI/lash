@@ -805,7 +805,7 @@ impl crate::RuntimeEffectController for UnavailableEffectController {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported(
             "UnavailableEffectController",
@@ -1001,19 +1001,92 @@ pub fn cancelled_code_execution_context(
 }
 
 /// Build an empty code-execution context cancelled after its runtime yields.
-pub fn code_execution_context_cancelling_after_yield(
+pub async fn code_execution_context_cancelling_after_yield(
     ports: impl Into<TestExecutionPorts>,
 ) -> crate::RuntimeExecutionContext<'static> {
-    let cancellation = tokio_util::sync::CancellationToken::new();
-    let cancellation_after_yield = cancellation.clone();
+    let ports = ports.into();
+    let host = Arc::clone(&ports.effect_host);
+    let context = TestExecutionContextBuilder::new(ports)
+        .build()
+        .into_runtime();
+    let control = Arc::new(
+        crate::runtime::turn_control::ActiveTurnControl::new(
+            host.await_event_resolver(),
+            crate::TurnAddress::new(context.session_id(), "cancelled-cell-turn"),
+        )
+        .await
+        .expect("the test host keys a turn's cancellation gate"),
+    );
+    let stopper = Arc::clone(&control);
+    let stop_host = Arc::clone(&host);
     crate::task::spawn(async move {
         tokio::task::yield_now().await;
-        cancellation_after_yield.cancel();
+        stopper
+            .request_local_stop(
+                host.await_event_resolver(),
+                crate::TurnCancelMode::Immediate,
+                None,
+            )
+            .await
+            .expect("the test host resolves the cancellation gate");
     });
-    TestExecutionContextBuilder::new(ports.into())
+    context.with_recorded_turn_cancel(
+        false,
+        control,
+        stop_host,
+        tokio_util::sync::CancellationToken::new(),
+    )
+}
+
+/// Build an empty code-execution context whose own turn is stopped
+/// `Immediate`, through its durable cancellation gate, once `stop` fires.
+///
+/// The gate is the one the context's turn-observing waits race: the turn is
+/// keyed from the scope those waits observe, so an engine that races a wait
+/// against it (a SQL timer, FIG-3672 P9) sees the stop.
+pub async fn code_execution_context_stopped_on(
+    ports: impl Into<TestExecutionPorts>,
+    stop: tokio_util::sync::CancellationToken,
+) -> crate::RuntimeExecutionContext<'static> {
+    let ports = ports.into();
+    let host = Arc::clone(&ports.effect_host);
+    let context = TestExecutionContextBuilder::new(ports)
         .build()
-        .into_runtime()
-        .with_cancellation_token(cancellation)
+        .into_runtime();
+    let wait = context.turn_cancel_wait(tokio_util::sync::CancellationToken::new());
+    let scope = wait
+        .observed_scope()
+        .expect("a test context observes its turn's cancellation");
+    let (Some(session_id), Some(turn_id)) = (scope.session_id(), scope.turn_id()) else {
+        panic!("a test context's observed scope is a turn scope: {scope:?}");
+    };
+    let control = Arc::new(
+        crate::runtime::turn_control::ActiveTurnControl::new(
+            host.await_event_resolver(),
+            crate::TurnAddress::new(session_id.to_string(), turn_id.to_string()),
+        )
+        .await
+        .expect("the test host keys a turn's cancellation gate"),
+    );
+    let stopper = Arc::clone(&control);
+    let stop_host = Arc::clone(&host);
+    crate::task::spawn(async move {
+        stop.cancelled().await;
+        stopper
+            .request_local_stop(
+                host.await_event_resolver(),
+                crate::TurnCancelMode::Immediate,
+                None,
+            )
+            .await
+            .expect("the test host resolves the cancellation gate");
+    });
+    context.with_recorded_turn_cancel(
+        false,
+        control,
+        stop_host,
+        tokio_util::sync::CancellationToken::new(),
+    )
 }
 
 /// Build an empty code-execution context carrying the stable parent invocation

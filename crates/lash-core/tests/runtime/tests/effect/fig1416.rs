@@ -47,7 +47,7 @@ impl RuntimeEffectController for GrouplessEffectController {
     async fn await_next_settlement(
         &self,
         _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        _cancel: lash_core::TurnCancelWait,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         Err(lash_core::effect_groups_unsupported(
             "GrouplessEffectController",
@@ -110,7 +110,7 @@ impl RuntimeEffectController for GroupSupportingEffectController {
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,
-        _cancel: tokio_util::sync::CancellationToken,
+        _cancel: lash_core::TurnCancelWait,
     ) -> Result<lash_core::GroupSettlement, RuntimeEffectControllerError> {
         let position = handle.consumed();
         // The cursor of record advances on exactly the settlements returned, and
@@ -200,7 +200,10 @@ async fn a_controller_without_group_support_fails_closed_on_every_group_method()
     );
 
     let await_error = controller
-        .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new())
+        .await_next_settlement(
+            &mut handle,
+            lash_core::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
+        )
         .await
         .expect_err("awaiting a settlement must fail closed");
     assert_eq!(
@@ -255,7 +258,10 @@ async fn the_three_group_methods_answer_as_one_surface() {
         let mut handle = opened.unwrap_or(fallback);
 
         let refuses_await = controller
-            .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new())
+            .await_next_settlement(
+                &mut handle,
+                lash_core::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
+            )
             .await
             .err()
             .is_some_and(|error| error.code == unsupported);

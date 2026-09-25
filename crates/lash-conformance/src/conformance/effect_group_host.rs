@@ -1796,7 +1796,7 @@ pub async fn a_cancelled_await_leaves_the_rank_to_be_read_again<F: Fn() -> Host>
     cancel.cancel();
     let error = scoped
         .controller()
-        .await_next_settlement(&mut handle, cancel)
+        .await_next_settlement(&mut handle, lash_core::TurnCancelWait::unobserved(cancel))
         .await
         .expect_err("a cancelled await must not deliver a settlement");
     assert_eq!(
@@ -2667,9 +2667,10 @@ async fn next(
 ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
     tokio::time::timeout(
         AWAIT_BUDGET,
-        scoped
-            .controller()
-            .await_next_settlement(handle, CancellationToken::new()),
+        scoped.controller().await_next_settlement(
+            handle,
+            lash_core::TurnCancelWait::unobserved(CancellationToken::new()),
+        ),
     )
     .await
     .unwrap_or_else(|_| {

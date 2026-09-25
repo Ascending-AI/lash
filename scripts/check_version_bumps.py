@@ -71,6 +71,13 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 # Entries stay after the surface lands; they are dead-but-honest history, and
 # re-adding a removed entry over a live constant is not a registration.
 REGISTRATION_BASELINES = {
+    # FIG-3672 P9: a code cell journals a gate peek at each cancel checkpoint
+    # its VM reaches, placed by lashlang's instruction accounting (compiler
+    # emission, builtin charges, yield granularity, the checkpoint schedule).
+    # That accounting had no version; it is pinned into cell journal grammar 4.
+    "crates/lashlang/src/runtime/mod.rs:INSTRUCTION_ACCOUNTING_VERSION": (
+        "sha256:639a18a5da4154cd2ba54a8414faa1bea4e6842a2fd0e84ad1b004347d9f6d08"
+    ),
     # FIG-3587: a code cell's journal grammar is a new versioned surface. It
     # was the replay-key grammar alone; it now also covers the ambient binding
     # set a cell journals before its first effect and links against on

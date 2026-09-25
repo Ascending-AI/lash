@@ -378,7 +378,7 @@ impl lash_core_execution::RuntimeEffectController for ScopedControllerAdapter {
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core_execution::EffectGroupHandle,
-        cancel: lash_core_execution::CancellationToken,
+        cancel: lash_core_execution::TurnCancelWait,
     ) -> Result<
         lash_core_execution::GroupSettlement,
         lash_core_execution::RuntimeEffectControllerError,
@@ -592,7 +592,7 @@ impl lash_core_execution::RuntimeEffectController for CrossingController {
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core_execution::EffectGroupHandle,
-        cancel: lash_core_execution::CancellationToken,
+        cancel: lash_core_execution::TurnCancelWait,
     ) -> Result<
         lash_core_execution::GroupSettlement,
         lash_core_execution::RuntimeEffectControllerError,

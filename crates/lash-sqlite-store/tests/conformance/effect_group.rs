@@ -528,9 +528,12 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
     // staged — lent on canonical identity despite the reformatted row.
     let settlement = tokio::time::timeout(
         Duration::from_secs(30),
-        scoped
-            .controller()
-            .await_next_settlement(&mut handle, lash_core_execution::CancellationToken::new()),
+        scoped.controller().await_next_settlement(
+            &mut handle,
+            lash_core_execution::TurnCancelWait::unobserved(
+                lash_core_execution::CancellationToken::new(),
+            ),
+        ),
     )
     .await
     .expect("the retained child settles inside the budget")

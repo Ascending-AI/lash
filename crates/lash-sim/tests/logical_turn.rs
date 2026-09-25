@@ -217,18 +217,33 @@ async fn standard_core(
     standard_core_with_attachment_limit(provider, tools, trace, None).await
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
 async fn standard_core_with_attachment_limit(
     provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
     trace: Arc<RecordingTraceSink>,
     max_attachment_bytes: Option<u64>,
 ) -> (lash::LashCore, lash_sim::backend::SimEngine) {
+    standard_core_on(
+        sim_engine().await,
+        provider,
+        tools,
+        trace,
+        max_attachment_bytes,
+    )
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
+fn standard_core_on(
+    engine: lash_sim::backend::SimEngine,
+    provider: lash_core::facade_support::ProviderHandle,
+    tools: Arc<dyn ToolProvider>,
+    trace: Arc<RecordingTraceSink>,
+    max_attachment_bytes: Option<u64>,
+) -> (lash::LashCore, lash_sim::backend::SimEngine) {
     let provider_id = provider.kind().to_string();
-    let engine = sim_engine().await;
     let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
         .session_spec(
             lash::SessionSpec::new()
@@ -607,8 +622,18 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         })
         .build()
         .into_handle();
-    let (cancel_core, cancel_engine) =
-        standard_core(cancel_provider, Arc::new(NoTools), cancel_trace.clone()).await;
+    // The stop reaches the turn as a durable request over ingress while the
+    // turn's attempt is running, which serial scheduling would hold until the
+    // attempt ends (FIG-3672 P9).
+    let (cancel_core, cancel_engine) = standard_core_on(
+        lash_sim::backend::SimEngine::concurrent(0x5eed_7010)
+            .await
+            .expect("concurrent sim engine"),
+        cancel_provider,
+        Arc::new(NoTools),
+        cancel_trace.clone(),
+        None,
+    );
     let cancel_session = cancel_core
         .session("logical-turn-cancel")
         .open()

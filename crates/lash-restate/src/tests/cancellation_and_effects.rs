@@ -576,33 +576,34 @@ pub(super) async fn restate_turn_wait_rejects_missing_cancel_scope() {
     assert_eq!(error.code.as_str(), "restate_turn_cancel_scope_missing");
 }
 
+/// FIG-3672 P9: a Restate timer races only the turn's durable gate. The
+/// waiting execution's own token is not a race arm: a timer it could end
+/// would end differently on a replay that never fired the token.
 #[tokio::test]
-pub(super) async fn restate_timer_stops_when_its_fresh_attempt_is_cancelled() {
+pub(super) async fn restate_timer_is_not_ended_by_its_executions_token() {
     let context = Arc::new(RecordingContext::default());
     context.block_sleeps.store(true, Ordering::SeqCst);
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let cancellation = tokio_util::sync::CancellationToken::new();
     cancellation.cancel();
 
-    let error = host
-        .execute_effect(
-            RuntimeEffectEnvelope::new(
-                runtime_invocation(RuntimeEffectKind::Sleep, "cancelled-sleep"),
-                RuntimeEffectCommand::Sleep {
-                    spec: lash_core::SleepSpec::For {
-                        duration_ms: 60_000,
-                    },
+    let sleep = host.execute_effect(
+        RuntimeEffectEnvelope::new(
+            runtime_invocation(RuntimeEffectKind::Sleep, "cancelled-sleep"),
+            RuntimeEffectCommand::Sleep {
+                spec: lash_core::SleepSpec::For {
+                    duration_ms: 60_000,
                 },
-            ),
-            RuntimeEffectLocalExecutor::sleep(cancellation)
-                .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
-        )
-        .await
-        .expect_err("cancelled Restate timer must stop the interpreter attempt");
-
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled
+            },
+        ),
+        RuntimeEffectLocalExecutor::sleep(cancellation)
+            .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), sleep)
+            .await
+            .is_err(),
+        "a fired token must not end a durable timer"
     );
     assert_eq!(context.sleeps.lock_recover().as_slice(), &[60_000]);
 }
@@ -661,7 +662,9 @@ pub(super) async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_
         error.code,
         lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled
     );
-    assert!(cancellation.is_cancelled());
+    // The verdict rides the recorded outcome; no controller writes it back
+    // into the waiting execution's token (FIG-3672 P9).
+    assert!(!cancellation.is_cancelled());
 }
 
 #[tokio::test]
@@ -729,7 +732,9 @@ pub(super) async fn restate_suspended_await_event_is_woken_by_the_durable_turn_c
             resolution: Resolution::Cancelled,
         }
     ));
-    assert!(cancellation.is_cancelled());
+    // The verdict rides the recorded outcome; no controller writes it back
+    // into the waiting execution's token (FIG-3672 P9).
+    assert!(!cancellation.is_cancelled());
 }
 
 #[tokio::test]
@@ -802,12 +807,31 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
             )
             .await
     });
-    tokio::task::yield_now().await;
+    wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
     assert!(
         !wait.is_finished(),
         "mock wait must genuinely remain pending"
     );
+    // The turn's durable gate, not the execution's token, ends the wait
+    // (FIG-3672 P9).
     cancellation.cancel();
+    assert!(!wait.is_finished(), "the token alone ends nothing");
+    let cancel_key = restate_await_event_key_for_authority(
+        &authority,
+        &durable_turn_scope("session", "turn"),
+        AwaitEventWaitIdentity::TurnCancelGate,
+    )
+    .expect("cancel gate key");
+    assert_eq!(
+        context.resolve_durable_event(RestateDurableWaitResolveRequest {
+            key: cancel_key,
+            resolution: Resolution::Ok(serde_json::json!({
+                "state": "cancel_requested",
+                "cancellation": { "request_id": "cancel-wait", "origin": "test" },
+            })),
+        }),
+        ResolveOutcome::Accepted
+    );
     let outcome = wait
         .await
         .expect("join cancellation wait")
@@ -1364,4 +1388,56 @@ pub(super) async fn run_restate_replay_turn(
         )
         .await
         .expect("run replay test turn")
+}
+
+/// A process body parked on `waitSignal` observes no turn, so its own stop —
+/// the process drive's token — still cancels it promptly until P16 (FIG-3673)
+/// replaces that live arm with a recorded race.
+#[tokio::test]
+pub(super) async fn a_process_parked_on_wait_signal_is_cancelled_by_its_process_stop() {
+    let context = Arc::new(RecordingContext::default());
+    let authority = RestateAuthorityId::new("process-signal-owner").expect("valid test authority");
+    let key = restate_await_event_key_for_authority(
+        &authority,
+        &ExecutionScope::process("worker"),
+        AwaitEventWaitIdentity::process_signal(lash_core::ProcessId::from("worker"), "go", 1),
+    )
+    .expect("process signal wait key");
+    let process_stop = tokio_util::sync::CancellationToken::new();
+    let task_stop = process_stop.clone();
+    let task_context = context.clone();
+    let wait = tokio::spawn(async move {
+        RestateRuntimeEffectController::new(task_context, authority)
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    runtime_invocation(RuntimeEffectKind::AwaitEvent, "process-signal-wait"),
+                    RuntimeEffectCommand::AwaitEvent { key },
+                ),
+                RuntimeEffectLocalExecutor::await_event_under(
+                    &lash_core::TurnCancelWait::unobserved(task_stop),
+                    None,
+                    Arc::new(lash_core::facade_support::SystemClock),
+                ),
+            )
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    if wait.is_finished() {
+        panic!(
+            "the signal wait must genuinely park: {:?}",
+            wait.await.expect("join the signal wait")
+        );
+    }
+    process_stop.cancel();
+    let outcome = tokio::time::timeout(Duration::from_secs(5), wait)
+        .await
+        .expect("the process stop ends the parked signal wait promptly")
+        .expect("join the signal wait")
+        .expect("signal wait outcome");
+    assert!(matches!(
+        outcome,
+        RuntimeEffectOutcome::AwaitEvent {
+            resolution: Resolution::Cancelled,
+        }
+    ));
 }

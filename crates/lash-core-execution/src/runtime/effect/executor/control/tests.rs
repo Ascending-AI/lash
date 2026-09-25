@@ -45,7 +45,7 @@ impl RuntimeEffectController for CompletionKeyProbe {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("CompletionKeyProbe"))
     }
@@ -113,7 +113,7 @@ impl RuntimeEffectController for TestResolver {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("TestResolver"))
     }
@@ -162,7 +162,7 @@ impl RuntimeEffectController for EffectAdmissionProbe {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("EffectAdmissionProbe"))
     }
@@ -312,9 +312,10 @@ async fn task_proxy_group_await_writes_back_the_advanced_cursor() {
     let mut handle =
         EffectGroupHandle::restored("group-cursor:0", 2, 0).expect("a valid restored cursor");
 
-    let await_call = scoped
-        .controller()
-        .await_next_settlement(&mut handle, CancellationToken::new());
+    let await_call = scoped.controller().await_next_settlement(
+        &mut handle,
+        crate::runtime::TurnCancelWait::unobserved(CancellationToken::new()),
+    );
     let service = async {
         let EffectControllerTaskRequest::AwaitNextSettlement {
             mut handle,
@@ -364,9 +365,10 @@ async fn task_proxy_group_await_carries_a_live_cancellation() {
         EffectGroupHandle::restored("group-cancel:0", 2, 0).expect("a valid restored cursor");
     let cancel = CancellationToken::new();
 
-    let await_call = scoped
-        .controller()
-        .await_next_settlement(&mut handle, cancel.clone());
+    let await_call = scoped.controller().await_next_settlement(
+        &mut handle,
+        crate::runtime::TurnCancelWait::unobserved(cancel.clone()),
+    );
     let service = async {
         let EffectControllerTaskRequest::AwaitNextSettlement {
             handle,
@@ -378,7 +380,7 @@ async fn task_proxy_group_await_carries_a_live_cancellation() {
         };
         // The token in the request is the caller's own: cancelling the await
         // is what wakes the task side, so it stays live for the whole await.
-        cancel.cancelled().await;
+        cancel.cancellation().cancelled().await;
         let _ = response.send((
             handle,
             Err(RuntimeEffectControllerError::new(
@@ -430,7 +432,10 @@ async fn task_proxy_group_calls_fail_closed_when_the_task_is_gone() {
         EffectGroupHandle::restored("group-closed-task:0", 1, 0).expect("a valid restored cursor");
     let await_error = scoped
         .controller()
-        .await_next_settlement(&mut handle, CancellationToken::new())
+        .await_next_settlement(
+            &mut handle,
+            crate::runtime::TurnCancelWait::unobserved(CancellationToken::new()),
+        )
         .await
         .expect_err("a settlement await on a closed task must return a typed error");
     assert_eq!(
@@ -831,7 +836,7 @@ impl RuntimeEffectController for SelfParkingKeyProbe {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported("SelfParkingKeyProbe"))
     }

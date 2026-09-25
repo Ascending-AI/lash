@@ -1,6 +1,6 @@
 {
   "format": "lash-protocol-rlm cell replay corpus v1: one SQLite effect journal, one turn per scenario",
-  "grammar": 3,
+  "grammar": 4,
   "dispatched": 13,
   "scenarios": {
     "aggregates": {
@@ -114,8 +114,8 @@
             },
             "tool": "app_a"
           },
-          "now": 1790304028807,
-          "roll": 0.7195180996895418,
+          "now": 1790310412615,
+          "roll": 0.10887673704913803,
           "second": {
             "args": {
               "after": 1,

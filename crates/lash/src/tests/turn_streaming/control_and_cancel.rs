@@ -743,13 +743,11 @@ pub(super) async fn cancel_running_turns_does_not_cross_separately_opened_handle
 }
 
 #[tokio::test]
-pub(super) async fn provider_abort_cancellation_commits_the_evidence_the_turn_streamed()
--> Result<()> {
-    // No host cancel request explains this stop, so the evidence is minted
-    // inside the sans-IO machine and rides the streamed `TurnOutcome`. The
-    // committed report must carry that same request id: one cancellation is
-    // one identity, never a machine-side id plus a commit-side `internal:
-    // {turn_id}` mint.
+pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Result<()> {
+    // A process-local stop reaches the turn as a durable request on its
+    // cancellation gate, with lash's internal evidence (FIG-3672 P9). The
+    // turn honours it at its journaled peek, so the committed report names
+    // that one request: one cancellation is one identity.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -767,20 +765,17 @@ pub(super) async fn provider_abort_cancellation_commits_the_evidence_the_turn_st
         .turn_id("abort-evidence-turn")
         .stream()?;
     started_rx.await.expect("turn reached the provider");
-    assert_eq!(session.cancel_running_turns(), 1);
+    assert_eq!(
+        session.cancel_running_turns_with_origin(Some("user".to_string())),
+        1
+    );
 
     let result = hanging.finish().await?;
     let evidence = result
         .cancellation()
         .expect("a cancelled turn names the request that stopped it");
-    assert!(
-        evidence
-            .request_id
-            .starts_with("internal:provider-cancelled:"),
-        "committed report must carry the machine-minted evidence, got `{}`",
-        evidence.request_id
-    );
-    assert_ne!(evidence.request_id, "internal:abort-evidence-turn");
+    assert_eq!(evidence.request_id, "internal:abort-evidence-turn");
+    assert_eq!(evidence.origin.as_deref(), Some("user"));
     Ok(())
 }
 

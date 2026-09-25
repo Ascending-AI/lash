@@ -8,10 +8,7 @@ use crate::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, RuntimeError, SessionId,
     TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence, TurnId,
 };
-use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::sync::Mutex;
 
 /// Stable routing identity for one foreground turn.
 ///
@@ -376,6 +373,19 @@ impl TurnCancelRequest {
                 "turn cancellation requires a non-empty request id",
             ));
         }
+        if self
+            .request_id
+            .starts_with(TurnCancellationEvidence::INTERNAL_REQUEST_ID_PREFIX)
+        {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                format!(
+                    "a host turn cancellation request id cannot start with `{}`: lash \
+                     reserves that namespace for cancellations it originates itself",
+                    TurnCancellationEvidence::INTERNAL_REQUEST_ID_PREFIX
+                ),
+            ));
+        }
         Ok(())
     }
 
@@ -396,65 +406,4 @@ pub struct TurnCancelRequestRecord {
     pub request: TurnCancelRequest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<TurnCancelInputOutcome>,
-}
-
-/// Shared origin hint for a process-local cancellation token.
-///
-/// The outer option records whether a local entry point supplied a hint; the
-/// inner option is the opaque host origin, which may intentionally be absent.
-/// It is not a durable cancellation request and must not be used as
-/// authorization.
-#[derive(Clone, Default)]
-pub struct TurnCancelOriginHint {
-    state: Arc<Mutex<TurnCancelOriginState>>,
-}
-#[derive(Default)]
-struct TurnCancelOriginState {
-    configured_origin: Option<Option<String>>,
-    observed_origin: Option<Option<String>>,
-    after_step_requested: bool,
-}
-impl TurnCancelOriginHint {
-    /// Record the origin of an observed cancellation request.
-    pub fn set(&self, origin: Option<String>) {
-        let mut state = self.state.lock_recover();
-        if state.observed_origin.is_none() {
-            state.observed_origin = Some(origin);
-        }
-    }
-
-    /// The token stays untouched; the owning turn honours the flag at its next step boundary
-    /// by resolving its own cancellation gate with internal after-step evidence.
-    pub fn request_after_step(&self, origin: Option<String>) {
-        let mut state = self.state.lock_recover();
-        if state.observed_origin.is_none() {
-            state.observed_origin = Some(origin);
-        }
-        state.after_step_requested = true;
-    }
-
-    pub fn after_step_requested(&self) -> bool {
-        self.state.lock_recover().after_step_requested
-    }
-
-    pub fn get(&self) -> Option<String> {
-        let state = self.state.lock_recover();
-        state
-            .observed_origin
-            .clone()
-            .or_else(|| state.configured_origin.clone())
-            .flatten()
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub fn was_set(&self) -> bool {
-        self.state.lock_recover().observed_origin.is_some()
-    }
-
-    /// Record a process-local token and the origin to use if that token fires
-    /// independently of a routed cancellation request.
-    pub fn configure_local_token(&self, origin: Option<String>) {
-        let mut state = self.state.lock_recover();
-        state.configured_origin = Some(origin);
-    }
 }

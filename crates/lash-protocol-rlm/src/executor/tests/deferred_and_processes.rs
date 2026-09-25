@@ -125,7 +125,7 @@ impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
+        cancel: lash_core::TurnCancelWait,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.inner.await_next_settlement(handle, cancel).await
     }

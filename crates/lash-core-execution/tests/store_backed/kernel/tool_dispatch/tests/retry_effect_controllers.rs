@@ -41,7 +41,7 @@ impl crate::RuntimeEffectController for SleepRecordingEffectController {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported(
             "SleepRecordingEffectController",
@@ -108,7 +108,7 @@ impl crate::RuntimeEffectController for FailingSleepEffectController {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported(
             "FailingSleepEffectController",

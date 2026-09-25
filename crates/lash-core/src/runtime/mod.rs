@@ -194,6 +194,11 @@ pub use causal::process_event_invocation;
 pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
 pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION};
+#[cfg(feature = "testing")]
+pub use effect::RuntimeEffectControllerHandle;
+#[cfg(not(feature = "testing"))]
+pub(crate) use effect::RuntimeEffectControllerHandle;
+pub use effect::TurnCancelWait;
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AdmittedScope, AdmittedScopeError, AssistantResponseHookEvents, AssistantStreamHookState,
@@ -224,10 +229,6 @@ pub use effect::{
     effect_groups_unsupported, refuse_unhonored_group_membership,
     turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
-#[cfg(feature = "testing")]
-pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
-#[cfg(not(feature = "testing"))]
-pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
 use error::session_commit_error;
@@ -352,11 +353,12 @@ use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_
 #[cfg(feature = "testing")]
 pub use turn_boundary::{RecordedTurnAssembly, classify_output_state};
 pub use turn_control::{
-    TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,
-    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
-    TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest,
-    TurnCancelRequestRecord, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
+    LocalTurnStop, StopDeliveryGuard, TurnAddress, TurnAttach, TurnCancelAffectedInput,
+    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
+    TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,
+    TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
 };
 #[cfg(feature = "testing")]
 pub use turn_input_ingress::ingress_message_id;
@@ -437,11 +439,13 @@ pub struct TurnOptions<'a> {
     events: Option<&'a dyn EventSink>,
     turn_events: Option<&'a dyn TurnActivitySink>,
     scoped_effect_controller: ScopedEffectController<'a>,
-    cancel: CancellationToken,
-    local_cancel_origin: Option<TurnCancelOriginHint>,
+    local_stop: LocalTurnStop,
 }
 
 impl<'a> TurnOptions<'a> {
+    /// `cancel` is a host-local stop lever for the turn: firing it asks the
+    /// turn to stop now, delivered as a durable request on the turn's gate
+    /// (see [`LocalTurnStop`]). The drive itself never reads it.
     pub fn new(
         cancel: CancellationToken,
         scoped_effect_controller: ScopedEffectController<'a>,
@@ -450,8 +454,7 @@ impl<'a> TurnOptions<'a> {
             events: None,
             turn_events: None,
             scoped_effect_controller,
-            cancel,
-            local_cancel_origin: None,
+            local_stop: LocalTurnStop::from_token(cancel, None),
         }
     }
 
@@ -465,13 +468,15 @@ impl<'a> TurnOptions<'a> {
         self
     }
 
-    pub fn with_local_cancel_origin_hint(mut self, hint: TurnCancelOriginHint) -> Self {
-        self.local_cancel_origin = Some(hint);
+    /// Replaces the host-local stop lever with `stop`, which also carries the
+    /// origin a forwarded stop records and its `AfterStep` request.
+    pub fn with_local_stop(mut self, stop: LocalTurnStop) -> Self {
+        self.local_stop = stop;
         self
     }
 
-    pub(crate) fn local_cancel_origin_hint(&self) -> Option<TurnCancelOriginHint> {
-        self.local_cancel_origin.clone()
+    pub(crate) fn local_stop(&self) -> &LocalTurnStop {
+        &self.local_stop
     }
 
     pub(crate) fn events_or_noop(&self) -> &'a dyn EventSink {

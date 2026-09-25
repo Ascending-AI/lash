@@ -522,7 +522,12 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
                 .expect("the identical group reopens");
             match scoped
                 .controller()
-                .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new())
+                .await_next_settlement(
+                    &mut handle,
+                    lash_core::TurnCancelWait::unobserved(
+                        tokio_util::sync::CancellationToken::new(),
+                    ),
+                )
                 .await
             {
                 Ok(settlement) => break settlement,

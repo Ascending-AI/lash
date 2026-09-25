@@ -5,11 +5,11 @@ use std::task::{Context, Poll};
 
 use crate::support::{
     Arc, AssembledTurn, BTreeMap, CancellationToken, EffectHost, EmbedError, EventSink, JoinHandle,
-    LlmCallRecord, Message, MessageRole, PromptContribution, PromptLayer, PromptSlot,
-    PromptTemplate, ProtocolTurnOptions, ProviderHandle, Result, RuntimeEffectController,
-    RuntimeErrorCode, RuntimeHandle, ScopedEffectController, SessionSnapshot, StdMutex, TokenUsage,
-    ToolCallRecord, TurnActivity, TurnActivitySink, TurnCancelOriginHint, TurnExecutionMetrics,
-    TurnInput, TurnOutcome, async_trait, mpsc,
+    LlmCallRecord, LocalTurnStop, Message, MessageRole, PromptContribution, PromptLayer,
+    PromptSlot, PromptTemplate, ProtocolTurnOptions, ProviderHandle, Result,
+    RuntimeEffectController, RuntimeErrorCode, RuntimeHandle, ScopedEffectController,
+    SessionSnapshot, StdMutex, TokenUsage, ToolCallRecord, TurnActivity, TurnActivitySink,
+    TurnExecutionMetrics, TurnInput, TurnOutcome, async_trait, mpsc,
 };
 use futures_util::Stream;
 use lash_core::facade_support::{
@@ -66,10 +66,11 @@ impl<'a> TurnSinks<'a> {
     }
 }
 
-/// Cancellation tokens of the turns currently executing through one opened
+/// Host-local stops of the turns currently executing through one opened
 /// [`LashSession`](crate::LashSession) (shared by its clones).
 /// [`LashSession::cancel_running_turns`](crate::LashSession::cancel_running_turns)
-/// cancels them without the caller having to thread a token around.
+/// stops them without the caller having to thread a token around. A stop is
+/// delivered to each turn as a durable request on its cancellation gate.
 #[derive(Clone, Default)]
 pub(crate) struct TurnCancelRegistry {
     inner: Arc<StdMutex<TurnCancelRegistryInner>>,
@@ -78,27 +79,16 @@ pub(crate) struct TurnCancelRegistry {
 #[derive(Default)]
 struct TurnCancelRegistryInner {
     next_id: u64,
-    active: BTreeMap<u64, RegisteredTurnCancel>,
-}
-
-struct RegisteredTurnCancel {
-    token: CancellationToken,
-    origin_hint: TurnCancelOriginHint,
+    active: BTreeMap<u64, LocalTurnStop>,
 }
 
 impl TurnCancelRegistry {
     /// The guard removes the entry when the turn finishes, however it finishes.
-    fn register(
-        &self,
-        token: CancellationToken,
-        origin_hint: TurnCancelOriginHint,
-    ) -> TurnCancelGuard {
+    fn register(&self, stop: LocalTurnStop) -> TurnCancelGuard {
         let mut inner = self.inner.lock_recover();
         let id = inner.next_id;
         inner.next_id += 1;
-        inner
-            .active
-            .insert(id, RegisteredTurnCancel { token, origin_hint });
+        inner.active.insert(id, stop);
         TurnCancelGuard {
             registry: Arc::clone(&self.inner),
             id,
@@ -109,25 +99,16 @@ impl TurnCancelRegistry {
         self.cancel_all_with_mode(origin, TurnCancelMode::Immediate)
     }
 
-    /// Signal every registered turn. `Immediate` fires the cooperative token;
-    /// `AfterStep` leaves the token alone and flags the shared origin hint so
-    /// each turn stops at its next step boundary.
+    /// Ask every registered turn to stop in `mode`, recording `origin`. An
+    /// `AfterStep` stop lands at each turn's next step boundary.
     pub(crate) fn cancel_all_with_mode(
         &self,
         origin: Option<String>,
         mode: TurnCancelMode,
     ) -> usize {
         let inner = self.inner.lock_recover();
-        for registered in inner.active.values() {
-            match mode {
-                TurnCancelMode::Immediate => {
-                    registered.origin_hint.set(origin.clone());
-                    registered.token.cancel();
-                }
-                TurnCancelMode::AfterStep => {
-                    registered.origin_hint.request_after_step(origin.clone())
-                }
-            }
+        for stop in inner.active.values() {
+            stop.request(mode, origin.clone());
         }
         inner.active.len()
     }
@@ -174,33 +155,30 @@ pub struct TurnBuilder {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) effect_host: Arc<dyn EffectHost>,
     pub(crate) input: TurnInput,
-    pub(crate) cancel: CancellationToken,
+    pub(crate) stop: LocalTurnStop,
     pub(crate) cancels: TurnCancelRegistry,
     pub(crate) protocol_turn_options: Option<ProtocolTurnOptions>,
     pub(crate) provider: Option<ProviderHandle>,
     pub(crate) turn_id: Option<TurnId>,
-    pub(crate) cancel_origin_hint: TurnCancelOriginHint,
 }
 
 impl TurnBuilder {
     /// This low-level hook remains for provider plumbing, shutdown, and tests.
-    /// Host-facing stop controls should use `TurnWorkDriver::request_cancel`
-    /// with an exact session/turn address. If this token fires, cancellation
-    /// evidence records no origin; call
+    /// Firing the token asks the running turn to stop now; the stop is
+    /// delivered as a durable request on the turn's cancellation gate, with
+    /// lash's internal evidence. Host-facing stop controls should use
+    /// `TurnWorkDriver::request_cancel` with an exact session/turn address. If
+    /// this token fires, cancellation evidence records no origin; call
     /// [`cancel_with_origin`](Self::cancel_with_origin) when the origin is
     /// known.
     pub fn cancel(mut self, cancel: CancellationToken) -> Self {
-        self.cancel = cancel;
-        self.cancel_origin_hint = TurnCancelOriginHint::default();
-        lash_core::facade_support::configure_local_turn_token(&self.cancel_origin_hint, None);
+        self.stop = LocalTurnStop::from_token(cancel, None);
         self
     }
 
     /// Lash records the value without interpreting it.
     pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
-        self.cancel = cancel;
-        self.cancel_origin_hint = TurnCancelOriginHint::default();
-        lash_core::facade_support::configure_local_turn_token(&self.cancel_origin_hint, origin);
+        self.stop = LocalTurnStop::from_token(cancel, origin);
         self
     }
 
@@ -335,7 +313,7 @@ impl TurnBuilder {
     pub(crate) fn prepare(
         mut self,
         turn_id: Option<TurnId>,
-    ) -> Result<(RuntimeHandle, TurnInput, CancellationToken, TurnCancelGuard)> {
+    ) -> Result<(RuntimeHandle, TurnInput, LocalTurnStop, TurnCancelGuard)> {
         if let Some(options) = self.protocol_turn_options {
             self.input.protocol_turn_options = Some(options);
         }
@@ -345,13 +323,8 @@ impl TurnBuilder {
         if let Some(turn_id) = turn_id {
             self.input.trace_turn_id = Some(turn_id);
         }
-        self.input
-            .turn_context
-            .set_local_cancel_origin_hint(self.cancel_origin_hint.clone());
-        let cancel_guard = self
-            .cancels
-            .register(self.cancel.clone(), self.cancel_origin_hint);
-        Ok((self.runtime, self.input, self.cancel, cancel_guard))
+        let cancel_guard = self.cancels.register(self.stop.clone());
+        Ok((self.runtime, self.input, self.stop, cancel_guard))
     }
 
     pub async fn stream_to_with_effects(
@@ -383,13 +356,13 @@ impl TurnBuilder {
         scoped_effect_controller: ScopedEffectController<'_>,
         turn_id: Option<TurnId>,
     ) -> Result<TurnReport> {
-        let (runtime, input, cancel, _cancel_guard) = self.prepare(turn_id)?;
+        let (runtime, input, stop, _cancel_guard) = self.prepare(turn_id)?;
         stream_prepared_turn(
             &runtime,
             input,
             TurnSinks::turn(events),
             scoped_effect_controller,
-            cancel,
+            stop,
         )
         .await
     }
@@ -410,7 +383,7 @@ impl TurnBuilder {
         scoped_effect_controller: ScopedEffectController<'static>,
         turn_id: Option<TurnId>,
     ) -> Result<TurnStream> {
-        let (runtime, input, cancel, cancel_guard) = self.prepare(turn_id)?;
+        let (runtime, input, stop, cancel_guard) = self.prepare(turn_id)?;
         let (tx, rx) = mpsc::channel(64);
         let sink = ChannelTurnActivitySink { tx };
         let completion = tokio::spawn(async move {
@@ -420,7 +393,7 @@ impl TurnBuilder {
                 input,
                 TurnSinks::turn(&sink),
                 scoped_effect_controller,
-                cancel,
+                stop,
             )
             .await
         });
@@ -508,13 +481,13 @@ impl AdvancedTurn {
         let turn_id = self
             .builder
             .resolved_turn_id(Some(&scoped_effect_controller));
-        let (runtime, input, cancel, _cancel_guard) = self.builder.prepare(turn_id)?;
+        let (runtime, input, stop, _cancel_guard) = self.builder.prepare(turn_id)?;
         stream_prepared_turn(
             &runtime,
             input,
             TurnSinks::session(events),
             scoped_effect_controller,
-            cancel,
+            stop,
         )
         .await
     }
@@ -573,8 +546,7 @@ impl Stream for TurnStream {
 pub struct QueuedTurnBuilder {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) effect_host: Arc<dyn EffectHost>,
-    pub(crate) cancel: CancellationToken,
-    pub(crate) cancel_origin_hint: TurnCancelOriginHint,
+    pub(crate) stop: LocalTurnStop,
     pub(crate) cancels: TurnCancelRegistry,
     pub(crate) turn_id: Option<TurnId>,
     pub(crate) drain_id: Option<String>,
@@ -582,17 +554,13 @@ pub struct QueuedTurnBuilder {
 
 impl QueuedTurnBuilder {
     pub fn cancel(mut self, cancel: CancellationToken) -> Self {
-        self.cancel = cancel;
-        self.cancel_origin_hint = TurnCancelOriginHint::default();
-        lash_core::facade_support::configure_local_turn_token(&self.cancel_origin_hint, None);
+        self.stop = LocalTurnStop::from_token(cancel, None);
         self
     }
 
     /// Lash records the value without interpreting it.
     pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
-        self.cancel = cancel;
-        self.cancel_origin_hint = TurnCancelOriginHint::default();
-        lash_core::facade_support::configure_local_turn_token(&self.cancel_origin_hint, origin);
+        self.stop = LocalTurnStop::from_token(cancel, origin);
         self
     }
 
@@ -720,15 +688,12 @@ impl QueuedTurnBuilder {
             .clone()
             .or_else(|| self.turn_id.as_ref().map(ToString::to_string))
             .map(|id| self.runtime.observe().queue_drain_scope(id));
-        let _cancel_guard = self
-            .cancels
-            .register(self.cancel.clone(), self.cancel_origin_hint.clone());
+        let _cancel_guard = self.cancels.register(self.stop.clone());
         stream_next_queued_prepared_turn(
             &self.runtime,
             TurnSinks::turn(events),
             binding.queued(identity),
-            self.cancel,
-            self.cancel_origin_hint,
+            self.stop,
         )
         .await
     }
@@ -751,19 +716,17 @@ impl QueuedTurnBuilder {
         let Self {
             runtime,
             effect_host: _,
-            cancel,
-            cancel_origin_hint,
+            stop,
             cancels,
             turn_id: _,
             drain_id: _,
         } = self;
-        let _cancel_guard = cancels.register(cancel.clone(), cancel_origin_hint.clone());
+        let _cancel_guard = cancels.register(stop.clone());
         stream_next_queued_prepared_turn(
             &runtime,
             TurnSinks::turn(events),
             QueuedEffectSource::Scoped(scoped_effect_controller),
-            cancel,
-            cancel_origin_hint,
+            stop,
         )
         .await
     }
@@ -879,16 +842,12 @@ impl SelectedQueuedTurnBuilder {
             .clone()
             .or_else(|| self.builder.turn_id.as_ref().map(ToString::to_string))
             .map(|id| self.builder.runtime.observe().queue_drain_scope(id));
-        let _cancel_guard = self.builder.cancels.register(
-            self.builder.cancel.clone(),
-            self.builder.cancel_origin_hint.clone(),
-        );
+        let _cancel_guard = self.builder.cancels.register(self.builder.stop.clone());
         stream_selected_queued_prepared_turn(
             &self.builder.runtime,
             TurnSinks::turn(events),
             binding.queued(identity),
-            self.builder.cancel,
-            self.builder.cancel_origin_hint,
+            self.builder.stop,
             &self.batch_ids,
         )
         .await
@@ -914,19 +873,17 @@ impl SelectedQueuedTurnBuilder {
         let QueuedTurnBuilder {
             runtime,
             effect_host: _,
-            cancel,
-            cancel_origin_hint,
+            stop,
             cancels,
             turn_id: _,
             drain_id: _,
         } = builder;
-        let _cancel_guard = cancels.register(cancel.clone(), cancel_origin_hint.clone());
+        let _cancel_guard = cancels.register(stop.clone());
         stream_selected_queued_prepared_turn(
             &runtime,
             TurnSinks::turn(events),
             QueuedEffectSource::Scoped(scoped_effect_controller),
-            cancel,
-            cancel_origin_hint,
+            stop,
             &batch_ids,
         )
         .await
@@ -985,15 +942,10 @@ pub(crate) async fn stream_next_queued_prepared_turn(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,
     source: QueuedEffectSource<'_>,
-    cancel: CancellationToken,
-    cancel_origin_hint: TurnCancelOriginHint,
+    stop: LocalTurnStop,
 ) -> Result<QueuedTurnDrain<TurnReport>> {
     let drain = Box::pin(stream_next_queued_prepared_assembled(
-        runtime,
-        sinks,
-        source,
-        cancel,
-        cancel_origin_hint,
+        runtime, sinks, source, stop,
     ))
     .await?;
     Ok(drain.map(TurnReport::from_assembled))
@@ -1003,8 +955,7 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,
     source: QueuedEffectSource<'_>,
-    cancel: CancellationToken,
-    cancel_origin_hint: TurnCancelOriginHint,
+    stop: LocalTurnStop,
 ) -> Result<QueuedTurnDrain<AssembledTurn>> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
@@ -1012,9 +963,9 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
         runtime: runtime.clone(),
         live: sinks.turn_events(),
     };
-    let mut opts = QueuedTurnOptions::new(cancel, source)
+    let mut opts = QueuedTurnOptions::new(CancellationToken::new(), source)
         .with_turn_events(&observation_sink)
-        .with_local_cancel_origin_hint(cancel_origin_hint);
+        .with_local_stop(stop);
     if let Some(events) = sinks.events() {
         opts = opts.with_events(events);
     }
@@ -1027,17 +978,11 @@ pub(crate) async fn stream_selected_queued_prepared_turn(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,
     source: QueuedEffectSource<'_>,
-    cancel: CancellationToken,
-    cancel_origin_hint: TurnCancelOriginHint,
+    stop: LocalTurnStop,
     batch_ids: &[lash_core::BatchId],
 ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
     let outcome = Box::pin(stream_selected_queued_prepared_assembled(
-        runtime,
-        sinks,
-        source,
-        cancel,
-        cancel_origin_hint,
-        batch_ids,
+        runtime, sinks, source, stop, batch_ids,
     ))
     .await?;
     Ok(SelectedQueuedWorkDrainOutcome {
@@ -1051,8 +996,7 @@ pub(crate) async fn stream_selected_queued_prepared_assembled(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,
     source: QueuedEffectSource<'_>,
-    cancel: CancellationToken,
-    cancel_origin_hint: TurnCancelOriginHint,
+    stop: LocalTurnStop,
     batch_ids: &[lash_core::BatchId],
 ) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>> {
     let writer_handle = runtime.writer();
@@ -1061,9 +1005,9 @@ pub(crate) async fn stream_selected_queued_prepared_assembled(
         runtime: runtime.clone(),
         live: sinks.turn_events(),
     };
-    let mut opts = QueuedTurnOptions::new(cancel, source)
+    let mut opts = QueuedTurnOptions::new(CancellationToken::new(), source)
         .with_turn_events(&observation_sink)
-        .with_local_cancel_origin_hint(cancel_origin_hint);
+        .with_local_stop(stop);
     if let Some(events) = sinks.events() {
         opts = opts.with_events(events);
     }
@@ -1092,9 +1036,13 @@ fn turn_options<'a>(
     events: Option<&'a dyn EventSink>,
     turn_events: &'a dyn TurnActivitySink,
     scoped_effect_controller: ScopedEffectController<'a>,
-    cancel: CancellationToken,
+    stop: LocalTurnStop,
 ) -> lash_core::facade_support::TurnOptions<'a> {
-    let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);
+    let mut opts = lash_core::facade_support::TurnOptions::new(
+        CancellationToken::new(),
+        scoped_effect_controller,
+    )
+    .with_local_stop(stop);
     if let Some(events) = events {
         opts = opts.with_events(events);
     }
@@ -1143,14 +1091,14 @@ pub(crate) async fn stream_prepared_turn(
     input: TurnInput,
     sinks: TurnSinks<'_>,
     scoped_effect_controller: ScopedEffectController<'_>,
-    cancel: CancellationToken,
+    stop: LocalTurnStop,
 ) -> Result<TurnReport> {
     let turn = Box::pin(stream_prepared_assembled(
         runtime,
         input,
         sinks,
         scoped_effect_controller,
-        cancel,
+        stop,
     ))
     .await?;
     Ok(TurnReport::from_assembled(turn))
@@ -1161,14 +1109,14 @@ pub(crate) async fn stream_prepared_assembled(
     input: TurnInput,
     sinks: TurnSinks<'_>,
     scoped_effect_controller: ScopedEffectController<'_>,
-    cancel: CancellationToken,
+    stop: LocalTurnStop,
 ) -> Result<AssembledTurn> {
     let turn = Box::pin(stream_prepared_agent_frame_run(
         runtime,
         input,
         sinks,
         scoped_effect_controller,
-        cancel,
+        stop,
     ))
     .await?;
     turn.into_final_turn().ok_or_else(|| {
@@ -1184,7 +1132,7 @@ pub(crate) async fn stream_prepared_agent_frame_run(
     input: TurnInput,
     sinks: TurnSinks<'_>,
     scoped_effect_controller: ScopedEffectController<'_>,
-    cancel: CancellationToken,
+    stop: LocalTurnStop,
 ) -> Result<lash_core::facade_support::AgentFrameRun> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
@@ -1204,7 +1152,7 @@ pub(crate) async fn stream_prepared_agent_frame_run(
             sinks.events(),
             &observation_sink,
             scoped_effect_controller,
-            cancel,
+            stop,
         ),
     ))
     .await?;

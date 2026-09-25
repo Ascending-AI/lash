@@ -14,6 +14,7 @@
 //! obligation is the committed-but-unseated child plus the dispatch workflow's
 //! own redrive, so `AlreadyCommitted` reports it `None`.
 
+use crate::durable_wait::RestateTurnCancelRaceOutcome;
 use lash_core::facade_support::effect_replay_driver::{
     EffectGroupChildCommitOutcome, GroupChildFinalCommit,
 };
@@ -120,10 +121,11 @@ where
     for position in positions {
         let request = drained_wait_request(&wait_scope, group_key, position)?;
         let replay_key = request.key.key_id.clone();
-        let resolution = context
+        let resolution = match context
             .await_effect_group_wait(
                 request,
                 replay_key,
+                None,
                 tokio_util::sync::CancellationToken::new(),
             )
             .await
@@ -132,13 +134,16 @@ where
                     "LashDurableWaitWorkflow/await_resolution(DRAINED)",
                     error,
                 )
-            })?
-            .ok_or_else(|| {
-                group_shape_error(format!(
+            })? {
+            RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
+            RestateTurnCancelRaceOutcome::TurnCancelled
+            | RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
+                return Err(group_shape_error(format!(
                     "effect group {group_key} drained wake for child {position} ended without \
-                     a resolution under a token nothing cancels"
-                ))
-            })?;
+                     a resolution though it races no turn gate"
+                )));
+            }
+        };
         drained_wait_lifted(group_key, position, resolution)?;
     }
     Ok(())

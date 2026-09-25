@@ -507,7 +507,16 @@ pub trait ExecutionHost: Sync {
         op: AbilityOp,
     ) -> impl Future<Output = Result<AbilityResult, ExecutionHostError>> + Send;
 
-    fn yield_now(&self) -> impl Future<Output = ()> + Send {
+    /// The run's cancel checkpoint: the VM awaits it each time its
+    /// executed-instruction count crosses a multiple of
+    /// [`CANCEL_CHECKPOINT_INSTRUCTIONS`](crate::CANCEL_CHECKPOINT_INSTRUCTIONS),
+    /// numbering them from one, and then consults
+    /// [`is_cancelled`](Self::is_cancelled). A host whose cancellation is an
+    /// engine event answers it with a recorded operation, which is also the
+    /// run's only wait on a long stretch of pure compute; the default answers
+    /// nothing. A checkpoint never decides anything by itself.
+    fn cancel_checkpoint(&self, checkpoint: u64) -> impl Future<Output = ()> + Send {
+        let _ = checkpoint;
         async {}
     }
 
@@ -652,8 +661,8 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
         self.host.perform(op).await
     }
 
-    async fn yield_now(&self) {
-        self.host.yield_now().await;
+    async fn cancel_checkpoint(&self, checkpoint: u64) {
+        self.host.cancel_checkpoint(checkpoint).await;
     }
 
     fn execution_mode(&self) -> ExecutionMode {

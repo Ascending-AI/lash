@@ -5,8 +5,7 @@
 //! driver that normalizes and applies them stays in `lash-core`.
 
 use crate::{
-    CheckpointKind, PluginMessage, RuntimeError, RuntimeErrorCode, SessionId, TurnCancelOriginHint,
-    TurnCause, TurnId,
+    CheckpointKind, PluginMessage, RuntimeError, RuntimeErrorCode, SessionId, TurnCause, TurnId,
 };
 use std::any::Any;
 use std::collections::HashMap;
@@ -1209,7 +1208,6 @@ pub struct TurnContext {
     provider: Option<crate::ProviderHandle>,
     prompt: crate::PromptLayer,
     runtime_correlation: Option<Arc<dyn Any + Send + Sync>>,
-    local_cancel_origin: TurnCancelOriginHint,
     queued_work_drain: QueuedWorkDrainMode,
 }
 impl Default for TurnContext {
@@ -1219,7 +1217,6 @@ impl Default for TurnContext {
             provider: None,
             prompt: crate::PromptLayer::default(),
             runtime_correlation: None,
-            local_cancel_origin: TurnCancelOriginHint::default(),
             queued_work_drain: QueuedWorkDrainMode::Automatic,
         }
     }
@@ -1242,14 +1239,6 @@ impl TurnContext {
 
     pub fn provider(&self) -> Option<&crate::ProviderHandle> {
         self.provider.as_ref()
-    }
-
-    pub fn set_local_cancel_origin_hint(&mut self, hint: TurnCancelOriginHint) {
-        self.local_cancel_origin = hint;
-    }
-
-    pub fn local_cancel_origin_hint(&self) -> TurnCancelOriginHint {
-        self.local_cancel_origin.clone()
     }
 
     pub fn mark_selected_queued_work_drain(&mut self) {

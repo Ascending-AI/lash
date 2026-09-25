@@ -59,20 +59,20 @@ impl<'a> QueuedEffectSource<'a> {
 
 pub struct QueuedTurnOptions<'a> {
     pub(crate) source: QueuedEffectSource<'a>,
-    pub(crate) cancel: CancellationToken,
+    pub(crate) local_stop: LocalTurnStop,
     events: Option<&'a dyn EventSink>,
     turn_events: Option<&'a dyn TurnActivitySink>,
-    local_cancel_origin: Option<TurnCancelOriginHint>,
 }
 
 impl<'a> QueuedTurnOptions<'a> {
+    /// `cancel` is the drain's host-local stop lever, as for
+    /// [`TurnOptions::new`](super::TurnOptions::new).
     pub fn new(cancel: CancellationToken, source: QueuedEffectSource<'a>) -> Self {
         Self {
             source,
-            cancel,
+            local_stop: LocalTurnStop::from_token(cancel, None),
             events: None,
             turn_events: None,
-            local_cancel_origin: None,
         }
     }
     pub fn with_events(mut self, events: &'a dyn EventSink) -> Self {
@@ -83,8 +83,10 @@ impl<'a> QueuedTurnOptions<'a> {
         self.turn_events = Some(events);
         self
     }
-    pub fn with_local_cancel_origin_hint(mut self, hint: TurnCancelOriginHint) -> Self {
-        self.local_cancel_origin = Some(hint);
+    /// Replaces the host-local stop lever, as for
+    /// [`TurnOptions::with_local_stop`](super::TurnOptions::with_local_stop).
+    pub fn with_local_stop(mut self, stop: LocalTurnStop) -> Self {
+        self.local_stop = stop;
         self
     }
     pub(crate) fn bind(
@@ -93,10 +95,9 @@ impl<'a> QueuedTurnOptions<'a> {
     ) -> Result<TurnOptions<'a>, RuntimeError> {
         Ok(TurnOptions {
             scoped_effect_controller: self.source.scoped(scope)?,
-            cancel: self.cancel.clone(),
+            local_stop: self.local_stop.clone(),
             events: self.events,
             turn_events: self.turn_events,
-            local_cancel_origin: self.local_cancel_origin.clone(),
         })
     }
 }
@@ -105,10 +106,9 @@ impl<'a> From<TurnOptions<'a>> for QueuedTurnOptions<'a> {
     fn from(options: TurnOptions<'a>) -> Self {
         Self {
             source: QueuedEffectSource::Scoped(options.scoped_effect_controller),
-            cancel: options.cancel,
+            local_stop: options.local_stop,
             events: options.events,
             turn_events: options.turn_events,
-            local_cancel_origin: options.local_cancel_origin,
         }
     }
 }

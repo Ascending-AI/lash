@@ -380,7 +380,7 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
     async fn await_next_settlement(
         &self,
         handle: &mut crate::EffectGroupHandle,
-        cancel: CancellationToken,
+        cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, RuntimeEffectControllerError> {
         Box::pin(
             self.replay_driver()

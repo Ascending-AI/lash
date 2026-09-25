@@ -544,7 +544,7 @@ impl RuntimeEffectController for JournalController {
     async fn await_next_settlement(
         &self,
         handle: &mut lash::runtime::EffectGroupHandle,
-        cancel: lash::CancellationToken,
+        cancel: lash_core::TurnCancelWait,
     ) -> Result<lash::runtime::GroupSettlement, lash::runtime::RuntimeEffectControllerError> {
         self.inner.await_next_settlement(handle, cancel).await
     }

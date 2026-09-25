@@ -64,7 +64,7 @@ impl lash::runtime::RuntimeEffectController for CountingProcessEffectController 
     async fn await_next_settlement(
         &self,
         _handle: &mut lash::runtime::EffectGroupHandle,
-        _cancel: lash::CancellationToken,
+        _cancel: lash::runtime::TurnCancelWait,
     ) -> Result<lash::runtime::GroupSettlement, lash::runtime::RuntimeEffectControllerError> {
         Err(lash::runtime::effect_groups_unsupported(
             "CountingProcessEffectController",

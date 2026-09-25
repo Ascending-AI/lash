@@ -139,7 +139,7 @@ pub(crate) fn test_sleep_or_turn_cancel<'run, 'ctx, C>(
     gate: &'run TestTurnCancelGate,
     duration: Duration,
     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-    cancellation: tokio_util::sync::CancellationToken,
+    process_stop: tokio_util::sync::CancellationToken,
 ) -> TestTurnCancelRaceFuture<'run, ()>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
@@ -151,7 +151,7 @@ where
                 result = context.sleep_send(duration) => {
                     result.map(RestateTurnCancelRaceOutcome::Completed)
                 }
-                _ = cancellation.cancelled() => {
+                _ = process_stop.cancelled() => {
                     Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
                 }
             };
@@ -193,10 +193,6 @@ where
                         }
                     }
                 }
-                _ = cancellation.cancelled() => {
-                    gate.unregister(registration.id);
-                    return Ok(RestateTurnCancelRaceOutcome::TurnCancelled);
-                }
             }
         }
     })
@@ -208,16 +204,18 @@ pub(crate) fn test_await_event_or_turn_cancel<'run, 'ctx, C>(
     request: RestateDurableWaitAwaitRequest,
     replay_key: String,
     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-    cancellation: tokio_util::sync::CancellationToken,
+    process_stop: tokio_util::sync::CancellationToken,
 ) -> TestTurnCancelRaceFuture<'run, Resolution>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
     'ctx: 'run,
 {
     Box::pin(async move {
+        // A wait that observes no turn keeps the process drive's own stop:
+        // P16 (FIG-3673) replaces with a recorded race.
         let Some(turn_cancel) = turn_cancel else {
             return context
-                .await_event(request, replay_key, cancellation)
+                .await_event(request, replay_key, process_stop)
                 .await
                 .map(RestateTurnCancelRaceOutcome::Completed);
         };
@@ -238,7 +236,11 @@ where
         };
         let event_key = request.key.clone();
         let mut escalated = false;
-        let guarded = context.await_event(request, replay_key, cancellation);
+        let guarded = context.await_event(
+            request,
+            replay_key,
+            tokio_util::sync::CancellationToken::new(),
+        );
         tokio::pin!(guarded);
         loop {
             tokio::select! {

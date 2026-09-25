@@ -108,7 +108,10 @@ impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
             .await
             .map_err(restate_sdk::errors::TerminalError::from_error)?;
         let first = controller
-            .await_next_settlement(&mut handle, CancellationToken::new())
+            .await_next_settlement(
+                &mut handle,
+                lash::runtime::TurnCancelWait::unobserved(CancellationToken::new()),
+            )
             .await
             .map_err(restate_sdk::errors::TerminalError::from_error)?;
         if !matches!(first.outcome, Ok(RuntimeEffectOutcome::Sleep)) {

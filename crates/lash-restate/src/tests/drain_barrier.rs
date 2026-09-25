@@ -103,3 +103,56 @@ pub(super) async fn an_index_of_another_protocol_version_is_refused_typed() {
     assert!(error.code.is_terminal());
     assert!(context.group_waits.lock_recover().is_empty());
 }
+
+/// FIG-3672 P9: a turn-observing rank wait races the turn's durable
+/// cancellation gate in the journal, and a gate win is the typed cancelled
+/// await. The execution's own token races nothing here: a Restate wait is
+/// cancelled only by what its journal recorded.
+#[tokio::test]
+pub(super) async fn a_turn_observing_rank_wait_races_the_turn_gate_and_never_a_token() {
+    let turn = ExecutionScope::turn(SessionId::from("session"), TurnId::from("turn"));
+    let context = Arc::new(RecordingContext::default());
+    *context.group_rank_read.lock_recover() =
+        Some(crate::effect_group::EffectGroupReadRankResponse::NotSettled);
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
+    let mut handle =
+        lash_core::EffectGroupHandle::restored("group", 2, 0).expect("a restored cursor");
+    let error = controller
+        .await_next_settlement(
+            &mut handle,
+            lash_core::TurnCancelWait::observing(
+                tokio_util::sync::CancellationToken::new(),
+                turn.clone(),
+            ),
+        )
+        .await
+        .expect_err("the gate won the race");
+    assert_eq!(
+        error.code,
+        RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
+    );
+    assert_eq!(handle.consumed(), 0, "a cancelled await leaves the cursor");
+    let raced = context.group_wait_turn_cancels.lock_recover().clone();
+    assert_eq!(raced.len(), 1, "one gate raced the one rank wait");
+    assert_eq!(raced[0].key.scope, turn);
+    assert_eq!(
+        raced[0].key.wait,
+        lash_core::AwaitEventWaitIdentity::TurnCancelGate
+    );
+
+    // An unobserved wait races no gate, and a cancelled token does not end
+    // it: the wake resolves as recorded (here, a retirement).
+    *context.group_wait_resolution.lock_recover() =
+        Some(resolved(EffectGroupWaitResolution::Retired));
+    let cancelled = tokio_util::sync::CancellationToken::new();
+    cancelled.cancel();
+    let error = controller
+        .await_next_settlement(
+            &mut handle,
+            lash_core::TurnCancelWait::unobserved(cancelled),
+        )
+        .await
+        .expect_err("the retired wake is a shape error");
+    assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
+    assert_eq!(context.group_wait_turn_cancels.lock_recover().len(), 1);
+}

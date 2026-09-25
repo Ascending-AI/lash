@@ -1886,9 +1886,10 @@ async fn next_settlement(
 ) -> crate::GroupSettlement {
     tokio::time::timeout(
         SETTLE_BUDGET,
-        scoped
-            .controller()
-            .await_next_settlement(handle, tokio_util::sync::CancellationToken::new()),
+        scoped.controller().await_next_settlement(
+            handle,
+            lash_core::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
+        ),
     )
     .await
     .unwrap_or_else(|_| panic!("settlement for rank {rank} never arrived"))

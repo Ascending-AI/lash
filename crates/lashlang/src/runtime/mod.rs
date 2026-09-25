@@ -156,6 +156,52 @@ impl ExecutionScratch {
 
 pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 
+/// The instruction accounting a run's cancel checkpoints are placed by
+/// (FIG-3672 P9): what the compiler emits for a program, what each builtin
+/// charges (the collection-work, intrinsic, callback and regexp
+/// charges), the cooperative-yield granularity, and the checkpoint
+/// schedule ([`cancel_checkpoint_reached`]). A checkpoint is a journaled gate
+/// peek, and a code cell replays by re-execution, so a change to any of these
+/// moves checkpoints to other journal positions: it bumps this version, and
+/// with it the cell journal grammar, which refuses a journal written under
+/// another before its cell runs.
+pub const INSTRUCTION_ACCOUNTING_VERSION: u32 = 1;
+
+/// Instructions before a run's first cancel checkpoint (FIG-3672 P9). The VM
+/// hands its host checkpoint `n` when its executed-instruction count reaches
+/// the `n`th position of the schedule [`cancel_checkpoint_reached`] counts.
+pub const CANCEL_CHECKPOINT_INSTRUCTIONS: u64 = 1 << 20;
+
+/// The widest gap between two cancel checkpoints: each gap doubles the one
+/// before it, from [`CANCEL_CHECKPOINT_INSTRUCTIONS`], until it reaches this.
+pub const CANCEL_CHECKPOINT_INTERVAL_CAP: u64 = 1 << 28;
+
+/// The doublings from the first gap to the cap.
+const CANCEL_CHECKPOINT_DOUBLINGS: u32 = CANCEL_CHECKPOINT_INTERVAL_CAP.trailing_zeros()
+    - CANCEL_CHECKPOINT_INSTRUCTIONS.trailing_zeros();
+
+/// How many cancel checkpoints a run has reached after `instructions`
+/// executed instructions.
+///
+/// Gap `k` (from 1) is `CANCEL_CHECKPOINT_INSTRUCTIONS << (k - 1)`, capped at
+/// [`CANCEL_CHECKPOINT_INTERVAL_CAP`]: checkpoints fall at 1, 3, 7, ... 511
+/// times 2^20 instructions, then every 2^28. A run of `I` instructions reaches
+/// at most `9 + (I - 511 * 2^20) / 2^28` checkpoints — nine in its first ~536M
+/// instructions, then one per ~268M — and each journals one gate peek, or two
+/// while an `AfterStep` request is pending (the second reads its escalation).
+/// The schedule is a pure function of the deterministic instruction count, so
+/// a replay reaches the same checkpoints at the same points.
+pub fn cancel_checkpoint_reached(instructions: u64) -> u64 {
+    let first = CANCEL_CHECKPOINT_INSTRUCTIONS;
+    let doubling_span = first * ((1 << (CANCEL_CHECKPOINT_DOUBLINGS + 1)) - 1);
+    if instructions < doubling_span {
+        // Checkpoint `n` sits at `first * (2^n - 1)`.
+        return u64::from((instructions / first + 1).ilog2());
+    }
+    u64::from(CANCEL_CHECKPOINT_DOUBLINGS + 1)
+        + (instructions - doubling_span) / CANCEL_CHECKPOINT_INTERVAL_CAP
+}
+
 #[derive(Clone)]
 pub struct CompiledProgram {
     pub(crate) chunk: Chunk,

@@ -159,7 +159,6 @@ pub(crate) use process_identity::{ProcessWakeDelivery, WakeDeliveryState};
 pub(crate) use queued_work_vocabulary::QueuedWorkClaim;
 pub(crate) use session_graph::SessionGraphScopeError;
 pub(crate) use store::queued_work::QueuedWorkClass;
-pub(crate) use turn_control_vocabulary::TurnCancelOriginHint;
 pub(crate) use turn_input_vocabulary::TurnInputCheckpointBoundary;
 pub(crate) use turn_input_vocabulary::{InputItem, TurnContext, TurnInput};
 

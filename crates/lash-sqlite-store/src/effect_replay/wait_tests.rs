@@ -695,7 +695,12 @@ async fn close_with_two_running_children() {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     controller
-        .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new())
+        .await_next_settlement(
+            &mut handle,
+            lash_core_execution::TurnCancelWait::unobserved(
+                tokio_util::sync::CancellationToken::new(),
+            ),
+        )
         .await
         .expect("the winner takes rank one");
     controller

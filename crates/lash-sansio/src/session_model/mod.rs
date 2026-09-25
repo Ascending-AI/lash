@@ -708,17 +708,28 @@ pub struct TurnCancellationEvidence {
 }
 
 impl TurnCancellationEvidence {
+    /// The request-id namespace of a cancellation lash originated itself.
+    pub const INTERNAL_REQUEST_ID_PREFIX: &'static str = "internal:";
+
     /// Evidence for a cancellation lash originated itself: no host cancel
     /// request exists, so the request id is namespaced `internal:`.
     pub fn internal(subject: impl std::fmt::Display) -> Self {
         Self {
-            request_id: format!("internal:{subject}"),
+            request_id: format!("{}{subject}", Self::INTERNAL_REQUEST_ID_PREFIX),
             origin: None,
             reason: None,
             undelivered: TurnCancelDisposition::Defer,
             mode: TurnCancelMode::Immediate,
             honoured_after_step: None,
         }
+    }
+
+    /// Whether lash originated this cancellation itself (a host-local stop,
+    /// a provider's cancelled transport): no host request chose its
+    /// undelivered-input policy.
+    pub fn is_internal(&self) -> bool {
+        self.request_id
+            .starts_with(Self::INTERNAL_REQUEST_ID_PREFIX)
     }
 }
 

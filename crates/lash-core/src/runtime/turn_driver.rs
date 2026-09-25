@@ -87,11 +87,23 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// loser the turn's end incorporates is charged against the same ledger
     /// the winning cell charged.
     pub(super) opener_state: crate::session::OpenerState,
-    /// The cooperative cancellation signal this turn's effect loop runs under.
-    ///
-    /// The lent opener context carries this token so a tool child's waits are
-    /// cancelled with the turn that opened it (FIG-2266). Set at `run`; a
-    /// registration taken before `run` — impossible today, since the first
-    /// context is built inside the loop — would lend a token nobody cancels.
-    pub(super) cooperative_cancel: CancellationToken,
+    /// The cancellation this turn recorded honouring: the answer of a
+    /// journaled gate peek, and nothing else (FIG-3672 P9). Drive decisions
+    /// that depend on the turn's cancellation read this, never a live token.
+    pub(super) turn_cancel: Option<crate::TurnCancellationEvidence>,
+    /// The cooperative stop the turn lends to the tool children its
+    /// live-opener registration serves (FIG-2266). The drive fires it when it
+    /// records the turn's cancellation, at a recorded point, so a replay
+    /// fires it at the same point; the children record what they observed in
+    /// their own settlements. No drive code reads it (FIG-3672 P9).
+    pub(super) children_stop: CancellationToken,
+}
+
+impl RuntimeTurnDriver<'_> {
+    /// Records the cancellation this turn honours, from a journaled peek or a
+    /// recorded outcome, and stops the children it lent its context to.
+    pub(super) fn record_turn_cancel(&mut self, evidence: crate::TurnCancellationEvidence) {
+        self.turn_cancel = Some(evidence);
+        self.children_stop.cancel();
+    }
 }

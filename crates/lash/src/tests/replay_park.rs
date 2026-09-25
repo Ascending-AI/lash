@@ -486,6 +486,8 @@ async fn a_cell_whose_sync_predates_the_grammar_stamp_parks_its_turn() -> Result
     for (session_id, probe_id, stamp) in [
         ("stamp-real", "stamp-prob", ""),
         ("stamp-old2", "stamp-prb2", ",\"cell_replay_grammar\":2"),
+        // Grammar 3 predates the journaled cancel checkpoints (FIG-3672 P9).
+        ("stamp-old3", "stamp-prb3", ",\"cell_replay_grammar\":3"),
     ] {
         let backend = Backend::open().await;
         let attempt_key = backend.first_attempt_key(probe_id, session_id).await;
@@ -496,7 +498,7 @@ async fn a_cell_whose_sync_predates_the_grammar_stamp_parks_its_turn() -> Result
             .journal()
             .execute(
                 "UPDATE runtime_effect_replay
-                    SET outcome_json = replace(outcome_json, ',\"cell_replay_grammar\":3', ?2)
+                    SET outcome_json = replace(outcome_json, ',\"cell_replay_grammar\":4', ?2)
                   WHERE replay_key LIKE ?1 AND outcome_json LIKE '%cell_replay_grammar%'",
                 [format!("%{session_id}%"), stamp.to_string()],
             )

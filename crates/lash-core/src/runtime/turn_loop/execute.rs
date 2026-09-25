@@ -1,6 +1,7 @@
 //! The execute phase: run the prepared turn's effect loop to a terminal
-//! outcome, watching for cancellation alongside it, while its observations are
-//! published to the host sinks outside the drive.
+//! outcome while its observations are published to the host sinks outside the
+//! drive. Cancellation reaches the loop only as recorded facts: the journaled
+//! gate peeks and the recorded outcomes of its steps (FIG-3672 P9).
 
 use super::*;
 use crate::TurnId;
@@ -19,6 +20,8 @@ pub(super) struct TurnDriverRemainder {
     pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(super) pending_turn_input_claims: Vec<crate::TurnInputClaim>,
     pub(super) withheld_terminal_work: crate::runtime::logical_turn::WithheldTerminalWork,
+    /// The cancellation the turn recorded honouring, if any.
+    pub(super) turn_cancel: Option<crate::TurnCancellationEvidence>,
 }
 
 /// Everything the execute phase needs to drive an already-prepared turn.
@@ -29,7 +32,7 @@ pub(in crate::runtime) struct PreparedTurnExecuteContext<'sinks, 'run> {
     pub(in crate::runtime) turn: PreparedLogicalTurn,
     pub(in crate::runtime) sinks: TurnSinks<'sinks>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
-    pub(in crate::runtime) cancel: CancellationToken,
+    pub(in crate::runtime) local_stop: LocalTurnStop,
     pub(in crate::runtime) initial_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(in crate::runtime) initial_turn_input_claims: Vec<crate::TurnInputClaim>,
     pub(in crate::runtime) lease: TurnLeaseScope<'sinks>,
@@ -56,7 +59,6 @@ struct PreparedTurnAbortContext<'abort, 'run> {
     trace_turn_id: TurnId,
     claims: &'abort LogicalTurnClaims,
     scoped_effect_controller: &'abort ScopedEffectController<'run>,
-    cancel: &'abort CancellationToken,
     lease: TurnLeaseScope<'abort>,
     session_execution_fence: Option<crate::SessionExecutionLeaseAuthority>,
     turn_control: &'abort ActiveTurnControl,
@@ -65,17 +67,13 @@ struct PreparedTurnAbortContext<'abort, 'run> {
 }
 
 /// The effect loop's own inputs: the driver, the observer it publishes
-/// through, and the turn-control handles the cancellation watcher runs
-/// against.
+/// through, and the turn-control handle its start-gate peek runs against.
 struct TurnEffectLoopContext<'loop_run, 'run> {
     driver: &'loop_run mut RuntimeTurnDriver<'run>,
     messages: crate::MessageSequence,
     event_tx: TurnObserver,
-    cancellation: CancellationToken,
     protocol_run_offset: usize,
-    clock: Arc<dyn Clock>,
     turn_control: Arc<ActiveTurnControl>,
-    turn_control_host: Arc<dyn EffectHost>,
     cancel_controller: &'loop_run ScopedEffectController<'run>,
 }
 
@@ -102,6 +100,7 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             pending_queue_claims,
             pending_turn_input_claims,
             withheld_terminal_work,
+            turn_cancel,
             ..
         } = *self.driver.take().expect("turn driver loan is present");
         *self.session = Some(session);
@@ -114,6 +113,7 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             pending_queue_claims,
             pending_turn_input_claims,
             withheld_terminal_work,
+            turn_cancel,
         }
     }
 }
@@ -161,20 +161,16 @@ async fn run_turn_effect_loop(
         driver,
         messages,
         event_tx,
-        cancellation,
         protocol_run_offset,
-        clock,
         turn_control,
-        turn_control_host,
         cancel_controller,
     } = context;
     // The start gate can change the handler's control flow before its first
     // effect, so it is observed through the handler-scoped controller, which
     // journals the observation and replays the same answer after an owner
-    // crash. The shared controller is intentionally reserved for the
-    // concurrent live watcher below: an out-of-band peek here could observe a
-    // cancel that arrived after the original attempt and make a replay take a
-    // different command path.
+    // crash. It is the loop's only look at the gate before its steps: from
+    // here on a cancellation reaches the loop only through its steps'
+    // recorded outcomes and its journaled boundary peeks (FIG-3672 P9).
     //
     // The observation is attempted once (FIG-3647): an error it returns is
     // final. On Restate the peek is a call that surfaces only terminal
@@ -194,87 +190,13 @@ async fn run_turn_effect_loop(
         )
         .await?;
     drop(start_gate);
-    if pending_cancel.is_some() {
-        cancellation.cancel();
+    if let Some(evidence) = pending_cancel {
+        driver.record_turn_cancel(evidence);
     }
-    let cancel_watcher = await_turn_cancellation_with_retry(clock.as_ref(), || {
-        turn_control.await_cancel(turn_control_host.as_ref(), CancellationToken::new())
-    });
     // Canonical future-size seam: `driver.run` is boxed exactly once here.
     // Driver growth is absorbed by this allocation instead of accreting
     // opportunistic boxes through the callers below.
-    let drive = Box::pin(driver.run(
-        messages,
-        event_tx,
-        cancellation.clone(),
-        protocol_run_offset,
-    ));
-    tokio::pin!(cancel_watcher);
-    tokio::pin!(drive);
-    tokio::select! {
-        biased;
-        observation = cancel_watcher.as_mut() => match observation {
-            Ok(Some(_)) => {
-                cancellation.cancel();
-                drive.await
-            }
-            Ok(None) => drive.await,
-            Err(err) => {
-                cancellation.cancel();
-                let _ = drive.await;
-                Err(err)
-            }
-        },
-        result = drive.as_mut() => result,
-    }
-}
-
-const TURN_CANCEL_WATCH_RETRY_INITIAL: std::time::Duration = std::time::Duration::from_millis(25);
-
-const TURN_CANCEL_WATCH_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// Bound the live watcher to a useful transient-recovery window without letting
-/// a broken resolver outlive the turn indefinitely. Eight attempts traverse
-/// the whole exponential ladder through its one-second ceiling (2.575 seconds
-/// of injected sleep). Exhaustion fails closed through the same cancellation
-/// token that observed evidence uses, tearing down in-flight turn execution.
-pub const TURN_CANCEL_WATCH_MAX_ATTEMPTS: usize = 8;
-
-pub(super) async fn await_turn_cancellation_with_retry<F, C>(
-    clock: &dyn Clock,
-    mut watch: F,
-) -> Result<Option<TurnCancellationEvidence>, RuntimeError>
-where
-    F: FnMut() -> C,
-    C: std::future::Future<Output = Result<Option<TurnCancellationEvidence>, RuntimeError>>,
-{
-    let mut backoff = TURN_CANCEL_WATCH_RETRY_INITIAL;
-    for attempt in 1..=TURN_CANCEL_WATCH_MAX_ATTEMPTS {
-        match watch().await {
-            Ok(observation) => return Ok(observation),
-            Err(err) if attempt == TURN_CANCEL_WATCH_MAX_ATTEMPTS => {
-                tracing::warn!(
-                    error = %err,
-                    attempts = attempt,
-                    max_attempts = TURN_CANCEL_WATCH_MAX_ATTEMPTS,
-                    "turn cancellation watcher exhausted its retry budget; tearing down turn execution"
-                );
-                return Err(err);
-            }
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    attempt,
-                    max_attempts = TURN_CANCEL_WATCH_MAX_ATTEMPTS,
-                    retry_after_ms = backoff.as_millis(),
-                    "turn cancellation watcher failed; retrying while the turn remains active"
-                );
-                clock.sleep(backoff).await;
-                backoff = backoff.saturating_mul(2).min(TURN_CANCEL_WATCH_RETRY_MAX);
-            }
-        }
-    }
-    unreachable!("positive cancellation-watch attempt limit")
+    Box::pin(driver.run(messages, event_tx, protocol_run_offset)).await
 }
 
 impl LashRuntime {
@@ -329,7 +251,6 @@ impl LashRuntime {
             trace_turn_id,
             claims,
             scoped_effect_controller,
-            cancel,
             lease:
                 TurnLeaseScope {
                     guard: session_execution_lease,
@@ -379,7 +300,7 @@ impl LashRuntime {
             },
             claims,
             scoped_effect_controller,
-            cancel_state: cancel,
+            honoured_cancel: None,
             lease: TurnLeaseScope {
                 guard: session_execution_lease,
                 release_policy: session_execution_lease_release_policy,
@@ -431,7 +352,7 @@ impl LashRuntime {
                 observer: logical_observer,
             },
             scoped_effect_controller,
-            cancel,
+            local_stop,
             initial_queue_claims,
             initial_turn_input_claims,
             lease:
@@ -451,9 +372,15 @@ impl LashRuntime {
                 turn_control_resolver,
                 TurnAddress::new(&self.state.session_id, &trace_turn_id),
             )
-            .await?
-            .with_local_cancel_origin(turn_context.local_cancel_origin_hint()),
+            .await?,
         );
+        // Host glue, not drive code: a host-local stop becomes a durable
+        // request on this turn's gate for as long as the turn runs, and the
+        // turn sees it only where it sees any request — its journaled peeks
+        // and its steps' recorded outcomes.
+        let _local_stop_forwarding = local_stop
+            .forward_to(Arc::clone(&turn_control), Arc::clone(&turn_control_host))
+            .await;
         let session_execution_fence =
             session_execution_lease.map(SessionExecutionLeaseGuard::fence);
         let mut turn_policy = self.state.effective_policy().clone();
@@ -507,7 +434,6 @@ impl LashRuntime {
                 trace_turn_id,
                 claims: &initial_claims,
                 scoped_effect_controller: &scoped_effect_controller,
-                cancel: &cancel,
                 lease: TurnLeaseScope {
                     guard: session_execution_lease,
                     release_policy: session_execution_lease_release_policy,
@@ -567,7 +493,6 @@ impl LashRuntime {
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
-        let cancel_state = cancel.clone();
         let finish_scoped_effect_controller = scoped_effect_controller.clone();
         let turn_cancel_peek_controller = &finish_scoped_effect_controller;
         let session = self
@@ -606,7 +531,8 @@ impl LashRuntime {
             opener_state: crate::session::OpenerState::new(
                 self.host.core.control.opener_work_bound,
             ),
-            cooperative_cancel: CancellationToken::new(),
+            turn_cancel: None,
+            children_stop: CancellationToken::new(),
         });
         let protocol_run_offset = 0;
         self.mark_phase_begin(RuntimeTurnPhase::EffectLoop);
@@ -615,48 +541,51 @@ impl LashRuntime {
             driver: &mut driver,
             messages: prepared.messages,
             event_tx: observer.clone(),
-            cancellation: cancel.clone(),
             protocol_run_offset,
-            clock: Arc::clone(&self.host.core.clock),
             turn_control: Arc::clone(&turn_control),
-            turn_control_host: Arc::clone(&turn_control_host),
             cancel_controller: turn_cancel_peek_controller,
         }))
         .await;
         let (new_messages, _new_protocol_iteration) = match run_result {
             Ok(result) => result,
             Err(err) => {
-                if cancel.is_cancelled() {
-                    if turn_control.evidence().is_none() {
-                        turn_control
+                // The loop aborted. Whether the abort is the turn's
+                // cancellation is decided from recorded facts only: the
+                // cancellation the loop already recorded honouring, or — for
+                // an abort a step's recorded outcome typed as a cancellation —
+                // the journaled post-abort peek.
+                let honoured =
+                    match driver.turn_cancel.clone() {
+                        Some(evidence) => Some(evidence),
+                        None if aborted_by_turn_cancel(&err.code) => turn_control
                             .observe_pending_cancel(
                                 turn_cancel_peek_controller,
                                 crate::runtime::turn_control::TurnCancelPeekIdentity::PostAbortGate,
                             )
-                            .await?;
-                    }
-                    if turn_control.evidence().is_some() {
-                        let cancellation_messages = driver.turn_pipeline.message_sequence();
-                        let driver = driver.reclaim();
-                        self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
-                        return Box::pin(self.finish_cancelled_turn_after_effect_abort(
-                            CancelledTurnFinishContext {
-                                driver,
-                                cancellation_messages,
-                                finish_scoped_effect_controller: &finish_scoped_effect_controller,
-                                cancel: &cancel,
-                                lease: TurnLeaseScope {
-                                    guard: session_execution_lease,
-                                    release_policy: session_execution_lease_release_policy,
-                                },
-                                turn_control: turn_control.as_ref(),
-                                turn_index,
-                                trace_turn_id,
-                                observer,
+                            .await?,
+                        None => None,
+                    };
+                if let Some(evidence) = honoured {
+                    driver.record_turn_cancel(evidence);
+                    let cancellation_messages = driver.turn_pipeline.message_sequence();
+                    let driver = driver.reclaim();
+                    self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
+                    return Box::pin(self.finish_cancelled_turn_after_effect_abort(
+                        CancelledTurnFinishContext {
+                            driver,
+                            cancellation_messages,
+                            finish_scoped_effect_controller: &finish_scoped_effect_controller,
+                            lease: TurnLeaseScope {
+                                guard: session_execution_lease,
+                                release_policy: session_execution_lease_release_policy,
                             },
-                        ))
-                        .await;
-                    }
+                            turn_control: turn_control.as_ref(),
+                            turn_index,
+                            trace_turn_id,
+                            observer,
+                        },
+                    ))
+                    .await;
                 }
                 let driver = driver.reclaim();
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
@@ -695,6 +624,7 @@ impl LashRuntime {
             pending_queue_claims,
             pending_turn_input_claims,
             mut withheld_terminal_work,
+            turn_cancel,
         } = driver;
         let pending_claims =
             LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims)
@@ -713,7 +643,7 @@ impl LashRuntime {
                 },
                 claims: &pending_claims,
                 scoped_effect_controller: &finish_scoped_effect_controller,
-                cancel_state: &cancel_state,
+                honoured_cancel: turn_cancel,
                 lease: TurnLeaseScope {
                     guard: session_execution_lease,
                     release_policy: session_execution_lease_release_policy,
@@ -742,4 +672,16 @@ impl LashRuntime {
             execution
         })
     }
+}
+
+/// Whether a loop abort is one a step's recorded outcome typed as the turn's
+/// cancellation: a wait that lost to the turn's gate. Only such an abort asks
+/// the gate whether the turn is cancelled (FIG-3672 P9).
+fn aborted_by_turn_cancel(code: &RuntimeErrorCode) -> bool {
+    matches!(
+        code,
+        RuntimeErrorCode::RuntimeEffectSleepCancelled
+            | RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
+            | RuntimeErrorCode::TurnControlWaitCancelled
+    )
 }

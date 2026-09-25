@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use super::super::{
     COOPERATIVE_YIELD_INSTRUCTION_BUDGET, ExecutionBound, ExecutionHost, ExecutionMode,
-    ExecutionOutcome, RuntimeError, RuntimeFailure, Value,
+    ExecutionOutcome, RuntimeError, RuntimeFailure, Value, cancel_checkpoint_reached,
 };
 use super::effects::VmEffect;
 use super::heap_plan::{
@@ -226,6 +226,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// unchanged.
     async fn run_loop(&mut self, stop_after_effect: bool) -> Result<VmOutcome, VmTrap> {
         let mut budget = COOPERATIVE_YIELD_INSTRUCTION_BUDGET;
+        let mut checkpoint = cancel_checkpoint_reached(self.instructions_executed);
         let mut active_started = Instant::now();
         let mut next_clock_read = self.next_clock_read();
         // Whether VM state held no inline compound after the last instruction:
@@ -394,6 +395,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             budget -= 1;
             if budget == 0 {
                 self.active_execution_elapsed += active_started.elapsed();
+                // A cancel checkpoint falls where the executed-instruction
+                // count crosses a position of the checkpoint schedule: a fact
+                // of the run, so a replay reaches it at the same point
+                // (FIG-3672 P9).
+                let reached = cancel_checkpoint_reached(self.instructions_executed);
+                if reached > checkpoint {
+                    checkpoint = reached;
+                    self.host.cancel_checkpoint(reached).await;
+                }
                 if let Err(error) = self.enforce_execution_bounds() {
                     return Err(VmTrap {
                         error,
@@ -401,7 +411,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         span: None,
                     });
                 }
-                self.host.yield_now().await;
                 active_started = Instant::now();
                 next_clock_read = self.next_clock_read();
                 budget = COOPERATIVE_YIELD_INSTRUCTION_BUDGET;

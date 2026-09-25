@@ -1909,8 +1909,12 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 PreparedEffect::ReplayError(err) => return Err(err.into_journaled()),
                 PreparedEffect::Claimed(claim) => {
                     let command_kind = envelope.command.kind();
-                    let execution =
-                        self.execute_claimed_effect_with_renewal(&claim, envelope, local_executor);
+                    let execution = self.execute_claimed_effect_with_renewal(
+                        &claim,
+                        envelope,
+                        local_executor,
+                        binding.is_none(),
+                    );
                     let execution = match cancel {
                         None => execution.await,
                         Some(cancel) => {
@@ -2313,15 +2317,18 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         }
     }
 
+    /// A group child's effects never race the turn's gate: its cancel is its group's.
     async fn execute_claimed_effect(
         &self,
         claim: &ClaimedEffect,
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
+        races_turn_gate: bool,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         if matches!(envelope.command, RuntimeEffectCommand::Sleep { .. }) {
-            self.sleep_until_due(claim.due_at_ms).await;
-            return Ok(RuntimeEffectOutcome::Sleep);
+            return self
+                .sleep_racing_turn(claim.due_at_ms, local_executor, races_turn_gate)
+                .await;
         }
         match envelope.command {
             RuntimeEffectCommand::PeekAwaitEvent { key } => {
@@ -2332,18 +2339,8 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution })
             }
             RuntimeEffectCommand::AwaitEvent { key } => {
-                let super::executor::RuntimeAwaitEventOptions {
-                    cancellation,
-                    deadline,
-                    clock,
-                    ..
-                } = local_executor.into_await_event_options()?;
-                let resolution = self
-                    .await_events
-                    .await_resolution_with_clock(&key, cancellation, deadline, clock.as_ref())
+                self.await_event_racing_turn(&key, local_executor, races_turn_gate)
                     .await
-                    .map_err(RuntimeEffectControllerError::from)?;
-                Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
             }
             RuntimeEffectCommand::Process { command } => {
                 let result =
@@ -2353,7 +2350,9 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                             .execute(envelope.invocation.replay_key(), *command)
                             .await?
                     } else {
-                        local_executor.into_process()?.execute(*command).await?
+                        let process = local_executor.into_process()?;
+                        Box::pin(self.process_racing_turn(process, *command, races_turn_gate))
+                            .await?
                     };
                 Ok(RuntimeEffectOutcome::Process { result })
             }
@@ -2361,7 +2360,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         }
     }
 
-    async fn sleep_until_due(&self, due_at_ms: Option<u64>) {
+    pub(super) async fn sleep_until_due(&self, due_at_ms: Option<u64>) {
         let Some(due_at_ms) = due_at_ms else {
             return;
         };
@@ -2452,6 +2451,7 @@ mod journal_wake;
 mod lease_renewal;
 mod reexecution;
 mod served_only;
+mod turn_stop;
 #[cfg(feature = "testing")]
 pub use journal_faults::{EffectJournalFaultPoint, EffectJournalFaults};
 pub use journal_wake::{

@@ -178,11 +178,15 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
     let active = ActiveTurnControl::new(resolver, address.clone())
         .await
         .unwrap();
-    let token = CancellationToken::new();
-    token.cancel();
-    let result = active.await_cancel(host.as_ref(), token).await;
+    // A watch the host accepts stays pending: only a rejected gate answers
+    // at once.
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        active.watch_immediate(host.await_event_resolver()),
+    )
+    .await;
     assert!(
-        !matches!(result, Err(ref error) if error.code == lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked),
+        !matches!(result, Ok(Err(ref error)) if error.code == lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked),
         "host rejected active gate: {result:?}"
     );
     let driver_store: Arc<dyn lash_core::RuntimePersistence> =
@@ -205,7 +209,7 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
     .await
     .unwrap();
     let evidence = active
-        .await_cancel(host.as_ref(), CancellationToken::new())
+        .watch_immediate(host.await_event_resolver())
         .await
         .unwrap()
         .unwrap();

@@ -280,8 +280,8 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             address.execution_scope(),
             &lease.fence(),
             observed.clone(),
-            false,
-            Some(honoured.clone()),
+            Some(&honoured),
+            None,
         )
         .expect("materialize exact closure");
     store
@@ -289,7 +289,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         .await
         .expect("authorize exact closure");
     let settlement = control
-        .settle_authorized(host.as_ref(), &authorization)
+        .settle_authorized(host.as_ref(), &authorization, Some(&honoured))
         .await
         .expect("settle exact closure");
     assert_eq!(

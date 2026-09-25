@@ -78,16 +78,14 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         messages: crate::MessageSequence,
         event_tx: TurnObserver,
-        cancel: CancellationToken,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
-        self.cooperative_cancel = cancel.clone();
         Box::pin(self.recover_opener_groups(&event_tx)).await;
         // The erasure's reason lives on `EffectLoop`: the alias exists to make
         // the cut a named decision rather than an incidental annotation.
         let result = {
             let effect_loop: EffectLoop<'_> =
-                Box::pin(self.run_effect_loop(messages, event_tx.clone(), cancel, run_offset));
+                Box::pin(self.run_effect_loop(messages, event_tx.clone(), run_offset));
             effect_loop.await
         };
         let result = Box::pin(self.end_opener_groups(result, &event_tx)).await;
@@ -99,7 +97,6 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         messages: crate::MessageSequence,
         event_tx: TurnObserver,
-        cancel: CancellationToken,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
         self.protocol_reply.mark_run_start(messages.iter());
@@ -110,15 +107,13 @@ impl RuntimeTurnDriver<'_> {
             Ok(prepared) => prepared,
             Err((messages, iteration)) => return Ok((messages, iteration)),
         };
-        self.run_machine(machine, event_tx, cancel, run_offset)
-            .await
+        self.run_machine(machine, event_tx, run_offset).await
     }
 
     async fn run_machine(
         &mut self,
         mut machine: TurnMachine,
         event_tx: TurnObserver,
-        cancel: CancellationToken,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
         loop {
@@ -158,24 +153,19 @@ impl RuntimeTurnDriver<'_> {
                 Effect::LlmCall { id, request } => {
                     self.protocol_reply
                         .mark_model_call(machine.messages().iter());
-                    self.handle_llm_call_effect(&mut machine, id, request, &event_tx, &cancel)
+                    self.handle_llm_call_effect(&mut machine, id, request, &event_tx)
                         .await?;
                 }
                 Effect::Checkpoint { id, checkpoint } => {
-                    self.handle_checkpoint_effect(&mut machine, id, checkpoint, &event_tx, &cancel)
+                    self.handle_checkpoint_effect(&mut machine, id, checkpoint, &event_tx)
                         .await?;
                 }
                 Effect::SyncExecutionEnvironment { id } => {
-                    self.handle_execution_environment_sync_effect(
-                        &mut machine,
-                        id,
-                        &event_tx,
-                        &cancel,
-                    )
-                    .await?;
+                    self.handle_execution_environment_sync_effect(&mut machine, id, &event_tx)
+                        .await?;
                 }
                 Effect::ToolCalls { id, calls } => {
-                    self.handle_tool_calls_effect(&mut machine, id, calls, &event_tx, &cancel)
+                    self.handle_tool_calls_effect(&mut machine, id, calls, &event_tx)
                         .await?;
                 }
                 Effect::ReportToolCalls { completed } => {
@@ -189,15 +179,8 @@ impl RuntimeTurnDriver<'_> {
                 Effect::Log { event } => self.handle_log_event(event),
                 Effect::ExecCode { id, language, code } => {
                     self.recorded_assembly.note_code_execution();
-                    self.handle_exec_code_effect(
-                        &mut machine,
-                        id,
-                        language,
-                        code,
-                        &event_tx,
-                        &cancel,
-                    )
-                    .await?;
+                    self.handle_exec_code_effect(&mut machine, id, language, code, &event_tx)
+                        .await?;
                 }
             }
         }

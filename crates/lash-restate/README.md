@@ -148,10 +148,13 @@ At turn start, Lash reads the cancellation gate through the handler-scoped
 controller, so Restate journals the observation before any turn effect. A
 pre-registered cancellation is therefore still observed before execution, and
 handler replay reuses the original observation instead of branching on a later
-out-of-band ingress result. Transport failures at this start gate are retried
-without starting effects; Lash does not degrade to watcher-only observation.
-The deployment-level ingress controller is used only by the concurrent live
-cancellation watcher.
+out-of-band ingress result. After that, cancellation reaches a turn only as
+journaled facts (ADR 0105 §3): durable waits and effect-group rank waits race
+the turn's gate in the journal, the turn peeks the gate at its step
+boundaries, and a model call's `ctx.run` body watches the gate itself and
+records whether it was stopped. That watch, and a host-local stop forwarded to
+the gate, are the only users of the deployment-level ingress controller;
+nothing live races the handler.
 
 The controller submits workflow `run` with workflow key
 `ProcessRegistration.id` and sends cancellation to the workflow's shared

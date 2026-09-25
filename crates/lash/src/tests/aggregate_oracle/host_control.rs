@@ -22,7 +22,7 @@ impl lash_core::testing::EffectLayer for SettlementFaultLayer {
         &self,
         inner: &dyn lash_core::RuntimeEffectController,
         handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
+        cancel: lash_core::TurnCancelWait,
     ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
     {
         if self.fail_settlements.load(Ordering::SeqCst) {

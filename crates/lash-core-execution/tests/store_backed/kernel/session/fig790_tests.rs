@@ -75,7 +75,7 @@ impl crate::RuntimeEffectController for DeletedSessionProcessEffectController {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported(
             "DeletedSessionProcessEffectController",
@@ -215,7 +215,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
     async fn await_next_settlement(
         &self,
         _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
+        _cancel: crate::runtime::TurnCancelWait,
     ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
         Err(crate::effect_groups_unsupported(
             "RecordingProcessEffectController",

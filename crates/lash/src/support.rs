@@ -27,10 +27,10 @@ pub(crate) use tokio_util::sync::CancellationToken;
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{InputItem, TokenUsage};
 pub(crate) use lash_core::{
-    LlmCallRecord, Message, PluginMessage, PluginOptions, ProcessRegistry, ProtocolTurnOptions,
-    RuntimeErrorCode, RuntimePersistence, SessionCursor, SessionError, SessionReadView,
-    SessionScope, SessionSnapshot, SessionStoreFactory, SessionToolAccess, ToolCallRecord,
-    ToolManifest, ToolProvider, ToolState, TurnCancelOriginHint, facade_support::AssembledTurn,
+    LlmCallRecord, LocalTurnStop, Message, PluginMessage, PluginOptions, ProcessRegistry,
+    ProtocolTurnOptions, RuntimeErrorCode, RuntimePersistence, SessionCursor, SessionError,
+    SessionReadView, SessionScope, SessionSnapshot, SessionStoreFactory, SessionToolAccess,
+    ToolCallRecord, ToolManifest, ToolProvider, ToolState, facade_support::AssembledTurn,
     facade_support::EventSink, facade_support::PluginFactory, facade_support::ProviderHandle,
     facade_support::SessionObservation, facade_support::SessionObservationSubscription,
     facade_support::SessionResume, facade_support::SessionUsageReport,

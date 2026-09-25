@@ -5,6 +5,7 @@ mod envelope;
 #[doc(hidden)]
 pub mod executor;
 mod group;
+pub(crate) use group::await_cancelled_error;
 pub mod group_closing;
 pub mod group_drain;
 mod group_journal;

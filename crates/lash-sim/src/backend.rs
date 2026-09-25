@@ -91,6 +91,19 @@ impl SimEngine {
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
     }
 
+    /// An engine whose server double runs every live attempt concurrently,
+    /// as `restate-server` does. A scenario that stops a running turn from
+    /// outside it needs this: a host-local stop is a durable request on the
+    /// turn's cancellation gate, an ingress call, and serial scheduling lands
+    /// ingress only between attempts, so it would wait on the very attempt it
+    /// stops (FIG-3672 P9).
+    pub async fn concurrent(seed: u64) -> Result<Self, FixedScriptRunnerError> {
+        lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+            .await
+            .map(|restate| Self { restate })
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
+    }
+
     /// The server double and the engine wired to it.
     pub fn restate(&self) -> &lash_restate_test::RestateTestBackend {
         &self.restate

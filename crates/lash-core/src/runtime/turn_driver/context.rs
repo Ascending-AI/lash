@@ -3,13 +3,13 @@ use crate::PluginError;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 impl<'run> RuntimeTurnDriver<'run> {
+    /// The scope whose cancellation gate this turn's waits race: always the
+    /// physical turn's, whatever scope admitted the run, because that is the
+    /// gate the turn's own control keys, peeks and forwards stops to
+    /// (FIG-3672 P9). A process- or drain-admitted turn is cancelled through
+    /// the same gate as a foreground one.
     pub(super) fn turn_cancel_scope(&self) -> crate::ExecutionScope {
-        match self.scoped_effect_controller.execution_scope() {
-            crate::ExecutionScope::Turn { .. } => {
-                crate::ExecutionScope::turn(self.session_id.clone(), self.turn_id.clone())
-            }
-            admitted_scope => admitted_scope.clone(),
-        }
+        crate::ExecutionScope::turn(self.session_id.clone(), self.turn_id.clone())
     }
 
     pub(super) fn effect_controller_handle(&self) -> RuntimeEffectControllerHandle<'run> {
@@ -63,6 +63,12 @@ impl<'run> RuntimeTurnDriver<'run> {
             .map(|context| {
                 self.register_live_opener(context.dispatch(), stream_event_tx);
                 context
+                    .with_recorded_turn_cancel(
+                        self.turn_cancel.is_some(),
+                        Arc::clone(&self.turn_control),
+                        Arc::clone(&self.host.core.control.effect_host),
+                        self.children_stop.clone(),
+                    )
                     .with_opener_state(self.opener_state.clone())
                     .with_group_closing(self.host.core.control.effect_host.effect_group_closing())
                     .with_turn_cancel_scope(self.turn_cancel_scope())
@@ -130,7 +136,7 @@ impl<'run> RuntimeTurnDriver<'run> {
             dispatch.as_ref(),
             lent_controller,
             child_event_tx,
-            self.cooperative_cancel.clone(),
+            self.children_stop.clone(),
         )
         .with_turn_activity_sender(child_activity_tx);
         let (registration, ended) = tool_children.openers().register(opener, context);

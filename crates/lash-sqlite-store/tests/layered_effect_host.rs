@@ -55,7 +55,7 @@ impl EffectLayer for RecordingLayer {
         &self,
         inner: &dyn RuntimeEffectController,
         handle: &mut EffectGroupHandle,
-        cancel: lash_core_execution::CancellationToken,
+        cancel: lash_core::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         let settlement = inner.await_next_settlement(handle, cancel).await?;
         self.record(format!("settle:{}", settlement.position));
@@ -162,11 +162,16 @@ async fn a_layered_group_is_arbitrated_by_the_backend_journal() {
 
     let mut consumed = Vec::new();
     while !handle.is_exhausted() {
-        let settlement = view
-            .controller()
-            .await_next_settlement(&mut handle, lash_core_execution::CancellationToken::new())
-            .await
-            .expect("the journal serves each rank");
+        let settlement =
+            view.controller()
+                .await_next_settlement(
+                    &mut handle,
+                    lash_core::TurnCancelWait::unobserved(
+                        lash_core_execution::CancellationToken::new(),
+                    ),
+                )
+                .await
+                .expect("the journal serves each rank");
         consumed.push(settlement.position);
         let recorded = unlayered_view
             .controller()

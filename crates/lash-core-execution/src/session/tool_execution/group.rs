@@ -487,11 +487,34 @@ impl RuntimeExecutionContext<'_> {
             (0..children.len()).map(|_| None).collect();
         let mut settlement_positions = Vec::with_capacity(children.len());
         let mut decided = None;
+        let mut lost_to_turn_gate = false;
         while !handle.is_exhausted() {
-            let settlement = match controller
-                .await_next_settlement(&mut handle, cancel.child_token())
-                .await
-            {
+            // A turn that already recorded its cancellation awaits no rank:
+            // the recorded fact answers exactly as a wait that lost to the
+            // gate would, at the same point on every replay (FIG-3672 P9).
+            let awaited = if self.is_cancelled() {
+                Err(crate::runtime::effect::await_cancelled_error(
+                    handle.group_key(),
+                    handle.consumed() + 1,
+                ))
+            } else {
+                let turn_cancel = self.turn_cancel_wait(cancel.child_token());
+                let awaited = controller
+                    .await_next_settlement(&mut handle, turn_cancel.clone())
+                    .await;
+                // Decided by the wait's recorded outcome alone, never by a
+                // live read of the execution's token: a turn-observing rank
+                // wait that ended cancelled is the turn's cancellation, and an
+                // execution whose own stop ended it is cancelled either way.
+                if matches!(&awaited, Err(error)
+                    if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled)
+                    && turn_cancel.observes_turn_cancel()
+                {
+                    lost_to_turn_gate = true;
+                }
+                awaited
+            };
+            let settlement = match awaited {
                 Ok(settlement) => settlement,
                 Err(error)
                     if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled =>
@@ -532,6 +555,12 @@ impl RuntimeExecutionContext<'_> {
                             error = %error,
                             "closing a cancelled tool-child group failed; the close is retryable"
                         );
+                    }
+                    // The close has decided every undecided child; only now
+                    // does the recorded cancellation reach the children's
+                    // cooperative stop, as the group's cancel always did.
+                    if lost_to_turn_gate {
+                        self.note_turn_cancelled();
                     }
                     // The group stays the opener's: a rank that lands after
                     // this close — a committed loser's drain, a cancelled

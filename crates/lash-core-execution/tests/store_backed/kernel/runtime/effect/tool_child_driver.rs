@@ -460,7 +460,9 @@ mod tests {
             crate::RuntimeEffectController::await_next_settlement(
                 controller.as_ref(),
                 &mut handle,
-                tokio_util::sync::CancellationToken::new(),
+                crate::runtime::TurnCancelWait::unobserved(
+                    tokio_util::sync::CancellationToken::new(),
+                ),
             ),
         )
         .await

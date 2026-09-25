@@ -1082,8 +1082,20 @@ impl ExecutionHost for HostBridge<'_> {
         self.perform_selected_ability(op)
     }
 
-    async fn yield_now(&self) {
-        tokio::task::yield_now().await;
+    /// The cell's cancel checkpoint (FIG-3672 P9): a journaled peek of the
+    /// turn's cancellation gate, through the cell's context, at an instruction
+    /// count a replay reaches again. It is also the cell's wait on a long
+    /// stretch of pure compute, so a cancel lands without a scheduler yield.
+    /// A peek the controller refuses — a replay divergence among them — ends
+    /// the cell like any nested effect it refused.
+    async fn cancel_checkpoint(&self, checkpoint: u64) {
+        if self.is_cancelled() {
+            return;
+        }
+        if let Err(error) = self.ctx.turn_cancel_checkpoint(checkpoint).await {
+            self.ctx.record_nested_effect_error(error);
+            self.cancellation.cancel();
+        }
     }
 
     fn is_cancelled(&self) -> bool {

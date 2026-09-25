@@ -42,6 +42,11 @@ pub use causal::process_event_invocation;
 pub use causal::tool_retry_sleep_invocation;
 pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
+#[cfg(feature = "testing")]
+pub use effect::RuntimeEffectControllerHandle;
+#[cfg(not(feature = "testing"))]
+pub(crate) use effect::RuntimeEffectControllerHandle;
+pub use effect::TurnCancelWait;
 pub use effect::await_event_coordinator;
 pub use effect::effect_replay_driver;
 pub use effect::promise_semantics;
@@ -78,10 +83,6 @@ pub use effect::{
     refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
     validate_replayed_effect_envelope,
 };
-#[cfg(feature = "testing")]
-pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
-#[cfg(not(feature = "testing"))]
-pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
     DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS, EmbeddedRuntimeHost, ProcessRuntimeHost,
@@ -178,11 +179,12 @@ pub use queued_drain_policy::{
 pub use session_catalog::*;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 pub use turn_control::{
-    TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,
-    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
-    TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest,
-    TurnCancelRequestRecord, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
+    LocalTurnStop, StopDeliveryGuard, TurnAddress, TurnAttach, TurnCancelAffectedInput,
+    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
+    TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,
+    TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
 };
 #[cfg(feature = "testing")]
 pub use turn_queue::SessionCommandSettlement;

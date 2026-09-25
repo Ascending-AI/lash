@@ -598,7 +598,7 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
     async fn await_next_settlement(
         &self,
         _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        _cancel: lash_core::TurnCancelWait,
     ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
     {
         Err(lash_core::effect_groups_unsupported("KeyJournalController"))
@@ -761,7 +761,7 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
     async fn await_next_settlement(
         &self,
         _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        _cancel: lash_core::TurnCancelWait,
     ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
     {
         Err(lash_core::effect_groups_unsupported(

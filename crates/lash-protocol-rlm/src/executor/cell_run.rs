@@ -202,4 +202,22 @@ mod tests {
             );
         }
     }
+
+    /// FIG-3672 P9: a cell journal written before cancel checkpoints were
+    /// journaled (grammar 3) holds no checkpoint peeks, so replaying it under
+    /// the instruction-accounting grammar would meet them at positions the
+    /// journal never recorded: it is refused before the cell runs.
+    #[test]
+    fn a_cell_journaled_before_instruction_accounting_is_refused() {
+        assert_eq!(
+            lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
+            4
+        );
+        let refusal =
+            admit_replay_key_grammar(Some(3)).expect_err("a grammar-3 cell journal is refused");
+        assert_eq!(
+            refusal.code,
+            lash_core::RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
+        );
+    }
 }

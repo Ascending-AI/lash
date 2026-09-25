@@ -222,6 +222,10 @@ pub(super) struct RecordingContext {
         Mutex<Option<Result<crate::effect_group::EffectGroupDrainBlockersResponse, TerminalError>>>,
     /// Every effect-group wake awaited, in order, and what each resolves to.
     pub(super) group_waits: Mutex<Vec<RestateDurableWaitAwaitRequest>>,
+    /// The turn-cancel gate each effect-group wake raced, when it raced one.
+    pub(super) group_wait_turn_cancels: Mutex<Vec<RestateDurableWaitAwaitRequest>>,
+    /// What the index's `read_rank` answers; unregistered when unset.
+    pub(super) group_rank_read: Mutex<Option<crate::effect_group::EffectGroupReadRankResponse>>,
     pub(super) group_wait_resolution: Mutex<Option<Resolution>>,
 }
 
@@ -452,18 +456,53 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         Box::pin(async move { answer })
     }
 
+    fn effect_group_read_rank<'run>(
+        &'run self,
+        _group_key: String,
+        _request: crate::effect_group::EffectGroupReadRankRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        crate::effect_group::EffectGroupReadRankResponse,
+                        TerminalError,
+                    >,
+                > + Send
+                + 'run,
+        >,
+    >
+    where
+        'ctx: 'run,
+    {
+        let answer = self.group_rank_read.lock_recover().clone();
+        Box::pin(async move {
+            answer.ok_or_else(|| TerminalError::new("EffectGroupIndex/read_rank is not registered"))
+        })
+    }
+
     fn await_effect_group_wait<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
         _replay_key: String,
-        _cancellation: tokio_util::sync::CancellationToken,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        _process_stop: tokio_util::sync::CancellationToken,
+    ) -> TestTurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
     {
         self.group_waits.lock_recover().push(request);
+        if let Some(turn_cancel) = turn_cancel {
+            self.group_wait_turn_cancels
+                .lock_recover()
+                .push(turn_cancel);
+        }
         let resolution = self.group_wait_resolution.lock_recover().clone();
-        Box::pin(async move { Ok(resolution) })
+        Box::pin(async move {
+            Ok(match resolution {
+                Some(resolution) => RestateTurnCancelRaceOutcome::Completed(resolution),
+                None => RestateTurnCancelRaceOutcome::TurnCancelled,
+            })
+        })
     }
 
     fn sleep_send<'run>(
@@ -487,7 +526,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         &'run self,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        cancellation: tokio_util::sync::CancellationToken,
+        process_stop: tokio_util::sync::CancellationToken,
     ) -> TestTurnCancelRaceFuture<'run, ()>
     where
         'ctx: 'run,
@@ -497,7 +536,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             &self.turn_cancel_gate,
             duration,
             turn_cancel,
-            cancellation,
+            process_stop,
         )
     }
 
@@ -675,7 +714,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        cancellation: tokio_util::sync::CancellationToken,
+        process_stop: tokio_util::sync::CancellationToken,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
@@ -686,7 +725,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             request,
             replay_key,
             turn_cancel,
-            cancellation,
+            process_stop,
         )
     }
 
@@ -1105,9 +1144,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v11-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v11-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v11-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v12-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v12-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v12-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1151,6 +1190,7 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
     const GENERATION_THREE: &str = "carries effect-journal generation 3;";
     const GENERATION_FOUR: &str = "carries effect-journal generation 4;";
     const GENERATION_FIVE: &str = "carries effect-journal generation 5;";
+    const GENERATION_SIX: &str = "carries effect-journal generation 6;";
     for (name, checked_in, refusal) in [
         (
             "v1-full-drain",
@@ -1296,6 +1336,24 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
                 .as_slice(),
             GENERATION_FIVE,
         ),
+        (
+            "v11-mid-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v11-mid-drain.json")
+                .as_slice(),
+            GENERATION_SIX,
+        ),
+        (
+            "v11-mid-intent",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v11-mid-intent.json")
+                .as_slice(),
+            GENERATION_SIX,
+        ),
+        (
+            "v11-full-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v11-full-drain.json")
+                .as_slice(),
+            GENERATION_SIX,
+        ),
     ] {
         let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(checked_in)
             .expect("decode the checked-in endpoint corpus fixture");
@@ -1406,16 +1464,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v11-mid-drain",
+            "v12-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v11-mid-intent",
+            "v12-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v11-full-drain", "full_drain", full),
+        ("v12-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
@@ -1664,7 +1722,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         &'run self,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        cancellation: tokio_util::sync::CancellationToken,
+        process_stop: tokio_util::sync::CancellationToken,
     ) -> TestTurnCancelRaceFuture<'run, ()>
     where
         'ctx: 'run,
@@ -1674,7 +1732,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
             &self.turn_cancel_gate,
             duration,
             turn_cancel,
-            cancellation,
+            process_stop,
         )
     }
 
@@ -1759,7 +1817,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        cancellation: tokio_util::sync::CancellationToken,
+        process_stop: tokio_util::sync::CancellationToken,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
@@ -1770,7 +1828,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
             request,
             replay_key,
             turn_cancel,
-            cancellation,
+            process_stop,
         )
     }
 
@@ -1948,7 +2006,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         &'run self,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        cancellation: tokio_util::sync::CancellationToken,
+        process_stop: tokio_util::sync::CancellationToken,
     ) -> TestTurnCancelRaceFuture<'run, ()>
     where
         'ctx: 'run,
@@ -1958,7 +2016,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             &self.events.turn_cancel_gate,
             duration,
             turn_cancel,
-            cancellation,
+            process_stop,
         )
     }
 
@@ -2124,7 +2182,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        cancellation: tokio_util::sync::CancellationToken,
+        process_stop: tokio_util::sync::CancellationToken,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
@@ -2135,7 +2193,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             request,
             replay_key,
             turn_cancel,
-            cancellation,
+            process_stop,
         )
     }
 

@@ -660,11 +660,45 @@ impl RuntimeExecutionContext<'_> {
         attempt_context.dispatch = std::sync::Arc::clone(&attempt_dispatch);
         attempt_context.parent_invocation = Some(attempt_invocation.clone());
 
+        // The attempt is a recorded step its engine cannot select away: its
+        // body watches the turn's gate itself and gets the stop as its token,
+        // so the recorded outcome says whether the stop won (FIG-3672 P9).
+        Box::pin(self.run_turn_step_body(|stop| {
+            self.execute_prepared_tool_attempt_body(
+                prepared,
+                execution_grant,
+                attempt,
+                max_attempts,
+                attempt_invocation,
+                child_execution_trace_hook,
+                completion_key,
+                attempt_dispatch,
+                attempt_context,
+                stop,
+            )
+        }))
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_prepared_tool_attempt_body(
+        &self,
+        prepared: crate::PreparedToolCall,
+        execution_grant: Option<Box<crate::ToolExecutionGrant>>,
+        attempt: u32,
+        max_attempts: u32,
+        attempt_invocation: crate::RuntimeInvocation,
+        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
+        completion_key: Option<crate::AwaitEventKey>,
+        attempt_dispatch: std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'_>>,
+        attempt_context: Self,
+        stop: Option<tokio_util::sync::CancellationToken>,
+    ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         let mut tool_context =
             crate::ToolContext::from_dispatch(std::sync::Arc::clone(&attempt_dispatch))
                 .runtime_execution_context(attempt_context.clone())
                 .prepared_call(&prepared)
-                .cancellation_token(self.cancellation_token.clone())
+                .cancellation_token(stop)
                 .enclosing_process(self.process_id().map(String::from).map(Into::into))
                 .parent_invocation(Some(attempt_invocation))
                 .child_execution_trace_hook(child_execution_trace_hook);

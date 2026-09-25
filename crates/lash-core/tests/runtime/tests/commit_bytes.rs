@@ -8,6 +8,12 @@
 //! (FIG-3672 P6). A difference here is a durable-format change and needs a
 //! version bump, not a new pin.
 //!
+//! The two cancelled pins were retaken once, for a change of value and not of
+//! shape (FIG-3672 P9): a host-local stop is now a durable request with
+//! lash's internal evidence for the turn, so the committed cancellation names
+//! `internal:{turn_id}` rather than the provider-abort id the live token used
+//! to mint.
+//!
 //! The digest is over the commit's serialized form with the values that differ
 //! between two runs of the same turn masked: worker and lease identities,
 //! random ids, wall-clock timestamps, and the hashes computed over them. Every
@@ -376,7 +382,7 @@ async fn cancelled_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled",
         &pinned,
-        &["dedd5d4b3a89fb2dfc08628681bd5bbd9b201ae185009e21daf5c1db09f95221"],
+        &["bd1c33720824cc6b828d3f05146ec86dccca737e05cd58fe78255725e775f368"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -387,7 +393,7 @@ async fn cancelled_turn_commits_the_pinned_bytes() {
                 "stopped": {
                     "cancelled": {
                         "evidence": {
-                            "request_id": "internal:provider-cancelled:0"
+                            "request_id": "internal:commit-pin-cancelled"
                         }
                     }
                 }
@@ -437,7 +443,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled mid tool",
         &pinned,
-        &["f2555d340a30729c6b6fa7d29ba0e56182f7d64708f14723837842e0e08d18a5"],
+        &["e0eea7b08fec1f95948029f0c1447ae4f31d0edc89337f1a3930403bbe568886"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -448,7 +454,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
                 "stopped": {
                     "cancelled": {
                         "evidence": {
-                            "request_id": "internal:provider-cancelled:1"
+                            "request_id": "internal:commit-pin-cancelled-mid-tool"
                         }
                     }
                 }

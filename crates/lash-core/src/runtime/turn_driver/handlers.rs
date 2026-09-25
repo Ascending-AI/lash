@@ -68,7 +68,6 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         request: Arc<LlmRequest>,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         match self.before_llm_call(machine, &request).await {
             Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame { frame_key, task })) => {
@@ -126,7 +125,7 @@ impl RuntimeTurnDriver<'_> {
                     stream_hook_states,
                 },
         } = match self
-            .invoke_turn_llm_effect(machine, id, request, event_tx, cancel)
+            .invoke_turn_llm_effect(machine, id, request, event_tx)
             .await
         {
             Ok(result) => result,
@@ -169,7 +168,6 @@ impl RuntimeTurnDriver<'_> {
                         raw,
                         stream_hook_states,
                         event_tx,
-                        cancel,
                     )
                     .await
                 {
@@ -192,8 +190,8 @@ impl RuntimeTurnDriver<'_> {
         // `ctx.run` command only when its future is polled and requires that
         // future to be awaited immediately; it cannot honestly be selected
         // away from mid-flight. The durable contract is therefore cancellation
-        // between iterations. A local provider may still cooperatively observe
-        // `cancel` while the run is executing, and that result is journaled.
+        // between iterations. The run's body watches the gate itself and stops
+        // on an immediate request, and that result is journaled (FIG-3672 P9).
         let pending_cancel = self
             .turn_control
             .observe_pending_cancel(
@@ -204,7 +202,7 @@ impl RuntimeTurnDriver<'_> {
             )
             .await?;
         if let Some(evidence) = pending_cancel {
-            cancel.cancel();
+            self.record_turn_cancel(evidence.clone());
             self.emit_recorded(event_tx, SessionStreamEvent::Done);
             machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
                 evidence,
@@ -226,7 +224,7 @@ impl RuntimeTurnDriver<'_> {
         }
         // Name the request that stopped the call before the machine decides a
         // cancelled terminal reason, so its outcome carries real evidence.
-        if let Some(evidence) = self.turn_control.evidence() {
+        if let Some(evidence) = self.turn_cancel.clone() {
             machine.record_cancellation_evidence(evidence);
         }
         self.handle_machine_response(
@@ -249,7 +247,6 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         checkpoint: CheckpointKind,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
             // The opener's end precedes the turn's terminal checkpoint, so
@@ -258,7 +255,7 @@ impl RuntimeTurnDriver<'_> {
             Box::pin(self.finish_opener_groups_before_completion(event_tx)).await?;
         }
         let result = self
-            .invoke_turn_checkpoint_effect(machine, id, checkpoint, event_tx, cancel)
+            .invoke_turn_checkpoint_effect(machine, id, checkpoint, event_tx)
             .await;
         match result {
             Ok(delivery) => {
@@ -342,19 +339,10 @@ impl RuntimeTurnDriver<'_> {
         closed_iteration: usize,
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
-        let effect_host = Arc::clone(&self.host.core.control.effect_host);
-        let binding = effect_host
-            .turn_control_binding(&self.scoped_effect_controller)
-            .await?;
-        let resolver = binding.resolver();
-        let peek_controller = &self.scoped_effect_controller;
-        // A process-local after-step stop lands on the durable gate before
-        // the journaled peek, so replay sees the gate and never the flag.
-        self.turn_control.resolve_local_after_step(resolver).await?;
         let pending_cancel = self
             .turn_control
             .observe_pending_cancel(
-                peek_controller,
+                &self.scoped_effect_controller,
                 crate::runtime::turn_control::TurnCancelPeekIdentity::AfterStep {
                     protocol_iteration: closed_iteration,
                 },
@@ -363,10 +351,8 @@ impl RuntimeTurnDriver<'_> {
         let Some(evidence) = pending_cancel else {
             return Ok(());
         };
-        // `binding` still borrows the controller, so this records the
-        // terminal `Done` field by field rather than through `emit_recorded`.
-        self.recorded_assembly.record(&SessionStreamEvent::Done);
-        event_tx.session(SessionStreamEvent::Done);
+        self.record_turn_cancel(evidence.clone());
+        self.emit_recorded(event_tx, SessionStreamEvent::Done);
         machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
             evidence,
         }));
@@ -378,14 +364,13 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         let crate::runtime::effect::ServedExecutionEnvironmentSync {
             result,
             cell_replay_grammar,
             tool_surface,
         } = match self
-            .invoke_turn_execution_environment_sync_effect(machine, id, event_tx, cancel)
+            .invoke_turn_execution_environment_sync_effect(machine, id, event_tx)
             .await
         {
             Ok(result) => result,
@@ -431,7 +416,6 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         calls: Vec<crate::sansio::PendingToolCall>,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         // Per-tool trace events (ToolCallStarted / ToolCallCompleted) are
         // emitted from the shared tool-execution seam so every tool call
@@ -439,7 +423,7 @@ impl RuntimeTurnDriver<'_> {
         // `RuntimeExecutionContext::emit_tool_call_started_trace` /
         // `emit_tool_call_completed_trace`.
         let results = match self
-            .invoke_turn_tool_calls_effect(machine, id, calls, event_tx, cancel)
+            .invoke_turn_tool_calls_effect(machine, id, calls, event_tx)
             .await
         {
             Ok(results) => results,
@@ -474,6 +458,34 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
+    /// The cancellation a code cell's turn honours after the cell: the
+    /// turn's recorded fact, or — when the cell stopped on the host, so its
+    /// stop may be the turn's cancellation — the answer of a journaled peek
+    /// under the cell's own identity. Recorded as the turn's fact.
+    async fn recorded_cell_cancel(
+        &mut self,
+        _machine: &TurnMachine,
+        cell_key: &str,
+        stopped_on_host: bool,
+    ) -> Result<Option<crate::TurnCancellationEvidence>, RuntimeError> {
+        if self.turn_cancel.is_some() || !stopped_on_host {
+            return Ok(self.turn_cancel.clone());
+        }
+        let observed = self
+            .turn_control
+            .observe_pending_cancel(
+                &self.scoped_effect_controller,
+                crate::runtime::turn_control::TurnCancelPeekIdentity::AfterCell {
+                    cell: cell_key.to_string(),
+                },
+            )
+            .await?;
+        if let Some(evidence) = observed.clone() {
+            self.record_turn_cancel(evidence);
+        }
+        Ok(observed)
+    }
+
     pub(super) async fn handle_exec_code_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -481,7 +493,6 @@ impl RuntimeTurnDriver<'_> {
         language: String,
         code: String,
         event_tx: &TurnObserver,
-        cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
         let iteration = machine.protocol_iteration();
@@ -527,6 +538,7 @@ impl RuntimeTurnDriver<'_> {
             }
         };
         let graph_key = Some(foreground_effect_graph_key(&invocation));
+        let cell_key = invocation.replay_key().to_string();
         event_tx.activity(
             code_correlation_id.clone(),
             TurnEvent::CodeBlockStarted {
@@ -543,7 +555,6 @@ impl RuntimeTurnDriver<'_> {
                 language.clone(),
                 code.clone(),
                 event_tx,
-                cancel,
             )
             .await
         {
@@ -571,7 +582,18 @@ impl RuntimeTurnDriver<'_> {
                         graph_key: graph_key.clone(),
                     },
                 );
-                let cancellation_evidence = self.turn_control.evidence();
+                // A cell that aborted may have stopped for the turn's
+                // cancellation, at a recorded checkpoint or on an outcome that
+                // lost to the gate: it asks the gate why, through a journaled
+                // peek (FIG-3672 P9). A refusal that parks the turn (a replay
+                // divergence, a drifted binding) is not a stop, and journals
+                // nothing further. Nor is a session retirement: the deleted
+                // session's gate is revoked with it, so a peek could only
+                // fail, and the typed retirement refusal must reach the turn.
+                let stopped_on_host = !err.code.parks_turn() && !err.is_session_retirement();
+                let cancellation_evidence = self
+                    .recorded_cell_cancel(machine, &cell_key, stopped_on_host)
+                    .await?;
                 if let Some(code_executor) = self.session.plugins().code_executor() {
                     code_executor
                         .settle_code_execution(if cancellation_evidence.is_some() {
@@ -711,9 +733,20 @@ impl RuntimeTurnDriver<'_> {
             );
         }
         // Name the request that stopped code execution before the protocol
-        // classifies its typed Stop response. This is the same evidence seam
-        // used for provider cancellation above.
-        let cancellation_evidence = self.turn_control.evidence();
+        // classifies its typed Stop response. A cell stops on the host only
+        // at a recorded point — a checkpoint, or a nested outcome that lost
+        // to the turn's gate — so a host-stopped cell asks the gate why
+        // through a journaled peek, and a replay asks at the same point
+        // (FIG-3672 P9).
+        let host_stopped = result.as_ref().ok().is_some_and(|output| {
+            output
+                .error
+                .as_ref()
+                .is_some_and(|error| error.kind == crate::CellFailureKind::Host)
+        });
+        let cancellation_evidence = self
+            .recorded_cell_cancel(machine, &cell_key, host_stopped)
+            .await?;
         // A cancelled tool call ended the cell as an uncatchable host terminal,
         // so the execution settles as cancelled even without a host cancel
         // request. The protocol then reads the cancelled record off the call

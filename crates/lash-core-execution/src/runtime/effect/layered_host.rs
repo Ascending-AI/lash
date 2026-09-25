@@ -76,7 +76,7 @@ pub trait EffectLayer: Send + Sync + 'static {
         &self,
         inner: &dyn RuntimeEffectController,
         handle: &mut EffectGroupHandle,
-        cancel: CancellationToken,
+        cancel: crate::runtime::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         inner.await_next_settlement(handle, cancel).await
     }
@@ -695,7 +695,7 @@ impl RuntimeEffectController for LayeredController<'_> {
     async fn await_next_settlement(
         &self,
         handle: &mut EffectGroupHandle,
-        cancel: CancellationToken,
+        cancel: crate::runtime::TurnCancelWait,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.layer
             .await_next_settlement(self.inner.as_ref(), handle, cancel)

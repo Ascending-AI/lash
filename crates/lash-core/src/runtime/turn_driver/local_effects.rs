@@ -1,8 +1,6 @@
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
-use crate::runtime::effect::executor::{
-    RuntimeEffectLocalRunner, sleep_duration, sleep_with_cancellation,
-};
+use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 
 struct LocalTurnEffectRunner {
     driver: RuntimeTurnDriver<'static>,
@@ -12,7 +10,6 @@ struct LocalTurnEffectRunner {
     cell_replay_grammar: Option<u32>,
     messages: crate::MessageSequence,
     event_tx: TurnObserver,
-    cancellation: CancellationToken,
 }
 
 #[async_trait::async_trait]
@@ -36,21 +33,30 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 provider_id: _,
                 request,
             } => {
+                // The recorded body races the model call against the turn's
+                // gate itself: this is the engine's cooperative cancel for a
+                // step it cannot select away, and what the body saw is its
+                // recorded outcome (ADR 0105 §3, FIG-3672 P9). A watch that
+                // gave up is a live fault the engine never records.
+                let control = Arc::clone(&runner.driver.turn_control);
+                let host = Arc::clone(&runner.driver.host.core.control.effect_host);
+                let honoured = runner.driver.turn_cancel.is_some();
+                let request = Arc::new((*request).into_request(None, None));
+                let invocation = envelope.invocation.into_runtime_invocation();
+                let protocol_iteration = runner.protocol_iteration;
+                let event_tx = runner.event_tx.clone();
+                let driver = &mut runner.driver;
                 let crate::runtime::RuntimeLlmCallOutcome {
                     result,
                     text_streamed,
                     call_record,
                     stream,
-                } = runner
-                    .driver
-                    .run_llm_call(
-                        Arc::new((*request).into_request(None, None)),
-                        runner.protocol_iteration,
-                        envelope.invocation.into_runtime_invocation(),
-                        &runner.event_tx,
-                        &runner.cancellation,
-                    )
-                    .await;
+                } = Box::pin(control.run_step_body(&host, honoured, |stop| async move {
+                    driver
+                        .run_llm_call(request, protocol_iteration, invocation, &event_tx, &stop)
+                        .await
+                }))
+                .await?;
                 Ok(RuntimeEffectOutcome::LlmCall {
                     result: Box::new(result),
                     text_streamed,
@@ -82,7 +88,6 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         runner.cell_replay_grammar,
                         envelope.invocation.into_runtime_invocation(),
                         &runner.event_tx,
-                        &runner.cancellation,
                     )
                     .await?;
                 Ok(RuntimeEffectOutcome::ExecCode {
@@ -137,12 +142,6 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     tool_surface,
                 })
             }
-            RuntimeEffectCommand::Sleep { spec } => {
-                let clock = runner.driver.host.core.clock.as_ref();
-                let duration_ms = sleep_duration(spec, clock.timestamp_ms());
-                sleep_with_cancellation(duration_ms, &runner.cancellation, clock).await?;
-                Ok(RuntimeEffectOutcome::Sleep)
-            }
             command => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
@@ -158,7 +157,6 @@ pub(super) fn turn_effect_executor(
     driver: &mut RuntimeTurnDriver<'_>,
     machine: &crate::TurnMachine,
     event_tx: TurnObserver,
-    cancellation: CancellationToken,
     scoped_effect_controller: ScopedEffectController<'static>,
 ) -> crate::RuntimeEffectLocalExecutor<'static> {
     let replay_trace = crate::runtime::effect::RuntimeEffectReplayTrace::for_divergence(
@@ -206,7 +204,8 @@ pub(super) fn turn_effect_executor(
         protocol_reply: Default::default(),
         live_opener: std::sync::Mutex::new(None),
         opener_state: driver.opener_state.clone(),
-        cooperative_cancel: CancellationToken::new(),
+        turn_cancel: driver.turn_cancel.clone(),
+        children_stop: driver.children_stop.clone(),
     };
     crate::RuntimeEffectLocalExecutor::owned_runner(
         Box::new(LocalTurnEffectRunner {
@@ -215,7 +214,6 @@ pub(super) fn turn_effect_executor(
             cell_replay_grammar: machine.synced_cell_replay_grammar(),
             messages: machine.message_sequence(),
             event_tx,
-            cancellation,
         }),
         replay_trace,
     )

@@ -101,7 +101,6 @@ struct TurnCommitRequest<'commit> {
 /// The local commit-admission handles: only the head-advancing attempt uses
 /// them, and they are dropped when the store needs no admission.
 struct TurnCommitAdmission<'admission> {
-    cancellation: CancellationToken,
     effect_controller: &'admission dyn crate::RuntimeEffectController,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
 }
@@ -121,7 +120,6 @@ impl PreparedTurn {
         admission: TurnCommitAdmission<'_>,
     ) -> Result<CommittedTurn, crate::StoreError> {
         let TurnCommitAdmission {
-            cancellation,
             effect_controller,
             turn_phase_probe,
         } = admission;
@@ -140,7 +138,9 @@ impl PreparedTurn {
         super::run_head_advancing_commit_attempt(
             session_id.clone(),
             work_identity.clone(),
-            cancellation,
+            // A turn that reached its commit, cancelled or not, commits: its
+            // admission wait is not cancellable.
+            CancellationToken::new(),
             move |waited, queue_depth| async move {
                 super::commit_admission::record_product_commit_admission(
                     "turn_final_commit",
@@ -310,7 +310,9 @@ pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
     pub(in crate::runtime) finish: TurnFinishInput,
     pub(in crate::runtime) claims: &'commit LogicalTurnClaims,
     pub(in crate::runtime) scoped_effect_controller: &'commit ScopedEffectController<'run>,
-    pub(in crate::runtime) cancel_state: &'commit CancellationToken,
+    /// The cancellation the turn recorded honouring, if any: a journaled
+    /// peek's answer, never a live token (FIG-3672 P9).
+    pub(in crate::runtime) honoured_cancel: Option<crate::TurnCancellationEvidence>,
     pub(in crate::runtime) lease: TurnLeaseScope<'commit>,
     pub(in crate::runtime) turn_control: &'commit ActiveTurnControl,
     /// What the turn publishes through. The terminal publication waits
@@ -325,7 +327,6 @@ pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
     pub(super) driver: TurnDriverRemainder,
     pub(super) cancellation_messages: crate::MessageSequence,
     pub(super) finish_scoped_effect_controller: &'cancel ScopedEffectController<'run>,
-    pub(super) cancel: &'cancel CancellationToken,
     pub(super) lease: TurnLeaseScope<'cancel>,
     pub(super) turn_control: &'cancel ActiveTurnControl,
     pub(super) turn_index: usize,
@@ -340,7 +341,6 @@ pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
     pub(in crate::runtime) trace_turn_id: TurnId,
     pub(in crate::runtime) sinks: TurnSinks<'error>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
-    pub(in crate::runtime) cancel: CancellationToken,
     pub(in crate::runtime) claims: LogicalTurnClaims,
     pub(in crate::runtime) session_execution_lease: Option<&'error SessionExecutionLeaseGuard>,
 }
@@ -354,7 +354,7 @@ impl LashRuntime {
             finish,
             claims,
             scoped_effect_controller,
-            cancel_state,
+            honoured_cancel,
             lease:
                 TurnLeaseScope {
                     guard: session_execution_lease,
@@ -429,14 +429,10 @@ impl LashRuntime {
             Some(TurnOutcome::Stopped(TurnStop::Cancelled { evidence })) => Some(evidence.clone()),
             _ => None,
         };
-        let assembled_cancelled = assembled_cancellation.is_some();
         let lease_was_lost = session_execution_lease.is_some_and(|lease| lease.is_lost());
-        if lease_was_lost && cancel_state.is_cancelled() && !assembled_cancelled {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::SessionExecutionLeaseLost,
-                "session execution lease was lost while the turn was active",
-            ));
-        }
+        // A lost lease never turns a recorded cancellation into a proposal of
+        // this worker's: the commit's head CAS arbitrates the race.
+        let honoured_cancel = honoured_cancel.filter(|_| !lease_was_lost);
         let mut interrupted_turn_cancel_intent =
             match self.session.as_ref().and_then(Session::history_store) {
                 Some(store) => Some(
@@ -483,7 +479,7 @@ impl LashRuntime {
                             admitted_scope.clone(),
                             &lease.fence(),
                             observed.clone(),
-                            assembled_cancelled || (cancel_state.is_cancelled() && !lease_was_lost),
+                            honoured_cancel.as_ref(),
                             assembled_cancellation.clone(),
                         )?;
                         match store
@@ -511,7 +507,11 @@ impl LashRuntime {
         let turn_cancel_closure_settlement = match turn_cancel_closure_authorization.as_ref() {
             Some(authorization) => Some(
                 turn_control
-                    .settle_authorized(turn_control_resolver, authorization)
+                    .settle_authorized(
+                        turn_control_resolver,
+                        authorization,
+                        honoured_cancel.as_ref(),
+                    )
                     .await?,
             ),
             None => None,
@@ -522,20 +522,16 @@ impl LashRuntime {
                 turn_control
                     .settle_before_commit(
                         turn_control_resolver,
-                        assembled_cancelled || (cancel_state.is_cancelled() && !lease_was_lost),
+                        honoured_cancel.as_ref(),
                         assembled_cancellation,
                     )
                     .await?
             }
         };
-        if cancellation.is_some() {
-            cancel_state.cancel();
-        }
-        // Interruption derives from sealed evidence, never the raw token: a
-        // lease-loss wakeup cancels the token without evidence and must not
-        // become a Cancelled outcome. When a durable cancel races lease loss,
-        // the final commit's head CAS and any claim batch-ownership checks are
-        // the arbiters. Lease loss alone does not reject a current-head commit.
+        // Interruption derives from the sealed gate evidence. When a durable
+        // cancel races lease loss, the final commit's head CAS and any claim
+        // batch-ownership checks are the arbiters. Lease loss alone does not
+        // reject a current-head commit.
         let interrupted = cancellation.is_some();
 
         turn_pipeline.finalize_turn_read_state(new_messages, interrupted);
@@ -756,7 +752,6 @@ impl LashRuntime {
                     turn_control_resolver,
                 },
                 TurnCommitAdmission {
-                    cancellation: cancel_state.clone(),
                     effect_controller: scoped_effect_controller.controller(),
                     turn_phase_probe: self.turn_phase_probe.clone(),
                 },
@@ -927,7 +922,6 @@ impl LashRuntime {
             driver,
             cancellation_messages,
             finish_scoped_effect_controller,
-            cancel,
             lease:
                 TurnLeaseScope {
                     guard: session_execution_lease,
@@ -945,14 +939,18 @@ impl LashRuntime {
             mut pending_queue_claims,
             pending_turn_input_claims,
             withheld_terminal_work,
+            turn_cancel,
             ..
         } = driver;
+        // Only a recorded cancellation reaches this finisher; lash's own
+        // evidence stands in for none (FIG-3672 P9).
+        let evidence = turn_cancel.unwrap_or_else(|| turn_control.internal_evidence(None));
         emit_terminal_sequence(
             &mut recorded_assembly,
             observer,
             None,
             TurnStop::Cancelled {
-                evidence: turn_control.evidence_or_internal(),
+                evidence: evidence.clone(),
             },
         )
         .await;
@@ -979,7 +977,7 @@ impl LashRuntime {
             },
             claims: &claims,
             scoped_effect_controller: finish_scoped_effect_controller,
-            cancel_state: cancel,
+            honoured_cancel: Some(evidence),
             lease: TurnLeaseScope {
                 guard: session_execution_lease,
                 release_policy: session_execution_lease_release_policy,
@@ -1054,7 +1052,6 @@ impl LashRuntime {
             trace_turn_id,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
-            cancel,
             claims,
             session_execution_lease,
         } = context;
@@ -1117,7 +1114,7 @@ impl LashRuntime {
             },
             claims: &claims,
             scoped_effect_controller: &scoped_effect_controller,
-            cancel_state: &cancel,
+            honoured_cancel: None,
             lease: TurnLeaseScope {
                 guard: session_execution_lease,
                 release_policy: SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
