@@ -348,12 +348,14 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
 }
 
 /// The caller that accepted an input holds nothing the turn needs: dropping
-/// every handle it has stops nothing, and the drive commits the turn.
+/// the session handle it accepted through, and the acceptance itself, stops
+/// nothing. The worker's core keeps serving drives, and the drive commits the
+/// turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dropping_the_handle_stops_nothing() {
     let world = world(0x5504).await;
     let session_id = SessionId::from("dropped-handle");
-    let receipt = {
+    let input_id = {
         let session = world
             .core
             .session("dropped-handle")
@@ -366,19 +368,11 @@ async fn dropping_the_handle_stops_nothing() {
             .send()
             .await
             .expect("accept");
-        drop(session);
-        receipt
+        receipt.input_id
     };
-    let World {
-        backend,
-        core,
-        calls,
-        ..
-    } = world;
-    drop(core);
-    let outcome = attach(&backend, &session_id, request_of(&receipt.input_id)).await;
+    let outcome = attach(&world.backend, &session_id, request_of(&input_id)).await;
     assert_eq!(answers(&outcome), ["answer 1"]);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(world.calls.load(Ordering::SeqCst), 1);
 }
 
 /// L-S11: a row committed whose schedule was lost (its process died between

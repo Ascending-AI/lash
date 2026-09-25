@@ -45,7 +45,7 @@
 //! is refused, terminally and before the handler journals anything, so a
 //! journal written under one generation is never replayed against another.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, Weak};
 
 use lash_core::engine::{
     AdmitVerdict, Admitted, BuildGeneration, DriveAbort, DriveOutcome, DriveRequest,
@@ -121,14 +121,21 @@ pub(crate) fn turn_workflow_key(session: &SessionId, root: &lash_core::TurnId) -
 ///
 /// The endpoint binds `LashSession` and `LashTurn` before any core over the
 /// backend exists, so they read the driver from this slot when a drive runs.
-/// The core fills it once, get-or-init, through the engine's
-/// [`install_session_driver`](SessionWorkEngine::install_session_driver): one
-/// engine has one answer to what runs its drives, whichever core was built
-/// first. A drive that runs before the install fails its attempt retryably,
-/// naming the empty slot. Clones share one slot.
+/// The core fills it through the engine's
+/// [`install_session_driver`](SessionWorkEngine::install_session_driver), a
+/// get-or-init: while an installed driver is alive, one engine has one
+/// answer to what runs its drives, whichever core was built first.
+///
+/// The slot holds the driver **weakly**. The driver belongs to the core,
+/// which owns the backend this slot lives in; a strong reference back would
+/// make the three a cycle no drop ever breaks. The core keeps the driver the
+/// install returns for as long as it serves drives. A drive that runs while
+/// no live driver is installed (before the core is built, or after it was
+/// dropped) fails its attempt retryably, naming the empty slot, and a later
+/// install serves it. Clones share one slot.
 #[derive(Clone, Default)]
 pub struct RestateSessionDriverSlot {
-    driver: Arc<OnceLock<Arc<dyn SessionDriver>>>,
+    driver: Arc<Mutex<Option<Weak<dyn SessionDriver>>>>,
 }
 
 impl RestateSessionDriverSlot {
@@ -137,23 +144,35 @@ impl RestateSessionDriverSlot {
         Self::default()
     }
 
-    /// Install `driver` unless one is installed already; returns the driver
-    /// the slot holds.
+    /// Install `driver` unless a live one is installed already; returns the
+    /// driver the slot now serves, which the caller keeps alive.
     pub fn install(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
-        Arc::clone(self.driver.get_or_init(|| driver))
+        let mut slot = self
+            .driver
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(live) = slot.as_ref().and_then(Weak::upgrade) {
+            return live;
+        }
+        *slot = Some(Arc::downgrade(&driver));
+        driver
     }
 
-    /// The installed driver, if a core installed one.
+    /// The installed driver, if one is installed and still alive.
     pub fn installed(&self) -> Option<Arc<dyn SessionDriver>> {
-        self.driver.get().cloned()
+        self.driver
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .and_then(Weak::upgrade)
     }
 
     /// The installed driver, or the retryable failure of a drive that ran
-    /// before any core installed one.
+    /// while none was installed.
     fn driver_for(&self, handler: &str) -> Result<Arc<dyn SessionDriver>, HandlerError> {
         self.installed().ok_or_else(|| {
             HandlerError::from(std::io::Error::other(format!(
-                "{handler}: no session driver is installed on this deployment yet; \
+                "{handler}: no session driver is installed on this deployment; \
                  a core over this backend installs it when it is built"
             )))
         })
@@ -164,7 +183,7 @@ impl std::fmt::Debug for RestateSessionDriverSlot {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RestateSessionDriverSlot")
-            .field("installed", &self.driver.get().is_some())
+            .field("installed", &self.installed().is_some())
             .finish()
     }
 }
