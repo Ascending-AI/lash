@@ -5201,6 +5201,22 @@
     },
     {
       "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-worker:lash-core-worker__fv_bff28357",
+      "package": "lash-internal-core-worker"
+    },
+    {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-worker:lash-core-worker__fv_bff28357",
+      "package": "lash-internal-core-worker"
+    },
+    {
+      "features": [
         "testing"
       ],
       "kind": "lib",
@@ -5221,24 +5237,6 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-worker:lash-core-worker__fv_f59d9541",
-      "package": "lash-internal-core-worker"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-worker:lash-core-worker__fv_f5d29280",
-      "package": "lash-internal-core-worker"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-worker:lash-core-worker__fv_f5d29280",
       "package": "lash-internal-core-worker"
     },
     {
@@ -7041,6 +7039,18 @@
     {
       "features": [],
       "kind": "lib",
+      "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_8d5036b3",
+      "package": "lash-internal-lashlang-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_8d5036b3",
+      "package": "lash-internal-lashlang-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
       "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_90ae4cf3",
       "package": "lash-internal-lashlang-runtime"
     },
@@ -7175,18 +7185,6 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_cb93add0",
-      "package": "lash-internal-lashlang-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_cb93add0",
-      "package": "lash-internal-lashlang-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
       "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_f0b92908",
       "package": "lash-internal-lashlang-runtime"
     },
@@ -7211,7 +7209,7 @@
         "default"
       ],
       "kind": "lib",
-      "label": "//crates/lash-llm-tools:lash-llm-tools__fv_7a84615b",
+      "label": "//crates/lash-llm-tools:lash-llm-tools__fv_782c3e47",
       "package": "lash-internal-llm-tools"
     },
     {
@@ -7219,7 +7217,7 @@
         "default"
       ],
       "kind": "lib",
-      "label": "//crates/lash-llm-tools:lash-llm-tools__fv_7a84615b",
+      "label": "//crates/lash-llm-tools:lash-llm-tools__fv_782c3e47",
       "package": "lash-internal-llm-tools"
     },
     {
@@ -7755,25 +7753,25 @@
         "lashlang"
       ],
       "kind": "lib",
+      "label": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_7d958ef5",
+      "package": "lash-internal-plugin-mcp"
+    },
+    {
+      "features": [
+        "default",
+        "lashlang"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_7d958ef5",
+      "package": "lash-internal-plugin-mcp"
+    },
+    {
+      "features": [
+        "default",
+        "lashlang"
+      ],
+      "kind": "lib",
       "label": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_c25c81ac",
-      "package": "lash-internal-plugin-mcp"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_dd6d9fbd",
-      "package": "lash-internal-plugin-mcp"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_dd6d9fbd",
       "package": "lash-internal-plugin-mcp"
     },
     {
@@ -8724,24 +8722,6 @@
       "package": "lash-internal-protocol-rlm"
     },
     {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_25b7b2d7",
-      "package": "lash-internal-protocol-rlm"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_25b7b2d7",
-      "package": "lash-internal-protocol-rlm"
-    },
-    {
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_3894eefa",
@@ -8780,6 +8760,24 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_8a2664f5",
+      "package": "lash-internal-protocol-rlm"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_903b1e95",
+      "package": "lash-internal-protocol-rlm"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_903b1e95",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -10753,13 +10751,19 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_6e611ae1",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_498d37bf",
       "package": "lash-internal-restate-test"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_6e611ae1",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_498d37bf",
+      "package": "lash-internal-restate-test"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_8f3fdb86",
       "package": "lash-internal-restate-test"
     },
     {
@@ -10769,10 +10773,20 @@
       "package": "lash-internal-restate-test"
     },
     {
-      "features": [],
+      "features": [
+        "lashlang"
+      ],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_8f3fdb86",
-      "package": "lash-internal-restate-test"
+      "label": "//crates/lash-restate:lash-restate__fv_197896d4",
+      "package": "lash-internal-restate"
+    },
+    {
+      "features": [
+        "lashlang"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-restate:lash-restate__fv_197896d4",
+      "package": "lash-internal-restate"
     },
     {
       "features": [
@@ -10882,22 +10896,6 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-restate:lash-restate__fv_85abed0d",
-      "package": "lash-internal-restate"
-    },
-    {
-      "features": [
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_889b1965",
-      "package": "lash-internal-restate"
-    },
-    {
-      "features": [
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_889b1965",
       "package": "lash-internal-restate"
     },
     {
@@ -12305,13 +12303,13 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_d579503f",
+      "label": "//crates/lash-sim:lash-sim__fv_b6980b7d",
       "package": "lash-sim"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_d579503f",
+      "label": "//crates/lash-sim:lash-sim__fv_b6980b7d",
       "package": "lash-sim"
     },
     {
@@ -13133,18 +13131,6 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-subagents:lash-subagents__fv_7f824552",
-      "package": "lash-internal-subagents"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-subagents:lash-subagents__fv_7f824552",
-      "package": "lash-internal-subagents"
-    },
-    {
-      "features": [],
-      "kind": "lib",
       "label": "//crates/lash-subagents:lash-subagents__fv_a7ab0d54",
       "package": "lash-internal-subagents"
     },
@@ -13152,6 +13138,18 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-subagents:lash-subagents__fv_a7ab0d54",
+      "package": "lash-internal-subagents"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-subagents:lash-subagents__fv_f40a3b1b",
+      "package": "lash-internal-subagents"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-subagents:lash-subagents__fv_f40a3b1b",
       "package": "lash-internal-subagents"
     },
     {
@@ -15149,6 +15147,26 @@
     },
     {
       "features": [
+        "default",
+        "rlm",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_a0db8c55",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "rlm",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_a0db8c55",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
         "postgres"
       ],
       "kind": "lib",
@@ -15165,26 +15183,6 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_b6188282",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "rlm",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_c0c61a1e",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "rlm",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_c0c61a1e",
       "package": "lash-runtime"
     },
     {
@@ -16690,13 +16688,13 @@
         "provider-wire-fixtures"
       ],
       "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_074f4431",
+      "label": "//examples/agent-workbench:agent-workbench__fv_8d652ec9",
       "package": "agent-workbench"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_e10fdf73",
+      "label": "//examples/agent-workbench:agent-workbench__fv_fbf68d16",
       "package": "agent-workbench"
     },
     {
@@ -16704,13 +16702,13 @@
         "provider-wire-fixtures"
       ],
       "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_074f4431",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_8d652ec9",
       "package": "agent-workbench"
     },
     {
       "features": [],
       "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_e10fdf73",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_fbf68d16",
       "package": "agent-workbench"
     },
     {
@@ -18751,7 +18749,6 @@
         "insta",
         "lash-internal-conformance",
         "lash-internal-core",
-        "lash-internal-core-worker",
         "lash-internal-lashlang-runtime",
         "lash-internal-llm-transport",
         "lash-internal-plugin-process-controls",

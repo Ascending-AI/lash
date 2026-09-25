@@ -472,10 +472,7 @@ DOC_SUFFIXES = frozenset({".md", ".rst", ".txt"})
 # runtime doc read reopens no hole silently.
 RUST_RUNTIME_DOC_INPUTS = frozenset(
     {
-        "docs/adr/0008-confidence-gate.md",
-        "docs/adr/0009-deterministic-simulation-harness.md",
         "docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md",
-        "CONTEXT.md",
     }
 )
 
