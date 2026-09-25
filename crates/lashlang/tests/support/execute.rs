@@ -55,6 +55,8 @@ pub async fn execute<H: ExecutionHost>(
 
 /// Compiles a `Program` written against the IR directly — for the builtin
 /// intrinsics no dialect spells — and runs it against `state`.
+// Not every target that compiles this module calls it.
+#[allow(dead_code)]
 pub async fn execute_program<H: ExecutionHost>(
     program: &lashlang::Program,
     state: &mut State,

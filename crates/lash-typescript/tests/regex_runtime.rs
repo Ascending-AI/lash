@@ -427,7 +427,12 @@ fn execute_budgeted(source: &str, instructions: u64) -> Result<ExecutionOutcome,
 fn a_regexp_heavy_loop_exhausts_the_instruction_budget() {
     // Each iteration matches trivially and returns instantly, so nothing here
     // trips the per-call fuel: only the charge links this loop to the budget.
-    let budget = 5_000;
+    //
+    // Measured minimal budgets: the `includes` control loop costs 7,310
+    // instructions (`includes` now charges its UTF-16 scan to the budget) and
+    // the regexp loop costs 14,510, so 10,000 admits the former and
+    // exhausts the latter with margin on both sides.
+    let budget = 10_000;
     let loop_body = |work: &str| {
         format!(
             "let hits = 0;\nfor (let i = 0; i < 100; i++) {{\n  if ({work}) {{ hits++; }}\n}}\nfinish(hits);"
