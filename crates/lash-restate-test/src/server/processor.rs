@@ -728,30 +728,36 @@ impl State {
             .iter()
             .filter(|entry| entry.frame.ty.is_command())
             .count();
-        let run_name = if frame.ty == MessageType::RunCommand {
-            frame.decode::<RunCommandMessage>().ok().map(|run| run.name)
-        } else if frame.ty == MessageType::ProposeRunCompletion {
-            frame
-                .decode::<ProposeRunCompletionMessage>()
-                .ok()
-                .and_then(|proposal| {
-                    invocation.journal.iter().find_map(|entry| {
+        let proposed_run = (frame.ty == MessageType::ProposeRunCompletion)
+            .then(|| frame.decode::<ProposeRunCompletionMessage>().ok())
+            .flatten()
+            .and_then(|proposal| {
+                invocation
+                    .journal
+                    .iter()
+                    .filter(|entry| entry.frame.ty.is_command())
+                    .enumerate()
+                    .find_map(|(index, entry)| {
                         (entry.frame.ty == MessageType::RunCommand)
                             .then(|| entry.frame.decode::<RunCommandMessage>().ok())
                             .flatten()
                             .filter(|run| run.result_completion_id == proposal.result_completion_id)
-                            .map(|run| run.name)
+                            .map(|run| (index, run.name))
                     })
-                })
+            });
+        let run_name = if frame.ty == MessageType::RunCommand {
+            frame.decode::<RunCommandMessage>().ok().map(|run| run.name)
         } else {
-            None
+            proposed_run.as_ref().map(|(_, name)| name.clone())
         };
+        let run_index = proposed_run.map(|(index, _)| index);
         CrashSite {
             service: invocation.target.service.clone(),
             handler: invocation.target.handler.clone(),
             ty: frame.ty,
             command_index,
             run_name,
+            run_index,
             attempt: invocation.attempts,
         }
     }

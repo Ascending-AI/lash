@@ -14,6 +14,10 @@ pub enum CrashPoint {
     /// Before the server stores the result of a `ctx.run` — the one named
     /// `name`, or any run when `None`.
     BeforeRunResult { name: Option<String> },
+    /// Before the server stores the result of the `ctx.run` whose command
+    /// has this 0-based journal command index: the point for a run whose name
+    /// differs from one execution to the next (it embeds a fresh id).
+    BeforeRunResultAt { index: usize },
     /// Before the server stores the `ctx.run` command named `name`: the run
     /// never reaches the journal, and the replay issues it anew.
     BeforeRun { name: String },
@@ -92,6 +96,9 @@ impl CrashRule {
                         .as_deref()
                         .is_none_or(|name| site.run_name.as_deref() == Some(name))
             }
+            CrashPoint::BeforeRunResultAt { index } => {
+                site.ty == MessageType::ProposeRunCompletion && site.run_index == Some(*index)
+            }
             CrashPoint::BeforeRun { name } => {
                 site.ty == MessageType::RunCommand && site.run_name.as_deref() == Some(name)
             }
@@ -122,6 +129,8 @@ pub struct CrashSite {
     /// For a run command, its name; for a run proposal, the name of the run
     /// it completes.
     pub run_name: Option<String>,
+    /// For a run proposal, the journal command index of the run it completes.
+    pub run_index: Option<usize>,
     pub attempt: u32,
 }
 
