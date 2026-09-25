@@ -79,6 +79,14 @@ crate::statements! {
              FROM turn_parks
              GROUP BY reason_code";
 
+        /// Live retired-generation parks grouped by the generation their
+        /// admission recorded (FIG-3571): read off the projected, indexed
+        /// `park_executable_generation` column, never the reason payload.
+        count_retired_parks_by_executable_generation = "SELECT park_executable_generation, COUNT(*) AS parks
+             FROM turn_parks
+             WHERE park_executable_generation IS NOT NULL
+             GROUP BY park_executable_generation";
+
         /// Whether session `?1` has work a runner could pick up at `?2`:
         /// an unfinished queued run, an available queued batch, or an input
         /// already deferred to the next turn that no aborted turn is bound to

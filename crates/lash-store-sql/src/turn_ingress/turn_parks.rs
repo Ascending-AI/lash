@@ -16,8 +16,7 @@
 pub const TABLE: &str = "turn_parks";
 
 /// Every column a park row carries, in insert order.
-pub const INSERT_COLUMNS: &str =
-    "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts";
+pub const INSERT_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation";
 
 /// The stored record's read projection.
 pub const RECORD_COLUMNS: &str =
@@ -30,22 +29,35 @@ pub const RECORD_COLUMNS: &str =
 /// aggregate — none of the park row's payload columns.
 pub const REASON_COUNT_COLUMNS: &str = "reason_code, COUNT(*) AS parks";
 
+/// The grouped count `count_retired_parks_by_executable_generation` reads for
+/// drain status (FIG-3571).
+///
+/// Narrow on purpose: the deployment drain wants each retired executable
+/// generation's live park count and nothing else, so the projection carries
+/// the projected generation column and the aggregate — none of the park row's
+/// payload columns.
+pub const EXECUTABLE_GENERATION_COUNT_COLUMNS: &str =
+    "park_executable_generation, COUNT(*) AS parks";
+
 crate::statements! {
     /// `turn_parks` statements both backends issue verbatim.
     pub struct TurnParkStatements @ "turn_park" {
         /// Open session `?1`'s first park of turn `?2`: `park_id` `?3` is the
         /// feed sequence the `Parked` event was allocated, `?4` the reason
         /// code, `?5` the reason payload, `?6` the park instant, `?7` the same
-        /// instant as `last_refused_ms`, `?8` = 1 attempt.
-        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        /// instant as `last_refused_ms`, `?8` = 1 attempt, `?9` the retired
+        /// generation the reason names (`park_executable_generation`, NULL for any other
+        /// reason; FIG-3571).
+        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
         /// Re-park of the same turn `?2` in session `?1`: `park_id` and
         /// `since_ms` are kept, the reason refreshes, `last_refused_ms` moves
-        /// to `?5`, and `attempts` counts the refusal.
+        /// to `?5`, `park_executable_generation` to `?6`, and `attempts` counts the
+        /// refusal.
         update_same_turn = "UPDATE turn_parks
              SET reason_code = ?3, reason_json = ?4,
-                 last_refused_ms = ?5, attempts = attempts + 1
+                 last_refused_ms = ?5, attempts = attempts + 1, park_executable_generation = ?6
              WHERE session_id = ?1 AND turn_id = ?2";
 
         /// Drop the park a different turn `?2` supersedes in session `?1`,

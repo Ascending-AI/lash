@@ -92,9 +92,6 @@ pub(crate) fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
                     tool_specs: Arc::new(Vec::new()),
                     projector_turn_inputs: None,
                 })),
-                cell_replay_grammar: Some(
-                    lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
-                ),
             });
             continue;
         }

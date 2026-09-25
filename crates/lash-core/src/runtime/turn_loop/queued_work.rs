@@ -307,6 +307,7 @@ impl LashRuntime {
                 self.state.turn_index as u64,
             )
             .map_err(super::runtime_error_from_store_commit)?,
+            generation: super::generation_fence::current(self),
         };
         let admission = match store.begin_or_resume_queued_run(&fence, request).await {
             Ok(run) => run,
@@ -351,6 +352,14 @@ impl LashRuntime {
                     QueuedWorkDrainResult::Automatic(QueuedTurnDrain::Replayed(Box::new(admission)))
                 }
             });
+        }
+        // A settled run above only replays its end; a run that still drives
+        // work drives it under the generation it was admitted under.
+        if let Err(error) = super::generation_fence::admit(self, admission.generation.as_ref()) {
+            self.record_turn_park_after_abort(&error, &TurnId::from(admission.scope.id()))
+                .await;
+            let _ = lease.release_if_live().await;
+            return Err(error.into());
         }
         let preparation = async {
             let opts = queued_opts.bind(admission.scope.clone())?;

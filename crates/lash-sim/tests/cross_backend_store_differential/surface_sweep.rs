@@ -804,6 +804,7 @@ impl BackendRunner {
                             configuration: surface_queued_run_configuration(&session_id),
                             expected_head_revision,
                             initial_turn_index: 1,
+                            generation: None,
                         },
                     )
                     .await?;

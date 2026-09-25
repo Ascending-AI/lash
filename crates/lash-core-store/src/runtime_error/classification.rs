@@ -238,8 +238,8 @@ impl RuntimeErrorCode {
             Self::ToolIntentReplayKeyFormatCutover => Terminal,
             // the re-executed program no longer issues its recorded commands; only the build that wrote the journal serves it.
             Self::LashlangCellReplayDivergence => Parked,
-            // the journal predates this build's replay-key grammar; only a pre-cutover build serves it.
-            Self::LashlangCellReplayKeyFormatCutover => Parked,
+            // the turn was admitted under another executable generation; only a build of it serves it.
+            Self::RetiredGeneration => Parked,
             // a binding the cell's journal names moved; only its recorded results serve it.
             Self::LashlangCellBindingDrift => Parked,
             // the controller cannot answer the frontier read; wiring, not the attempt.

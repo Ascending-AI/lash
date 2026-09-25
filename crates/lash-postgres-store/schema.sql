@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 132.
+-- lash-postgres-store schema, component version 133.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -253,10 +253,13 @@ CREATE TABLE IF NOT EXISTS lash_turn_parks (
     reason_json TEXT NOT NULL,
     since_ms BIGINT NOT NULL,
     last_refused_ms BIGINT NOT NULL,
-    attempts BIGINT NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1)
+    attempts BIGINT NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1),
+    park_executable_generation TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_lash_turn_parks_since
     ON lash_turn_parks(since_ms, session_id);
+CREATE INDEX IF NOT EXISTS idx_lash_turn_parks_executable_generation
+    ON lash_turn_parks(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS lash_turn_park_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
@@ -817,7 +820,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- transactional clock rows, and the catalog identity. `gen_random_uuid()` is
 -- core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 132)
+VALUES ('lash-postgres-store', 133)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

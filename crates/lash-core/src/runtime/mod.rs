@@ -233,7 +233,8 @@ pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuild
 pub(crate) use error::runtime_error_from_store_commit;
 use error::session_commit_error;
 pub use error::{
-    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal, TurnFailureCause,
+    ExecutableGeneration, ExecutableGenerationRefusal, RuntimeError, RuntimeErrorCause,
+    RuntimeErrorCode, SessionStateVersionRefusal, TurnFailureCause,
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{

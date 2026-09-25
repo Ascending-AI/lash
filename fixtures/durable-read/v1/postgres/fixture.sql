@@ -896,6 +896,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_parks (
     since_ms bigint NOT NULL,
     last_refused_ms bigint NOT NULL,
     attempts bigint NOT NULL,
+    park_executable_generation text,
     CONSTRAINT ck_turn_parks_attempts CHECK ((attempts >= 1))
 );
 
@@ -1211,7 +1212,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 -- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=132', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=133', 1700000000000);
 
 
 --
@@ -1228,7 +1229,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 132);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 133);
 
 
 --
@@ -2261,6 +2262,13 @@ CREATE INDEX idx_lash_trigger_subscriptions_registrant ON lash_durable_read_fixt
 --
 
 CREATE INDEX idx_lash_trigger_subscriptions_source ON lash_durable_read_fixture.lash_trigger_subscriptions USING btree (source_type, source_key, lifecycle);
+
+
+--
+-- Name: idx_lash_turn_parks_executable_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_turn_parks_executable_generation ON lash_durable_read_fixture.lash_turn_parks USING btree (park_executable_generation) WHERE (park_executable_generation IS NOT NULL);
 
 
 --

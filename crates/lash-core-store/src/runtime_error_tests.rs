@@ -18,7 +18,7 @@ fn replay_mismatch_classification_covers_every_durable_controller_code() {
         "effect_replay_divergence",
         "tool_intent_replay_key_format_cutover",
         "lashlang_cell_replay_divergence",
-        "lashlang_cell_replay_key_format_cutover",
+        "retired_generation",
         "lashlang_cell_binding_drift",
     ] {
         let typed = RuntimeErrorCode::from_wire_code(code);
@@ -345,7 +345,7 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
         parked,
         [
             RuntimeErrorCode::LashlangCellReplayDivergence,
-            RuntimeErrorCode::LashlangCellReplayKeyFormatCutover,
+            RuntimeErrorCode::RetiredGeneration,
             RuntimeErrorCode::LashlangCellBindingDrift,
             RuntimeErrorCode::EffectReplayDivergence,
             RuntimeErrorCode::SqliteEffectReplayHashConflict,
@@ -453,7 +453,7 @@ fn replay_refusals_park_the_turn() {
 
     for code in [
         RuntimeErrorCode::LashlangCellReplayDivergence,
-        RuntimeErrorCode::LashlangCellReplayKeyFormatCutover,
+        RuntimeErrorCode::RetiredGeneration,
         RuntimeErrorCode::LashlangCellBindingDrift,
         RuntimeErrorCode::EffectReplayDivergence,
         RuntimeErrorCode::SqliteEffectReplayHashConflict,
@@ -483,7 +483,7 @@ fn replay_refusals_park_the_turn() {
             matches!(
                 code,
                 RuntimeErrorCode::LashlangCellReplayDivergence
-                    | RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
+                    | RuntimeErrorCode::RetiredGeneration
                     | RuntimeErrorCode::LashlangCellBindingDrift
                     | RuntimeErrorCode::EffectReplayDivergence
                     | RuntimeErrorCode::SqliteEffectReplayHashConflict

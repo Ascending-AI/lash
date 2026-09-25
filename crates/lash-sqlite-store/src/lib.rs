@@ -1065,12 +1065,15 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 };
                 parked_by_reason.insert(code, usize::try_from(count).unwrap_or_default());
             }
+            let retired_by_executable_generation =
+                crate::turn_ingress::count_retired_parks_by_executable_generation(conn)?;
             Ok(lash_core_execution::store::UnsettledTurnCounts {
                 parked_turns: usize::try_from(parked).unwrap_or_default(),
                 in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
                 oldest_parked_since_ms: oldest_since_ms
                     .map(|ms| u64::try_from(ms).unwrap_or_default()),
                 parked_by_reason,
+                retired_by_executable_generation,
             })
         })
         .await
