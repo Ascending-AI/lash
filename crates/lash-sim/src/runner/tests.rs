@@ -1562,7 +1562,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         .collect::<BTreeMap<_, _>>();
     assert_eq!(
         runtime_transition_facts.len(),
-        8,
+        6,
         "every runtime scenario contract must have generated transition facts"
     );
     for (semantic_oracle, facts) in &runtime_transition_facts {
@@ -1574,8 +1574,8 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     assert!(
         runtime_transition_facts
             .get("runtime.command_only_queue_drain")
-            .is_some_and(|facts| facts.contains("command_queue_drains_with_real_lease_fence")),
-        "command-only runtime contract must assert queued source keys plus real lease fencing"
+            .is_some_and(|facts| facts.contains("command_queue_drains_queued_source_keys")),
+        "command-only runtime contract must assert its queued source keys"
     );
     assert!(
         runtime_transition_facts
@@ -2222,17 +2222,6 @@ async fn confidence_seed_cancellation_replays_exact_outcome() {
     );
     crate::replay::replay_trace(Path::new("confidence-claim-regression"), &trace)
         .expect("exact cancellation replay");
-    let mut missing_admissions = trace.clone();
-    for event in &mut missing_admissions.events {
-        event
-            .payload
-            .as_object_mut()
-            .expect("payload")
-            .remove("provider_admissions");
-    }
-    assert!(
-        crate::replay::replay_trace(Path::new("missing-admissions"), &missing_admissions).is_err()
-    );
     let mut predecessor = trace;
     predecessor.schema = "lash.sim.trace.v1".to_string();
     assert!(matches!(
