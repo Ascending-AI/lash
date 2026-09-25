@@ -1,3 +1,4 @@
+load(":pool_sizes.bzl", "POOL_EXEC_PROPERTIES")
 load(":test_xml.bzl", "test_xml_runner")
 
 exports_files([
@@ -11,6 +12,7 @@ exports_files([
 ])
 
 exports_files(["patches/libsqlite3-sys-hermetic-manifest-dir.patch"])
+exports_files(["patches/rules-rust-clippy-action-exec-group.patch"])
 
 # The checked-in workspace fact that replaces a nested `cargo metadata` call in
 # the lash-core dependency-direction test. Kept current by
@@ -42,4 +44,19 @@ test_xml_runner(
         "junit_xml.py",
         "test_xml_runner.sh",
     ],
+)
+
+# The workspace's execution platform: the small default request every action
+# carries, plus one `pool_<cpu>_<memory_kb>`-scoped entry per distinct measured
+# compile request. Exec-group-scoped platform properties are the only channel
+# that reaches actions an *aspect* creates, so the Clippy/check aspects in
+# `clippy.bzl` run their actions in the pool exec group named by the target's
+# compile row instead of inheriting `exec_properties` they cannot see.
+# `parents` keeps the host's constraints verbatim, so this platform matches
+# exactly what `@platforms//host` matched.
+platform(
+    name = "pool",
+    exec_properties = POOL_EXEC_PROPERTIES,
+    parents = ["@platforms//host"],
+    visibility = ["//visibility:public"],
 )

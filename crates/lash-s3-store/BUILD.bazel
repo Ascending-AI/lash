@@ -22,7 +22,7 @@ lash_rust_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-s3-store",
     package_name = "lash-internal-s3-store",
@@ -32,6 +32,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-s3-store__doc",
     crate = ":lash-s3-store",
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
     testonly = True,
 )
 
@@ -46,7 +47,7 @@ lash_rust_unit_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-s3-store",
     package_name = "lash-internal-s3-store",
@@ -83,7 +84,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-s3-store",
     package_name = "lash-internal-s3-store",
@@ -103,7 +104,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-s3-store",
     package_name = "lash-internal-s3-store",
@@ -125,7 +126,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-s3-store",
     package_name = "lash-internal-s3-store",

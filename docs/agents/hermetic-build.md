@@ -176,20 +176,23 @@ The shared caches live where `.kiln.bazelrc` points them; Bazel action keys use
 declared repository-relative source, patch, data, runfiles, build environment,
 and rule inputs, so two Kiln forks can reuse the same results. Successful test
 results are cacheable (`--cache_test_results=yes`) and an input change produces
-a different test action key. Failed tests are never reused as successes. Inherited actions request one CPU and 2 GiB in both local and CI builds.
+a different test action key. Failed tests are never reused as successes. Inherited actions request one CPU and 1.5 GiB in both local and CI builds.
 Compile and test-run requests are separate. A target's plain `exec_properties`
-size its compile actions (Rustc, RustcMetadata, Clippy) from the table in
+size its compile actions (Rustc, RustcMetadata, Rustdoc, Clippy) from the table in
 `tools/bazel/action-sizes.json`, which `tools/bazel/action_sizes_from_log.py`
 rebuilds from the pool's usage logs for Lash packages only; an unmeasured
 compile inherits the default. A test target's `test.cpu_count` /
 `test.memory_kb` size its TestRunner spawn alone, from the per-label table in
 `tools/bazel/test-run-sizes.json` (`action_sizes_from_log.py --test-runs`, at
-least 3 pool runs per label). An unmeasured run asks for 4 CPU / 4 GiB, or 8 CPU
+least 3 pool runs per label; a `__fv_` feature variant inherits its base
+label's row). An unmeasured run asks for 2 CPU / 1 GiB, or 8 CPU
 for the large suites in `[test_runs.large_suites]` of
 `tools/bazel/package-policy.toml`; lash-perf and lash-sim never drop below 4 CPU
-(`[test_runs] contention_floor`). A `:test_batch` reserves its two largest members'
-requests side by side, never less than the batch itself measured, and runs at
-most two members at once. Local
+(`[test_runs] contention_floor`), and a few runs and batches carry a per-label
+request in `[test_runs.pinned]`. A `:test_batch` reserves its own measured row
+when one exists, else its two largest members' requests side by side, and runs at
+most two members at once; the contention floor counts once per batch, not once
+per member. Local
 clients submit at most 16 jobs; CI submits 32. These are in-flight action
 limits, not compiler thread counts. The scheduler admits work against each
 worker's advertised capacity. Keep a fork's Bazel server alive to preserve
@@ -415,8 +418,9 @@ The generator reads everything `cargo metadata` cannot tell it from
 - feature-only compile inputs, shared filegroups, trybuild fixture gates and
   the service-job package map;
 - the test-run exceptions (`[test_runs]`): the large suites' unmeasured
-  requests, which also keep them out of `:test_batch`, and the timing-sensitive
-  packages' core floor.
+  requests, which also keep them out of `:test_batch`, the timing-sensitive
+  packages' core floor, and the per-label pins for runs and batches no
+  measured row prices.
 
 A `[[rule]]` selects labels by package, target kind and target-name glob, and
 rules apply in file order. The generator refuses a rule that names an unknown
@@ -683,7 +687,7 @@ CI values are `build-cache` environment secrets, masked on read and validated
 by `.github/actions/bazel-shared-cache`, which fails with the name of any empty
 one. The build-infra repository writes both sides; nothing here is edited by
 hand. `.bazelrc` keeps only what the pool is asked *for* — the common one-CPU,
-2 GiB fallback and explicit per-target resource requests, `--remote_local_fallback=false`, and the download and
+1.5 GiB fallback and explicit per-target resource requests, `--remote_local_fallback=false`, and the download and
 upload policy — and `scripts/test_bazel_test_contract.py` refuses an IP
 address, an instance name, a fingerprint, a certificate path or a home
 directory in `.bazelrc`, under `.github/`, or in `scripts/ci_plan.py`.
@@ -692,7 +696,7 @@ The local `--jobs=16` and CI `--jobs=32` limits count in-flight remote actions,
 not local cores. Resource defaults live in the unconditional `build` section
 of `.bazelrc`, so forks and CI use identical action keys for inherited requests.
 Measured compiles and test runs state their own requests. Aligning CI's previous
-4 CPU/4 GiB fallback with the local 1 CPU/2 GiB fallback changes the keys of
+4 CPU/4 GiB fallback with the local 1 CPU/1.5 GiB fallback changes the keys of
 unannotated CI actions once; those actions can then reuse local results.
 
 `--remote_local_fallback=false`

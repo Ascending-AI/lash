@@ -18,7 +18,7 @@ lash_rust_library(
     crate_features = [],
     crate_name = "lash_sim",
     declared_features = [],
-    exec_properties = {"cpu_count": "3", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "4194304"},
     compile_data_patterns = [
         "provider-scripts/**/*",
     ],
@@ -31,6 +31,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-sim__doc",
     crate = ":lash-sim",
+    exec_properties = {"cpu_count": "2", "memory_kb": "4194304"},
     testonly = True,
 )
 
@@ -41,7 +42,7 @@ lash_rust_unit_test(
     crate_name = "lash_sim",
     crate_root = "src/lib.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "3", "memory_kb": "4194304", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "4194304", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     extra_data = [
         "//:confidence_gate_corpus",
@@ -65,7 +66,7 @@ lash_rust_binary(
     compile_data_patterns = [
         "provider-scripts/**/*",
     ],
-    exec_properties = {"cpu_count": "3", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "4194304"},
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":lash-sim",
@@ -83,7 +84,7 @@ lash_rust_unit_test(
     crate_name = "lash_sim",
     crate_root = "src/main.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "3", "memory_kb": "4194304", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "4194304", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     library = ":lash-sim",
     library_crate_name = "lash_sim",
     manifest_dir = "crates/lash-sim",
@@ -98,7 +99,7 @@ lash_rust_integration_test(
     crate_name = "cross_backend_store_differential",
     crate_root = "tests/cross_backend_store_differential.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -142,7 +143,7 @@ lash_rust_integration_test(
     crate_name = "possession_conservation",
     crate_root = "tests/possession_conservation.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -162,7 +163,7 @@ lash_rust_integration_test(
     crate_name = "process_lifecycle_vocabulary",
     crate_root = "tests/process_lifecycle_vocabulary.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -203,7 +204,7 @@ lash_rust_integration_test(
     crate_name = "schema_congruence",
     crate_root = "tests/schema_congruence.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -266,7 +267,7 @@ lash_rust_integration_test(
     crate_name = "two_opener_differential",
     crate_root = "tests/two_opener_differential.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -284,9 +285,9 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 8,
+    cpu_count = 4,
     jobs = 2,
-    memory_kb = 2097152,
+    memory_kb = 1048576,
     tests = [
         ":lash-sim__bin__unit_test",
         ":logical_turn__test",
@@ -323,7 +324,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lash_sim",
     declared_features = [],
-    exec_properties = {"cpu_count": "3", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "4194304"},
     compile_data_patterns = [
         "provider-scripts/**/*",
     ],

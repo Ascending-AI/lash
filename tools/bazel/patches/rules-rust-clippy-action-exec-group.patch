@@ -1,0 +1,27 @@
+--- a/rust/private/clippy.bzl	2026-09-25 14:39:28.727086955 +0200
++++ b/rust/private/clippy.bzl	2026-09-25 14:39:28.741087050 +0200
+@@ -108,7 +108,7 @@
+     else:
+         return None
+ 
+-def rust_clippy_action(ctx, clippy_executable, crate_info, config, output = None, success_marker = None, cap_at_warnings = False, extra_clippy_flags = [], error_format = None, clippy_diagnostics_file = None, captured_exit_code_file = None):
++def rust_clippy_action(ctx, clippy_executable, crate_info, config, output = None, success_marker = None, cap_at_warnings = False, extra_clippy_flags = [], error_format = None, clippy_diagnostics_file = None, captured_exit_code_file = None, exec_group = None):
+     """Run clippy with the specified parameters.
+ 
+     Args:
+@@ -123,6 +123,7 @@
+         error_format (str): Which error format to use. Must be acceptable by rustc: https://doc.rust-lang.org/beta/rustc/command-line-arguments.html#--error-format-control-how-errors-are-produced
+         clippy_diagnostics_file (File): File to output diagnostics to. If None, no diagnostics will be written
+         captured_exit_code_file (File): File to write clippy's exit code to. If set, the process wrapper exits successfully even when clippy fails.
++        exec_group (str): The exec group the action runs in, or None for the default group. Exec-group-scoped exec_properties of the resolved execution platform apply to it, which is how an aspect action can carry a per-crate resource request.
+ 
+     Returns:
+         None
+@@ -245,6 +246,7 @@
+         mnemonic = "Clippy",
+         progress_message = "Clippy %{label}",
+         toolchain = "@rules_rust//rust:toolchain_type",
++        exec_group = exec_group,
+         execution_requirements = {"supports-path-mapping": ""} if args.supports_path_mapping else None,
+     )
+ 

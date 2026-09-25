@@ -476,7 +476,7 @@ class BazelTestContractTests(unittest.TestCase):
             "build --remote_default_exec_properties=cpu_count=1", bazelrc
         )
         self.assertIn(
-            "build --remote_default_exec_properties=memory_kb=2097152", bazelrc
+            "build --remote_default_exec_properties=memory_kb=1572864", bazelrc
         )
         self.assertIn("build:shared --remote_local_fallback=false", bazelrc)
         action = (ROOT / ".github/actions/bazel-shared-cache/action.yml").read_text()

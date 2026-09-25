@@ -36,6 +36,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-core-worker__doc",
     crate = ":lash-core-worker",
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     testonly = True,
 )
 

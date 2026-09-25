@@ -30,6 +30,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-lashlang-runtime__doc",
     crate = ":lash-lashlang-runtime",
+    exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
     testonly = True,
 )
 
