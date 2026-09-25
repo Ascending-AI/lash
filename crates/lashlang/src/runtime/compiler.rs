@@ -37,9 +37,9 @@ use super::{
     LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
     LASH_TYPE_KEY, Name, Value, as_number, compile_format_template, eval_binary_values,
     eval_javascript_binary, eval_javascript_unary, execute_integer_div_builtin, execute_len_direct,
-    execute_range_builtin, extend_handler_chain_digest, is_comparison_binary_op,
-    is_numeric_binary_op, is_truthy, read_javascript_field_direct, read_javascript_index_direct,
-    transient_name, unwrap_type_value,
+    execute_range_builtin, extend_handler_chain_digest, inline_inherited_builtin,
+    is_comparison_binary_op, is_numeric_binary_op, is_truthy, javascript_to_string,
+    read_javascript_field_direct, read_javascript_index_direct, transient_name, unwrap_type_value,
 };
 
 pub(crate) struct Compiler {

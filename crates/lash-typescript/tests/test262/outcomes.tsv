@@ -9597,7 +9597,7 @@ test/built-ins/String/prototype/includes/String.prototype.includes_FailLocation.
 test/built-ins/String/prototype/includes/String.prototype.includes_FailMissingLetter.js	pass	-
 test/built-ins/String/prototype/includes/String.prototype.includes_Success.js	pass	-
 test/built-ins/String/prototype/includes/String.prototype.includes_SuccessNoLocation.js	pass	-
-test/built-ins/String/prototype/includes/String.prototype.includes_lengthProp.js	fail	FIG-3700
+test/built-ins/String/prototype/includes/String.prototype.includes_lengthProp.js	pass	-
 test/built-ins/String/prototype/includes/coerced-values-of-position.js	pass	-
 test/built-ins/String/prototype/includes/includes.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/String/prototype/includes/length.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED

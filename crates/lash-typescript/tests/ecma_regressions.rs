@@ -2241,3 +2241,126 @@ fn set_like_objects_with_guest_callbacks_stay_a_refusal() {
         Value::String("true|true".into())
     );
 }
+
+/// An advertised method read without a call is its ECMA function object
+/// (FIG-3701). It used to read `undefined`, so `typeof 'x'.includes` was
+/// `"undefined"` and `'word'.includes.length` threw.
+#[test]
+fn builtin_method_reads_are_identity_stable_functions() {
+    for source in [
+        // One function per built-in, whichever receiver it was read from.
+        "finish('a'.includes === 'b'.includes);",
+        "const f = 'x'.includes; const g = 'x'.includes; finish(f === g && Object.is(f, g));",
+        "finish(new Set([1]).keys === new Set().values);",
+        "finish([].hasOwnProperty === ({ a: 1 }).hasOwnProperty);",
+        "finish(new Date(0).getTime === new Date(5).getTime);",
+        "finish(/a/.test === /b/.test);",
+        "finish(new Error('x').toString === new TypeError('y').toString);",
+        // Distinct prototypes carry distinct functions.
+        "finish('a'.includes !== [].includes);",
+        "finish([].toString !== ({}).toString);",
+        "finish(new Map().keys !== new Map().values);",
+        // A variable, a computed and an optional read all find the same one.
+        "const s = 'word'; const k = 'includes'; finish(s[k] === s.includes && s?.includes === s.includes);",
+        "const { includes } = 'abc'; finish(includes === 'x'.includes);",
+        // An own property wins, even one holding `undefined`.
+        "finish(({ includes: 7 }).includes === 7);",
+        "finish(({ toString: undefined }).toString === undefined);",
+        // Identity holds wherever SameValue or SameValueZero asks.
+        "finish(new Set(['x'.includes]).has('y'.includes));",
+        "finish(['x'.includes].indexOf('z'.includes) === 0);",
+        "finish(new Map([['x'.includes, 1]]).get('y'.includes) === 1);",
+        // ECMA's function shape: typeof, own name and length, no enumerable keys.
+        "finish(typeof 'word'.includes === 'function' && typeof [].map === 'function');",
+        "finish('word'.includes.length === 1 && 'word'.includes.name === 'includes');",
+        "finish('x'.slice.length === 2 && 'x'.replace.length === 2 && [].flat.length === 0);",
+        "finish(new Set().keys.name === 'values' && (1).toFixed.length === 1);",
+        "finish(Object.hasOwn('x'.includes, 'length') && Object.hasOwn('x'.includes, 'name'));",
+        "finish(Object.keys('x'.includes).length === 0);",
+        "finish('x'.includes.toString === (() => 1).toString);",
+        // An unadvertised name still reads nothing.
+        "finish('x'.map === undefined);",
+    ] {
+        assert_eq!(finished(source), Value::Bool(true), "{source}");
+    }
+    assert_eq!(
+        finished("finish(String([].map) + '|' + ('x'.includes + ''));"),
+        Value::String(
+            "function map() { [native code] }|function includes() { [native code] }".into()
+        )
+    );
+    assert_eq!(
+        finished("finish(JSON.stringify({ f: 'x'.includes, a: [[].map], n: 1 }));"),
+        Value::String("{\"a\":[null],\"n\":1}".into())
+    );
+}
+
+/// A plain call passes `undefined` as the receiver, and the built-in answers
+/// as node's does: a TypeError, except `Object.prototype.toString`, which
+/// tags `undefined`. Argument steps ECMA orders ahead of the receiver check
+/// run first.
+#[test]
+fn a_detached_builtin_call_answers_as_node_does() {
+    let caught = |call: &str| {
+        finished(&format!(
+            "try {{ {call}; finish('returned'); }} catch (e) {{ finish(e instanceof TypeError ? e.message : 'not a TypeError'); }}"
+        ))
+    };
+    for (call, message) in [
+        (
+            "const f = 'x'.includes; f('x')",
+            "String.prototype.includes called on null or undefined",
+        ),
+        (
+            "const f = 'x'.valueOf; f()",
+            "String.prototype.valueOf requires that 'this' be a String",
+        ),
+        (
+            "const f = (1).toFixed; f(2)",
+            "Number.prototype.toFixed requires that 'this' be a Number",
+        ),
+        (
+            "const f = [].map; f((x: number) => x)",
+            "Array.prototype.map called on null or undefined",
+        ),
+        (
+            "const f = new Map().get; f(1)",
+            "Method Map.prototype.get called on incompatible receiver undefined",
+        ),
+        (
+            "const f = ({}).hasOwnProperty; f('a')",
+            "Cannot convert undefined or null to object",
+        ),
+        (
+            "const f = [].sort; f(1)",
+            "The comparison function must be either a function or undefined: 1",
+        ),
+        (
+            "const f = [].sort; f()",
+            "Cannot convert undefined or null to object",
+        ),
+        (
+            "const f = 'x'.trimEnd; f()",
+            "String.prototype.trimRight called on null or undefined",
+        ),
+        (
+            "const f = new Date(0).getTime; f()",
+            "this is not a Date object.",
+        ),
+    ] {
+        assert_eq!(caught(call), Value::String(message.into()), "{call}");
+    }
+    assert_eq!(
+        finished("const t = ({}).toString; finish(t());"),
+        Value::String("[object Undefined]".into())
+    );
+    // As a callback it is called the same way, once per element.
+    assert_eq!(
+        finished("finish(['a', 'b', 'c'].map(({}).toString).join());"),
+        Value::String("[object Undefined],[object Undefined],[object Undefined]".into())
+    );
+    assert_eq!(
+        caught("['a'].forEach('x'.trim)"),
+        Value::String("String.prototype.trim called on null or undefined".into())
+    );
+}

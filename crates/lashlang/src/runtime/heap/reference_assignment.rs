@@ -209,6 +209,10 @@ impl Heap {
                 "length" => length.take().is_some(),
                 _ => false,
             },
+            // A built-in's own `name` and `length` belong to the one object
+            // every read of it shares, so deleting them stays refused below;
+            // any other key is not its own, and deleting it changes nothing.
+            HeapObject::BuiltinFunction(_) if !matches!(key.as_ref(), "name" | "length") => false,
             object => {
                 return Err(RuntimeError::ValidationFailed {
                     reason: format!(
@@ -560,7 +564,7 @@ impl Heap {
 /// has no slot for one on the object, so the write is refused by name.
 pub(crate) fn unwritable_member(object: &HeapObject, key: &str) -> RuntimeError {
     match object {
-        HeapObject::Closure { .. } => match key {
+        HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) => match key {
             "caller" | "arguments" => restricted_function_property(),
             "name" | "length" => RuntimeError::type_error(format!(
                 "Cannot assign to read only property '{key}' of function"

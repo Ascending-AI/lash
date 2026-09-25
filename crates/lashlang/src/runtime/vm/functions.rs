@@ -354,6 +354,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
             HeapObject::Closure {
                 function, captures, ..
             } => (*function as usize, captures.clone()),
+            HeapObject::BuiltinFunction(function) => {
+                let function = *function;
+                return self.call_detached_builtin(function, &args.into_owned(), return_target);
+            }
             _ => {
                 return Err(RuntimeError::NonFunctionCall {
                     actual: "value".to_string(),
@@ -464,9 +468,28 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.iter_stack = frame.iter_stack;
         self.active_function = frame.function;
         self.ip = frame.return_ip;
-        match frame.return_target {
-            ReturnTarget::Direct => self.stack.push(result),
-            ReturnTarget::Callback(mut callback) => {
+        self.complete_call(result, frame.return_target)
+    }
+
+    /// Hands a call's `result` to whatever started the call: the operand
+    /// stack for a direct call, or the callback driver, which records it and
+    /// starts the next callback. A frame's return and a built-in that answers
+    /// without a frame both finish here, so a built-in used as a callback is
+    /// driven exactly as a closure is.
+    ///
+    /// A built-in callee answers without a frame, so its callbacks are driven
+    /// here in a loop rather than by recursing once per element.
+    pub(super) fn complete_call(
+        &mut self,
+        mut result: Value,
+        mut return_target: ReturnTarget,
+    ) -> Result<(), RuntimeError> {
+        loop {
+            let ReturnTarget::Callback(mut callback) = return_target else {
+                self.stack.push(result);
+                return Ok(());
+            };
+            {
                 if matches!(callback.completion, CallbackCompletion::Collect) {
                     callback.results.push(self.heap.isolate_value(&result)?);
                 }
@@ -499,21 +522,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     // as an explicit `Call` opcode.
                     self.instructions_executed = self.instructions_executed.saturating_add(1);
                     let arguments = callback_arguments(call)?;
-                    self.begin_function_call(
+                    if let Some(builtin) = self.builtin_callee(&function)? {
+                        result = self.detached_builtin_result(builtin, &arguments)?;
+                        return_target = ReturnTarget::Callback(callback);
+                        continue;
+                    }
+                    return self.begin_function_call(
                         function,
                         Value::Undefined,
                         CallArguments::Borrowed(&arguments),
                         ReturnTarget::Callback(callback),
-                    )?;
-                } else {
-                    self.stack.push(match callback.completion {
-                        CallbackCompletion::Collect => Value::List(callback.results.into()),
-                        CallbackCompletion::Discard => Value::Undefined,
-                    });
+                    );
                 }
+                self.stack.push(match callback.completion {
+                    CallbackCompletion::Collect => Value::List(callback.results.into()),
+                    CallbackCompletion::Discard => Value::Undefined,
+                });
+                return Ok(());
             }
         }
-        Ok(())
     }
 
     pub(super) fn begin_callback_driver(

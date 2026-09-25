@@ -12237,6 +12237,25 @@
       ]
     },
     {
+      "name": "builtin-method-value",
+      "create": "const value = 'x'.includes;",
+      "uses": "console.log(typeof value, value.name, value.length, value === 'y'.includes, String(value));",
+      "node": [
+        {
+          "outcome": "normal",
+          "prints": [],
+          "probes": {}
+        },
+        {
+          "outcome": "normal",
+          "prints": [
+            "function includes 1 true function includes() { [native code] }"
+          ],
+          "probes": {}
+        }
+      ]
+    },
+    {
       "name": "object-holding-a-function",
       "create": "const value = { run: () => 1, n: 2 };",
       "uses": "console.log(value.n, typeof value.run);",

@@ -159,6 +159,10 @@ impl Heap {
                 }
             }
             HeapObject::Closure { .. } => out.push_str("function"),
+            HeapObject::BuiltinFunction(function) => {
+                out.push_str("function ");
+                out.push_str(function.name());
+            }
         }
     }
 

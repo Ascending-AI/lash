@@ -19,6 +19,11 @@ pub(super) enum CanonicalHeapObject {
         name: Option<CanonicalValue>,
         length: Option<CanonicalValue>,
     },
+    /// A built-in method value, named by its prototype and ECMA `name`.
+    BuiltinFunction {
+        prototype: String,
+        name: String,
+    },
     RegExp {
         pattern: String,
         flags: String,
@@ -101,6 +106,10 @@ impl CanonicalHeapObject {
                         CanonicalValue::from_runtime(value, &format!("{location}.length"), 0)
                     })
                     .transpose()?,
+            },
+            HeapObject::BuiltinFunction(function) => Self::BuiltinFunction {
+                prototype: function.prototype().name().to_string(),
+                name: function.name().to_string(),
             },
             HeapObject::RegExp(regexp) => Self::RegExp {
                 pattern: regexp.pattern.clone(),
@@ -228,6 +237,17 @@ impl CanonicalHeapObject {
                 name: name.map(CanonicalValue::into_runtime).transpose()?,
                 length: length.map(CanonicalValue::into_runtime).transpose()?,
             },
+            Self::BuiltinFunction { prototype, name } => HeapObject::BuiltinFunction(
+                crate::runtime::heap::BuiltinPrototype::from_name(&prototype)
+                    .and_then(|prototype| {
+                        crate::runtime::heap::BuiltinFunction::named(prototype, &name)
+                    })
+                    .ok_or_else(|| {
+                        SnapshotDecodeError::InvalidEncoding(format!(
+                            "unknown built-in function {prototype}.prototype.{name}"
+                        ))
+                    })?,
+            ),
             Self::RegExp {
                 pattern,
                 flags,

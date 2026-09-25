@@ -8,6 +8,7 @@ use crate::span::Span;
 use crate::{LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection};
 use rustc_hash::FxHashMap;
 
+mod builtin_functions;
 mod continuation;
 mod control;
 mod effects;
@@ -54,21 +55,21 @@ use super::schema::{
 };
 use super::value::ProjectedValue;
 use super::{
-    Chunk, ClosureParameterModel, CompiledProgram, DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, ExecutionHost,
-    ExecutionOutcome, ExecutionScratch, Heap, HeapId, HeapObject, ImageValue, Instruction,
-    InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
-    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name, PersistedRoots,
-    ProfileAccumulator, ProfileReport, ProjectedBindings, RegExpMatchObject, ResourceHandle,
-    RuntimeError, State, Value, add_assign_index_number, add_values, as_number, assign_path,
-    eval_binary_values, eval_compare_values, eval_javascript_binary, eval_javascript_unary,
-    eval_number_binary_values, eval_number_compare_values, eval_number_numeric_binary_value,
-    execute_compiled_format, execute_compiled_format_direct,
+    BuiltinFunction, Chunk, ClosureParameterModel, CompiledProgram,
+    DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap,
+    HeapId, HeapObject, ImageValue, Instruction, InstructionProfileTag, IntrinsicOp,
+    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name,
+    PersistedRoots, ProfileAccumulator, ProfileReport, ProjectedBindings, RegExpMatchObject,
+    ResourceHandle, RuntimeError, State, Value, add_assign_index_number, add_values, as_number,
+    assign_path, eval_binary_values, eval_compare_values, eval_javascript_binary,
+    eval_javascript_unary, eval_number_binary_values, eval_number_compare_values,
+    eval_number_numeric_binary_value, execute_compiled_format, execute_compiled_format_direct,
     execute_compiled_format_one_number_compact_direct, execute_intrinsic,
-    execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values, javascript_join,
-    javascript_split, materialize_projected_async, materialize_value, range_bounds,
-    range_bounds_async, read_javascript_field_direct, read_javascript_heap_field,
-    read_javascript_heap_index, read_javascript_index_direct_with_key, regexp_string,
-    unwrap_tool_result, unwrap_type_value,
+    execute_push_builtin_async, heap_inherited_builtin, inline_inherited_builtin, is_truthy,
+    is_truthy_async, iterable_values, javascript_join, javascript_split,
+    materialize_projected_async, materialize_value, range_bounds, range_bounds_async,
+    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
+    read_javascript_index_direct_with_key, regexp_string, unwrap_tool_result, unwrap_type_value,
 };
 
 #[derive(Clone)]

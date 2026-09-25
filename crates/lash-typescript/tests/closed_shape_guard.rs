@@ -216,3 +216,32 @@ fn an_escaping_field_opens_its_own_object_not_its_holder() {
         "TS_LINK_ERROR: object has no field `typo`; its fields are `a`, `inner`"
     );
 }
+
+/// A closed literal still inherits `Object.prototype`, and `tsc --strict`
+/// types `point.toString` from it, so the guard admits a read of an advertised
+/// inherited method and the read answers the built-in function (FIG-3701).
+/// The guard refused these before: `object has no field \`toString\``.
+#[test]
+fn a_closed_literal_reads_its_inherited_methods() {
+    for (source, expected) in [
+        (
+            "const point = { x: 1 }; finish(typeof point.toString);",
+            "function",
+        ),
+        (
+            "const point = { x: 1 }; finish(String(point.hasOwnProperty === ({}).hasOwnProperty));",
+            "true",
+        ),
+        (
+            "const point = { x: 1 }; finish(point.valueOf.name);",
+            "valueOf",
+        ),
+    ] {
+        assert_eq!(run(source), Ok(expected.to_string()), "{source}");
+    }
+    // A name no prototype carries is still the literal's missing field.
+    assert!(
+        refusal("const point = { x: 1 }; finish(point.includes);")
+            .contains("object has no field `includes`"),
+    );
+}

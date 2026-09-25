@@ -45,6 +45,12 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// v20 (FIG-3655): a function expression's canonical identity carries its
 /// inferred ECMA `name`, so two programs identical but for a naming context
 /// hash differently — exactly what the observable `f.name` difference means.
+///
+/// v21 (FIG-3700, FIG-3701): a function expression's receiver slot joins its
+/// canonical identity, and a member read of an advertised method
+/// (`x.includes`) means the built-in function object where it meant
+/// `undefined`, so an unchanged artifact that reads one no longer means what
+/// it did.
 pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v21";
 
 pub use attachment::{

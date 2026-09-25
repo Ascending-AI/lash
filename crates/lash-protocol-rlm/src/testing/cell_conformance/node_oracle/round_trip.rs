@@ -220,6 +220,18 @@ pub(super) const ROWS: &[Row] = &[
         ),
         Pin::RefusedWhenStored("TS_FUNCTION_NOT_PERSISTED"),
     ),
+    // A built-in method read as a value is a function like any other: one
+    // object per built-in within its cell, and gone at the cell boundary
+    // (FIG-3701).
+    pinned(
+        row(
+            "built-in function",
+            "builtin-method-value",
+            "const value = 'x'.includes;",
+            "console.log(typeof value, value.name, value.length, value === 'y'.includes, String(value));",
+        ),
+        Pin::RefusedWhenStored("TS_FUNCTION_NOT_PERSISTED"),
+    ),
     pinned(
         row(
             "record",

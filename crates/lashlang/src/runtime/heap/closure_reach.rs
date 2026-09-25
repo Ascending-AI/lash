@@ -5,10 +5,15 @@
 // state boundary asks this of every runtime root before it installs an
 // execution's result, and the answer is a property of the whole graph rather
 // than of any one object, so it is computed here for the heap at once.
+//
+// A built-in method read as a value (`'x'.includes`) names no compiled
+// function, but it is a function all the same, and the dialect's rule is about
+// functions: none survives a cell boundary (TS_FUNCTION_NOT_PERSISTED). It is
+// reached here exactly as a closure is (FIG-3701).
 
 use rustc_hash::FxHashSet;
 
-use super::{Heap, HeapId, HeapObject, Value};
+use super::{Heap, HeapId, Value};
 
 impl Heap {
     /// Which objects a closure is reachable from, closures themselves included.
@@ -23,7 +28,7 @@ impl Heap {
         let mut reached = FxHashSet::default();
         let mut pending = Vec::new();
         for (id, object) in self.objects_in_id_order() {
-            if matches!(object, HeapObject::Closure { .. }) {
+            if object.is_function() {
                 reached.insert(id);
                 pending.push(id);
             }

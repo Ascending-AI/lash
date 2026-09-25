@@ -24,9 +24,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
         field: &Name,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
-            return read_javascript_heap_field(&self.heap, id, field);
+            let value = read_javascript_heap_field(&self.heap, id, field)?;
+            return self.or_inherited_builtin(value, &target, &field.text);
         }
-        read_javascript_field_direct(target, field)
+        let inherited = inline_inherited_builtin(&target, &field.text);
+        let value = read_javascript_field_direct(target, field)?;
+        self.or_builtin(value, inherited)
     }
 
     pub(super) fn read_dialect_index(
@@ -35,7 +38,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
         index: Value,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
-            return read_javascript_heap_index(&self.heap, id, &index);
+            let value = read_javascript_heap_index(&self.heap, id, &index)?;
+            if !matches!(value, Value::Undefined) {
+                return Ok(value);
+            }
+            let key = self.heap.javascript_to_string(&index)?;
+            return self.or_inherited_builtin(value, &target, &key);
         }
         // A `null` or `undefined` base throws before its key is converted, so
         // an object key's own `toString` never runs.
@@ -43,7 +51,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Err(nullish_property_read(&target, &index));
         }
         let key = self.heap.javascript_to_string(&index)?;
-        read_javascript_index_direct_with_key(target, &key)
+        let inherited = inline_inherited_builtin(&target, &key);
+        let value = read_javascript_index_direct_with_key(target, &key)?;
+        self.or_builtin(value, inherited)
     }
 
     pub(super) async fn iterable_values_for_dialect(
@@ -334,6 +344,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.stack.push(Value::List(result.into()));
             return Ok(());
         }
+        if self.object_is_by_reference(&values) {
+            return Ok(());
+        }
         if let [Value::String(method), Value::Ref(receiver), key] = values.as_slice()
             && method.as_str() == "Object.hasOwn"
         {
@@ -362,6 +375,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     "length" => length.is_some(),
                     _ => false,
                 },
+                // A built-in function's own properties are its `name` and
+                // `length`; its methods are `Function.prototype`'s.
+                HeapObject::BuiltinFunction(_) => matches!(key.as_str(), "name" | "length"),
                 _ => false,
             };
             self.stack.push(Value::Bool(has));
