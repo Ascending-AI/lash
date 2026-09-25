@@ -527,11 +527,11 @@ pub async fn run_lashlang_process(
         context.incarnation(),
     ));
     let session_id = process_trace_session_id(&context.registration().provenance.originator);
-    let restate_invocation_id = context
+    let engine_execution_id = context
         .execution_context()
         .execution_write_authority
         .as_ref()
-        .and_then(|authority| authority.restate_invocation_id(&process_id))
+        .and_then(|authority| authority.engine_execution_id(&process_id))
         .map(str::to_string);
     let attempt = context
         .execution_context()
@@ -551,7 +551,7 @@ pub async fn run_lashlang_process(
             process_name: input.process_name.clone(),
             attempt,
             incarnation: context.incarnation(),
-            restate_invocation_id,
+            engine_execution_id,
         },
     );
     lashlang_execution_trace.execution_map =
@@ -1451,7 +1451,7 @@ struct LashlangProcessExecutionTrace {
     process_name: String,
     attempt: u32,
     incarnation: lash_core::ProcessIncarnation,
-    restate_invocation_id: Option<String>,
+    engine_execution_id: Option<String>,
     resource_call_ids: Arc<std::sync::Mutex<BTreeMap<(String, u64), String>>>,
     pending_resource_starts:
         Arc<std::sync::Mutex<BTreeMap<(String, u64), lashlang::LashlangExecutionSite>>>,
@@ -1472,7 +1472,7 @@ struct LashlangProcessTraceIdentity {
     process_name: String,
     attempt: u32,
     incarnation: lash_core::ProcessIncarnation,
-    restate_invocation_id: Option<String>,
+    engine_execution_id: Option<String>,
 }
 
 #[path = "process/execution_trace.rs"]

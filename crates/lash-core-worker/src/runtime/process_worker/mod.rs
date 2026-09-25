@@ -555,7 +555,7 @@ impl DurableProcessWorker {
                 execution_id,
                 ..
             } => (
-                crate::LeaseOwnerIdentity::restate_process_execution(process_id, execution_id),
+                crate::LeaseOwnerIdentity::engine_process_execution(process_id, execution_id),
                 0,
             ),
         };

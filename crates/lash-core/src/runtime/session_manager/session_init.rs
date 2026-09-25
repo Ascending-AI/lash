@@ -1330,7 +1330,7 @@ mod tests {
             .turn_context(input.turn_context)
             .build()
             .into_runtime()
-            .restate_invocation_id(),
+            .engine_execution_id(),
             Some("invocation:subagent:call")
         );
     }

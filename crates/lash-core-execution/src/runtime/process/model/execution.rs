@@ -132,7 +132,7 @@ impl ProcessExecutionWriteAuthority {
                 attempt: Some(attempt),
                 ..
             } => Some(ProcessStarted {
-                owner: crate::LeaseOwnerIdentity::restate_process_execution(
+                owner: crate::LeaseOwnerIdentity::engine_process_execution(
                     process_id,
                     execution_id.clone(),
                 ),
@@ -145,9 +145,9 @@ impl ProcessExecutionWriteAuthority {
         }
     }
 
-    /// Returns the durable-substrate invocation ID only after this authority
+    /// Returns the engine execution ID only after this authority
     /// is bound to the named process and one execution attempt.
-    pub fn restate_invocation_id(&self, process_id: &ProcessId) -> Option<&str> {
+    pub fn engine_execution_id(&self, process_id: &ProcessId) -> Option<&str> {
         match self {
             Self::Invocation {
                 process_id: authority_process_id,
@@ -213,10 +213,8 @@ impl ProcessExecutionWriteAuthority {
         else {
             return;
         };
-        let presented_owner = crate::LeaseOwnerIdentity::restate_process_execution(
-            authority_process_id,
-            execution_id,
-        );
+        let presented_owner =
+            crate::LeaseOwnerIdentity::engine_process_execution(authority_process_id, execution_id);
         tracing::warn!(
             process_id = process_id.as_str(),
             presented_process_id = authority_process_id.as_str(),

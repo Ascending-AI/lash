@@ -74,7 +74,7 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
         entry_kind: "main".to_string(),
         entry_ref: None,
         entry_name: "main".to_string(),
-        restate_invocation_id: None,
+        engine_execution_id: None,
         generation: None,
     };
     let observer_store = Arc::clone(&store);
@@ -195,7 +195,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
         entry_kind: "main".to_string(),
         entry_ref: None,
         entry_name: "main".to_string(),
-        restate_invocation_id: None,
+        engine_execution_id: None,
         generation: None,
     };
     let payloads = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -362,7 +362,7 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         entry_kind: "main".to_string(),
         entry_ref: None,
         entry_name: "main".to_string(),
-        restate_invocation_id: None,
+        engine_execution_id: None,
         generation: None,
     };
     let record = |payload: TraceLanguageExecutionPayload| {

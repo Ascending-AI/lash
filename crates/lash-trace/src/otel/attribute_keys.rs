@@ -98,8 +98,8 @@ pub(super) const LASH_LANGUAGE_EXECUTION_INCARNATION: &str = "lash.language_exec
 pub(super) const LASH_LANGUAGE_EXECUTION_PARENT_NODE_ID: &str =
     "lash.language_execution.parent_node_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_PROCESS_ID: &str = "lash.language_execution.process_id";
-pub(super) const LASH_LANGUAGE_EXECUTION_RESTATE_INVOCATION_ID: &str =
-    "lash.language_execution.restate_invocation_id";
+pub(super) const LASH_LANGUAGE_EXECUTION_ENGINE_EXECUTION_ID: &str =
+    "lash.language_execution.engine_execution_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_SESSION_ID: &str = "lash.language_execution.session_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_SOURCE_IDENTITY: &str =
     "lash.language_execution.source_identity";

@@ -1024,7 +1024,7 @@ fn foreground_lashlang_execution_trace(
             entry_kind: "main".to_string(),
             entry_ref: None,
             entry_name: "main".to_string(),
-            restate_invocation_id: ctx.restate_invocation_id().map(str::to_string),
+            engine_execution_id: ctx.engine_execution_id().map(str::to_string),
             generation,
         },
     ))

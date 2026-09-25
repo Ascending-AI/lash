@@ -29,7 +29,7 @@ fn wait_facts_export_closed_otel_attributes() {
         entry_kind: "process".to_string(),
         entry_ref: None,
         entry_name: "main".to_string(),
-        restate_invocation_id: None,
+        engine_execution_id: None,
         generation: None,
     };
     let record = |payload| {
@@ -89,7 +89,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
         entry_kind: "process".to_string(),
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
-        restate_invocation_id: Some("invocation-1".to_string()),
+        engine_execution_id: Some("invocation-1".to_string()),
         generation: Some(crate::TraceLanguageExecutionGeneration::new(2, 3)),
     };
     let language_record = TraceRecord::new(
@@ -117,7 +117,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
     assert_eq!(
         attribute_value(
             &language_attrs,
-            "lash.language_execution.restate_invocation_id"
+            "lash.language_execution.engine_execution_id"
         ),
         &OtelValue::String("invocation-1".into())
     );
@@ -177,7 +177,7 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
         entry_kind: "process".into(),
         entry_ref: None,
         entry_name: "main".into(),
-        restate_invocation_id: None,
+        engine_execution_id: None,
         generation: Some(crate::TraceLanguageExecutionGeneration::new(2, 4)),
     };
     let record = |failure| {
@@ -591,7 +591,7 @@ fn failed_language_execution_yields_error_span() {
         entry_kind: "process".to_string(),
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
-        restate_invocation_id: None,
+        engine_execution_id: None,
         generation: None,
     };
 

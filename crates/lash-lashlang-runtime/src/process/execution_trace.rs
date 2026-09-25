@@ -17,7 +17,7 @@ impl LashlangProcessExecutionTrace {
             process_name: identity.process_name,
             attempt: identity.attempt,
             incarnation: identity.incarnation,
-            restate_invocation_id: identity.restate_invocation_id,
+            engine_execution_id: identity.engine_execution_id,
             resource_call_ids: Arc::default(),
             pending_resource_starts: Arc::default(),
             active_nodes: Arc::default(),
@@ -46,7 +46,7 @@ impl LashlangProcessExecutionTrace {
             entry_kind: "process".to_string(),
             entry_ref: Some(lashlang::process_ref_key(&self.process_ref)),
             entry_name: self.process_name.clone(),
-            restate_invocation_id: self.restate_invocation_id.clone(),
+            engine_execution_id: self.engine_execution_id.clone(),
             generation: Some(lash_trace::TraceLanguageExecutionGeneration::new(
                 self.attempt,
                 self.incarnation.registration_sequence(),

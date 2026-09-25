@@ -59,7 +59,7 @@ fn record(process_id: &str, incarnation: u64, attempt: u32, occurrence: u64) -> 
                     entry_kind: "main".to_string(),
                     entry_ref: None,
                     entry_name: "main".to_string(),
-                    restate_invocation_id: None,
+                    engine_execution_id: None,
                     generation: Some(TraceLanguageExecutionGeneration::new(attempt, incarnation)),
                 },
                 payload,

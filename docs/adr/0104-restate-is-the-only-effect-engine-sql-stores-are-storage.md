@@ -168,21 +168,15 @@ The rules:
 
 **Known violations at origin/main `b4e1318cc`.** Each is a defect against this
 section. FIG-3670 removes them: it renames the `restate_*` identifiers to
-engine-neutral opaque ids, moves the Restate error and format vocabulary below
-`lash-restate` (with the B5 error-code rename), and makes the substrate boundary
-gate refuse new ones. None may be added.
+engine-neutral opaque ids (landed: `RuntimeExecutionContext::engine_execution_id`,
+`ProcessExecutionWriteAuthority::engine_execution_id`,
+`LeaseOwnerIdentity::engine_process_execution` and
+`engine_process_execution_id`, and the `engine_execution_id` field of
+lash-trace's language-execution identity with its OpenTelemetry attribute
+`lash.language_execution.engine_execution_id`), moves the Restate error and
+format vocabulary below `lash-restate` (with the B5 error-code rename), and
+makes the substrate boundary gate refuse new ones. None may be added.
 
-- `RuntimeExecutionContext::restate_invocation_id` and
-  `ProcessExecutionWriteAuthority::restate_invocation_id` in
-  `lash-core-execution`, read by `lash-core` (`turn_loop/accept.rs`,
-  `session_manager/session_init.rs`), `lash-protocol-rlm` and
-  `lash-lashlang-runtime`.
-- `LeaseOwnerIdentity::restate_process_execution` and
-  `restate_process_execution_id` in `lash-core-store`, re-exported by the facade
-  as `lash::persistence::LeaseOwnerIdentity`.
-- The `restate_invocation_id` field of `lash-trace`'s language-execution identity
-  and its OpenTelemetry attribute
-  `lash.language_execution.restate_invocation_id`.
 - The Restate error vocabulary of `RuntimeErrorCode` in `lash-core-store`
   (`RestateAwaitEvent*`, `RestateEffectController`,
   `RestateEffectHostRequiresHandlerScope`, `RestateJournaledEffectPoisoned`;

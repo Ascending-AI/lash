@@ -378,10 +378,10 @@ fn processes_area_witnesses() {
             lash::observe::SessionProcessEventKind::Started { .. }
         )
     });
-    // W0094: lash::persistence::LeaseOwnerIdentity::restate_process_execution [function]
-    let _ = lash::persistence::LeaseOwnerIdentity::restate_process_execution(todo!(), "exec");
-    // W0095: lash::persistence::LeaseOwnerIdentity::restate_process_execution_id [function]
-    let _ = lash::persistence::LeaseOwnerIdentity::restate_process_execution_id;
+    // W0094: lash::persistence::LeaseOwnerIdentity::engine_process_execution [function]
+    let _ = lash::persistence::LeaseOwnerIdentity::engine_process_execution(todo!(), "exec");
+    // W0095: lash::persistence::LeaseOwnerIdentity::engine_process_execution_id [function]
+    let _ = lash::persistence::LeaseOwnerIdentity::engine_process_execution_id;
     // W0096: lash::persistence::ProcessExecutionEnvStore [trait]
     fn trait_witness_0096<T: lash::persistence::ProcessExecutionEnvStore>() {}
     // W0097: lash::persistence::ProcessExecutionEnvStore::get_process_execution_env [function]

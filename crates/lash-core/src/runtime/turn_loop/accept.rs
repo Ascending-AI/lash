@@ -754,7 +754,7 @@ mod process_invocation_correlation_tests {
         .turn_context(input.turn_context.clone())
         .build()
         .into_runtime()
-        .restate_invocation_id()
+        .engine_execution_id()
         .map(str::to_owned)
     }
 

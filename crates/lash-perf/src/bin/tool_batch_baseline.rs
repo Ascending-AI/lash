@@ -562,7 +562,7 @@ async fn restate_deployment(
 }
 
 /// The invocation id a workflow key produced, for the journal count.
-async fn restate_invocation_id(
+async fn engine_execution_id(
     admin: &lash_restate::RestateAdminClient,
     workflow_key: &str,
 ) -> anyhow::Result<String> {
@@ -711,7 +711,7 @@ async fn run_restate(
                 .await
                 .map_err(|_| anyhow::anyhow!("probe call for `{session}` timed out"))?
                 .map_err(|error| anyhow::anyhow!("probe call for `{session}` failed: {error}"))?;
-                let invocation_id = restate_invocation_id(&admin, &session).await?;
+                let invocation_id = engine_execution_id(&admin, &session).await?;
                 let journal_rows = restate_journal_rows(&admin, &invocation_id).await?;
                 let measurement = lash_conformance::ToolBatchMeasurement {
                     width,

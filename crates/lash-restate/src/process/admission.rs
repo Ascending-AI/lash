@@ -328,7 +328,7 @@ async fn start_root_segment(
         // writer that can have recorded a start since the verdict is this
         // execution's own earlier try of this step.
         return Ok(
-            if existing.owner.restate_process_execution_id(process_id) == Some(nonce.as_str()) {
+            if existing.owner.engine_process_execution_id(process_id) == Some(nonce.as_str()) {
                 StartOutcome::Started {
                     execution_id: nonce,
                 }
@@ -380,7 +380,7 @@ async fn start_later_segment(
     let root = retained_start(&record, segment_ordinal)?;
     let execution_id = root
         .owner
-        .restate_process_execution_id(process_id)
+        .engine_process_execution_id(process_id)
         .ok_or_else(|| {
             HandlerError::from(TerminalError::new(format!(
                 "process `{process_id}` segment {segment_ordinal} retained a non-Restate execution owner"

@@ -150,7 +150,9 @@ pub use lashlang_graph::{
 /// result per call, instead of a string beside loose attachment blocks.
 /// Version 34 (FIG-3571) keys language observations by carrier IR node ids:
 /// the same source traces under different node ids than version 33.
-pub const TRACE_SCHEMA_VERSION: u32 = 34;
+/// Version 35 (FIG-3670) renames the language-execution identity's engine
+/// invocation field to `engine_execution_id`: the kernel names no engine.
+pub const TRACE_SCHEMA_VERSION: u32 = 35;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1545,7 +1547,7 @@ pub struct TraceLanguageExecutionIdentity {
     pub entry_ref: Option<String>,
     pub entry_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub restate_invocation_id: Option<String>,
+    pub engine_execution_id: Option<String>,
     /// Store-minted process lifetime and one-based durable attempt. Absent
     /// only for a foreground effect execution that is not process-admitted.
     #[serde(flatten)]
@@ -1561,7 +1563,7 @@ struct TraceLanguageExecutionIdentityWire {
     entry_kind: String,
     entry_ref: Option<String>,
     entry_name: String,
-    restate_invocation_id: Option<String>,
+    engine_execution_id: Option<String>,
     attempt: Option<u32>,
     incarnation: Option<u64>,
 }
@@ -1585,7 +1587,7 @@ impl<'de> Deserialize<'de> for TraceLanguageExecutionIdentity {
             entry_kind: wire.entry_kind,
             entry_ref: wire.entry_ref,
             entry_name: wire.entry_name,
-            restate_invocation_id: wire.restate_invocation_id,
+            engine_execution_id: wire.engine_execution_id,
             generation: match (wire.attempt, wire.incarnation) {
                 (Some(attempt), Some(incarnation)) => {
                     Some(TraceLanguageExecutionGeneration::new(attempt, incarnation))
