@@ -151,6 +151,7 @@ pub(super) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
 
 mod bindings;
 mod determinism;
+mod drive_laws_on_the_double;
 mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
 mod effect_group_session_gate;

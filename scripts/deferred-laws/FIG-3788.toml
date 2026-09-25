@@ -8,8 +8,8 @@
 # no other row may carry either field.
 
 [[deferred]]
-file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
-claimant = "lash_restate::tests::conformance_and_poison::on_the_server_double"
+file = "crates/lash-restate/src/tests/drive_laws_on_the_double.rs"
+claimant = "lash_restate::tests::drive_laws_on_the_double"
 suite = "frame_switch_redrive_tests"
 recipe = "parked"
 ticket = "FIG-3788"
