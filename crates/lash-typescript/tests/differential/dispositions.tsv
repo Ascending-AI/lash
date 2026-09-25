@@ -72,3 +72,8 @@
 "typeof new Number(1)"	reject	TS_NEW_UNSUPPORTED
 "(() => { try { return new Number(1).toFixed(101); } catch (e) { return e instanceof RangeError; } })()"	reject	TS_NEW_UNSUPPORTED
 "({}).constructor === Object"	accept-unlinked	TS_LINK_ERROR
+# FIG-3722: strict mode makes `eval` and `arguments` unusable as assignment
+# targets (ECMA-262 §13.15.2 early error) — the compiler answers SyntaxError
+# where sloppy Node would quietly write the name.
+"(() => { eval = 1; return eval; })()"	reject	TS_SYNTAX_ERROR
+"(() => { ({ x: arguments } = { x: 1 }); return arguments; })()"	reject	TS_SYNTAX_ERROR

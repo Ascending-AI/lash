@@ -9,6 +9,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lashlang::is_javascript_builtin_global;
+
 use super::captures::{BindingId, SlotKey};
 use super::{
     BinaryOp, CallArg, Expr, Function, FunctionBody, MemberProperty, Pattern, Stmt, TsAssignTarget,
@@ -553,6 +555,243 @@ fn global_this_accesses(statements: &[Stmt], writes_only: bool) -> BTreeSet<Stri
     for statement in statements {
         for expression in statement.child_expressions() {
             visit(expression, writes_only, &mut names);
+        }
+    }
+    names
+}
+
+/// Every advertised built-in global the program writes as a bare name, at
+/// any depth — `Object = x`, `Math += y`, `Number++`, `for (JSON of xs)`,
+/// `{ n: Number } = now`, `[Map] = ms`. The entry point binds each as a
+/// session slot ahead of lowering, seeded with the built-in object the name
+/// answered before any write, so the write has ECMA's global property to
+/// land on.
+pub(super) fn builtin_global_writes(statements: &[Stmt]) -> BTreeSet<String> {
+    // `eval` reads as a built-in like the others, but strict code may never
+    // write it: the target check reports the early SyntaxError, so no slot
+    // may stand ready to take one.
+    fn assignable(name: &str) -> bool {
+        is_javascript_builtin_global(name) && name != "eval"
+    }
+    fn collect_pattern_names(pattern: &Pattern, names: &mut BTreeSet<String>) {
+        let mut declared = Vec::new();
+        pattern_names(pattern, &mut declared);
+        names.extend(declared.into_iter().filter(|name| assignable(name)));
+    }
+    fn collect_target(target: &TsAssignTarget, names: &mut BTreeSet<String>) {
+        match target {
+            TsAssignTarget::Ident(name) | TsAssignTarget::ParenIdent(name) if assignable(name) => {
+                names.insert(name.clone());
+            }
+            TsAssignTarget::Pattern(pattern) => collect_pattern_names(pattern, names),
+            _ => {}
+        }
+    }
+    fn visit_expression(expression: &Expr, names: &mut BTreeSet<String>) {
+        match expression {
+            Expr::Assign { target, .. } | Expr::Update { target, .. } => {
+                collect_target(target, names);
+            }
+            // A nested function's body needs the statement walk, not the
+            // flattened expression stream, or a loop target inside it is
+            // missed.
+            Expr::Function(function) => {
+                for parameter in &function.params {
+                    for expression in parameter.child_expressions() {
+                        visit_expression(expression, names);
+                    }
+                }
+                match &function.body {
+                    FunctionBody::Block(statements) => {
+                        for statement in statements {
+                            visit_statement(statement, names);
+                        }
+                    }
+                    FunctionBody::Expression(expression) => {
+                        visit_expression(expression, names);
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
+        for child in expression.children() {
+            visit_expression(child, names);
+        }
+    }
+    fn visit_statement(statement: &Stmt, names: &mut BTreeSet<String>) {
+        match statement {
+            Stmt::Spanned(_, statement)
+            | Stmt::Labeled {
+                stmt: statement, ..
+            } => visit_statement(statement, names),
+            Stmt::Expr(expression) | Stmt::Throw(expression) => visit_expression(expression, names),
+            Stmt::Return(expression) => {
+                if let Some(expression) = expression {
+                    visit_expression(expression, names);
+                }
+            }
+            Stmt::Block(statements) => {
+                statements
+                    .iter()
+                    .for_each(|statement| visit_statement(statement, names));
+            }
+            Stmt::Var { declarations, .. } => {
+                for declaration in declarations {
+                    if let Some(initializer) = &declaration.init {
+                        visit_expression(initializer, names);
+                    }
+                    for expression in declaration.pattern.child_expressions() {
+                        visit_expression(expression, names);
+                    }
+                }
+            }
+            Stmt::Enum { members, .. } => {
+                members
+                    .iter()
+                    .for_each(|member| visit_expression(&member.value, names));
+            }
+            Stmt::If {
+                test,
+                consequent,
+                alternate,
+            } => {
+                visit_expression(test, names);
+                visit_statement(consequent, names);
+                if let Some(alternate) = alternate {
+                    visit_statement(alternate, names);
+                }
+            }
+            Stmt::While { test, body } => {
+                visit_expression(test, names);
+                visit_statement(body, names);
+            }
+            Stmt::DoWhile { body, test, .. } => {
+                visit_statement(body, names);
+                visit_expression(test, names);
+            }
+            Stmt::For {
+                init,
+                test,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    visit_statement(init, names);
+                }
+                if let Some(test) = test {
+                    visit_expression(test, names);
+                }
+                if let Some(update) = update {
+                    visit_expression(update, names);
+                }
+                visit_statement(body, names);
+            }
+            // A declaration-free loop target is an assignment: `for (Object
+            // of xs)` writes the global property each iteration, where `for
+            // (let Object of xs)` declares a shadow.
+            Stmt::ForOf {
+                pattern,
+                iterable,
+                body,
+                kind,
+            }
+            | Stmt::ForIn {
+                pattern,
+                object: iterable,
+                body,
+                kind,
+            } => {
+                if kind.is_none() {
+                    collect_pattern_names(pattern, names);
+                }
+                for expression in pattern.child_expressions() {
+                    visit_expression(expression, names);
+                }
+                visit_expression(iterable, names);
+                visit_statement(body, names);
+            }
+            Stmt::Switch {
+                discriminant,
+                cases,
+            } => {
+                visit_expression(discriminant, names);
+                for case in cases {
+                    if let Some(test) = &case.test {
+                        visit_expression(test, names);
+                    }
+                    for statement in &case.consequent {
+                        visit_statement(statement, names);
+                    }
+                }
+            }
+            Stmt::Try {
+                body,
+                catch,
+                finally,
+            } => {
+                for statement in body {
+                    visit_statement(statement, names);
+                }
+                if let Some(catch) = catch {
+                    // The catch binding declares, it does not assign.
+                    for expression in catch.binding.iter().flat_map(Pattern::child_expressions) {
+                        visit_expression(expression, names);
+                    }
+                    for statement in &catch.body {
+                        visit_statement(statement, names);
+                    }
+                }
+                for statement in finally.iter().flatten() {
+                    visit_statement(statement, names);
+                }
+            }
+            Stmt::Function { function, .. } => {
+                for parameter in &function.params {
+                    for expression in parameter.child_expressions() {
+                        visit_expression(expression, names);
+                    }
+                }
+                match &function.body {
+                    FunctionBody::Block(statements) => {
+                        for statement in statements {
+                            visit_statement(statement, names);
+                        }
+                    }
+                    FunctionBody::Expression(expression) => {
+                        visit_expression(expression, names);
+                    }
+                }
+            }
+            Stmt::Empty | Stmt::Break | Stmt::Continue => {}
+        }
+    }
+    let mut names = BTreeSet::new();
+    for statement in statements {
+        visit_statement(statement, &mut names);
+    }
+    names
+}
+
+/// The names the program's root statements declare lexically — a `let`,
+/// `const`, `function` or `enum` at the cell's top level. One shadows the
+/// global property of the same name, so no other binding may take it. A
+/// `var` is deliberately absent: it is the global property itself.
+pub(super) fn root_declaration_names(statements: &[Stmt]) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for statement in statements {
+        match statement.unlabeled() {
+            Stmt::Var { kind, declarations } if !matches!(kind, VarKind::Var) => {
+                for declaration in declarations {
+                    let mut declared = Vec::new();
+                    pattern_names(&declaration.pattern, &mut declared);
+                    names.extend(declared);
+                }
+            }
+            Stmt::Function { name, .. } | Stmt::Enum { name, .. } => {
+                names.insert(name.clone());
+            }
+            _ => {}
         }
     }
     names

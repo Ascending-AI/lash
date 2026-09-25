@@ -265,6 +265,10 @@ impl Lowerer {
         };
         match self.classify_callee(callee) {
             CalleeFamily::UnboundGlobal(name) => {
+                // A boundary dropped the name for holding a function: a
+                // call of it is refused by name before the built-in folds
+                // can answer.
+                self.refuse_expired_global_read(name)?;
                 // A bare `Date(...)` call ignores its arguments and answers
                 // the current date-time string; like `Date.now()` it reads
                 // the journaled clock.
@@ -654,6 +658,12 @@ impl Lowerer {
         method: &str,
         args: &[Expr],
     ) -> Result<LashExpr, Diagnostic> {
+        // A boundary dropped an unbound name for holding a function: a
+        // method call on it is refused by name before the built-in surface
+        // fast paths can answer.
+        if let Expr::Ident(name, _) = object {
+            self.refuse_expired_global_read(name)?;
+        }
         if matches!(object, Expr::Ident(name, _) if name == "crypto")
             && method == "randomUUID"
             && !self.has_binding("crypto")

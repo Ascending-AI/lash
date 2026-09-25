@@ -220,7 +220,7 @@ impl Lowerer {
 
     /// Refuses a `globalThis` read of a function the session dropped, unless
     /// this program writes the name itself.
-    fn refuse_expired_global_read(&self, name: &str) -> Result<(), Diagnostic> {
+    pub(super) fn refuse_expired_global_read(&self, name: &str) -> Result<(), Diagnostic> {
         if self.expired_functions.contains(name)
             && !self.global_this_writes.contains(name)
             && !self.has_binding(name)
@@ -1211,6 +1211,10 @@ impl Lowerer {
             Expr::Ident(name, _)
                 if !self.has_binding(name) && is_javascript_builtin_global(name) =>
             {
+                // A boundary dropped the name for holding a function: the
+                // read is refused by name, as `globalThis.name` is, not
+                // answered with a fresh built-in.
+                self.refuse_expired_global_read(name)?;
                 Self::stdlib_call("Lash.Builtin", vec![LashExpr::String(name.as_str().into())])
             }
             Expr::Ident(name, _) if name == "globalThis" && !self.has_binding(name) => {
@@ -1247,7 +1251,10 @@ impl Lowerer {
             Expr::Assign { target, op, value } => {
                 match self.builtin_constant_write(target, value)? {
                     Some(write) => write,
-                    None => self.lower_assignment(target, *op, value)?,
+                    None => match self.builtin_global_constant_write(target, value)? {
+                        Some(write) => write,
+                        None => self.lower_assignment(target, *op, value)?,
+                    },
                 }
             }
             Expr::Member {

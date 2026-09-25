@@ -234,6 +234,30 @@ const PROBES: &[Probe] = &[
             "finish(typeof has);",
         ],
     ),
+    // A session global a bare write bound to a callable built-in is a
+    // function at the boundary too (FIG-3722): a later cell is refused the
+    // name on a bare read, on `typeof`, and on a member call.
+    session_probe(
+        17,
+        "TS_FUNCTION_NOT_PERSISTED",
+        &["Object = Object; finish(typeof Object);", "finish(Object);"],
+    ),
+    session_probe(
+        17,
+        "TS_FUNCTION_NOT_PERSISTED",
+        &[
+            "Object = Object; finish(typeof Object);",
+            "finish(typeof Object);",
+        ],
+    ),
+    session_probe(
+        17,
+        "TS_FUNCTION_NOT_PERSISTED",
+        &[
+            "Object = Object; finish(typeof Object);",
+            "finish(Object.getOwnPropertyNames({}).length);",
+        ],
+    ),
     // A function has no primitive the runtime keeps (FIG-3652).
     readme_probe("TS_FUNCTION_STRING_COERCION", "finish('' + (() => 1));"),
     // 23. A classic-loop `continue` across a `finally`.

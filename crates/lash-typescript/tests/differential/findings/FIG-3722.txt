@@ -1,0 +1,21 @@
+JSON === JSON
+Object.is(Math, Math)
+Math.max === Math.max
+[].constructor === Array
+Array.isArray(Math)
+typeof Object === 'function' && typeof Math === 'object'
+(() => { const o = JSON; return o === JSON && Object.is(o, JSON); })()
+(() => { const keep = Object; Object = 12; const read = Object === 12 && typeof Object === 'number'; Object = keep; return read && Object === keep; })()
+(() => { const keep = Object; Object = 8; const read = globalThis.Object === 8; Object = keep; return read; })()
+(() => { const keep = Object; const read = () => Object; Object = 5; const r = read() === 5; Object = keep; return r; })()
+(() => { const keep = Number; const w = (v) => { Number = v; }; w(7); const read = Number === 7; Number = keep; return read && typeof Number === 'function'; })()
+(() => { Object ??= 9; return typeof Object === 'function' && Array.isArray([]); })()
+(() => { const keep = Number; ({ n: Number } = { n: 9 }); const r = Number === 9; Number = keep; return r; })()
+(() => { const keep = Map; for (Map of [4]) {} const r = Map === 4; Map = keep; return r; })()
+(() => { const keep = Set; [Set] = [6]; const r = Set === 6; Set = keep; return r; })()
+(() => { const keep = Object; Object = 9; const r = 'Object' in globalThis; Object = keep; return r; })()
+(() => { try { NaN = 12; return 'no'; } catch (e) { return e.name; } })()
+(() => { try { undefined = 12; return 'no'; } catch (e) { return e.name; } })()
+(() => { try { Infinity = 12; return 'no'; } catch (e) { return e.name; } })()
+(() => { eval = 1; return eval; })()
+(() => { ({ x: arguments } = { x: 1 }); return arguments; })()
