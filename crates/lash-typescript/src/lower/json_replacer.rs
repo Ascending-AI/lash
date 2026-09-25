@@ -5,7 +5,10 @@
 //! frame; the final JSON byte rendering remains the single heap-aware runtime
 //! implementation used by ordinary stringify calls.
 
-use lashlang::{AssignPathStep, AssignTarget, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp};
+use lashlang::{
+    AssignPathStep, AssignTarget, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp,
+    JavaScriptUnaryOp,
+};
 
 use super::{GENERATED_BINDING_PREFIX, Lowerer};
 use crate::adapter::Expr;
@@ -208,33 +211,58 @@ impl Lowerer {
         let root = LashExpr::Record(vec![("".into(), variable(&input))]);
         let worker_body = recurse(root, LashExpr::String("".into()));
 
-        let replacer_value = if let Some(replacer) = function_replacer {
-            self.lower_expr(replacer)?
+        let identity_key = self.temporary("identity_key");
+        let identity_value = self.temporary("identity_value");
+        let identity = LashExpr::Function(Box::new(FunctionExpr {
+            name: None,
+            js_name: None,
+            params: vec![identity_key.into(), identity_value.as_str().into()],
+            captures: Vec::new(),
+            body: Box::new(variable(&identity_value)),
+        }));
+        let mut prefix = vec![assign(&input, self.lower_expr(value)?)];
+        if let Some(replacer) = function_replacer {
+            // A replacer the source does not spell as `null` or an array
+            // literal is classified when it runs, as ECMA-262 classifies it: a
+            // function transforms, an array names the properties, and
+            // anything else is ignored.
+            prefix.push(assign(&replacer_name, self.lower_expr(replacer)?));
+            prefix.push(assign(
+                &property_replacer_name,
+                LashExpr::If {
+                    condition: Box::new(stdlib("Array.isArray", vec![variable(&replacer_name)])),
+                    then_block: Box::new(variable(&replacer_name)),
+                    else_block: Box::new(LashExpr::Null),
+                },
+            ));
+            prefix.push(assign(
+                &replacer_name,
+                LashExpr::If {
+                    condition: Box::new(binary(
+                        LashExpr::JavaScriptUnary {
+                            op: JavaScriptUnaryOp::TypeOf,
+                            expr: Box::new(variable(&replacer_name)),
+                        },
+                        JavaScriptBinaryOp::StrictEqual,
+                        LashExpr::String("function".into()),
+                    )),
+                    then_block: Box::new(variable(&replacer_name)),
+                    else_block: Box::new(identity),
+                },
+            ));
         } else {
-            let identity_key = self.temporary("identity_key");
-            let identity_value = self.temporary("identity_value");
-            LashExpr::Function(Box::new(FunctionExpr {
-                name: None,
-                js_name: None,
-                params: vec![identity_key.into(), identity_value.as_str().into()],
-                captures: Vec::new(),
-                body: Box::new(variable(&identity_value)),
-            }))
-        };
-        let property_replacer_value = property_replacer
-            .map(|value| self.lower_expr(value))
-            .transpose()?
-            .unwrap_or(LashExpr::Null);
+            let property_replacer_value = property_replacer
+                .map(|value| self.lower_expr(value))
+                .transpose()?
+                .unwrap_or(LashExpr::Null);
+            prefix.push(assign(&replacer_name, identity));
+            prefix.push(assign(&property_replacer_name, property_replacer_value));
+        }
         let space_value = space
             .map(|value| self.lower_expr(value))
             .transpose()?
             .unwrap_or(LashExpr::Undefined);
-        let mut prefix = vec![
-            assign(&input, self.lower_expr(value)?),
-            assign(&replacer_name, replacer_value),
-            assign(&property_replacer_name, property_replacer_value),
-            assign(&space_name, space_value),
-        ];
+        prefix.push(assign(&space_name, space_value));
         let mut expressions = vec![
             // Reject a durable cycle before the callback driver captures the
             // graph. The v1 heap wire cannot encode cycles, so allowing a

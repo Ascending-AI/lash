@@ -238,6 +238,7 @@ typescript	delete-non-reference
 typescript	destructuring-non-iterable
 typescript	direct-eval
 typescript	enum
+typescript	exotic-own-properties
 typescript	function-constructor
 typescript	function-redeclaration
 typescript	generics

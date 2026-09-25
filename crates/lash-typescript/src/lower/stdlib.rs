@@ -216,3 +216,107 @@ pub(super) fn all_settled_results(items: LashExpr) -> LashExpr {
         }))),
     }
 }
+
+impl Lowerer {
+    /// A write to a built-in constant (`Number.MAX_VALUE = x`): the property
+    /// is non-writable, so strict code evaluates the right-hand side and then
+    /// throws ECMA's `TypeError`, exactly as Node does.
+    pub(super) fn builtin_constant_write(
+        &mut self,
+        target: &TsAssignTarget,
+        value: &Expr,
+    ) -> Result<Option<LashExpr>, Diagnostic> {
+        let TsAssignTarget::Member { object, property } = target else {
+            return Ok(None);
+        };
+        let (Expr::Ident(owner, _), MemberProperty::Field(name)) = (object.as_ref(), property)
+        else {
+            return Ok(None);
+        };
+        if !is_known_runtime_global(owner)
+            || self.has_binding(owner)
+            || builtin_constant(owner, name).is_none()
+        {
+            return Ok(None);
+        }
+        let kind = if owner == "Math" {
+            "object"
+        } else {
+            "function"
+        };
+        let ignored = self.temporary("constant_write_value");
+        Ok(Some(LashExpr::Block(vec![
+            LashExpr::Assign {
+                target: AssignTarget::variable(ignored.into()),
+                expr: Box::new(self.lower_expr(value)?),
+            },
+            LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
+                name: "__typescript_heap_new".into(),
+                args: vec![
+                    LashExpr::String("TypeError".into()),
+                    LashExpr::String(
+                        format!("Cannot assign to read only property '{name}' of {kind} '{owner}'")
+                            .into(),
+                    ),
+                ],
+            })),
+        ])))
+    }
+}
+
+/// The value of a built-in's non-writable numeric constant.
+pub(super) fn builtin_constant(owner: &str, name: &str) -> Option<f64> {
+    match (owner, name) {
+        ("Number", "EPSILON") => Some(f64::EPSILON),
+        ("Number", "NaN") => Some(f64::NAN),
+        ("Number", "MIN_SAFE_INTEGER") => Some(-9_007_199_254_740_991.0),
+        ("Number", "MAX_SAFE_INTEGER") => Some(9_007_199_254_740_991.0),
+        ("Number", "MAX_VALUE") => Some(f64::MAX),
+        ("Math", "PI") => Some(std::f64::consts::PI),
+        ("Math", "E") => Some(std::f64::consts::E),
+        ("Math", "LN2") => Some(std::f64::consts::LN_2),
+        ("Math", "LN10") => Some(std::f64::consts::LN_10),
+        ("Math", "LOG2E") => Some(std::f64::consts::LOG2_E),
+        ("Math", "LOG10E") => Some(std::f64::consts::LOG10_E),
+        ("Math", "SQRT2") => Some(std::f64::consts::SQRT_2),
+        ("Math", "SQRT1_2") => Some(std::f64::consts::FRAC_1_SQRT_2),
+        _ => None,
+    }
+}
+
+/// RequireObjectCoercible on a destructuring's input: `null` or `undefined`
+/// throws ECMA's TypeError, in Node's words, even when the pattern reads
+/// nothing.
+pub(super) fn require_object_coercible(input: &str) -> LashExpr {
+    let base = || {
+        js_add(
+            LashExpr::String("".into()),
+            LashExpr::Variable(input.into()),
+        )
+    };
+    let message = [
+        base(),
+        LashExpr::String("' as it is ".into()),
+        base(),
+        LashExpr::String(".".into()),
+    ]
+    .into_iter()
+    .fold(LashExpr::String("Cannot destructure '".into()), js_add);
+    let is = |value: LashExpr| LashExpr::JavaScriptBinary {
+        left: Box::new(LashExpr::Variable(input.into())),
+        op: JavaScriptBinaryOp::StrictEqual,
+        right: Box::new(value),
+    };
+    LashExpr::If {
+        condition: Box::new(LashExpr::JavaScriptLogical {
+            left: Box::new(is(LashExpr::Null)),
+            op: JavaScriptLogicalOp::Or,
+            right: Box::new(is(LashExpr::Undefined)),
+        }),
+        then_block: Box::new(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
+            name: "__typescript_heap_new".into(),
+            args: vec![LashExpr::String("TypeError".into()), message],
+        }))),
+        else_block: Box::new(LashExpr::Undefined),
+    }
+}

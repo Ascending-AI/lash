@@ -906,6 +906,57 @@ pub(super) fn to_int32(value: f64) -> i64 {
     }
 }
 
+impl<H: ExecutionHost> Vm<'_, H> {
+    /// The ECMA-262 guards a stdlib call answers before anything is
+    /// exported: IsCallable, which a lowering asks for by name and which
+    /// passes the callable through with its identity, and IsRegExp on a
+    /// string search. Whether it answered the call.
+    pub(super) fn execute_ecma_guard(&mut self, values: &[Value]) -> Result<bool, RuntimeError> {
+        match values {
+            [Value::String(method), value] if method.as_str() == "Lash.RequireCallable" => {
+                let callable = matches!(value, Value::Ref(id)
+                    if matches!(self.heap.get(*id)?, HeapObject::Closure { .. }));
+                if !callable {
+                    return Err(RuntimeError::type_error(format!(
+                        "{} is not a function",
+                        non_callable_text(value)
+                    )));
+                }
+                self.stack.push(value.clone());
+                Ok(true)
+            }
+            // A string search that takes a substring refuses a RegExp outright
+            // rather than reading it as text.
+            [
+                Value::String(method),
+                Value::String(_),
+                Value::Ref(search),
+                ..,
+            ] if matches!(method.as_str(), "startsWith" | "endsWith" | "includes")
+                && matches!(self.heap.get(*search)?, HeapObject::RegExp(_)) =>
+            {
+                Err(RuntimeError::type_error(format!(
+                    "First argument to String.prototype.{method} must not be a regular expression"
+                )))
+            }
+            _ => Ok(false),
+        }
+    }
+}
+
+/// How V8 names a value that was called but has no `[[Call]]`: its type,
+/// then its value when that is a primitive.
+fn non_callable_text(value: &Value) -> String {
+    match value {
+        Value::Null => "object null".to_string(),
+        Value::Undefined => "undefined".to_string(),
+        Value::Bool(value) => format!("boolean {value}"),
+        Value::Number(_) => format!("number {}", javascript_to_string(value)),
+        Value::String(value) => format!("string \"{value}\""),
+        _ => "object".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -249,10 +249,9 @@ end
 session runtime-error-classes
 about an uncaught error reports its class
 probe value
-cell deviation runtime-fault-brand
+cell
 const value = null;
 console.log(value.missing);
-lash {"outcome":"throw","error":"RuntimeError","prints":[],"probes":{"value":"object null"}}
 end
 
 session printed-values
@@ -318,14 +317,13 @@ end
 session caught-runtime-fault
 about a caught runtime fault is an Error of the fault's class
 probe nothing error
-cell deviation runtime-fault-brand
+cell
 try {
   const nothing = null;
   console.log(nothing.field);
 } catch (error) {
   console.log(error.name, error instanceof Error, error instanceof TypeError);
 }
-lash {"outcome":"normal","prints":["RuntimeError true false"],"probes":{"error":"unbound","nothing":"unbound"}}
 end
 
 session process-literal-binding
@@ -626,10 +624,9 @@ end
 session parentheses-end-an-optional-chain
 about in (a?.b).c the short circuit ends at the parenthesis, so .c reads undefined (FIG-3608)
 probe none
-cell deviation runtime-fault-brand
+cell
 const none = null;
 console.log((none?.b).c);
-lash {"outcome":"throw","error":"RuntimeError","prints":[],"probes":{"none":"object null"}}
 end
 
 session durable-error-value

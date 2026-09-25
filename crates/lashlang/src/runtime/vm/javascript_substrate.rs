@@ -485,10 +485,10 @@ pub(super) fn javascript_json_stringify_with_options(
     if matches!(value, Value::Undefined) || is_function(heap, value) {
         return Ok(None);
     }
-    let whitelist = replacer
-        .filter(|value| !matches!(value, Value::Null | Value::Undefined))
-        .map(|value| json_property_whitelist(heap, value))
-        .transpose()?;
+    let whitelist = match replacer {
+        Some(replacer) => json_property_whitelist(heap, replacer)?,
+        None => None,
+    };
     let gap = match space {
         Some(value) => match heap.javascript_to_primitive_string_or_number(value)? {
             Value::Number(value) => " ".repeat(if value.is_nan() || value <= 0.0 {
@@ -513,7 +513,12 @@ pub(super) fn javascript_json_stringify_with_options(
     .map(Some)
 }
 
-fn json_property_whitelist(heap: &Heap, value: &Value) -> Result<Vec<String>, RuntimeError> {
+/// The property list an array replacer names. A replacer that is neither a
+/// function nor an array is ignored, as ECMA-262 ignores it.
+fn json_property_whitelist(
+    heap: &Heap,
+    value: &Value,
+) -> Result<Option<Vec<String>>, RuntimeError> {
     let values = match value {
         Value::Ref(id) => match heap.get(*id)? {
             HeapObject::List(values) | HeapObject::Tuple(values) => values.as_slice(),
@@ -522,18 +527,10 @@ fn json_property_whitelist(heap: &Heap, value: &Value) -> Result<Vec<String>, Ru
                     "TS_JSON_REPLACER_FUNCTION_INTERNAL: function replacers must stay in the VM",
                 ));
             }
-            _ => {
-                return Err(js_stdlib_error(
-                    "TypeError: JSON.stringify replacer must be null, an array, or a function",
-                ));
-            }
+            _ => return Ok(None),
         },
         Value::List(values) | Value::Tuple(values) => values.as_ref(),
-        _ => {
-            return Err(js_stdlib_error(
-                "TypeError: JSON.stringify replacer must be null, an array, or a function",
-            ));
-        }
+        _ => return Ok(None),
     };
     let mut result = Vec::new();
     for value in values {
@@ -544,7 +541,7 @@ fn json_property_whitelist(heap: &Heap, value: &Value) -> Result<Vec<String>, Ru
             }
         }
     }
-    Ok(result)
+    Ok(Some(result))
 }
 
 fn javascript_json_stringify_with_errors(
@@ -559,8 +556,8 @@ fn javascript_json_stringify_with_errors(
     match value {
         Value::Ref(id) => {
             if !active.insert(*id) {
-                return Err(js_stdlib_error(
-                    "TypeError: Converting circular structure to JSON",
+                return Err(RuntimeError::type_error(
+                    "Converting circular structure to JSON",
                 ));
             }
             let result = match heap.get(*id)? {

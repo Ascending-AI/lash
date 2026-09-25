@@ -252,10 +252,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         let values = match iterable {
             Value::List(values) | Value::Tuple(values) => values,
-            // No conversion makes these iterable; the loop's own refusal
-            // names what it expects.
+            // No conversion makes these iterable.
             Value::Null | Value::Undefined | Value::Bool(_) | Value::Number(_) => {
-                return Err(RuntimeError::NonListIteration);
+                return Err(crate::runtime::not_iterable_error(&iterable));
             }
             other => {
                 self.stack

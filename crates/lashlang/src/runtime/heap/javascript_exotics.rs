@@ -119,6 +119,19 @@ impl ErrorKind {
     }
 }
 
+impl From<crate::runtime::EcmaErrorClass> for ErrorKind {
+    fn from(class: crate::runtime::EcmaErrorClass) -> Self {
+        use crate::runtime::EcmaErrorClass;
+        match class {
+            EcmaErrorClass::TypeError => Self::TypeError,
+            EcmaErrorClass::RangeError => Self::RangeError,
+            EcmaErrorClass::SyntaxError => Self::SyntaxError,
+            EcmaErrorClass::ReferenceError => Self::ReferenceError,
+            EcmaErrorClass::URIError => Self::URIError,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ErrorObject {
     pub(crate) kind: ErrorKind,
@@ -736,6 +749,26 @@ impl Heap {
         Ok(false)
     }
 
+    /// OrdinaryToPrimitive's `TypeError`. A plain object whose own `toString`
+    /// is not callable shadows `Object.prototype.toString`, and the
+    /// `valueOf` it inherits answers the object itself, so no step yields a
+    /// primitive — unless an own callable `valueOf` does, which is guest code
+    /// that the callers of this conversion refuse before they get here.
+    fn ensure_record_has_primitive(&self, record: &Record) -> Result<(), RuntimeError> {
+        let callable = |name: &str| -> Result<bool, RuntimeError> {
+            Ok(match record.get(name) {
+                Some(Value::Ref(id)) => matches!(self.get(*id)?, HeapObject::Closure { .. }),
+                _ => false,
+            })
+        };
+        if record.get("toString").is_some() && !callable("toString")? && !callable("valueOf")? {
+            return Err(RuntimeError::type_error(
+                "Cannot convert object to primitive value",
+            ));
+        }
+        Ok(())
+    }
+
     /// This is the ECMA-exact conversion: an object with no string of its own
     /// answers `"[object Object]"`. Property keys, `console.log`'s fallback
     /// text and `Map.prototype.toString` all ask for exactly that. The string
@@ -965,7 +998,8 @@ impl Heap {
                 self.javascript_sequence_string(&result.items, active, depth, objects)?
                     .into(),
             ),
-            Some(HeapObject::Record(_)) => {
+            Some(HeapObject::Record(record)) => {
+                self.ensure_record_has_primitive(record)?;
                 objects.string_or_refuse("[object Object]", "a plain object", depth)?
             }
             Some(HeapObject::Date(date)) => Value::Number(date.milliseconds),
@@ -995,7 +1029,11 @@ impl Heap {
                     self.javascript_sequence_string(values, active, depth, objects)?
                         .into(),
                 ),
-                Value::Record(_) | Value::Image(_) | Value::Resource(_) => {
+                Value::Record(record) => {
+                    self.ensure_record_has_primitive(record)?;
+                    objects.string_or_refuse("[object Object]", "a plain object", depth)?
+                }
+                Value::Image(_) | Value::Resource(_) => {
                     objects.string_or_refuse("[object Object]", "a plain object", depth)?
                 }
                 // A projected handle is a host-side view of a value, not an

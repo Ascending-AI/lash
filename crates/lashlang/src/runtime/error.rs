@@ -500,6 +500,50 @@ pub enum RuntimeError {
     /// Bytecode violated the structured handler/finally stack discipline.
     #[error("invalid lashlang exception state: {reason}")]
     InvalidExceptionState { reason: Cow<'static, str> },
+    /// An operation ECMA-262 specifies to throw one of its native errors.
+    ///
+    /// This is the typed form of "the operation throws a `TypeError`" for a
+    /// site that has no heap to allocate the error object on. The VM's error
+    /// routing turns it into exactly that thrown object before any guest
+    /// handler, finally block or host sees it (see [`RuntimeError::ecma_error`]),
+    /// so it never reaches a guest as a `RuntimeError` brand. For the same
+    /// reason it is never a suspended `finally`'s pending origin, and it has no
+    /// wire form: the continuation's error vocabulary is unchanged by it.
+    #[error("{class}: {message}")]
+    #[serde(skip)]
+    EcmaThrow {
+        class: EcmaErrorClass,
+        message: String,
+    },
+}
+
+/// The ECMA-262 native error classes a built-in operation can throw.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EcmaErrorClass {
+    TypeError,
+    RangeError,
+    SyntaxError,
+    ReferenceError,
+    URIError,
+}
+
+impl EcmaErrorClass {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::TypeError => "TypeError",
+            Self::RangeError => "RangeError",
+            Self::SyntaxError => "SyntaxError",
+            Self::ReferenceError => "ReferenceError",
+            Self::URIError => "URIError",
+        }
+    }
+}
+
+impl std::fmt::Display for EcmaErrorClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
 }
 
 impl RuntimeError {
@@ -644,6 +688,7 @@ impl RuntimeError {
             Self::ContextDependentIntrinsicMisdispatch { .. } => ErrorTaxonomy::Catchable,
             Self::UncaughtException { .. } => ErrorTaxonomy::Catchable,
             Self::InvalidExceptionState { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::EcmaThrow { .. } => ErrorTaxonomy::Catchable,
         }
     }
 
@@ -781,6 +826,82 @@ impl RuntimeError {
             }
             Self::UncaughtException { .. } => "UncaughtException",
             Self::InvalidExceptionState { .. } => "InvalidExceptionState",
+            Self::EcmaThrow { .. } => "EcmaThrow",
+        }
+    }
+
+    /// The ECMA-262 native error this failure is, when it is one: the class
+    /// and message of the error object the guest receives in its place.
+    ///
+    /// This is the one mapping from a VM failure to an ECMA throw. A failure
+    /// is an ECMA error exactly when the operation that raised it is one
+    /// ECMA-262 specifies to throw — reading or writing a property of `null`
+    /// or `undefined`, calling a value that has no `[[Call]]`, or any
+    /// [`RuntimeError::EcmaThrow`] a built-in raised. The VM's error routing
+    /// allocates that error object and throws it as the operation's own
+    /// completion, so `catch`, `instanceof TypeError` and `error.name` answer
+    /// as they do in Node, and an uncaught one ends the cell as an uncaught
+    /// exception of that class. Every other failure has no ECMA counterpart —
+    /// a host-boundary, tool, process or invariant failure — and keeps the
+    /// substrate's `RuntimeError` brand.
+    pub fn ecma_error(&self) -> Option<(EcmaErrorClass, String)> {
+        let nullish = |actual: &str| matches!(actual, "null" | "undefined");
+        Some(match self {
+            Self::EcmaThrow { class, message } => (*class, message.clone()),
+            Self::NonFunctionCall { actual } => (
+                EcmaErrorClass::TypeError,
+                format!("{actual} is not a function"),
+            ),
+            Self::CannotReadField { field, actual } if nullish(actual) => (
+                EcmaErrorClass::TypeError,
+                format!("Cannot read properties of {actual} (reading '{field}')"),
+            ),
+            Self::CannotIndex { actual } if nullish(actual) => (
+                EcmaErrorClass::TypeError,
+                format!("Cannot read properties of {actual}"),
+            ),
+            Self::CannotAssignField { field, actual }
+            | Self::CannotAssignThroughField { field, actual }
+                if nullish(actual) =>
+            {
+                (
+                    EcmaErrorClass::TypeError,
+                    format!("Cannot set properties of {actual} (setting '{field}')"),
+                )
+            }
+            Self::CannotAssignIndex { actual } | Self::CannotAssignThroughIndex { actual }
+                if nullish(actual) =>
+            {
+                (
+                    EcmaErrorClass::TypeError,
+                    format!("Cannot set properties of {actual}"),
+                )
+            }
+            _ => return None,
+        })
+    }
+
+    /// An ECMA-262 `TypeError` thrown by the failing operation.
+    pub(crate) fn type_error(message: impl Into<String>) -> Self {
+        Self::EcmaThrow {
+            class: EcmaErrorClass::TypeError,
+            message: message.into(),
+        }
+    }
+
+    /// An ECMA-262 `RangeError` thrown by the failing operation.
+    pub(crate) fn range_error(message: impl Into<String>) -> Self {
+        Self::EcmaThrow {
+            class: EcmaErrorClass::RangeError,
+            message: message.into(),
+        }
+    }
+
+    /// An ECMA-262 `SyntaxError` thrown by the failing operation.
+    pub(crate) fn syntax_error(message: impl Into<String>) -> Self {
+        Self::EcmaThrow {
+            class: EcmaErrorClass::SyntaxError,
+            message: message.into(),
         }
     }
 
@@ -1142,6 +1263,7 @@ mod tests {
             RuntimeError::InvalidExceptionState {
                 reason: "test".into(),
             },
+            RuntimeError::type_error("Cannot read properties of null"),
         ];
 
         for error in &errors {
@@ -1459,6 +1581,7 @@ mod tests {
                 RuntimeError::InvalidExceptionState { .. } => {
                     "invalid lashlang exception state: test"
                 }
+                RuntimeError::EcmaThrow { .. } => "TypeError: Cannot read properties of null",
             };
 
             assert_eq!(error.to_string(), expected);
@@ -1613,5 +1736,6 @@ mod tests {
     RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => "ContextDependentIntrinsicMisdispatch",
     RuntimeError::UncaughtException { .. } => "UncaughtException",
     RuntimeError::InvalidExceptionState { .. } => "InvalidExceptionState",
+    RuntimeError::EcmaThrow { .. } => "EcmaThrow",
     }
 }

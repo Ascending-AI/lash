@@ -207,10 +207,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let [index, value] = args else {
                     return Err(js_stdlib_error("Array.with expects exactly two arguments"));
                 };
-                let Some(index) = relative_index(javascript_to_number(index), values.len()) else {
-                    return Err(js_stdlib_error(
-                        "RangeError: Array.with index is out of range",
-                    ));
+                let relative = javascript_to_number(index);
+                let Some(index) = relative_index(relative, values.len()) else {
+                    return Err(RuntimeError::range_error(format!(
+                        "Invalid index : {}",
+                        crate::runtime::javascript_to_string(&Value::Number(relative.trunc()))
+                    )));
                 };
                 values[index] = value.clone();
                 self.heap.allocate_list(values)?

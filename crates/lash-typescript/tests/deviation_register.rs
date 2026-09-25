@@ -296,6 +296,16 @@ const PROBES: &[Probe] = &[
         "TS_REGEX_ITERATOR_POSITION",
         "const matches = 'aa'.matchAll(/a/g); finish(1);",
     ),
+    // Both halves: the TS2339-backed write onto a built-in object, and the
+    // function expando that ECMA and tsc accept.
+    readme_probe(
+        "TS_EXOTIC_PROPERTY_UNSUPPORTED",
+        "const m: any = new Map(); m.cache = 1; finish(1);",
+    ),
+    readme_probe(
+        "TS_EXOTIC_PROPERTY_UNSUPPORTED",
+        "const f = () => 1; const g: any = f; g.cache = 1; finish(1);",
+    ),
     readme_probe(
         "TS_DELETE_ARRAY_INDEX_UNSUPPORTED",
         "const a = [1, 2]; delete a[0]; finish(a.length);",

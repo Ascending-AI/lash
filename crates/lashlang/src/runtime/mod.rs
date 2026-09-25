@@ -22,7 +22,7 @@ pub use compiler::{
 };
 mod entry_points;
 mod error;
-pub use error::{ErrorTaxonomy, FormatError, RuntimeError};
+pub use error::{EcmaErrorClass, ErrorTaxonomy, FormatError, RuntimeError};
 mod format;
 mod heap;
 mod host;
@@ -102,11 +102,12 @@ pub(crate) use access::value_contains_tool_handle;
 pub(crate) use access::{
     add_assign_index_number, add_assign_value_number, assign_index, assign_path, assign_path_steps,
     assign_record_field, descend_index, descend_record_field, ensure_no_prototype_chain_wire_key,
-    is_prototype_chain_key, next_assign_index, prototype_chain_data_key_error,
-    prototype_chain_key_error, read_field_ref_direct, read_image_field, read_index_ref_direct,
-    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
-    read_javascript_index_direct, read_javascript_index_direct_with_key,
-    resolve_existing_list_assignment_index, resolve_index, unwrap_tool_result,
+    is_prototype_chain_key, next_assign_index, nullish_property_read,
+    prototype_chain_data_key_error, prototype_chain_key_error, read_field_ref_direct,
+    read_image_field, read_index_ref_direct, read_javascript_field_direct,
+    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct,
+    read_javascript_index_direct_with_key, resolve_existing_list_assignment_index, resolve_index,
+    unwrap_tool_result,
 };
 pub use access::{is_process_handle, parse_handle_record};
 #[allow(unused_imports)]

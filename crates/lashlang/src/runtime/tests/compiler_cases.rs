@@ -935,7 +935,28 @@ async fn condition_and_iteration_errors_are_reported() {
     )]))
     .await
     .expect_err("non-list iteration should fail");
-    assert_eq!(err, RuntimeError::NonListIteration);
+    assert_uncaught_ecma_error(&err, "TypeError", "1 is not iterable");
+}
+
+/// An operation ECMA-262 specifies to throw ends an uncaught cell as the
+/// thrown error object, detached, never as a `RuntimeError` brand.
+fn assert_uncaught_ecma_error(err: &RuntimeError, name: &str, message: &str) {
+    let RuntimeError::UncaughtException {
+        value: Value::Record(record),
+    } = err
+    else {
+        panic!("expected an uncaught {name}, got {err:?}");
+    };
+    assert_eq!(
+        record.get("name"),
+        Some(&Value::String(name.into())),
+        "{err:?}"
+    );
+    assert_eq!(
+        record.get("message"),
+        Some(&Value::String(message.into())),
+        "{err:?}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1398,12 +1419,10 @@ async fn field_index_and_type_errors_are_covered() {
     ]))
     .await
     .expect_err("reading a field through undefined should throw");
-    assert!(
-        matches!(
-            &err,
-            RuntimeError::CannotReadField { field, actual } if field == "items" && actual == "undefined"
-        ),
-        "{err:?}"
+    assert_uncaught_ecma_error(
+        &err,
+        "TypeError",
+        "Cannot read properties of undefined (reading 'items')",
     );
 }
 

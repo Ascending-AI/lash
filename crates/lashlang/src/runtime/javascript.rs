@@ -6,7 +6,7 @@ use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 
-use super::{Value, debug_assert_exported_value, is_truthy};
+use super::{RuntimeError, Value, debug_assert_exported_value, is_truthy};
 
 pub(crate) const MAX_JAVASCRIPT_STRING_BYTES: usize = 8 * 1024 * 1024;
 
@@ -312,6 +312,18 @@ fn javascript_string_to_number(value: &str) -> f64 {
         return f64::NAN;
     }
     value.parse().unwrap_or(f64::NAN)
+}
+
+/// GetIterator's `TypeError` for a value with no `@@iterator`, in Node's
+/// words: a primitive is named by its value.
+pub(crate) fn not_iterable_error(value: &Value) -> RuntimeError {
+    let text = match value {
+        Value::Null | Value::Undefined | Value::Bool(_) | Value::Number(_) => {
+            javascript_to_string(value)
+        }
+        _ => "object".to_string(),
+    };
+    RuntimeError::type_error(format!("{text} is not iterable"))
 }
 
 pub(crate) fn javascript_to_string(value: &Value) -> String {

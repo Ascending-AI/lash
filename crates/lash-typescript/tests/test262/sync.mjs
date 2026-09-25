@@ -162,6 +162,11 @@ const typescriptNames = [
   // at run time; tsc --strict rejects it as TS2488 (FIG-3705).
   "destructuring-non-iterable",
   "direct-eval",
+  // A write that would give an object an own property the value model has no
+  // slot for: on an Error, Map, Set, RegExp or URLSearchParams tsc rejects it
+  // too (TS2339); on a function it is an unsupported feature that ECMA and
+  // tsc both accept (a function value has no property slots).
+  "exotic-own-properties",
   "function-constructor",
   "function-redeclaration",
   "instanceof-arbitrary",

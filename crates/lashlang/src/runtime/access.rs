@@ -301,10 +301,30 @@ pub(crate) fn read_javascript_index_direct_with_key(
                 })
         }
         Value::Record(record) => Ok(record.get(key).cloned().unwrap_or(Value::Undefined)),
-        Value::Null | Value::Undefined => Err(RuntimeError::CannotIndex {
-            actual: value_type_name(&target).to_string(),
-        }),
+        Value::Null | Value::Undefined => Err(nullish_property_read(
+            &target,
+            &Value::String(key.to_compact_string()),
+        )),
         _ => Ok(Value::Undefined),
+    }
+}
+
+/// ECMA-262's `TypeError` for reading a property of `null` or `undefined`, in
+/// Node's words: the key is named when it is a primitive, as V8 names it.
+pub(crate) fn nullish_property_read(base: &Value, key: &Value) -> RuntimeError {
+    let base = value_type_name(base);
+    let message = match key {
+        Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Null | Value::Undefined => {
+            format!(
+                "Cannot read properties of {base} (reading '{}')",
+                javascript_to_string(key)
+            )
+        }
+        _ => format!("Cannot read properties of {base}"),
+    };
+    RuntimeError::EcmaThrow {
+        class: EcmaErrorClass::TypeError,
+        message,
     }
 }
 
@@ -323,6 +343,9 @@ pub(crate) fn read_javascript_heap_field(
             .get_symbol(field.symbol)
             .cloned()
             .unwrap_or(Value::Undefined),
+        HeapObject::Closure { .. } if matches!(field.text.as_ref(), "caller" | "arguments") => {
+            return Err(super::heap::restricted_function_property());
+        }
         HeapObject::List(values) | HeapObject::Tuple(values) if field.text.as_ref() == "length" => {
             Value::Number(values.len() as f64)
         }
@@ -394,6 +417,9 @@ pub(crate) fn read_javascript_heap_index(
         HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index_key(&key)
             .and_then(|index| values.get(index).cloned())
             .unwrap_or(Value::Undefined),
+        HeapObject::Closure { .. } if matches!(key.as_str(), "caller" | "arguments") => {
+            return Err(super::heap::restricted_function_property());
+        }
         HeapObject::Record(record) => record.get(&key).cloned().unwrap_or(Value::Undefined),
         HeapObject::RegExp(regexp) => match key.as_str() {
             "lastIndex" => Value::Number(regexp.last_index as f64),

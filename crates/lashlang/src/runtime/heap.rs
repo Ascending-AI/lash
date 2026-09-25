@@ -23,6 +23,7 @@ use object::{
     OBJECT_HEADER_BYTES, RECORD_FIELD_BYTES, VALUE_SLOT_BYTES, compound_identity,
     value_logical_bytes,
 };
+pub(crate) use reference_assignment::restricted_function_property;
 
 pub use id::HeapId;
 #[cfg(test)]
@@ -1362,12 +1363,8 @@ impl Heap {
                 )
             }
             HeapObject::Tuple(_) => return Err(RuntimeError::ImmutableTupleIndexes),
-            HeapObject::Closure { .. } => {
-                return Err(RuntimeError::CannotAssignIndex {
-                    actual: "function".to_string(),
-                });
-            }
-            object @ (HeapObject::RegExp(_)
+            object @ (HeapObject::Closure { .. }
+            | HeapObject::RegExp(_)
             | HeapObject::RegExpMatch(_)
             | HeapObject::Map(_)
             | HeapObject::Set(_)
@@ -1375,9 +1372,10 @@ impl Heap {
             | HeapObject::Error(_)
             | HeapObject::Url(_)
             | HeapObject::UrlSearchParams(_)) => {
-                return Err(RuntimeError::CannotAssignIndex {
-                    actual: object.kind_name().to_string(),
-                });
+                return Err(reference_assignment::unwritable_member(
+                    object,
+                    &coerce_string(index)?,
+                ));
             }
         };
         let current_member = current.clone();

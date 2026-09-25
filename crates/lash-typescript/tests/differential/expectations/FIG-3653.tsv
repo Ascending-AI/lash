@@ -1,0 +1,35 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3653	1	accept	"(() => { try { const n = null; return n.x; } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot read properties of null (reading 'x')"	-
+FIG-3653	2	accept	"(() => { try { const n = undefined; return n[0]; } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot read properties of undefined (reading '0')"	-
+FIG-3653	3	accept	"(() => { try { const n = null; n.x = 1; return 'wrote'; } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot set properties of null (setting 'x')"	-
+FIG-3653	4	accept	"(() => { try { const f = 1; return f(); } catch (e) { return `${e.name}`; } })()"	"TypeError"	-
+FIG-3653	5	accept	"(() => { try { const {} = null; return 'destructured'; } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot destructure 'null' as it is null."	-
+FIG-3653	6	accept	"(() => { try { return (({}) => 1)(undefined); } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot destructure 'undefined' as it is undefined."	-
+FIG-3653	7	accept	"(() => { try { const [{ x }] = [null]; return x; } catch (e) { return `${e.name}`; } })()"	"TypeError"	-
+FIG-3653	8	accept	"(() => { try { return [].find(null); } catch (e) { return `${e.name}`; } })()"	"TypeError"	-
+FIG-3653	9	accept	"(() => { try { return [].findLastIndex(1); } catch (e) { return `${e.name}`; } })()"	"TypeError"	-
+FIG-3653	10	accept	"(() => { try { return Array.from([], null); } catch (e) { return `${e.name}`; } })()"	"TypeError"	-
+FIG-3653	11	accept	"Array.from([1, 2], undefined).length"	"2"	-
+FIG-3653	12	accept	"(() => { try { return Object.groupBy([], {}); } catch (e) { return `${e.name}`; } })()"	"TypeError"	-
+FIG-3653	13	accept	"(() => { try { return JSON.parse('{'); } catch (e) { return `${e.name}`; } })()"	"SyntaxError"	-
+FIG-3653	14	accept	"(() => { try { return (1).toFixed(101); } catch (e) { return `${e.name}|${e.message}`; } })()"	"RangeError|toFixed() digits argument must be between 0 and 100"	-
+FIG-3653	15	accept	"(() => { try { return 'a'.repeat(-1); } catch (e) { return `${e.name}|${e.message}`; } })()"	"RangeError|Invalid count value: -1"	-
+FIG-3653	16	accept	"(() => { try { return String.fromCodePoint(1.5); } catch (e) { return `${e.name}|${e.message}`; } })()"	"RangeError|Invalid code point 1.5"	-
+FIG-3653	17	accept	"(() => { try { return 'a'.startsWith(/a/); } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|First argument to String.prototype.startsWith must not be a regular expression"	-
+FIG-3653	18	accept	"(() => { try { return [].reduce((a, b) => a + b); } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Reduce of empty array with no initial value"	-
+FIG-3653	19	accept	"(() => { try { return [1].with(5, 1); } catch (e) { return `${e.name}|${e.message}`; } })()"	"RangeError|Invalid index : 5"	-
+FIG-3653	20	accept	"(() => { try { const a = []; a.length = -1; return a.length; } catch (e) { return `${e.name}|${e.message}`; } })()"	"RangeError|Invalid array length"	-
+FIG-3653	21	accept	"(() => { try { return Object.assign(null); } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot convert undefined or null to object"	-
+FIG-3653	22	accept	"(() => { try { return Object.keys(undefined); } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot convert undefined or null to object"	-
+FIG-3653	23	accept	"(() => { try { return Error({ toString: undefined, valueOf: undefined }).message; } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot convert object to primitive value"	-
+FIG-3653	24	accept	"(() => { try { return (function () {}).caller; } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them"	-
+FIG-3653	25	accept	"(() => { try { const f = () => 1; f.arguments = 1; return 'wrote'; } catch (e) { return `${e.name}`; } })()"	"TypeError"	-
+FIG-3653	26	accept	"(() => { try { const m = new Map(); m.size = 1; return 'wrote'; } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot set property size of #<Map> which has only a getter"	-
+FIG-3653	27	accept	"(() => { try { const n = null; return delete n.x; } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Cannot convert undefined or null to object"	-
+FIG-3653	28	accept	"((n) => { try { for (const x of n) { return x; } return 'none'; } catch (e) { return `${e.name}`; } })(5)"	"TypeError"	-
+FIG-3653	29	accept	"(() => { try { return Object.fromEntries([1]); } catch (e) { return `${e.name}|${e.message}`; } })()"	"TypeError|Iterator value 1 is not an entry object"	-
+FIG-3653	30	accept	"JSON.stringify(Object.fromEntries([['a'], { 0: 'b', 1: 2 }]))"	"{\"b\":2}"	-
+FIG-3653	31	accept	"(() => { const r = ['a']; return JSON.stringify({ a: 1, b: 2 }, r); })()"	"{\"a\":1}"	-
+FIG-3653	32	accept	"JSON.stringify({ a: 1 }, 5)"	"{\"a\":1}"	-
+FIG-3653	33	accept	"JSON.stringify({ toJSON: null })"	"{\"toJSON\":null}"	-
+FIG-3653	34	accept	"(() => { try { Math.PI = 3; return 'wrote'; } catch (e) { return `${e.name}`; } })()"	"TypeError"	-
