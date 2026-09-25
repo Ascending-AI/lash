@@ -168,7 +168,7 @@ REGISTRATION_BASELINES = {
     # their journals lead with (ADR 0105 section 12). A new surface, not a
     # rename.
     "crates/lash-restate/src/session_driver.rs:LASH_SESSION_DRIVE_VERSION": (
-        "sha256:58e8aa68a4232e7064e03565bf687c5824987c68a6e80be3c02808780526edd6"
+        "sha256:2542171f2751b0fd3309cb3ce10fb91cea589529d0c0cb98ea226f044a454173"
     ),
     # FIG-3588: the Restate process handler's leading journaled commands (the
     # segment admission verdict and start steps) are a new versioned surface,
