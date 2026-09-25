@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 165,
+  "cargo_target_count": 166,
   "feature_lane_units": [
     {
       "features": [
@@ -16356,7 +16356,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 223,
+  "generated_label_count": 224,
   "packages": [
     {
       "declared_features": [
@@ -17952,6 +17952,9 @@
         "lash-internal-core",
         "lash-internal-core-worker",
         "lash-internal-http-transport",
+        "lash-internal-lashlang",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-protocol-rlm",
         "lash-internal-restate",
         "lash-internal-sqlite-store",
         "lash-runtime",
@@ -17997,6 +18000,12 @@
           "tags": []
         },
         {
+          "cargo": "substrate_lost_zombie",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:substrate_lost_zombie__test",
+          "tags": []
+        },
+        {
           "cargo": "suspended_turn",
           "kind": "test",
           "label": "//crates/lash-restate-test:suspended_turn__test",
@@ -18022,6 +18031,7 @@
           "//crates/lash-restate-test:lash-restate-test__unit_test",
           "//crates/lash-restate-test:server_semantics__test",
           "//crates/lash-restate-test:start_gate_peek__test",
+          "//crates/lash-restate-test:substrate_lost_zombie__test",
           "//crates/lash-restate-test:suspended_turn__test",
           "//crates/lash-restate-test:tool_child_drift__test",
           "//crates/lash-restate-test:turn_crash_replay__test"

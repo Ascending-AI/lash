@@ -105,6 +105,23 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "substrate_lost_zombie__test",
+    crate_features = [],
+    crate_name = "substrate_lost_zombie",
+    crate_root = "tests/substrate_lost_zombie.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "substrate_lost_zombie", "//crates/lash-restate-test:substrate_lost_zombie__test"),
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "suspended_turn__test",
     crate_features = [],
     crate_name = "suspended_turn",
@@ -166,6 +183,7 @@ lash_batch_test(
         ":lash-restate-test__unit_test",
         ":server_semantics__test",
         ":start_gate_peek__test",
+        ":substrate_lost_zombie__test",
         ":suspended_turn__test",
         ":tool_child_drift__test",
         ":turn_crash_replay__test",
