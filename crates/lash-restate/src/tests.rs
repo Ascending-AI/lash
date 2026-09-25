@@ -1393,6 +1393,7 @@ mod process_cancel_race;
 mod process_cancel_race_sdk;
 mod process_cancel_steps;
 mod process_child_residency;
+mod process_command_replay;
 mod process_drive_inputs;
 mod process_park;
 mod process_recovery;
