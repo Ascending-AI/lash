@@ -169,6 +169,7 @@ mod tool_context_conformance;
 mod trigger_intent_cutover;
 mod turn_cancel_modes;
 mod turn_crash_on_the_double;
+mod turn_laws_on_the_double;
 use endpoint_protocol::{
     RecordedCommand, admission_journal, admitted_invocation_body, durable_wait_index_call_response,
     encode_call_replay, encode_captured_run_and_call_replay,

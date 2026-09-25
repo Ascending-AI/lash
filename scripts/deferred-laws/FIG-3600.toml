@@ -1,0 +1,48 @@
+# Deferred conformance laws (FIG-3472), sharded so two changes never queue on
+# one file. The checker merges every `*.toml` in `scripts/deferred-laws/`; a
+# new deferred invocation adds a shard named for the recipe that runs it, or
+# for the ticket that brings a parked invocation back (`FIG-<n>.toml`).
+#
+# A row whose recipe is "parked" runs nowhere yet: it must name the `ticket`
+# (FIG-n) that brings the invocation back and the `reason` it is parked, and
+# no other row may carry either field.
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/turn_laws_on_the_double.rs"
+claimant = "lash_restate::tests::turn_laws_on_the_double"
+suite = "direct_turn_acceptance_tests"
+recipe = "parked"
+ticket = "FIG-3600"
+reason = "the laws drive stream_turn on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); S5a-q3 or S8 brings back a handler-bound direct-turn path"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/turn_laws_on_the_double.rs"
+claimant = "lash_restate::tests::turn_laws_on_the_double"
+suite = "restored_claim_cede_tests"
+recipe = "parked"
+ticket = "FIG-3600"
+reason = "the laws drive stream_turn on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); S5a-q3 or S8 brings back a handler-bound redrive path"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/turn_laws_on_the_double.rs"
+claimant = "lash_restate::tests::turn_laws_on_the_double"
+suite = "tool_batch_parallelism_tests"
+recipe = "parked"
+ticket = "FIG-3600"
+reason = "every width-8 leaf starts through the endpoint's dispatch but the probe turn never settles inside the law's budget on the double; S5a-q3 or S8 owns the nested-batch dispatch path"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/turn_laws_on_the_double.rs"
+claimant = "lash_restate::tests::turn_laws_on_the_double"
+suite = "tool_batch_group_tests"
+recipe = "parked"
+ticket = "FIG-3600"
+reason = "the batch consumer's group children dispatch but their replies and the opener's-end incorporation diverge on the double (committed-loser spend never reaches the opener's ledger, reply 0 lacks its call record); S5a-q3 or S8 owns the batch-group path"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/turn_laws_on_the_double.rs"
+claimant = "lash_restate::tests::turn_laws_on_the_double"
+suite = "session_failure_evidence_tests"
+recipe = "parked"
+ticket = "FIG-3600"
+reason = "the law drives a turn on the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); S5a-q3 or S8 brings back a handler-bound turn path"
