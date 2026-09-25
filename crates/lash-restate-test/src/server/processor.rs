@@ -1226,6 +1226,42 @@ impl State {
         ControlResult::Done
     }
 
+    /// Purge a completed `key` as the admin API does: its journal and id are
+    /// forgotten, and so are a workflow run's key state and promises, so a
+    /// later submission of the same workflow key starts a fresh invocation
+    /// with an empty journal, under the same id (a workflow's id derives from
+    /// its key). Returns `false` for an invocation that has not completed:
+    /// Restate purges only completed invocations.
+    pub fn purge(&mut self, key: InvKey) -> bool {
+        let invocation = &self.invocations[key.0];
+        if !invocation.status.is_completed() {
+            return false;
+        }
+        let id = invocation.id.as_str().to_owned();
+        if invocation.spec.kind == HandlerKind::WorkflowRun
+            && let Some(service_key) = invocation.target.service_key()
+            && let Some(record) = self.keys.get_mut(&service_key)
+            && record.workflow_run == Some(key)
+        {
+            record.workflow_run = None;
+            record.state.clear();
+            record.promises.clear();
+        }
+        self.idempotency.retain(|_, named| *named != key);
+        if self.by_id.get(&id) == Some(&key) {
+            self.by_id.remove(&id);
+        }
+        self.invocations[key.0].journal.clear();
+        self.touch(key);
+        true
+    }
+
+    /// Whether `key` is still retained: an invocation stays addressable by
+    /// its id until it is purged.
+    pub fn is_retained(&self, key: InvKey) -> bool {
+        self.by_id.get(self.invocations[key.0].id.as_str()) == Some(&key)
+    }
+
     pub(super) fn remove_from_inbox(&mut self, key: InvKey) {
         if let Some(service_key) = self.invocations[key.0].target.service_key()
             && let Some(record) = self.keys.get_mut(&service_key)

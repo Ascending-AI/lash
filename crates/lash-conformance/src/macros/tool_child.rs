@@ -84,6 +84,30 @@ macro_rules! admitted_head_redrive_tests {
     };
 }
 
+/// Register the segment re-drive law (FIG-3547): a re-drive never
+/// re-executes a recorded effect, an unrecorded one runs once more under the
+/// same identity, and a segment whose engine lost its record ends
+/// `Abandoned(SubstrateLost)` with no further effect. The fixture hands back a
+/// guard, a prefix, the store set whose process registry the tier's engine
+/// reads, and the tier's [`ConformanceTurnRunner`](crate::ConformanceTurnRunner),
+/// which must run, crash and recover process segments.
+#[macro_export]
+macro_rules! segment_redrive_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::segment_redrive_tests!(@law [$(#[$attr])*] $fixture;
+            (segment_redrive_never_reexecutes_a_recorded_effect, "segment-redrive"));
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, stores, runner) = $fixture;
+            $crate::registration_macro_support::$law(prefix, stores, runner).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
 /// Register the model-call drift park law (FIG-3587): a model call replays
 /// from the journaled prompt, a recorded model call whose envelope drifted
 /// parks its turn, and restoring the surface finishes it. The fixture hands

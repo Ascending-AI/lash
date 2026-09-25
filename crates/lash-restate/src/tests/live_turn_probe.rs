@@ -271,14 +271,174 @@ impl<T> Future for CatchUnwind<'_, T> {
     }
 }
 
+/// How one execution of a served process segment ended.
+#[derive(Debug)]
+pub(super) enum SegmentEnd {
+    /// The law's crash killed it; its invocation fails retryably.
+    Crashed,
+    /// Its body settled; the process completes.
+    Settled,
+    /// Its body aborted without an outcome; the invocation retries.
+    Aborted,
+    /// Its body panicked; the process fails.
+    Panicked,
+}
+
+/// The body a law serves one process's segments with, and the crash that
+/// kills its execution.
+struct ServedSegment {
+    body: Option<lash_conformance::ConformanceTurnAttempt>,
+    crash: Option<lash_conformance::ConformanceCrash>,
+    ends: Option<tokio::sync::mpsc::UnboundedSender<SegmentEnd>>,
+}
+
+/// The process segments laws serve on the endpoint's `LashProcessWorkflow`:
+/// the endpoint's process runner consults this table first, so a served
+/// process's every segment execution — past the workflow's own admission —
+/// runs the law's body on the process-scoped controller the workflow lends.
+///
+/// As on the turn probe, Restate runs a segment again from the top on every
+/// replay, so a body is a factory, and an execution that finds no body served
+/// waits for the law's next one.
+#[derive(Default)]
+pub(super) struct ServedSegments {
+    segments: Mutex<HashMap<lash_core::ProcessId, ServedSegment>>,
+    served: tokio::sync::Notify,
+}
+
+impl ServedSegments {
+    fn table(&self) -> std::sync::MutexGuard<'_, HashMap<lash_core::ProcessId, ServedSegment>> {
+        self.segments
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Serves `process_id`'s segments with `body` from now on (or with none,
+    /// so an execution waits), racing `crash` when one is given.
+    fn serve(
+        &self,
+        process_id: &lash_core::ProcessId,
+        body: Option<lash_conformance::ConformanceTurnAttempt>,
+        crash: Option<lash_conformance::ConformanceCrash>,
+        ends: Option<tokio::sync::mpsc::UnboundedSender<SegmentEnd>>,
+    ) {
+        self.table()
+            .insert(process_id.clone(), ServedSegment { body, crash, ends });
+        self.served.notify_waiters();
+    }
+
+    /// Whether a law serves `process_id`'s segments.
+    pub(super) fn serves(&self, process_id: &lash_core::ProcessId) -> bool {
+        self.table().contains_key(process_id)
+    }
+
+    /// Runs one execution of `process_id`'s served segment.
+    pub(super) async fn run(
+        &self,
+        process_id: &lash_core::ProcessId,
+        scoped: lash_core::ScopedEffectController<'_>,
+    ) -> Result<lash_core::ProcessRunOutcome, lash_core::PluginError> {
+        let retryable = |message: String| {
+            lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::RuntimeStore,
+                message,
+            ))
+        };
+        let (body, crash, ends) = loop {
+            let served = self.served.notified();
+            tokio::pin!(served);
+            served.as_mut().enable();
+            if let Some(segment) = self.table().get(process_id)
+                && let Some(body) = &segment.body
+            {
+                break (
+                    Arc::clone(body),
+                    segment.crash.clone(),
+                    segment.ends.clone(),
+                );
+            }
+            // A retry of a crashed segment waits for the law's recovery body;
+            // one that never comes fails the retry retryably.
+            if tokio::time::timeout(NEXT_ATTEMPT_WAIT, served)
+                .await
+                .is_err()
+            {
+                return Err(retryable(format!(
+                    "process `{process_id}` has no segment body served"
+                )));
+            }
+        };
+        let run = CatchUnwind {
+            inner: body(scoped),
+        };
+        let ran = match &crash {
+            Some(crash) => tokio::select! {
+                biased;
+                () = crash.fired() => None,
+                ran = run => Some(ran),
+            },
+            None => Some(run.await),
+        };
+        let (end, outcome) = match ran {
+            // The law's crash killed this execution where it stands: the body
+            // is dropped mid-poll, as a dying deployment drops its handler,
+            // and the invocation fails retryably. Its retry waits for the
+            // law's recovery body.
+            None => {
+                if let Some(segment) = self.table().get_mut(process_id) {
+                    segment.body = None;
+                    segment.crash = None;
+                }
+                (
+                    SegmentEnd::Crashed,
+                    Err(retryable(format!(
+                        "process `{process_id}` crashed; its engine recovers it"
+                    ))),
+                )
+            }
+            Some(Ok(lash_conformance::ConformanceTurnEnd::Settled)) => (
+                SegmentEnd::Settled,
+                Ok(lash_core::ProcessRunOutcome::Terminal {
+                    output: Box::new(lash_core::ProcessAwaitOutput::from_tool_output(
+                        lash_core::ToolCallOutput::success(serde_json::json!({
+                            "served_segment": "settled"
+                        })),
+                    )),
+                }),
+            ),
+            Some(Ok(lash_conformance::ConformanceTurnEnd::Aborted(cause))) => (
+                SegmentEnd::Aborted,
+                Err(retryable(format!(
+                    "process `{process_id}` aborted: {cause:?}"
+                ))),
+            ),
+            Some(Err(())) => (
+                SegmentEnd::Panicked,
+                Err(lash_core::PluginError::Session(format!(
+                    "process `{process_id}` panicked in its served segment"
+                ))),
+            ),
+        };
+        if let Some(ends) = ends {
+            let _ = ends.send(end);
+        }
+        outcome
+    }
+}
+
 /// Runs each conformance turn inside a [`ConformanceTurnProbe`] handler on the
 /// live endpoint.
 pub(super) struct LiveTurnRunner {
     connection: crate::RestateConnection,
+    /// Where the runner kills and purges a crashed process segment's
+    /// invocation for [`SegmentRecovery::SubstrateLost`](lash_conformance::SegmentRecovery::SubstrateLost).
+    admin: super::effect_group_conformance::HarnessAdmin,
     process_runner: std::sync::Arc<super::effect_group_conformance::LawProcessRunner>,
     /// The invocations a law left open, by scope: each one's probe key and
     /// its ingress call, which returns once the invocation completes.
     open: tokio::sync::Mutex<HashMap<String, OpenInvocation>>,
+    /// The process segments a law crashed and has not recovered yet.
+    crashed_segments: tokio::sync::Mutex<HashMap<lash_core::ProcessId, CrashedSegment>>,
 }
 
 struct OpenInvocation {
@@ -286,15 +446,56 @@ struct OpenInvocation {
     call: tokio::task::JoinHandle<Result<bool, crate::RestateHttpError>>,
 }
 
+/// A process segment whose execution a law's crash killed: its registration,
+/// and the ingress call of its invocation, which returns once the invocation
+/// completes.
+struct CrashedSegment {
+    registration: lash_core::ProcessRegistration,
+    call: SegmentCall,
+}
+
+type SegmentCall =
+    tokio::task::JoinHandle<Result<crate::RestateProcessWorkflowOutput, crate::RestateHttpError>>;
+
+/// How long a recovered segment may take to reach its end.
+const SEGMENT_RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 impl LiveTurnRunner {
     pub(super) fn shared(
         connection: crate::RestateConnection,
+        admin: super::effect_group_conformance::HarnessAdmin,
         process_runner: std::sync::Arc<super::effect_group_conformance::LawProcessRunner>,
     ) -> std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner> {
         std::sync::Arc::new(Self {
             connection,
+            admin,
             process_runner,
             open: tokio::sync::Mutex::default(),
+            crashed_segments: tokio::sync::Mutex::default(),
+        })
+    }
+
+    /// Submits segment 0 of `registration` to the endpoint's
+    /// `LashProcessWorkflow`, the way a process start schedules it, and
+    /// returns the ingress call that completes with the invocation.
+    fn submit_segment(&self, registration: &lash_core::ProcessRegistration) -> SegmentCall {
+        let ingress = RestateIngressClient::new(self.connection.clone());
+        let key = crate::process::process_segment_workflow_key(&registration.id, 0);
+        let input = crate::RestateProcessWorkflowInput {
+            registration: registration.clone(),
+            execution_context: lash_core::ProcessExecutionContext::default(),
+            segment_ordinal: 0,
+            journal_version: crate::RESTATE_PROCESS_JOURNAL_VERSION,
+        };
+        tokio::spawn(async move {
+            ingress
+                .call_workflow_json::<_, crate::RestateProcessWorkflowOutput>(
+                    crate::LashService::ProcessWorkflow.name(),
+                    &key,
+                    "run",
+                    &input,
+                )
+                .await
         })
     }
 
@@ -463,6 +664,101 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
             }],
         )
         .await;
+    }
+
+    async fn serve_segments(
+        &self,
+        process_id: &lash_core::ProcessId,
+        body: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        self.process_runner
+            .segments()
+            .serve(process_id, Some(body), None, None);
+    }
+
+    /// The segment runs in the endpoint's real `LashProcessWorkflow`, past its
+    /// admission; the crash fails the execution retryably, so the invocation
+    /// stays open for Restate to deliver again.
+    async fn run_segment_until_crash(
+        &self,
+        registration: lash_core::ProcessRegistration,
+        body: lash_conformance::ConformanceTurnAttempt,
+        crash: lash_conformance::ConformanceCrash,
+    ) {
+        let process_id = registration.id.clone();
+        let (ends, mut ended) = tokio::sync::mpsc::unbounded_channel();
+        self.process_runner
+            .segments()
+            .serve(&process_id, Some(body), Some(crash), Some(ends));
+        let mut call = self.submit_segment(&registration);
+        tokio::select! {
+            biased;
+            end = ended.recv() => match end {
+                Some(SegmentEnd::Crashed) => {}
+                end => panic!(
+                    "the segment of process `{process_id}` ended ({end:?}) before its crash fired"
+                ),
+            },
+            ran = &mut call => panic!(
+                "the invocation of process `{process_id}` completed before its crash fired: {ran:?}"
+            ),
+        }
+        self.crashed_segments
+            .lock()
+            .await
+            .insert(process_id, CrashedSegment { registration, call });
+    }
+
+    /// `Replay` lets Restate deliver the crashed invocation again, replaying
+    /// its journal. `SubstrateLost` kills that invocation and purges it, as
+    /// retention does, and submits the segment afresh under the same key.
+    async fn recover_segment(
+        &self,
+        process_id: &lash_core::ProcessId,
+        recovery: lash_conformance::SegmentRecovery,
+        body: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        let crashed = self
+            .crashed_segments
+            .lock()
+            .await
+            .remove(process_id)
+            .unwrap_or_else(|| panic!("process `{process_id}` has a crashed segment to recover"));
+        let segments = self.process_runner.segments();
+        let ran = match recovery {
+            lash_conformance::SegmentRecovery::Replay => {
+                segments.serve(process_id, Some(body), None, None);
+                tokio::time::timeout(SEGMENT_RECOVERY_TIMEOUT, crashed.call)
+                    .await
+                    .unwrap_or_else(|_| {
+                        panic!("the replayed segment of process `{process_id}` ended")
+                    })
+                    .expect("the segment's ingress call task")
+            }
+            lash_conformance::SegmentRecovery::SubstrateLost => {
+                let key = crate::process::process_segment_workflow_key(process_id, 0);
+                let killed = self
+                    .admin
+                    .kill_workflow_run(crate::LashService::ProcessWorkflow.name(), &key)
+                    .await;
+                let _ = crashed.call.await;
+                self.admin.purge_invocation(&killed).await;
+                // Only now may an execution find the body: the killed
+                // invocation's retry must never run it.
+                segments.serve(process_id, Some(body), None, None);
+                tokio::time::timeout(
+                    SEGMENT_RECOVERY_TIMEOUT,
+                    self.submit_segment(&crashed.registration),
+                )
+                .await
+                .unwrap_or_else(|_| panic!("the fresh segment of process `{process_id}` ended"))
+                .expect("the segment's ingress call task")
+            }
+        };
+        assert!(
+            ran.is_ok(),
+            "the recovered segment of process `{process_id}` ended its invocation: {ran:?}"
+        );
     }
 
     /// Process segments run in the endpoint's `LashProcessWorkflow`: the

@@ -41,6 +41,7 @@ pub use super::restored_claim_cede::*;
 pub use super::retention::*;
 pub use super::runtime_persistence::*;
 pub use super::runtime_persistence_state_machine::*;
+pub use super::segment_redrive::*;
 pub use super::session_delete_blob_reclaim::*;
 pub use super::session_execution_lease_renewal::*;
 pub use super::session_graph_append::*;

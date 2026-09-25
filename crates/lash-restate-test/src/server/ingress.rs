@@ -1,6 +1,6 @@
 //! The server's HTTP face: Restate's ingress API (service calls and sends,
 //! awakeables, attach and output) and the admin API routes lash uses
-//! (cancel, kill, resume, the `sys_invocation` query), served in process.
+//! (cancel, kill, resume, purge, the `sys_invocation` query), served in process.
 
 use std::sync::{Arc, Weak};
 use std::task::Poll;
@@ -228,7 +228,11 @@ impl Routes {
             (HttpMethod::Post, ["deployments"]) => respond_json(201, &json!({})),
             (
                 HttpMethod::Patch | HttpMethod::Put,
-                ["invocations", id, action @ ("cancel" | "kill" | "resume")],
+                [
+                    "invocations",
+                    id,
+                    action @ ("cancel" | "kill" | "resume" | "purge"),
+                ],
             ) => self.control(id, action),
             (HttpMethod::Post, ["query"]) => self.query(&request),
             (HttpMethod::Post, ["services", service, "state"]) => {
@@ -432,6 +436,13 @@ impl Routes {
         let result = match action {
             "cancel" => state.cancel(&self.shared, invocation),
             "kill" => state.kill(&self.shared, invocation),
+            "purge" => {
+                if state.purge(invocation) {
+                    ControlResult::Done
+                } else {
+                    return error(409, format!("invocation {id} is not completed"));
+                }
+            }
             _ => {
                 if state.resume(&self.shared, invocation) {
                     ControlResult::Done
