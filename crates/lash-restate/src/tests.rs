@@ -1441,6 +1441,7 @@ mod process_workflow;
 mod recording_context;
 mod restate_redrive;
 mod substrate_lost;
+mod sync_hooks_retryable_faults;
 
 use cancellation_and_effects::*;
 use conformance_and_poison::*;

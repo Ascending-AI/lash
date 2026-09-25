@@ -464,6 +464,27 @@ pub struct JournalEntryView {
     pub payload: bytes::Bytes,
 }
 
+impl JournalEntryView {
+    /// What a journaled `ctx.run` settled on — the value bytes it produced, or
+    /// the failure it was recorded with — on a `RunCompletionNotification`
+    /// entry; `None` on every other entry.
+    pub fn run_completion(&self) -> Option<Result<bytes::Bytes, (u32, String)>> {
+        use crate::protocol::generated::{
+            RunCompletionNotificationMessage,
+            run_completion_notification_message::Result as RunResult,
+        };
+        use prost::Message as _;
+        if self.ty != MessageType::RunCompletionNotification {
+            return None;
+        }
+        let notification = RunCompletionNotificationMessage::decode(self.payload.clone()).ok()?;
+        match notification.result? {
+            RunResult::Value(value) => Some(Ok(value.content)),
+            RunResult::Failure(failure) => Some(Err((failure.code, failure.message))),
+        }
+    }
+}
+
 impl RestateTestServer {
     /// Start a server with no deployment. Its [`transport`](Self::transport)
     /// works at once, so a deployment whose services need a connection to

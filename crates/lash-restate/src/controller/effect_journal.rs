@@ -36,7 +36,12 @@ use serde::{Deserialize, Serialize};
 /// 4: a tool child reads its recorded execution environment through its own
 /// recorded `load_execution_env` step, the first effect it journals, so a
 /// replay never reads the store again (FIG-3683).
-pub const EFFECT_JOURNAL_VERSION: u32 = 4;
+/// 5: a live store or session fault inside the environment sync or the
+/// assistant-response hooks ends the attempt instead of journaling (FIG-3726);
+/// a journal written under an earlier generation may hold such a fault as the
+/// step's recorded outcome, which replaying would surface forever, so those
+/// journals are refused rather than replayed.
+pub const EFFECT_JOURNAL_VERSION: u32 = 5;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

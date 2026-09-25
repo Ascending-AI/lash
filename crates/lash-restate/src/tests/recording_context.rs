@@ -1105,9 +1105,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v9-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v9-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v9-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v10-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v10-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v10-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1149,6 +1149,7 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
     const GENERATION_ONE: &str = "carries effect-journal generation 1;";
     const GENERATION_TWO: &str = "carries effect-journal generation 2;";
     const GENERATION_THREE: &str = "carries effect-journal generation 3;";
+    const GENERATION_FOUR: &str = "carries effect-journal generation 4;";
     for (name, checked_in, refusal) in [
         (
             "v1-full-drain",
@@ -1257,6 +1258,24 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
             include_bytes!("../../tests/fixtures/tool_intent_journals/v8-full-drain.json")
                 .as_slice(),
             GENERATION_THREE,
+        ),
+        (
+            "v9-mid-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v9-mid-drain.json")
+                .as_slice(),
+            GENERATION_FOUR,
+        ),
+        (
+            "v9-mid-intent",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v9-mid-intent.json")
+                .as_slice(),
+            GENERATION_FOUR,
+        ),
+        (
+            "v9-full-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v9-full-drain.json")
+                .as_slice(),
+            GENERATION_FOUR,
         ),
     ] {
         let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(checked_in)
@@ -1368,16 +1387,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v9-mid-drain",
+            "v10-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v9-mid-intent",
+            "v10-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v9-full-drain", "full_drain", full),
+        ("v10-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
@@ -1487,8 +1506,7 @@ impl ReplayableRecordingContext {
             .iter()
             .filter(|(effect_name, _)| !is_process_command_journal_fact(effect_name))
             .map(|(effect_name, bytes)| {
-                let recorded: RecordedRuntimeEffect =
-                    serde_json::from_slice(bytes).expect("recorded runtime effect");
+                let recorded = decode_recorded_runtime_effect(bytes);
                 let canonical =
                     serde_json::to_value(recorded.envelope).expect("canonical envelope value");
                 let json = canonical
@@ -1512,9 +1530,7 @@ impl ReplayableRecordingContext {
             .iter()
             .filter(|(effect_name, _)| !is_process_command_journal_fact(effect_name))
             .map(|(effect_name, bytes)| {
-                let recorded =
-                    serde_json::from_slice(bytes).expect("decode recorded runtime effect");
-                (effect_name.clone(), recorded)
+                (effect_name.clone(), decode_recorded_runtime_effect(bytes))
             })
             .collect()
     }
@@ -1542,7 +1558,7 @@ impl ReplayableRecordingContext {
         self.records
             .lock_recover()
             .get(effect_name)
-            .map(|bytes| serde_json::from_slice(bytes).expect("decode recorded runtime effect"))
+            .map(|bytes| decode_recorded_runtime_effect(bytes.as_slice()))
     }
 
     pub(super) fn install_process_worker(&self, worker: DurableProcessWorker) {
@@ -1552,6 +1568,30 @@ impl ReplayableRecordingContext {
 
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
     effect_name.ends_with(".process-cancel-admission:v1")
+}
+
+/// Decodes one journaled record into its recorded effect. A step whose engine
+/// faults are retried journals its run's `Result` under these contexts — a
+/// recording context cannot end the attempt, so `run_json_or_retry_send`'s
+/// default wraps the record in `{"Ok": ...}` (or the fault in `{"Err": ...}`);
+/// a step whose faults are recorded journals the stamped record bare.
+fn decode_recorded_runtime_effect(bytes: &[u8]) -> RecordedRuntimeEffect {
+    let value: serde_json::Value = serde_json::from_slice(bytes).expect("decode journaled record");
+    let unwrapped = match value {
+        serde_json::Value::Object(mut entry)
+            if entry.contains_key("Ok") || entry.contains_key("Err") =>
+        {
+            match entry.remove("Ok").or_else(|| entry.remove("Err")) {
+                Some(inner) if inner.is_object() => inner,
+                Some(serde_json::Value::String(fault)) => {
+                    panic!("the step's fault was journaled as its run's result: {fault}")
+                }
+                other => panic!("malformed journaled run result: {other:?}"),
+            }
+        }
+        value => value,
+    };
+    serde_json::from_value(unwrapped).expect("recorded runtime effect")
 }
 
 #[derive(Default)]

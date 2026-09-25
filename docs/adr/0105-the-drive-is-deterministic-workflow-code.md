@@ -404,6 +404,15 @@ worker. `SessionServices` has no members yet; P10a defines them.
   A refusal the step recorded is its outcome on every replay, so a recorded
   park settles the child rather than ending the handler. Effect-journal
   generation 4.
+- **Implemented (FIG-3726, the same rule for the turn's own store-backed
+  derivations).** The environment sync and the assistant-response hooks carry
+  the same seam as the tool child's environment read: a live store or session
+  fault — the sync's catalog read, the hooks' derivation over the journaled
+  completion — is the attempt's fault, never the step's recorded outcome, so
+  the executor marks it with derivation retry authority and Restate ends the
+  attempt without journaling it; the invocation retry runs the step again.
+  What the step decides stays recorded: the synced environment, a refusal the
+  sync recorded, a deterministic hook failure. Effect-journal generation 5.
 
 ### 11. Validation and laws
 
