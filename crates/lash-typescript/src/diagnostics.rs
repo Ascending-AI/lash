@@ -1010,10 +1010,6 @@ mod tests {
             ("finish(structuredClone({}));", "structuredClone"),
             ("finish(new Date(0).getHours());", "local-time Date reader"),
             ("finish(btoa('x'));", "base64 globals"),
-            (
-                "finish(JSON.parse('{}', (k, v) => v));",
-                "JSON.parse reviver",
-            ),
         ] {
             let error = crate::validate(source).expect_err(label);
             assert!(

@@ -521,9 +521,11 @@ no probe that fires it fails that test.
   `getUTC*` replacement; locale and local string methods direct the author to
   `toISOString()`.
 - Date numeric coercion is supported, including subtraction and relational
-  comparison. String coercion—directly or through an array/Error-message join—
-  rejects as `TS_DATE_STRING_COERCION_PENDING` and directs the author to
-  `.toISOString()`; the VM never substitutes a host-local date string.
+  comparison. String coercion—`d.toString()`, `d.toUTCString()`, `String(d)`,
+  `d + ''`, template interpolation, or through an array/Error-message join—
+  produces the deterministic UTC-pinned ECMA DateString, such as
+  `Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)`; the VM
+  never substitutes a host-local date string.
 - Map, Set, and URLSearchParams `forEach` all use live durable cursors: entries
   appended during a callback are visited, while entries deleted before their
   turn are skipped. Deleting and reinserting a Map key or Set value schedules
@@ -689,7 +691,7 @@ The shipped static families are:
   program at all.
 - URL: `canParse(input[, base])`.
 
-The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
+The shipped instance names are `at`, `concat`, `copyWithin`, `charAt`, `charCodeAt`,
 `codePointAt`, `append`, `add`, `clear`, `delete`, `entries`, `exec`, `endsWith`, `filter`, `fill`,
 `find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `forEach`,
 `get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `match`, `matchAll`,
@@ -703,10 +705,11 @@ The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
 `symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`,
 `toJSON`, `getTime`, `getUTCFullYear`, `getUTCMonth`, `getUTCDate`,
 `getUTCDay`, `getUTCHours`, `getUTCMinutes`, `getUTCSeconds`,
-`getUTCMilliseconds`, and `toISOString`. The signature table in
+`getUTCMilliseconds`, `toISOString`, and `toUTCString`. The signature table in
 `src/signatures.rs` gives every optional form.
 
-`Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, `MAX_VALUE`, and
+`Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, `MAX_VALUE`,
+`MIN_VALUE`, `POSITIVE_INFINITY`, `NEGATIVE_INFINITY`, and
 `NaN` are accepted constants. Array callbacks run synchronously and sequentially inside
 the durable VM callback driver. `sort` is stable, mutates and returns its
 receiver; `toSorted`, `toReversed`, `toSpliced`, and `with` return fresh arrays.
@@ -723,8 +726,7 @@ compose with the callback methods, so accumulating into an array inside
 data is host-dependent. Rewrite comparisons as
 `a < b ? -1 : a > b ? 1 : 0`; format numbers with `toFixed(digits)`.
 `String.normalize` also remains rejected because the pinned VM has no Unicode
-normalization database; normalize in a deterministic host tool. JSON parse
-revivers remain rejected: parse first and walk the result explicitly. Missing
+normalization database; normalize in a deterministic host tool. Missing
 methods reject with `TS_METHOD_UNSUPPORTED`.
 
 ## Source nesting budget

@@ -428,8 +428,8 @@ fn instance_method_inventory_matches_the_lowerer() {
         unaccepted.is_empty(),
         "the register documents {unaccepted:?}, which the lowerer does not accept"
     );
-    assert_eq!(documented.len(), 89);
-    assert_eq!(lash_typescript::stdlib_name_count(), 149);
+    assert_eq!(documented.len(), 91);
+    assert_eq!(lash_typescript::stdlib_name_count(), 152);
     for candidate in ["substr", "localeCompare", "toLocaleString", "normalize"] {
         assert!(
             !lash_typescript::accepts_instance_method(candidate),
@@ -469,10 +469,6 @@ fn retained_stdlib_rejections_carry_exact_repairs() {
         (
             "finish('e'.normalize());",
             "Normalize text in a deterministic host tool",
-        ),
-        (
-            "finish(JSON.parse('{}',(k,v)=>v));",
-            "Parse first, then walk the returned value explicitly",
         ),
     ] {
         let error = lash_typescript::validate(source).expect_err("call remains rejected");

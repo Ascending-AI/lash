@@ -231,6 +231,7 @@ typescript	comma-operator
 typescript	constructor-arity
 typescript	cyclic-heap-value
 typescript	date-mutation
+typescript	date-parse-non-iso
 typescript	date-string-coercion
 typescript	debugger
 typescript	decorators

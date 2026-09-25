@@ -42,7 +42,6 @@ use captures::{CaptureLedger, Site};
 use constructs::*;
 pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_workflow_fragment};
 use graph::{shortest_cycle_through, strongly_connected_components};
-use json_replacer::reject_json_parse_reviver;
 use param_types::process_param_type;
 pub(crate) use process_wrapper::{process_run_wrapper, wrapped_run_body};
 use triggers::{

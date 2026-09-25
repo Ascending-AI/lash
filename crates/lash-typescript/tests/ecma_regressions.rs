@@ -285,6 +285,54 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "const a=[1,2,3]; a.fill('x',-2); finish(a.join(','));",
             "1,x,x",
         ),
+        (
+            "const a=[0,0]; const b=[0,0]; finish(a.fill(1,0,undefined).join(',')+'|'+b.fill(1,0,null).join(','));",
+            "1,1|0,0",
+        ),
+        (
+            "const a=[1,2,3,4,5]; const r=a.copyWithin(-2); finish(a.join(',')+'|'+(a===r));",
+            "1,2,3,1,2|true",
+        ),
+        (
+            "const b=[1,2,3,4,5].copyWithin(0,3); const c=[1,2,3,4,5].copyWithin(0,3,4); const d=[1,2,3,4,5].copyWithin(-2,-3,-1); finish(b.join(',')+'|'+c.join(',')+'|'+d.join(','));",
+            "4,5,3,4,5|4,2,3,4,5|1,2,3,3,4",
+        ),
+        (
+            "const e=[1,2,3,4,5].copyWithin(1,0,3); const f=[1,2,3].copyWithin(0,1); finish(e.join(',')+'|'+f.join(','));",
+            "1,1,2,3,5|2,3,3",
+        ),
+        (
+            "const t={raw:['a','b','c']}; finish(String.raw(t,1,2)+'|'+String.raw(t)+'|'+String.raw({raw:{length:0}})+'|'+String.raw({raw:{length:undefined}}));",
+            "a1b2c|abc||",
+        ),
+        (
+            "const r={length:5,0:'e',1:'',2:null,3:undefined,4:123,5:'past'}; finish(String.raw({raw:r}));",
+            "enullundefined123",
+        ),
+        (
+            "try { String.raw(null); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "try { String.raw({raw:undefined}); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const calls=[]; JSON.parse('{\"p1\":0,\"p2\":0,\"p1\":0,\"2\":0,\"1\":0}',(k,v)=>{calls.push(k);return v;}); finish(calls.join(','));",
+            "1,2,p1,p2,",
+        ),
+        (
+            "const o=JSON.parse('{\"a\":1,\"b\":2}',(k,v)=>k==='b'?undefined:v); const l=JSON.parse('[1,2,3]',(k,v)=>k==='1'?undefined:v); finish(Object.keys(o).join(',')+'|'+l.length+'|'+l[1]+'|'+JSON.parse('{\"n\":5}',(k,v)=>typeof v==='number'?v*2:v).n+'|'+JSON.parse('4',7));",
+            "a|3|undefined|10|4",
+        ),
+        (
+            "const d=new Date('2014-03-27T00:00:00Z'); const e=new Date('0020-01-01T00:00:00Z'); const n=new Date(NaN); finish(d.toUTCString()+'|'+d.toString()+'|'+e.toUTCString()+'|'+n.toUTCString()+'|'+n.toString()+'|'+String(d));",
+            "Thu, 27 Mar 2014 00:00:00 GMT|Thu Mar 27 2014 00:00:00 GMT+0000 (Coordinated Universal Time)|Wed, 01 Jan 0020 00:00:00 GMT|Invalid Date|Invalid Date|Thu Mar 27 2014 00:00:00 GMT+0000 (Coordinated Universal Time)",
+        ),
+        (
+            "const g=new Date('-000123-07-01T00:00Z'); finish(g.toUTCString()+'|'+g.toString());",
+            "Sun, 01 Jul -0123 00:00:00 GMT|Sun Jul 01 -0123 00:00:00 GMT+0000 (Coordinated Universal Time)",
+        ),
         ("finish([1,[2,[3]]].flat(Infinity).join(','));", "1,2,3"),
         (
             "const a=[3,1,2]; const b=a.toReversed(); const c=a.toSpliced(1,1,9); const d=a.with(-1,8); finish(a.join(',')+'|'+b.join(',')+'|'+c.join(',')+'|'+d.join(','));",
@@ -311,6 +359,10 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "2.220446049250313e-16|-9007199254740991|3.141592653589793",
         ),
         (
+            "finish(String(Number.MIN_VALUE)+'|'+String(Number.POSITIVE_INFINITY)+'|'+String(Number.NEGATIVE_INFINITY));",
+            "5e-324|Infinity|-Infinity",
+        ),
+        (
             "finish([Math.atan2(1,1),Math.clz32(1),Math.imul(0xffffffff,5),Math.hypot(3,4)].join(','));",
             "0.7853981633974483,31,-5,5",
         ),
@@ -325,6 +377,38 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
         (
             "const a=new Set([1,2]); const b=new Set([2,3]); const u=a.union(b); const i=a.intersection(b); finish([...u].join(',')+'|'+[...i].join(',')+'|'+a.isDisjointFrom(new Set([9])));",
             "1,2,3|2|true",
+        ),
+        (
+            "const s=new Set([1,2]); const m=new Map([[2,'x'],[3,'y']]); finish([...s.union(m)].join(',')+'|'+[...s.intersection(m)].join(',')+'|'+[...s.difference(m)].join(',')+'|'+[...s.symmetricDifference(m)].join(','));",
+            "1,2,3|2|1|1,3",
+        ),
+        (
+            "const m=new Map([[2,'a']]); finish(new Set([2]).isSubsetOf(m)+'|'+new Set([2,5]).isSupersetOf(m)+'|'+new Set([1]).isDisjointFrom(m));",
+            "true|true|true",
+        ),
+        (
+            "finish([...new Set([3,2,1,0]).intersection(new Set([1,3,5]))].join(',')+'|'+[...new Set([1,2,3]).difference(new Set([7,6,3,2]))].join(','));",
+            "1,3|1",
+        ),
+        (
+            "try { new Set([1]).union([3]); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const o={size:2,has:()=>true,keys:undefined}; try { new Set([1]).union(o); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const o={size:2,has:undefined,keys:()=>[]}; try { new Set([1]).difference(o); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "const o={size:'x',has:()=>true,keys:()=>[]}; try { new Set([1]).isSubsetOf(o); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
+        ),
+        (
+            "try { new Set([1]).isDisjointFrom(null); finish('no'); } catch(e) { finish(e.name); }",
+            "TypeError",
         ),
         (
             "finish(JSON.stringify(Object.groupBy([1,2,3,4],v=>v%2)));",
@@ -2043,4 +2127,30 @@ fn writes_onto_exotic_objects_refuse_or_throw_as_ecma_does() {
             "{source}"
         );
     }
+}
+/// A record that passes GetSetRecord validation — numeric `size`, callable
+/// `has` and `keys` — still cannot be a Set argument: those members are guest
+/// closures and a synchronous builtin cannot invoke them, so the method
+/// refuses only when the algorithm actually reaches a callback (FIG-3704).
+#[test]
+fn set_like_objects_with_guest_callbacks_stay_a_refusal() {
+    for source in [
+        "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set([1]).union(o));",
+        "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set([1]).isSubsetOf(o));",
+    ] {
+        let error =
+            execute(source).expect_err("a set-like record's guest callbacks cannot be invoked");
+        assert!(
+            error.to_string().contains("TS_METHOD_UNSUPPORTED"),
+            "{source}: {error}"
+        );
+    }
+    // An empty `this` never reaches a callback, so the validated set-like
+    // still answers ECMA's result.
+    assert_eq!(
+        finished(
+            "const o={size:2,has:()=>true,keys:()=>[9]}; finish(new Set().isSubsetOf(o)+'|'+new Set().isDisjointFrom(o));"
+        ),
+        Value::String("true|true".into())
+    );
 }

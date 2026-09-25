@@ -89,13 +89,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
             "fill" => {
                 let value = args.first().cloned().unwrap_or(Value::Undefined);
                 let start = relative_bound(args.get(1), values.len(), 0);
-                let end = relative_bound(args.get(2), values.len(), values.len()).max(start);
+                // `undefined` is the absent `end`: ToIntegerOrInfinity reads
+                // it as NaN, but the parameter's default is the length.
+                let end = match args.get(2) {
+                    None | Some(Value::Undefined) => values.len(),
+                    Some(_) => relative_bound(args.get(2), values.len(), values.len()),
+                }
+                .max(start);
                 values[start..end].fill(value);
                 self.heap.replace_javascript_list(receiver, values)?;
                 Value::Ref(receiver)
             }
             "reverse" => {
                 values.reverse();
+                self.heap.replace_javascript_list(receiver, values)?;
+                Value::Ref(receiver)
+            }
+            "copyWithin" => {
+                copy_within(&mut values, args);
                 self.heap.replace_javascript_list(receiver, values)?;
                 Value::Ref(receiver)
             }
@@ -226,6 +237,35 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         self.stack.push(result);
         Ok(true)
+    }
+}
+
+/// `Array.prototype.copyWithin` on a materialized vector: the target, start
+/// and end bounds are relative indexes, the count is `min(end - start, len -
+/// target)`, and an overlapping range copies backward so a shifted read never
+/// sees a value already moved. ECMA-262 23.1.3.3.
+pub(super) fn copy_within(values: &mut [Value], args: &[Value]) {
+    let len = values.len();
+    let to = relative_bound(args.first(), len, 0);
+    let from = relative_bound(args.get(1), len, 0);
+    // `undefined` is the absent `end`: ToIntegerOrInfinity reads it as NaN,
+    // but the parameter's default is the length, not the zero NaN implies.
+    let end = match args.get(2) {
+        None | Some(Value::Undefined) => len,
+        Some(_) => relative_bound(args.get(2), len, len),
+    };
+    let count = end.saturating_sub(from).min(len.saturating_sub(to));
+    if count == 0 {
+        return;
+    }
+    if from < to && to < from + count {
+        for index in (0..count).rev() {
+            values[to + index] = values[from + index].clone();
+        }
+    } else {
+        for index in 0..count {
+            values[to + index] = values[from + index].clone();
+        }
     }
 }
 

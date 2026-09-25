@@ -11,8 +11,8 @@ use lashlang::{
 };
 
 use super::{GENERATED_BINDING_PREFIX, Lowerer};
+use crate::Diagnostic;
 use crate::adapter::Expr;
-use crate::{Diagnostic, DiagnosticCode};
 
 impl Lowerer {
     pub(super) fn lower_json_stringify(
@@ -350,6 +350,192 @@ impl Lowerer {
     }
 }
 
+impl Lowerer {
+    /// `JSON.parse(text, reviver)` per ECMA-262 25.5.1.1 + InternalizeJSONProperty:
+    /// the text parses through the ordinary runtime path, then a guest
+    /// `internalize(holder, key)` walks the result depth-first — children
+    /// before parents, the `{"": root}` wrapper last — calling
+    /// `reviver(key, value)` at each step and rebuilding each container from
+    /// the keys the reviver did not return `undefined` for.
+    ///
+    /// The call runs under the same single-shot `Map` driver as the stringify
+    /// replacer, so a throwing reviver propagates as itself. `this` is not
+    /// bound — the guest call mechanism that carries a receiver is FIG-3700's,
+    /// and a reviver that reads `this` still sees `undefined`.
+    pub(super) fn lower_json_parse(
+        &mut self,
+        text: &Expr,
+        reviver: &Expr,
+    ) -> Result<LashExpr, Diagnostic> {
+        let input = self.temporary("json_input");
+        let parsed = self.temporary("json_parsed");
+        let reviver_name = self.temporary("json_reviver");
+        let internalize = self.temporary("json_internalize");
+        let worker = self.temporary("json_worker");
+        let holder = self.temporary("json_holder");
+        let key = self.temporary("json_key");
+        let val = self.temporary("json_val");
+        let out = self.temporary("json_out");
+        let keys = self.temporary("json_keys");
+        let property = self.temporary("json_property");
+        let index = self.temporary("json_index");
+        let element = self.temporary("json_element");
+        let kind = self.temporary("json_kind");
+        let result = self.temporary("json_result");
+
+        let val_value = || variable(&val);
+        let recurse = |holder: LashExpr, key: LashExpr| LashExpr::Call {
+            function: Box::new(variable(&internalize)),
+            args: vec![holder, key],
+        };
+        // ECMA deletes the property when the reviver returns undefined. An
+        // array cannot hold a hole in this value model, so the element is
+        // written as `undefined` — index reads and `length` match; only an
+        // own-keys listing could tell it from a hole.
+        let array_branch = LashExpr::Block(vec![
+            assign(&out, LashExpr::List(Vec::new())),
+            assign(&index, LashExpr::Number(0.0)),
+            LashExpr::While {
+                condition: Box::new(binary(
+                    variable(&index),
+                    JavaScriptBinaryOp::Less,
+                    field(&val, "length"),
+                )),
+                body: Box::new(LashExpr::Block(vec![
+                    assign(
+                        &element,
+                        recurse(
+                            val_value(),
+                            add(LashExpr::String("".into()), variable(&index)),
+                        ),
+                    ),
+                    LashExpr::Assign {
+                        target: AssignTarget {
+                            root: out.as_str().into(),
+                            steps: vec![AssignPathStep::Index(variable(&index))],
+                        },
+                        expr: Box::new(variable(&element)),
+                    },
+                    assign(&index, add(variable(&index), LashExpr::Number(1.0))),
+                ])),
+            },
+            assign(&val, variable(&out)),
+        ]);
+        let record_branch = LashExpr::Block(vec![
+            assign(&out, LashExpr::Record(Vec::new())),
+            assign(&keys, stdlib("Object.keys", vec![val_value()])),
+            LashExpr::For {
+                binding: property.as_str().into(),
+                iterable: Box::new(variable(&keys)),
+                bind: None,
+                body: Box::new(LashExpr::Block(vec![
+                    assign(&element, recurse(val_value(), variable(&property))),
+                    LashExpr::If {
+                        condition: Box::new(binary(
+                            variable(&element),
+                            JavaScriptBinaryOp::StrictNotEqual,
+                            LashExpr::Undefined,
+                        )),
+                        then_block: Box::new(LashExpr::Assign {
+                            target: AssignTarget {
+                                root: out.as_str().into(),
+                                steps: vec![AssignPathStep::Index(variable(&property))],
+                            },
+                            expr: Box::new(variable(&element)),
+                        }),
+                        else_block: Box::new(LashExpr::Undefined),
+                    },
+                ])),
+            },
+            assign(&val, variable(&out)),
+        ]);
+        let internalize_body = LashExpr::Block(vec![
+            assign(
+                &val,
+                LashExpr::Index {
+                    target: Box::new(variable(&holder)),
+                    index: Box::new(variable(&key)),
+                },
+            ),
+            assign(&kind, stdlib("__jsonContainerKind", vec![val_value()])),
+            LashExpr::If {
+                condition: Box::new(binary(
+                    variable(&kind),
+                    JavaScriptBinaryOp::StrictEqual,
+                    LashExpr::String("array".into()),
+                )),
+                then_block: Box::new(array_branch),
+                else_block: Box::new(LashExpr::Undefined),
+            },
+            LashExpr::If {
+                condition: Box::new(binary(
+                    variable(&kind),
+                    JavaScriptBinaryOp::StrictEqual,
+                    LashExpr::String("record".into()),
+                )),
+                then_block: Box::new(record_branch),
+                else_block: Box::new(LashExpr::Undefined),
+            },
+            LashExpr::Return(Box::new(LashExpr::Call {
+                function: Box::new(variable(&reviver_name)),
+                args: vec![variable(&key), val_value()],
+            })),
+        ]);
+        let internalize_fn = LashExpr::Function(Box::new(FunctionExpr {
+            name: Some(internalize.as_str().into()),
+            js_name: None,
+            params: vec![holder.as_str().into(), key.as_str().into()],
+            captures: vec![reviver_name.as_str().into()],
+            body: Box::new(internalize_body),
+        }));
+        let root = LashExpr::Record(vec![("".into(), variable(&parsed))]);
+        let worker_body = recurse(root, LashExpr::String("".into()));
+
+        let reviver_value = self.lower_expr(reviver)?;
+        let traversed = stdlib(
+            "__singleCallbackResult",
+            vec![LashExpr::Map {
+                items: Box::new(LashExpr::List(vec![LashExpr::Undefined])),
+                function: Box::new(variable(&worker)),
+            }],
+        );
+        Ok(LashExpr::Block(vec![
+            assign(&input, self.lower_expr(text)?),
+            assign(&reviver_name, reviver_value),
+            assign(&internalize, internalize_fn),
+            assign(&parsed, stdlib("JSON.parse", vec![variable(&input)])),
+            assign(
+                &worker,
+                LashExpr::Function(Box::new(FunctionExpr {
+                    name: None,
+                    js_name: None,
+                    params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
+                    captures: vec![parsed.as_str().into(), internalize.as_str().into()],
+                    body: Box::new(worker_body),
+                })),
+            ),
+            // IsCallable decides whether the walk runs at all: a non-callable
+            // reviver argument leaves the parsed value untouched.
+            assign(
+                &result,
+                LashExpr::If {
+                    condition: Box::new(binary(
+                        LashExpr::JavaScriptUnary {
+                            op: JavaScriptUnaryOp::TypeOf,
+                            expr: Box::new(variable(&reviver_name)),
+                        },
+                        JavaScriptBinaryOp::StrictEqual,
+                        LashExpr::String("function".into()),
+                    )),
+                    then_block: Box::new(traversed),
+                    else_block: Box::new(variable(&parsed)),
+                },
+            ),
+            variable(&result),
+        ]))
+    }
+}
+
 fn variable(name: &str) -> LashExpr {
     LashExpr::Variable(name.into())
 }
@@ -400,12 +586,4 @@ fn stdlib(method: &str, mut args: Vec<LashExpr>) -> LashExpr {
         name: "__typescript_stdlib".into(),
         args,
     }
-}
-
-pub(super) fn reject_json_parse_reviver() -> Diagnostic {
-    Diagnostic::refusal(
-        DiagnosticCode::MethodUnsupported,
-        "Unsupported: JSON.parse reviver callbacks. Parse first, then walk the returned value explicitly in deterministic TypeScript.",
-        None,
-    )
 }

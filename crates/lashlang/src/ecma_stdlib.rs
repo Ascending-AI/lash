@@ -101,6 +101,7 @@ pub const STATIC_STDLIB_SIGNATURES: &[StdlibSignature] = signatures![
     ("Array", "of", "...values"),
     ("String", "fromCharCode", "...codeUnits"),
     ("String", "fromCodePoint", "...codePoints"),
+    ("String", "raw", "template, ...substitutions"),
     ("Map", "groupBy", "iterable, callback"),
     ("Date", "parse", "value"),
     (
@@ -173,6 +174,7 @@ pub const INSTANCE_STDLIB_SIGNATURES: &[StdlibSignature] = instance_signatures![
     ("endsWith", "search[, endPosition]", On::STRING),
     ("filter", "callback[, thisArg]", On::ARRAY),
     ("fill", "[value[, start[, end]]]", On::ARRAY),
+    ("copyWithin", "[target[, start[, end]]]", On::ARRAY),
     ("find", "callback[, thisArg]", On::ARRAY),
     ("findIndex", "callback[, thisArg]", On::ARRAY),
     ("findLast", "callback[, thisArg]", On::ARRAY),
@@ -260,6 +262,7 @@ pub const INSTANCE_STDLIB_SIGNATURES: &[StdlibSignature] = instance_signatures![
     ("getUTCSeconds", "", On::NONE),
     ("getUTCMilliseconds", "", On::NONE),
     ("toISOString", "", On::NONE),
+    ("toUTCString", "", On::NONE),
 ];
 
 /// The fixed positional arity a signature row declares, or `None` when the

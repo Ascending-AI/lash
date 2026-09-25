@@ -139,40 +139,26 @@ fn date_utc_surface_is_complete_and_iso_only() {
 }
 
 #[test]
-fn date_string_coercion_rejects_inside_containers_and_error_messages() {
-    for source in [
-        "finish('' + [new Date(0)]);",
-        "finish(new Error(new Date(0)).message);",
-        "finish(new Error([new Date(0)]).message);",
+fn date_string_coercion_produces_the_ecma_date_string() {
+    // FIG-3704: a Date's default ToPrimitive hint is string, so `+`, template
+    // interpolation, `String()` and container joins all answer the
+    // deterministic UTC DateString.
+    const DATE: &str = "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)";
+    for (source, expected) in [
+        ("finish('' + [new Date(0)]);", DATE),
+        ("finish(new Error(new Date(0)).message);", DATE),
+        ("finish(new Error([new Date(0)]).message);", DATE),
+        ("finish(new Date(0) + '');", DATE),
+        ("finish(`${new Date(0)}`);", DATE),
+        ("finish(String(new Date(0)));", DATE),
     ] {
-        let error = execute(source).expect_err("Date string coercion remains a loud deviation");
-        assert!(
-            error
-                .to_string()
-                .contains("TS_DATE_STRING_COERCION_PENDING")
-                && error.to_string().contains("toISOString"),
-            "{source}: {error}"
-        );
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
     }
 
     assert_eq!(
         finished("const a=new Date(1); const b=new Date(4); finish(`${b-a}|${a<b}`);"),
         Value::String("3|true".into())
     );
-    for source in [
-        "finish(new Date(0) + '');",
-        "finish(`${new Date(0)}`);",
-        "finish(String(new Date(0)));",
-    ] {
-        let error = execute(source).expect_err("Date string coercion remains a loud deviation");
-        assert!(
-            error
-                .to_string()
-                .contains("TS_DATE_STRING_COERCION_PENDING")
-                && error.to_string().contains("toISOString"),
-            "{source}: {error}"
-        );
-    }
 }
 
 #[test]

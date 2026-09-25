@@ -75,3 +75,8 @@
 "`\\8`"	reject	TS_SYNTAX_ERROR
 "`\\u{1F_639}`"	reject	TS_SYNTAX_ERROR
 "(() => { const p=/a/g; const f={toString: function() { return 'i'; }}; return new RegExp(p,f).flags; })()"	runtime-reject	TS_OBJECT_STRING_COERCION
+# FIG-3704: a GetSetRecord-valid set-like object still cannot be a Set
+# argument — its `has`/`keys` are guest closures and a synchronous builtin
+# cannot invoke them — so the method refuses by name rather than silently
+# computing the wrong set.
+"(() => { const o={size:1,has:()=>true,keys:()=>[9]}; return [...new Set([1]).union(o)].join(','); })()"	runtime-reject	TS_METHOD_UNSUPPORTED

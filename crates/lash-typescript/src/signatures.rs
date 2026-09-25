@@ -384,7 +384,7 @@ mod tests {
                 .count()
         };
         assert_eq!(carrying(On::STRING), 28, "string literal receivers");
-        assert_eq!(carrying(On::ARRAY), 34, "array literal receivers");
+        assert_eq!(carrying(On::ARRAY), 35, "array literal receivers");
         assert_eq!(carrying(On::NUMBER), 5, "number literal receivers");
         assert_eq!(carrying(On::OTHER), 3, "remaining literal receivers");
 
@@ -407,6 +407,7 @@ mod tests {
             [
                 "at",
                 "concat",
+                "copyWithin",
                 "every",
                 "fill",
                 "filter",

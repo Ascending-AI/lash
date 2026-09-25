@@ -1,5 +1,5 @@
 use super::super::{
-    ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
+    ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
 };
 use super::*;
 use num_traits::Float;
@@ -942,6 +942,304 @@ impl<H: ExecutionHost> Vm<'_, H> {
             _ => Ok(false),
         }
     }
+
+    /// `String.raw(template, ...substitutions)`, ECMA-262 22.1.2.4: the cooked
+    /// template is never read; the raw segments come from `template.raw`,
+    /// counted by its `length` after `ToLength`, and a substitution joins the
+    /// output only when a later raw segment follows it.
+    pub(super) fn javascript_string_raw(&mut self, args: &[Value]) -> Result<Value, RuntimeError> {
+        let template = args.first().cloned().unwrap_or(Value::Undefined);
+        if matches!(template, Value::Null | Value::Undefined) {
+            return Err(self.javascript_type_error("Cannot convert undefined or null to object"));
+        }
+        let raw = self.read_dialect_index(template, Value::String("raw".into()))?;
+        if matches!(raw, Value::Null | Value::Undefined) {
+            return Err(self.javascript_type_error("Cannot convert undefined or null to object"));
+        }
+        // `ToObject(raw)` before the length read: a sequence or string raw is
+        // an object with an indexed length, which the value model answers
+        // without materialising a wrapper.
+        let length = match &raw {
+            Value::List(items) | Value::Tuple(items) => items.len() as f64,
+            Value::String(value) => value.encode_utf16().count() as f64,
+            Value::Ref(id) => match self.heap.get(*id)? {
+                HeapObject::List(items) | HeapObject::Tuple(items) => items.len() as f64,
+                HeapObject::RegExpMatch(result) => result.items.len() as f64,
+                _ => {
+                    let value =
+                        self.read_dialect_index(raw.clone(), Value::String("length".into()))?;
+                    self.heap.javascript_to_number(&value)?
+                }
+            },
+            _ => {
+                let value = self.read_dialect_index(raw.clone(), Value::String("length".into()))?;
+                self.heap.javascript_to_number(&value)?
+            }
+        };
+        // ToLength: ToIntegerOrInfinity clamped to [0, 2^53 - 1].
+        let segments = if length.is_nan() || length <= 0.0 {
+            0
+        } else {
+            (length.trunc() as u64).min(9_007_199_254_740_991)
+        };
+        let substitutions = args.get(1..).unwrap_or(&[]);
+        let mut output = String::new();
+        for index in 0..segments {
+            let key = Value::String(index.to_string().into());
+            let literal = self.read_dialect_index(raw.clone(), key)?;
+            output.push_str(&self.heap.javascript_to_string(&literal)?);
+            ensure_javascript_string_size(output.len())?;
+            if index + 1 < segments && (index as usize) < substitutions.len() {
+                output.push_str(
+                    &self
+                        .heap
+                        .javascript_to_string(&substitutions[index as usize])?,
+                );
+                ensure_javascript_string_size(output.len())?;
+            }
+        }
+        Ok(Value::String(output.into()))
+    }
+
+    /// A guest-visible `TypeError`, thrown the way `assert.throws` expects:
+    /// as an uncaught exception carrying an error object, not a VM fault.
+    fn javascript_type_error(&mut self, message: &str) -> RuntimeError {
+        match self
+            .heap
+            .allocate_error(ErrorKind::TypeError, Some(message.to_string()), None, None)
+        {
+            Ok(value) => RuntimeError::UncaughtException { value },
+            Err(error) => error,
+        }
+    }
+
+    /// `IsCallable`, ECMA-262 7.2.3: in the value model only a heap closure is
+    /// callable.
+    fn javascript_is_callable(&self, value: &Value) -> Result<bool, RuntimeError> {
+        Ok(match value {
+            Value::Ref(id) => matches!(self.heap.get(*id)?, HeapObject::Closure { .. }),
+            _ => false,
+        })
+    }
+
+    /// GetSetRecord, ECMA-262 24.2.1.2: a `Set` or `Map` argument answers
+    /// `size`, `has` and `keys` natively; every other value is validated in
+    /// ECMA order — numeric `size`, callable `has`, callable `keys` — so an
+    /// invalid argument throws the TypeError the tests expect, while a
+    /// *valid* set-like object stays a refusal, because its `has`/`keys` are
+    /// guest closures a synchronous builtin cannot invoke.
+    fn javascript_set_like(&mut self, other: &Value) -> Result<(SetLike, f64), RuntimeError> {
+        if let Value::Ref(id) = other {
+            match self.heap.get(*id)? {
+                HeapObject::Set(set) => {
+                    return Ok((SetLike::Set(*id), set.values.len() as f64));
+                }
+                HeapObject::Map(map) => {
+                    return Ok((SetLike::Map(*id), map.entries.len() as f64));
+                }
+                _ => {}
+            }
+        }
+        if matches!(other, Value::Null | Value::Undefined) {
+            return Err(self.javascript_type_error(&format!(
+                "Cannot read properties of {} (reading 'size')",
+                if matches!(other, Value::Null) {
+                    "null"
+                } else {
+                    "undefined"
+                },
+            )));
+        }
+        let size = self.read_dialect_index(other.clone(), Value::String("size".into()))?;
+        let size = self.heap.javascript_to_number(&size)?;
+        if size.is_nan() {
+            return Err(self.javascript_type_error("size property is not a number"));
+        }
+        let has = self.read_dialect_index(other.clone(), Value::String("has".into()))?;
+        if !self.javascript_is_callable(&has)? {
+            return Err(self.javascript_type_error("has property is not callable"));
+        }
+        let keys = self.read_dialect_index(other.clone(), Value::String("keys".into()))?;
+        if !self.javascript_is_callable(&keys)? {
+            return Err(self.javascript_type_error("keys property is not callable"));
+        }
+        // ToIntegerOrInfinity: the declared size only chooses which side of the
+        // comparison methods iterates.
+        let size = if size.is_finite() { size.trunc() } else { size };
+        Ok((SetLike::Guest, size))
+    }
+
+    fn javascript_set_like_has(
+        &self,
+        like: &SetLike,
+        method: &str,
+        value: &Value,
+    ) -> Result<bool, RuntimeError> {
+        match like {
+            SetLike::Set(id) => self.heap.set_has(*id, value),
+            SetLike::Map(id) => self.heap.map_has(*id, value),
+            SetLike::Guest => Err(js_stdlib_error(format!(
+                "TS_METHOD_UNSUPPORTED: Set.{method} would invoke the argument's has/keys callbacks; pass a Set or a Map"
+            ))),
+        }
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "a SetLike::Set/Map is only constructed after the heap kind check, per each message"
+    )]
+    fn javascript_set_like_keys(
+        &self,
+        like: &SetLike,
+        method: &str,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        match like {
+            SetLike::Set(id) => Ok(self.heap.set_values(*id)?.expect("Set kind was checked")),
+            SetLike::Map(id) => Ok(self
+                .heap
+                .map_entries(*id)?
+                .expect("Map kind was checked")
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect()),
+            SetLike::Guest => Err(js_stdlib_error(format!(
+                "TS_METHOD_UNSUPPORTED: Set.{method} would invoke the argument's has/keys callbacks; pass a Set or a Map"
+            ))),
+        }
+    }
+
+    /// The seven `Set.prototype` combinational methods. The spec iterates
+    /// `this` and calls the argument's `has` when `this.size <= other.size`,
+    /// and iterates the argument's `keys()` otherwise — which fixes the result
+    /// order for `intersection` — so both directions are implemented against
+    /// the same set-like record.
+    #[expect(
+        clippy::expect_used,
+        reason = "the receiver kind was checked by the dispatch arm, per the message"
+    )]
+    pub(super) fn execute_javascript_set_method(
+        &mut self,
+        method: &str,
+        receiver: HeapId,
+        other: &Value,
+    ) -> Result<Value, RuntimeError> {
+        let left = self
+            .heap
+            .set_values(receiver)?
+            .expect("Set receiver was checked");
+        let (like, size) = self.javascript_set_like(other)?;
+        let contains = |values: &[Value], value: &Value| {
+            values
+                .iter()
+                .any(|candidate| same_value_zero(candidate, value))
+        };
+        Ok(match method {
+            "union" => {
+                let mut output = left.clone();
+                for value in self.javascript_set_like_keys(&like, method)? {
+                    if !contains(&output, &value) {
+                        output.push(value);
+                    }
+                }
+                self.heap.allocate_set(output)?
+            }
+            "intersection" => {
+                let mut output = Vec::new();
+                if left.len() as f64 <= size {
+                    for value in &left {
+                        if self.javascript_set_like_has(&like, method, value)? {
+                            output.push(value.clone());
+                        }
+                    }
+                } else {
+                    for value in self.javascript_set_like_keys(&like, method)? {
+                        if contains(&left, &value) && !contains(&output, &value) {
+                            output.push(value);
+                        }
+                    }
+                }
+                self.heap.allocate_set(output)?
+            }
+            "difference" => {
+                let mut output;
+                if left.len() as f64 <= size {
+                    output = Vec::new();
+                    for value in &left {
+                        if !self.javascript_set_like_has(&like, method, value)? {
+                            output.push(value.clone());
+                        }
+                    }
+                } else {
+                    output = left.clone();
+                    for value in self.javascript_set_like_keys(&like, method)? {
+                        output.retain(|candidate| !same_value_zero(candidate, &value));
+                    }
+                }
+                self.heap.allocate_set(output)?
+            }
+            "symmetricDifference" => {
+                let mut output = left.clone();
+                for value in self.javascript_set_like_keys(&like, method)? {
+                    if contains(&left, &value) {
+                        output.retain(|candidate| !same_value_zero(candidate, &value));
+                    } else if !contains(&output, &value) {
+                        output.push(value);
+                    }
+                }
+                self.heap.allocate_set(output)?
+            }
+            "isSubsetOf" => {
+                let mut all = true;
+                for value in &left {
+                    if !self.javascript_set_like_has(&like, method, value)? {
+                        all = false;
+                        break;
+                    }
+                }
+                Value::Bool(all)
+            }
+            "isSupersetOf" => {
+                let mut all = true;
+                for value in self.javascript_set_like_keys(&like, method)? {
+                    if !contains(&left, &value) {
+                        all = false;
+                        break;
+                    }
+                }
+                Value::Bool(all)
+            }
+            "isDisjointFrom" => {
+                let mut all = true;
+                if left.len() as f64 <= size {
+                    for value in &left {
+                        if self.javascript_set_like_has(&like, method, value)? {
+                            all = false;
+                            break;
+                        }
+                    }
+                } else {
+                    for value in self.javascript_set_like_keys(&like, method)? {
+                        if contains(&left, &value) {
+                            all = false;
+                            break;
+                        }
+                    }
+                }
+                Value::Bool(all)
+            }
+            _ => unreachable!(),
+        })
+    }
+}
+
+/// A validated `GetSetRecord`: a heap `Set` or `Map`, or an object whose
+/// `has`/`keys` are guest closures — which a synchronous builtin cannot call,
+/// so the enum marks them lazy and refuses only when the algorithm reaches
+/// them.
+enum SetLike {
+    Set(HeapId),
+    Map(HeapId),
+    Guest,
 }
 
 /// How V8 names a value that was called but has no `[[Call]]`: its type,

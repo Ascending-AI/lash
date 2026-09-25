@@ -2,7 +2,7 @@ use super::super::{
     ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_number,
     javascript_to_string, nullish_property_read,
 };
-use super::javascript_array::javascript_array_method_for_value;
+use super::javascript_array::{copy_within, javascript_array_method_for_value};
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
 pub(super) use super::javascript_stdlib::*;
 use super::*;
@@ -188,6 +188,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             };
             self.stack
                 .push(Value::Bool(values.iter().any(|value| value == needle)));
+            return Ok(());
+        }
+        if let [Value::String(method), arguments @ ..] = values.as_slice()
+            && method.as_str() == "String.raw"
+        {
+            let result = self.javascript_string_raw(arguments)?;
+            self.stack.push(result);
             return Ok(());
         }
         if let [Value::String(method), arguments @ ..] = values.as_slice()
@@ -670,92 +677,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             (
                 "Set",
-                "union" | "intersection" | "difference" | "symmetricDifference",
-                [Value::Ref(other)],
-            ) if matches!(self.heap.get(*other)?, HeapObject::Set(_)) => {
-                let left = self
-                    .heap
-                    .set_values(receiver)?
-                    .expect("Set receiver was checked");
-                let right = self
-                    .heap
-                    .set_values(*other)?
-                    .expect("Set argument was checked");
-                let mut output = Vec::new();
-                match method {
-                    "union" => {
-                        output.extend(left.iter().cloned());
-                        for value in &right {
-                            if !self.heap.set_has(receiver, value)? {
-                                output.push(value.clone());
-                            }
-                        }
-                    }
-                    "intersection" => {
-                        // ECMA iterates the smaller set and keeps its order:
-                        // `this` when it is no larger than the argument,
-                        // otherwise the argument's own insertion order.
-                        if left.len() <= right.len() {
-                            for value in &left {
-                                if self.heap.set_has(*other, value)? {
-                                    output.push(value.clone());
-                                }
-                            }
-                        } else {
-                            for value in &right {
-                                if self.heap.set_has(receiver, value)? {
-                                    output.push(value.clone());
-                                }
-                            }
-                        }
-                    }
-                    "difference" => {
-                        for value in &left {
-                            if !self.heap.set_has(*other, value)? {
-                                output.push(value.clone());
-                            }
-                        }
-                    }
-                    "symmetricDifference" => {
-                        for value in &left {
-                            if !self.heap.set_has(*other, value)? {
-                                output.push(value.clone());
-                            }
-                        }
-                        for value in &right {
-                            if !self.heap.set_has(receiver, value)? {
-                                output.push(value.clone());
-                            }
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-                Some(self.heap.allocate_set(output)?)
-            }
-            ("Set", "isSubsetOf" | "isSupersetOf" | "isDisjointFrom", [Value::Ref(other)])
-                if matches!(self.heap.get(*other)?, HeapObject::Set(_)) =>
-            {
-                let left = self
-                    .heap
-                    .set_values(receiver)?
-                    .expect("Set receiver was checked");
-                let right = self
-                    .heap
-                    .set_values(*other)?
-                    .expect("Set argument was checked");
-                Some(Value::Bool(match method {
-                    "isSubsetOf" => left
-                        .iter()
-                        .all(|value| self.heap.set_has(*other, value).unwrap_or(false)),
-                    "isSupersetOf" => right
-                        .iter()
-                        .all(|value| self.heap.set_has(receiver, value).unwrap_or(false)),
-                    "isDisjointFrom" => left
-                        .iter()
-                        .all(|value| !self.heap.set_has(*other, value).unwrap_or(false)),
-                    _ => unreachable!(),
-                }))
-            }
+                "union"
+                | "intersection"
+                | "difference"
+                | "symmetricDifference"
+                | "isSubsetOf"
+                | "isSupersetOf"
+                | "isDisjointFrom",
+                [other],
+            ) => Some(self.execute_javascript_set_method(method, receiver, other)?),
             _ => {
                 return Err(js_stdlib_error(format!(
                     "TS_METHOD_UNSUPPORTED: {kind}.{method} with {} argument(s)",
@@ -1356,6 +1286,11 @@ pub(super) fn javascript_array_method(
         }
         ("at", [index]) => Ok(relative_index(javascript_to_number(index), items.len())
             .map_or(Value::Undefined, |index| items[index].clone())),
+        ("copyWithin", _) => {
+            let mut values = items.to_vec();
+            copy_within(&mut values, &args);
+            Ok(Value::List(values.into()))
+        }
         ("concat", values) => {
             let mut output = items.to_vec();
             for value in values {
