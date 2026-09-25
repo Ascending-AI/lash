@@ -68,6 +68,17 @@ fn var_initialized_to_a_function_round_trips() {
 }
 
 #[test]
+fn template_literals_round_trip_their_cooked_escapes() {
+    // FIG-3720: the lens stores the cooked text and the printer re-escapes it
+    // — a newline prints `\n`, a literal `${` prints `\${` — so the printed
+    // template reparses to the same cooked value.
+    assert_lens_laws("finish(`a\\nb\\t${1}x\\u{1F600}\\${y}`);\n");
+    // A literal newline cooks to LF and prints back escaped; the reparse
+    // produces the same cooked text again.
+    assert_lens_laws("finish(`a\nb`);\n");
+}
+
+#[test]
 fn opaque_statements_read_session_globals() {
     // FIG-3663: an opaque statement may read a session global the program
     // itself linked against — the corpus's Test262 cells throw

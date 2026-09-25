@@ -15,6 +15,7 @@ mod nesting;
 mod optional_chain;
 mod prototype_chain;
 mod rejections;
+mod template;
 #[cfg(test)]
 mod tests;
 mod traversal;
@@ -1342,21 +1343,7 @@ impl Adapter<'_> {
                     source_span(call.span),
                 )
             }
-            swc::Expr::Tpl(template) => Expr::Template {
-                quasis: template
-                    .quasis
-                    .iter()
-                    .map(|quasi| {
-                        self.check_template_text(quasi.span)?;
-                        Ok(quasi.raw.to_string())
-                    })
-                    .collect::<Result<_, Diagnostic>>()?,
-                expressions: template
-                    .exprs
-                    .iter()
-                    .map(|expr| self.convert_expr(expr))
-                    .collect::<Result<_, _>>()?,
-            },
+            swc::Expr::Tpl(template) => self.convert_template(template)?,
             swc::Expr::Paren(expr) => optional_chain::parenthesized(self.convert_expr(&expr.expr)?),
             swc::Expr::TsTypeAssertion(expr) => self.convert_expr(&expr.expr)?,
             swc::Expr::TsConstAssertion(expr) => self.convert_expr(&expr.expr)?,

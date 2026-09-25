@@ -1,0 +1,16 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3720	1	accept	"`a\\nb`.length"	"3"	-
+FIG-3720	2	accept	"`\\t`"	"\t"	-
+FIG-3720	3	accept	"`\\\\`"	"\\"	-
+FIG-3720	4	accept	"`\\``"	"`"	-
+FIG-3720	5	accept	"`\\${x}`"	"${x}"	-
+FIG-3720	6	accept	"`\\A`"	"A"	-
+FIG-3720	7	accept	"`\\x41`"	"A"	-
+FIG-3720	8	accept	"`\\0`.length"	"1"	-
+FIG-3720	9	accept	"`a\\n${1}\\tb`"	"a\n1\tb"	-
+FIG-3720	10	reject	"`\\unicode`"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+FIG-3720	11	reject	"`\\uD800`"	"\ud800"	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
+FIG-3720	12	accept	"`\\u{000000041}`"	"A"	-
+FIG-3720	13	accept	"`\\u12345`"	"ሴ5"	-
+FIG-3720	14	reject	"`\\8`"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
+FIG-3720	15	reject	"`\\u{1F_639}`"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR
