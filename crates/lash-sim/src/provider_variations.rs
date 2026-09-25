@@ -459,9 +459,10 @@ mod tests {
         let (provider, model, _) =
             runtime_provider_components(fixture.dialect.provider_kind(), &transport)
                 .expect("Anthropic provider components");
-        let backend = crate::backend::memory_backend()
+        let engine = crate::backend::SimEngine::new(0x5eed_7006)
             .await
-            .expect("SQLite memory backend");
+            .expect("sim engine");
+        let backend = engine.backend();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -490,13 +491,15 @@ mod tests {
             .expect("RLM session");
         let run = tokio::time::timeout(
             Duration::from_secs(2),
-            session
-                .turn(lash::TurnInput::text("finish with the scripted value"))
-                .run(),
+            engine.run_text_turn(
+                &session,
+                "rlm-stop-honoring-turn",
+                "finish with the scripted value",
+            ),
         )
         .await;
         let turn = match run {
-            Ok(turn) => turn.expect("RLM turn"),
+            Ok(turn) => turn.expect("RLM turn handler").expect("RLM turn"),
             Err(_) => {
                 let selections = transport.selections();
                 let stop_consumed_calls = selections

@@ -180,7 +180,7 @@ declare -A confidence_fast_shard_steps=(
   [scenario-harnesses]="run_scenario_harnesses"
   [fault-matrix]="run_state_machine_and_fault_matrix"
   [sim-unit-perf-guards]="run_sim_unit_suite"
-  [sim-generated]="run_sim_generated_lane run_focused_sqlite_seed_tail_repro_when_store_selected write_provider_transport_exclusion_evidence write_sim_lane_evidence"
+  [sim-generated]="run_sim_generated_lane write_provider_transport_exclusion_evidence write_sim_lane_evidence"
   [minimizer-fixtures]="run_minimizer_fixture_suite"
   [summary]="write_fast_matrix_summary"
 )
@@ -509,14 +509,12 @@ declare -A confidence_artifact_paths=(
   [full_lane_prerequisites]="sim/full-lane-prerequisites.json"
   [postgres_effect_history_status]="sim/postgres-effect-history-status.json"
   [restate_postgres_workers_e2e]="sim/restate-postgres-workers-e2e.json"
-  [focused_sqlite_seed_tail_repro]="sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json"
   [backend_contention]="sim/backend-contention/backend-contention.json"
-  [postgres_current_trace_replay]="sim/postgres-current/status.json"
-  [postgres_current_trace_replay_report]="sim/postgres-replay/postgres-replay.json"
+  [postgres_current_contention]="sim/postgres-current/status.json"
   [coverage_summary]="coverage/summary.json"
   [mutation_evidence]="mutation-evidence.json"
   [sim_search_run]="sim/search.json"
-  [generated_postgres_dynamic_replay]="sim/postgres-generated-rerun/summary.json"
+  [postgres_conformance]="sim/postgres-conformance.json"
   [model_replay_evidence]="sim/model-replay/summary.json"
 )
 
@@ -551,15 +549,15 @@ confidence_schedule_table=(
   "fast:minimizer-fixtures|sim|minimizer-fixtures|simulation minimizer fixtures|failing_minimizer_fixtures"
   "fast:summary|all|summary|validate all unscoped fast shard summaries|"
   "sim-search|sim|sim-search|deterministic simulation search shard at full budgets|"
-  "default|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres replay|focused_sqlite_seed_tail_repro,backend_contention,postgres_current_trace_replay,postgres_current_trace_replay_report,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
+  "default|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_current_contention,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "default|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
   "default|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "default|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "default|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "default|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "default|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary,sim_search_run,provider_transport_exclusions,failing_minimizer_fixtures,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "broad|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres replay|focused_sqlite_seed_tail_repro,backend_contention,generated_postgres_dynamic_replay,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "broad|store|postgres-conformance|bounded Postgres conformance and dynamic backend differential|generated_postgres_dynamic_replay"
+  "broad|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
+  "broad|store|postgres-conformance|bounded Postgres conformance and dynamic backend differential|postgres_conformance"
   "broad|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
   "broad|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "broad|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
@@ -567,8 +565,8 @@ confidence_schedule_table=(
   "broad|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "broad|sim|simulation|simulation unit, generated, search, minimizer, and replay evidence|sim_summary,sim_search_run,provider_transport_exclusions,failing_minimizer_fixtures,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
   "broad|all|model-replay|model replay evidence|model_replay_evidence"
-  "full|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres replay|focused_sqlite_seed_tail_repro,backend_contention,generated_postgres_dynamic_replay,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
-  "full|store|postgres-conformance|full Postgres conformance and dynamic backend differential|generated_postgres_dynamic_replay"
+  "full|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
+  "full|store|postgres-conformance|full Postgres conformance and dynamic backend differential|postgres_conformance"
   "full|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,restate_postgres_workers_e2e,coverage_summary,mutation_evidence"
   "full|process|restate-workers|Restate/Postgres/S3 worker e2e|restate_postgres_workers_e2e"
   "full|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,postgres_effect_history_status,coverage_summary,mutation_evidence"
@@ -1493,29 +1491,6 @@ with open(path, "w", encoding="utf-8") as handle:
 CORPUS_TIMING
 }
 
-run_focused_sqlite_seed_tail_repro() {
-  mkdir -p "${out_dir}/sim"
-  local repro_dir="${out_dir}/sim/focused-sqlite-seed-tail"
-  local repro_artifact="${repro_dir}/focused-sqlite-seed-tail.json"
-  if [ "$lane" = "fast" ] && [ "${LASH_RUN_FOCUSED_SQLITE_REPRO_IN_FAST:-0}" != "1" ]; then
-    mkdir -p "$repro_dir"
-    cat >"$repro_artifact" <<EOF
-{
-  "schema": "lash.confidence.focused-sqlite-seed-tail-repro.v1",
-  "status": "not_run",
-  "lane": "${lane}",
-  "reason": "focused full-random SQLite seed-tail repro runs in default/broad/full; set LASH_RUN_FOCUSED_SQLITE_REPRO_IN_FAST=1 to include it in fast",
-  "exact_command": "scripts/lash-sim-focused-sqlite-repro.sh ${repro_dir}",
-  "seeds": [17785827714152183977, 4101155038242989457]
-}
-EOF
-    return
-  fi
-
-  step "Focused generated SQLite seed-tail repro"
-  scripts/lash-sim-focused-sqlite-repro.sh "$repro_dir"
-}
-
 write_provider_transport_exclusion_evidence() {
   step "Provider transport exclusion contract"
   python3 - "${out_dir}/sim/summary.json" "${out_dir}/sim/provider-transport-exclusions.json" <<'PY'
@@ -1636,11 +1611,11 @@ write_sim_lane_declarations() {
     fi
   elif [ "$lane" = "default" ]; then
     if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-      postgres_status="current_trace_replay_configured_by_env"
+      postgres_status="current_contention_configured_by_env"
     elif command -v docker >/dev/null 2>&1; then
-      postgres_status="current_trace_replay_bootstraps_docker"
+      postgres_status="current_contention_bootstraps_docker"
     else
-      postgres_status="current_trace_replay_requires_LASH_POSTGRES_DATABASE_URL_or_docker"
+      postgres_status="current_contention_requires_LASH_POSTGRES_DATABASE_URL_or_docker"
     fi
   else
     postgres_status="env_gated_full_lane_only"
@@ -1649,23 +1624,19 @@ write_sim_lane_declarations() {
 {
   "schema": "lash.confidence.env-gated-lanes.v1",
   "lane": "${lane}",
-  "sqlite_runtime_replay": "included_in_lash_sim_run",
   "minimized_regression_packages": "included_in_lash_sim_run",
   "operational_coverage_oracle": "sim.oracle.operational-coverage.v1",
   "operational_cases": "queueing_inputs,triggers,cancellation,observer_reconnects,provider_failures_mutations,process_wakes,tool_exec,durable_effects,worker_lease_failover,backend_choices,retries,duplicates",
   "scenario_contract_manifests": "included_in_lash_sim_summary",
   "scenario_contract_slices": "included_in_lash_sim_summary_with_generated_shape_transition_kind_and_negative_fixture",
   "sim_search_run": "$(scheduled_existing_artifact_path sim_search_run "$(schedule_lane_fallback_reason)")",
-  "focused_sqlite_seed_tail_repro": "$(scheduled_existing_artifact_path focused_sqlite_seed_tail_repro not_written)",
-  "generated_postgres_dynamic_replay": "$(scheduled_artifact_path generated_postgres_dynamic_replay "$(schedule_lane_fallback_reason)")",
+  "postgres_conformance": "$(scheduled_artifact_path postgres_conformance "$(schedule_lane_fallback_reason)")",
   "model_only_boundary_reviews": "included_in_lash_sim_summary",
   "provider_transport_exclusions": "$(scheduled_artifact_path provider_transport_exclusions not_in_selected_schedule)",
   "backend_contention": "$(scheduled_artifact_path backend_contention "$(schedule_lane_fallback_reason)")",
   "model_replay_evidence": "$(scheduled_artifact_path model_replay_evidence "$(schedule_lane_fallback_reason)")",
   "postgres_backend_conformance": "${postgres_status}",
-  "postgres_trace_replay": "${postgres_status}",
   "postgres_native_effect_history_replay": "native_postgres_runtime_effect_controller",
-  "postgres_effect_history_evidence": "Postgres trace replay report includes effect_history_replay.status=native_postgres_runtime_effect_controller and runtime_effect.controller=postgres_runtime_effect_controller for durable/tool/exec runtime boundaries",
   "postgres_env": "LASH_POSTGRES_DATABASE_URL"
 }
 EOF
@@ -1765,9 +1736,7 @@ write_postgres_effect_history_status() {
     "sleep due_at_ms preservation"
   ],
   "evidence": [
-    "lash-postgres-store env-gated RuntimeEffectController conformance",
-    "lash-sim replay-postgres effect_history_replay.status",
-    "durable/tool/exec runtime boundary observations with runtime_effect.controller=postgres_runtime_effect_controller"
+    "lash-postgres-store env-gated RuntimeEffectController conformance"
   ],
   "smallest_required_api_change": "none"
 }
@@ -1785,40 +1754,6 @@ run_backend_contention_evidence() {
   cargo run -p lash-sim --locked -- backend-contention --out "${out_dir}/sim/backend-contention"
 }
 
-run_generated_postgres_dynamic_replay() {
-  local database_url="$1"
-  local mode="$2"
-  step "Generated Postgres dynamic backend rerun"
-  local replay_dir="${out_dir}/sim/postgres-generated-rerun"
-  local profile="${LASH_POSTGRES_GENERATED_PROFILE:-full-random}"
-  local seed="4101155038242989457"
-  local max_boundaries="${LASH_POSTGRES_GENERATED_MAX_BOUNDARIES:-128}"
-  LASH_POSTGRES_DATABASE_URL="$database_url" \
-    cargo run -p lash-sim --locked -- run-postgres \
-      --out "$replay_dir" \
-      --profile "$profile" \
-      --seed "$seed" \
-      --max-boundaries "$max_boundaries"
-  python3 - "${replay_dir}/summary.json" "$mode" <<'PY'
-import json
-import sys
-
-path, mode = sys.argv[1:3]
-with open(path, "r", encoding="utf-8") as handle:
-    summary = json.load(handle)
-summary["postgres_mode"] = mode
-summary["confidence_lane"] = "generated_dynamic_postgres_backend_rerun"
-summary["semantics"] = (
-    "same generated workload rerun through the serialized in-memory reference "
-    "and real lash-postgres-store backend; this is dynamic generated-driver "
-    "equivalence, not fixed-order trace replay"
-)
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(summary, handle, indent=2, sort_keys=True)
-    handle.write("\n")
-PY
-}
-
 run_cross_backend_store_soak() {
   local database_url="$1"
   local cases="${LASH_CROSS_BACKEND_SOAK_CASES:-64}"
@@ -1828,18 +1763,6 @@ run_cross_backend_store_soak() {
     LASH_CROSS_BACKEND_CASES="$cases" \
     cargo test -p lash-sim --test cross_backend_store_differential --locked \
       generated_cross_backend_surface_differential_agrees -- --nocapture --include-ignored
-}
-
-write_generated_postgres_dynamic_replay_skipped() {
-  mkdir -p "${out_dir}/sim/postgres-generated-rerun"
-  cat >"${out_dir}/sim/postgres-generated-rerun/summary.json" <<EOF
-{
-  "schema": "lash.sim.postgres-generated-rerun-summary.v1",
-  "status": "skipped",
-  "reason": "Docker and LASH_POSTGRES_DATABASE_URL are unavailable for generated Postgres dynamic backend rerun",
-  "confidence_lane": "generated_dynamic_postgres_backend_rerun"
-}
-EOF
 }
 
 run_postgres_schema_gate() {
@@ -1865,7 +1788,6 @@ run_postgres_conformance() {
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
     run_postgres_schema_gate "$LASH_POSTGRES_DATABASE_URL"
     run_cross_backend_store_soak "$LASH_POSTGRES_DATABASE_URL"
-    run_generated_postgres_dynamic_replay "$LASH_POSTGRES_DATABASE_URL" "env"
     if area_selected sim; then
       run_model_replay_suite
     fi
@@ -1912,7 +1834,6 @@ EOF
     cargo test -p lash-internal-postgres-store --locked --test conformance
   run_postgres_schema_gate "postgres://lash:lash@127.0.0.1:${port}/lash"
   run_cross_backend_store_soak "postgres://lash:lash@127.0.0.1:${port}/lash"
-  run_generated_postgres_dynamic_replay "postgres://lash:lash@127.0.0.1:${port}/lash" "docker"
   if area_selected sim; then
     run_model_replay_suite
   fi
@@ -1999,11 +1920,10 @@ run_broad_postgres_evidence() {
   if [ "$lane" != "broad" ]; then
     return
   fi
-  step "Broad Postgres/static replay evidence"
+  step "Broad Postgres conformance evidence"
   build_conformance_helpers
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
-    run_generated_postgres_dynamic_replay "$LASH_POSTGRES_DATABASE_URL" "env"
     if area_selected sim; then
       run_model_replay_suite
     fi
@@ -2024,7 +1944,6 @@ EOF
     if area_selected sim; then
       run_model_replay_suite
     fi
-    write_generated_postgres_dynamic_replay_skipped
     mkdir -p "${out_dir}/sim"
     cat >"${out_dir}/sim/postgres-conformance.json" <<EOF
 {
@@ -2060,7 +1979,6 @@ EOF
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-internal-postgres-store --locked --test conformance
-  run_generated_postgres_dynamic_replay "postgres://lash:lash@127.0.0.1:${port}/lash" "docker"
   if area_selected sim; then
     run_model_replay_suite
   fi
@@ -2078,21 +1996,20 @@ EOF
 EOF
 }
 
-run_current_postgres_trace_replay_evidence() {
+run_current_postgres_contention_evidence() {
   if [ "$lane" != "default" ]; then
     return
   fi
-  step "Current Postgres trace replay evidence"
+  step "Current Postgres backend contention evidence"
   mkdir -p "${out_dir}/sim/postgres-current"
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-    run_sim_postgres_replay "$LASH_POSTGRES_DATABASE_URL" "env"
     run_backend_contention_evidence
     cat >"${out_dir}/sim/postgres-current/status.json" <<EOF
 {
-  "schema": "lash.confidence.postgres-current-trace-replay.v1",
+  "schema": "lash.confidence.postgres-current-contention.v1",
   "status": "passed",
   "mode": "env",
-  "report": "../postgres-replay/postgres-replay.json",
+  "report": "../backend-contention/backend-contention.json",
   "full_lane_status": "not_run_in_default_lane"
 }
 EOF
@@ -2101,7 +2018,7 @@ EOF
   if ! command -v docker >/dev/null 2>&1; then
     cat >"${out_dir}/sim/postgres-current/status.json" <<EOF
 {
-  "schema": "lash.confidence.postgres-current-trace-replay.v1",
+  "schema": "lash.confidence.postgres-current-contention.v1",
   "status": "skipped",
   "reason": "Docker and LASH_POSTGRES_DATABASE_URL are unavailable",
   "exact_command": "LASH_POSTGRES_DATABASE_URL=postgres://... LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh default",
@@ -2131,46 +2048,19 @@ EOF
     sleep 1
   done
 
-  run_sim_postgres_replay "postgres://lash:lash@127.0.0.1:${port}/lash" "docker"
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     run_backend_contention_evidence
   cat >"${out_dir}/sim/postgres-current/status.json" <<EOF
 {
-  "schema": "lash.confidence.postgres-current-trace-replay.v1",
+  "schema": "lash.confidence.postgres-current-contention.v1",
   "status": "passed",
   "mode": "docker",
   "image": "postgres:16-alpine",
   "port": "${port}",
-  "report": "../postgres-replay/postgres-replay.json",
+  "report": "../backend-contention/backend-contention.json",
   "full_lane_status": "not_run_in_default_lane"
 }
 EOF
-}
-
-run_sim_postgres_replay() {
-  local database_url="$1"
-  local mode="$2"
-  local trace
-  trace="$(
-    find "${out_dir}/sim/replays" -name '*.trace.json' -type f 2>/dev/null \
-      | sort \
-      | head -n 1
-  )"
-  mkdir -p "${out_dir}/sim/postgres-replay"
-  if [ -z "$trace" ]; then
-    cat >"${out_dir}/sim/postgres-replay/postgres-replay.json" <<EOF
-{
-  "schema": "lash.confidence.postgres-trace-replay.v1",
-  "status": "skipped",
-  "reason": "no generated lash-sim trace was available",
-  "mode": "${mode}"
-}
-EOF
-    return
-  fi
-  LASH_POSTGRES_DATABASE_URL="$database_url" \
-    cargo run -p lash-sim --locked -- replay-postgres "$trace" \
-      --out "${out_dir}/sim/postgres-replay"
 }
 
 run_model_replay_command() {
@@ -2271,7 +2161,7 @@ if generated["trace_count"] == 0 or generated_backend_regression["trace_count"] 
 summary = {
     "schema": "lash.confidence.model-replay-evidence.v1",
     "status": status,
-    "semantics": "Generated scheduler traces and generated backend regression fixtures are replayed against the simulation model. Minimized failing-regression traces are model-replayed to prove deterministic oracle preservation. Backend equivalence is not claimed by this artifact; SQLite evidence is recorded by sim/backend-contention/backend-contention.json and sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json, while Postgres generated-rerun evidence is recorded by sim/postgres-generated-rerun/summary.json using the single hardcoded seed 4101155038242989457.",
+    "semantics": "Generated scheduler traces and generated backend regression fixtures are replayed against the simulation model. Minimized failing-regression traces are model-replayed to prove deterministic oracle preservation. Backend equivalence is not claimed by this artifact; store-level backend evidence is recorded by sim/backend-contention/backend-contention.json and the cross-backend store differential.",
     "row_count": len(rows),
     "corpora": by_corpus,
     "failures": failures,
@@ -2976,15 +2866,12 @@ write_confidence_summary() {
   "coverage_scope": "${coverage_scope}",
   "coverage_evidence_status": "$(coverage_evidence_status)",
   "sim_search_run": "$(scheduled_existing_artifact_path sim_search_run not_run)",
-  "focused_sqlite_seed_tail_repro": "$(scheduled_existing_artifact_path focused_sqlite_seed_tail_repro not_run)",
   "mutation_evidence": "$(mutation_evidence_path)",
   "mutation_evidence_status": "$(mutation_evidence_status)",
   "mutation_scope": "${mutation_scope}",
   "full_mutation_status": "$(full_mutation_status)",
-  "postgres_backend_conformance": "$(if schedule_has_artifact generated_postgres_dynamic_replay; then echo "included_or_explicitly_skipped_in_postgres_conformance_artifact"; else echo "not_in_selected_lane_or_area"; fi)",
-  "postgres_current_trace_replay": "$(scheduled_artifact_path postgres_current_trace_replay not_in_selected_lane_or_area)",
-  "postgres_current_trace_replay_report": "$(scheduled_existing_artifact_path postgres_current_trace_replay_report not_run)",
-  "generated_postgres_dynamic_replay": "$(scheduled_existing_artifact_path generated_postgres_dynamic_replay not_run)",
+  "postgres_backend_conformance": "$(scheduled_existing_artifact_path postgres_conformance not_in_selected_lane_or_area)",
+  "postgres_current_contention": "$(scheduled_artifact_path postgres_current_contention not_in_selected_lane_or_area)",
   "backend_contention": "$(scheduled_existing_artifact_path backend_contention not_run)",
   "model_replay_evidence": "$(scheduled_existing_artifact_path model_replay_evidence not_run)",
   "restate_postgres_workers_e2e": "$(scheduled_existing_artifact_path restate_postgres_workers_e2e not_written)",
@@ -3130,12 +3017,6 @@ write_sim_lane_evidence() {
   write_full_lane_prerequisites
   write_postgres_effect_history_status
   write_restate_postgres_workers_e2e_lane_status
-}
-
-run_focused_sqlite_seed_tail_repro_when_store_selected() {
-  if [ "$area" = "all" ] || area_selected store; then
-    run_focused_sqlite_seed_tail_repro
-  fi
 }
 
 # The suites every non-sharded lane runs before its lane-specific work. Each
@@ -3284,9 +3165,6 @@ if [ "$lane" = "fast" ]; then
 fi
 
 run_core_suites
-if area_selected store; then
-  run_focused_sqlite_seed_tail_repro
-fi
 if area_selected sim; then
   write_provider_transport_exclusion_evidence
 fi
@@ -3296,7 +3174,7 @@ if [ "$lane" = "default" ] || [ "$lane" = "broad" ] || [ "$lane" = "full" ]; the
   if area_selected store; then
     run_local_backend_conformance
     run_backend_contention_evidence
-    run_current_postgres_trace_replay_evidence
+    run_current_postgres_contention_evidence
   fi
   run_coverage_blind_spots
   case "$mutation_scope" in

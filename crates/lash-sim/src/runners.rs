@@ -6,10 +6,7 @@ pub async fn run(cli: SimCli) -> Result<(), String> {
     match cli.command {
         SimCommand::FixedScripts(args) => run_fixed_scripts(args.into_iter()).await,
         SimCommand::Run(args) => run_run(args.into_iter()).await,
-        SimCommand::RunPostgres(args) => run_run_postgres(args.into_iter()).await,
         SimCommand::Replay(args) => run_replay(args.into_iter()).await,
-        SimCommand::ReplaySqlite(args) => run_replay_sqlite(args.into_iter()).await,
-        SimCommand::ReplayPostgres(args) => run_replay_postgres(args.into_iter()).await,
         SimCommand::BackendContention(args) => run_backend_contention(args.into_iter()).await,
         SimCommand::BackendFaults(args) => run_backend_faults(args.into_iter()).await,
         SimCommand::StackProbe(args) => run_stack_probe(args.into_iter()).await,
@@ -195,65 +192,6 @@ async fn run_run(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     Ok(())
 }
 
-async fn run_run_postgres(mut args: impl Iterator<Item = String>) -> Result<(), String> {
-    let mut out = None;
-    let mut profile = "fast-random".to_string();
-    let mut explicit_seeds = Vec::new();
-    let mut max_boundaries = None;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--out" => out = args.next().map(PathBuf::from),
-            "--profile" => {
-                profile = args
-                    .next()
-                    .ok_or_else(|| format!("missing --profile value\n\n{}", usage()))?
-            }
-            "--seed" => {
-                let value = args
-                    .next()
-                    .ok_or_else(|| format!("missing --seed value\n\n{}", usage()))?;
-                explicit_seeds.push(parse_u64("--seed", &value)?);
-            }
-            "--max-boundaries" => {
-                let value = args
-                    .next()
-                    .ok_or_else(|| format!("missing --max-boundaries value\n\n{}", usage()))?;
-                max_boundaries = Some(parse_usize("--max-boundaries", &value)?);
-            }
-            "-h" | "--help" => return Err(usage()),
-            other => return Err(format!("unknown argument `{other}`\n\n{}", usage())),
-        }
-    }
-    let Some(out) = out else {
-        return Err(format!("missing --out\n\n{}", usage()));
-    };
-    if explicit_seeds.is_empty() {
-        return Err(format!(
-            "run-postgres requires at least one --seed\n\n{}",
-            usage()
-        ));
-    }
-    let max_boundaries = match max_boundaries {
-        Some(max_boundaries) => max_boundaries,
-        None => {
-            lash_sim::generator::default_max_boundaries(&profile).map_err(|err| err.to_string())?
-        }
-    };
-    let database_url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .map_err(|_| "missing LASH_POSTGRES_DATABASE_URL".to_string())?;
-    let report = lash_sim::run_generated_postgres_replay_for_seeds(
-        out.as_path(),
-        &profile,
-        &explicit_seeds,
-        max_boundaries,
-        &database_url,
-    )
-    .await
-    .map_err(|err| err.to_string())?;
-    println!("{}", report.summary_path.display());
-    Ok(())
-}
-
 async fn run_replay(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let trace = args
         .next()
@@ -278,64 +216,6 @@ async fn run_replay(mut args: impl Iterator<Item = String>) -> Result<(), String
             serde_json::to_string_pretty(&report).map_err(|err| err.to_string())?
         );
     }
-    Ok(())
-}
-
-async fn run_replay_sqlite(mut args: impl Iterator<Item = String>) -> Result<(), String> {
-    let trace = args
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| format!("missing trace path\n\n{}", usage()))?;
-    let mut out = None;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--out" => out = args.next().map(PathBuf::from),
-            "-h" | "--help" => return Err(usage()),
-            other => return Err(format!("unknown argument `{other}`\n\n{}", usage())),
-        }
-    }
-    let Some(out) = out else {
-        return Err(format!("missing --out\n\n{}", usage()));
-    };
-    std::fs::create_dir_all(&out).map_err(|err| err.to_string())?;
-    let db_path = out.join("sqlite-store");
-    let report_path = out.join("sqlite-replay.json");
-    let _report =
-        lash_sim::sqlite_replay::replay_trace_file_to_sqlite(&trace, &db_path, Some(&report_path))
-            .await
-            .map_err(|err| err.to_string())?;
-    println!("{}", report_path.display());
-    Ok(())
-}
-
-async fn run_replay_postgres(mut args: impl Iterator<Item = String>) -> Result<(), String> {
-    let trace = args
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| format!("missing trace path\n\n{}", usage()))?;
-    let mut out = None;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--out" => out = args.next().map(PathBuf::from),
-            "-h" | "--help" => return Err(usage()),
-            other => return Err(format!("unknown argument `{other}`\n\n{}", usage())),
-        }
-    }
-    let Some(out) = out else {
-        return Err(format!("missing --out\n\n{}", usage()));
-    };
-    let database_url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .map_err(|_| "missing LASH_POSTGRES_DATABASE_URL".to_string())?;
-    std::fs::create_dir_all(&out).map_err(|err| err.to_string())?;
-    let report_path = out.join("postgres-replay.json");
-    let _report = lash_sim::postgres_replay::replay_trace_file_to_postgres(
-        &trace,
-        &database_url,
-        Some(&report_path),
-    )
-    .await
-    .map_err(|err| err.to_string())?;
-    println!("{}", report_path.display());
     Ok(())
 }
 
@@ -503,10 +383,7 @@ fn usage() -> String {
     "Usage:
   lash-sim fixed-scripts --out <artifact-root>
   lash-sim run --out <artifact-root> [--profile fast-random] [--seeds N | --seed U64 ...] [--max-boundaries N] [--shard I/N] [--mode evidence|search] [--salt TEXT | --corpus weekly-fixed-v1] [--time-budget SECONDS]
-  lash-sim run-postgres --out <artifact-root> [--profile fast-random] --seed U64 ... [--max-boundaries N]
   lash-sim replay <trace> [--out <artifact-root>]
-  lash-sim replay-sqlite <trace> --out <artifact-root>
-  lash-sim replay-postgres <trace> --out <artifact-root>
   lash-sim backend-contention --out <artifact-root>
   lash-sim backend-faults --out <artifact-root> [--backend sqlite|postgres] [--seeds N | --seed U64 ...]
                                  (alias: sqlite-faults)

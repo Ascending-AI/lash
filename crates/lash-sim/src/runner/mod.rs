@@ -47,8 +47,7 @@ use crate::minimize::{MinimizeError, minimize_trace};
 use crate::oracles::{
     LiveProviderFailureFacts, REPLAY_DETERMINISM_ORACLE, combine_oracles,
     live_provider_failure_coverage, peak_concurrent_live_turns, pending_tool_completion,
-    replay_determinism, runtime_final_value_semantic, runtime_provider_turn,
-    scenario_contract_generated_facts,
+    runtime_final_value_semantic, runtime_provider_turn, scenario_contract_generated_facts,
 };
 use crate::provider::{
     ProviderWireEvent, ProviderWireHeader, ProviderWireScript, ScriptedLlmHttpExchange,
@@ -72,7 +71,6 @@ use crate::scheduler::{
     BoundaryDeliveryLog, BoundaryEvent, BoundaryKind, BoundaryScheduler, RuntimeCompletionFamily,
     RuntimeCompletionQueue, RuntimeCompletionUnit,
 };
-use crate::sqlite_replay::SqliteReplayError;
 use crate::stack_policy::{
     SIM_HARNESS_STACK_LIMIT_BYTES, run_on_product_stack, run_on_sim_harness_stack,
 };
@@ -106,7 +104,6 @@ pub enum FixedScriptRunnerError {
     Provider(LlmTransportError),
     Trace(TraceIoError),
     Replay(ReplayError),
-    SqliteReplay(SqliteReplayError),
     Minimize(MinimizeError),
     Profile(WorkloadProfileError),
     Runtime(String),
@@ -121,7 +118,6 @@ impl fmt::Display for FixedScriptRunnerError {
             Self::Provider(err) => write!(f, "fixed-script provider proof failed: {err}"),
             Self::Trace(err) => write!(f, "simulation trace artifact failed: {err}"),
             Self::Replay(err) => write!(f, "simulation replay failed: {err}"),
-            Self::SqliteReplay(err) => write!(f, "SQLite simulation replay failed: {err}"),
             Self::Minimize(err) => write!(f, "simulation trace minimization failed: {err}"),
             Self::Profile(err) => write!(f, "workload profile rejected: {err}"),
             Self::Runtime(err) => write!(f, "runtime/facade proof failed: {err}"),
@@ -162,12 +158,6 @@ impl From<ReplayError> for FixedScriptRunnerError {
     }
 }
 
-impl From<SqliteReplayError> for FixedScriptRunnerError {
-    fn from(value: SqliteReplayError) -> Self {
-        Self::SqliteReplay(value)
-    }
-}
-
 impl From<MinimizeError> for FixedScriptRunnerError {
     fn from(value: MinimizeError) -> Self {
         Self::Minimize(value)
@@ -199,8 +189,6 @@ mod runtime_proofs;
 mod scenario_artifacts;
 mod scenario_evidence;
 mod scenario_facts;
-#[cfg(test)]
-mod sqlite_rerun_tests;
 mod standard_contracts;
 #[cfg(test)]
 mod tests;
@@ -209,10 +197,6 @@ pub use agent_contracts::{FIXED_AGENT_PRODUCT_CONTRACTS, run_agent_contract_prod
 pub(crate) use contract_support::replay_contract_execution;
 pub use fixed_script::run_fixed_script_profile;
 pub(crate) use generated_driver::run_generated_workload_for_fixture;
-pub use generated_driver::{
-    DurableRerun, replay_workload_on_postgres, replay_workload_on_sqlite,
-    replay_workload_serialized_reference, run_generated_postgres_replay_for_seeds,
-};
 pub use generated_profiles::{
     SimRunMode, SimRunModeError, SimSeedSource, WEEKLY_REGRESSION_CORPUS,
     run_generated_sim_profile, run_generated_sim_profile_for_seeds,

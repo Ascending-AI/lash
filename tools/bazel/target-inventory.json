@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 166,
+  "cargo_target_count": 165,
   "feature_lane_units": [
     {
       "features": [
@@ -10753,6 +10753,18 @@
     {
       "features": [],
       "kind": "lib",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_6e611ae1",
+      "package": "lash-internal-restate-test"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_6e611ae1",
+      "package": "lash-internal-restate-test"
+    },
+    {
+      "features": [],
+      "kind": "lib",
       "label": "//crates/lash-restate-test:lash-restate-test__fv_8f3fdb86",
       "package": "lash-internal-restate-test"
     },
@@ -12293,13 +12305,13 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_e27cffe9",
+      "label": "//crates/lash-sim:lash-sim__fv_d579503f",
       "package": "lash-sim"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_e27cffe9",
+      "label": "//crates/lash-sim:lash-sim__fv_d579503f",
       "package": "lash-sim"
     },
     {
@@ -16674,23 +16686,17 @@
       "package": "agent-service"
     },
     {
-      "features": [],
-      "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_15b7a39b",
-      "package": "agent-workbench"
-    },
-    {
       "features": [
         "provider-wire-fixtures"
       ],
       "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_889d39fb",
+      "label": "//examples/agent-workbench:agent-workbench__fv_074f4431",
       "package": "agent-workbench"
     },
     {
       "features": [],
-      "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_15b7a39b",
+      "kind": "bin",
+      "label": "//examples/agent-workbench:agent-workbench__fv_e10fdf73",
       "package": "agent-workbench"
     },
     {
@@ -16698,7 +16704,13 @@
         "provider-wire-fixtures"
       ],
       "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_889d39fb",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_074f4431",
+      "package": "agent-workbench"
+    },
+    {
+      "features": [],
+      "kind": "bin-unit-test",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_e10fdf73",
       "package": "agent-workbench"
     },
     {
@@ -16872,7 +16884,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 225,
+  "generated_label_count": 224,
   "packages": [
     {
       "declared_features": [
@@ -18797,16 +18809,6 @@
           "kind": "bin-unit-test",
           "label": "//crates/lash-sim:lash-sim__bin__unit_test",
           "tags": []
-        },
-        {
-          "cargo": "cross_backend_active_turn_divergence",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
-          "kind": "test",
-          "label": "//crates/lash-sim:cross_backend_active_turn_divergence__test",
-          "tags": [
-            "cargo-service-gate",
-            "manual"
-          ]
         },
         {
           "cargo": "cross_backend_store_differential",

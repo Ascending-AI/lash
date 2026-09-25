@@ -358,16 +358,14 @@ pub(super) fn write_generated_backend_regression_fixtures(
         std::fs::copy(&source_trace_path, &fixture_trace_path)?;
         let package_path = package_dir.join("package.json");
         let static_backend_replay_policy = "not_claimed_for_generated_scheduler_traces";
-        let backend_equivalence_contract = "source seed passed the dynamic generated workload rerun against the serialized in-memory reference and lash-sqlite-store; static SQLite/Postgres replay is a different fixed-order trace contract and is not inferred from this generated trace";
+        let backend_equivalence_contract = "source seed passed every oracle of the generated workload on the runtime world; a static backend replay is a different fixed-order trace contract and is not inferred from this generated trace";
         let package = GeneratedBackendRegressionPackage {
             schema: "lash.sim.generated-backend-regression-package.v1",
             fixture_id: spec.fixture_id,
-            status: "generated_cross_backend_valid_trace",
+            status: "generated_runtime_valid_trace",
             trace: "trace.json",
             source_trace_path: replay.trace_path.clone(),
             source_trace_sha256: replay.trace_sha256.clone(),
-            source_sqlite_replay_report_path: replay.sqlite_replay_report_path.clone(),
-            source_sqlite_replay_report_sha256: replay.sqlite_replay_report_sha256.clone(),
             required_boundary_kinds: spec.required_boundary_kinds.to_vec(),
             semantic_oracles: spec.semantic_oracles.to_vec(),
             replay_backends: vec!["model"],
@@ -383,13 +381,11 @@ pub(super) fn write_generated_backend_regression_fixtures(
         manifests.push(GeneratedBackendRegressionManifest {
             schema: "lash.sim.generated-backend-regression-manifest.v1",
             fixture_id: spec.fixture_id,
-            status: "generated_cross_backend_valid_trace",
+            status: "generated_runtime_valid_trace",
             package_path: relative_path(artifact_root, &package_path),
             trace_path: relative_path(artifact_root, &fixture_trace_path),
             source_trace_path: replay.trace_path.clone(),
             source_trace_sha256: replay.trace_sha256.clone(),
-            source_sqlite_replay_report_path: replay.sqlite_replay_report_path.clone(),
-            source_sqlite_replay_report_sha256: replay.sqlite_replay_report_sha256.clone(),
             required_boundary_kinds: spec.required_boundary_kinds.to_vec(),
             semantic_oracles: spec.semantic_oracles.to_vec(),
             replay_backends: vec!["model"],

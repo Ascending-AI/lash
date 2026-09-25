@@ -135,7 +135,7 @@ impl GeneratedRuntimeWorld {
     /// apples-to-apples: any divergence is a real store divergence, not an
     /// artifact of a separate, fixed-order, provider-event-gated re-drive.
     pub(super) fn with_backend(
-        backend: Arc<dyn lash::Backend>,
+        backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
         effect_replay_store: RuntimeEffectReplayStore,
         serialize_provider_turns: bool,
         clock: Arc<SimClock>,

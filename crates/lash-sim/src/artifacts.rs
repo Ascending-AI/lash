@@ -250,7 +250,6 @@ pub struct ScenarioPositiveEvidence {
     pub source_trace_aliases: Vec<String>,
     pub source_trace_paths: Vec<String>,
     pub replay_report_paths: Vec<String>,
-    pub sqlite_replay_report_paths: Vec<String>,
     pub selected_boundary_ids: Vec<String>,
     pub selected_event_count: usize,
     pub oracle_status: OracleStatus,
@@ -307,8 +306,6 @@ pub struct GeneratedBackendRegressionManifest {
     pub trace_path: String,
     pub source_trace_path: String,
     pub source_trace_sha256: String,
-    pub source_sqlite_replay_report_path: String,
-    pub source_sqlite_replay_report_sha256: String,
     pub required_boundary_kinds: Vec<&'static str>,
     pub semantic_oracles: Vec<&'static str>,
     pub replay_backends: Vec<&'static str>,
@@ -325,8 +322,6 @@ pub(crate) struct GeneratedBackendRegressionPackage {
     pub(crate) trace: &'static str,
     pub(crate) source_trace_path: String,
     pub(crate) source_trace_sha256: String,
-    pub(crate) source_sqlite_replay_report_path: String,
-    pub(crate) source_sqlite_replay_report_sha256: String,
     pub(crate) required_boundary_kinds: Vec<&'static str>,
     pub(crate) semantic_oracles: Vec<&'static str>,
     pub(crate) replay_backends: Vec<&'static str>,
@@ -362,43 +357,7 @@ pub struct GeneratedReplayArtifact {
     pub failure_package_path: String,
     pub minimize_report_path: String,
     pub minimize_report_sha256: String,
-    pub sqlite_database_path: String,
-    pub sqlite_replay_report_path: String,
-    pub sqlite_replay_report_sha256: String,
     pub replay_command: String,
-    pub sqlite_replay_command: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct GeneratedPostgresReplayReport {
-    pub schema: &'static str,
-    pub status: &'static str,
-    pub profile: String,
-    pub configured_max_boundaries: usize,
-    pub database_url_redacted: String,
-    pub cases: Vec<GeneratedPostgresReplayCase>,
-    pub counts: GeneratedPostgresReplayCounts,
-    #[serde(skip)]
-    pub summary_path: PathBuf,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct GeneratedPostgresReplayCase {
-    pub seed: u64,
-    pub trace_alias: String,
-    pub status: &'static str,
-    pub report_path: String,
-    pub report_sha256: String,
-    pub reference_digest: String,
-    pub actual_digest: String,
-    pub verdict: OracleVerdict,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct GeneratedPostgresReplayCounts {
-    pub seeds: usize,
-    pub passed: usize,
-    pub failed: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -574,15 +533,15 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             boundary_kind: "durable_effect",
             status: "runtime_effect_controller_backed_with_reviewed_host_history_ceiling",
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ToolAttempt, RuntimeEffectLocalExecutor::testing, SqliteRuntimeEffectController, and PostgresRuntimeEffectController",
-            model_only_scope: "workflow-host crash history outside store-backed effect replay remains excluded; generated memory runs and generated SQLite dynamic reruns execute production runtime effect replay controllers, while Postgres conformance/contention lanes cover native Postgres replay storage in lash_runtime_effect_replay",
+            model_only_scope: "workflow-host crash history outside store-backed effect replay remains excluded; generated memory runs execute production runtime effect replay controllers, while Postgres conformance/contention lanes cover native Postgres replay storage in lash_runtime_effect_replay",
             oracle_id: "sim.oracle.durable-effect-exactly-once.v1",
-            artifact_evidence: "durable-effect observations include runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, local_executor_called false on replay, first completion, replay for the same durable key, Postgres effect_history_replay.status=native_postgres_runtime_effect_controller, and generated SQLite divergence artifacts on mismatch",
+            artifact_evidence: "durable-effect observations include runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, local_executor_called false on replay, first completion, replay for the same durable key",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "worker",
             status: "runtime_session_and_process_registry_backed_with_reviewed_worker_task_ceiling",
             production_abstraction_used: "SessionExecutionLeaseStore claim/reclaim/renew/release plus ProcessRegistry claim_process_lease and complete_process_with_lease",
-            model_only_scope: "DurableProcessWorker task body launch remains excluded; generated memory runs and generated SQLite dynamic reruns execute production ProcessRegistry fencing, while Postgres backend contention covers the session-lease boundary",
+            model_only_scope: "DurableProcessWorker task body launch remains excluded; generated memory runs execute production ProcessRegistry fencing, while Postgres backend contention covers the session-lease boundary",
             oracle_id: "sim.oracle.worker-stale-completion-rejected.v1",
             artifact_evidence: "worker observed payload records session lease takeover plus process_stale_completion_rejected=true, process_stale_output_absent=true, process_terminal_writer=successor, and process_terminal_event_count=1",
         },
@@ -606,23 +565,23 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             boundary_kind: "tool",
             status: "runtime_effect_controller_backed_with_reviewed_tool_provider_ceiling",
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ToolAttempt, RuntimeEffectLocalExecutor, ToolAttemptLaunch, ToolCallRecord, and ToolCallOutput",
-            model_only_scope: "app-specific ToolProvider implementation bodies remain excluded; generated memory runs and generated SQLite dynamic reruns execute the production runtime effect-controller boundary with scripted no-network tool outcomes",
+            model_only_scope: "app-specific ToolProvider implementation bodies remain excluded; generated memory runs execute the production runtime effect-controller boundary with scripted no-network tool outcomes",
             oracle_id: "sim.oracle.tool-boundary-observed.v1",
-            artifact_evidence: "tool events carry runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, runtime_tool_record, runtime_tool_output, and generated SQLite divergence artifacts on mismatch",
+            artifact_evidence: "tool events carry runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, runtime_tool_record, and runtime_tool_output",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "exec_code",
             status: "runtime_effect_controller_backed_with_reviewed_kernel_launch_ceiling",
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ExecCode, RuntimeEffectLocalExecutor, RuntimeEffectOutcome::ExecCode, and ExecResponse",
-            model_only_scope: "host kernel process launch remains excluded; generated memory runs and generated SQLite dynamic reruns pass the boundary through the production runtime effect controller with scripted ExecResponse outcomes that launch no kernel process. ExecCode replays by re-execution on every host (ADR 0103), so on the SQLite and Postgres controllers this boundary is a direct local-executor call that writes no journal row and is re-run, never served, on replay",
+            model_only_scope: "host kernel process launch remains excluded; generated memory runs pass the boundary through the production runtime effect controller with scripted ExecResponse outcomes that launch no kernel process. ExecCode replays by re-execution on every host (ADR 0103), so on the SQLite and Postgres controllers this boundary is a direct local-executor call that writes no journal row and is re-run, never served, on replay",
             oracle_id: "sim.oracle.exec-code-observed.v1",
-            artifact_evidence: "exec-code events carry runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, runtime_effect_outcome from the local executor on every pass, exit-code data, and generated SQLite divergence artifacts on mismatch",
+            artifact_evidence: "exec-code events carry runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, runtime_effect_outcome from the local executor on every pass, and exit-code data",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "process_wake",
             status: "runtime_persistence_queued_work_backed_with_reviewed_process_body_ceiling",
             production_abstraction_used: "process_wake_delivery, QueuedWorkBatchDraft, QueuedWorkPayload::process_wake, QueuedWorkStore::enqueue_queued_work, and claim_ready_queued_work_by_batch_ids",
-            model_only_scope: "the eventual process body that consumes the wake remains excluded; generated memory runs, generated SQLite dynamic reruns, and Postgres backend contention enqueue or claim wake-adjacent queued work through real queued-work/session-lease backend paths",
+            model_only_scope: "the eventual process body that consumes the wake remains excluded; generated memory runs and Postgres backend contention enqueue or claim wake-adjacent queued work through real queued-work/session-lease backend paths",
             oracle_id: "sim.oracle.process-wake-observed.v1",
             artifact_evidence: "process wake events include runtime_process_wake, structural runtime_queued_work source identity, claimed_once=true, and duplicate claimed_once=false receiver evidence from real queued-work claims",
         },

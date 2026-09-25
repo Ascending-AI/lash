@@ -121,7 +121,7 @@ pub(super) fn scenario_backend_regression_reference(
     };
     Some(ScenarioBackendRegressionReference {
         fixture_id,
-        status: "generated_cross_backend_valid_trace",
+        status: "generated_runtime_valid_trace",
         regression_contract,
     })
 }

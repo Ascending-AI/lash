@@ -335,9 +335,10 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
         })
         .build()
         .into_handle();
-    let backend = crate::backend::memory_backend()
+    let engine = crate::backend::SimEngine::new(0x5eed_7003)
         .await
-        .expect("SQLite memory backend");
+        .expect("sim engine");
+    let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -364,12 +365,19 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
         .open()
         .await
         .expect("RLM cache regression session");
-    session
-        .turn(lash::TurnInput::text("increment a bound value twice"))
-        .require_finish()
-        .expect("finish-required RLM turn")
-        .run()
+    engine
+        .run_turn(
+            &session,
+            "cache-regression-turn",
+            Arc::new(crate::backend::DiscardedTurnActivity),
+            Arc::new(|session: &lash::LashSession| {
+                session
+                    .turn(lash::TurnInput::text("increment a bound value twice"))
+                    .require_finish()
+            }),
+        )
         .await
+        .expect("RLM cache regression handler")
         .expect("RLM cache regression turn");
 
     captures.lock_recover().clone()
@@ -489,9 +497,10 @@ async fn captured_checkpoint_feedback() -> Vec<LlmRequest> {
         })
         .build()
         .into_handle();
-    let backend = crate::backend::memory_backend()
+    let engine = crate::backend::SimEngine::new(0x5eed_7003)
         .await
-        .expect("SQLite memory backend");
+        .expect("sim engine");
+    let backend = engine.backend();
     let builder = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .plugin(Arc::new(FeedbackPlugin));
     let core = builder
@@ -511,10 +520,14 @@ async fn captured_checkpoint_feedback() -> Vec<LlmRequest> {
         .open()
         .await
         .expect("RLM cache regression session");
-    session
-        .turn(lash::TurnInput::text("increment a bound value twice"))
-        .run()
+    engine
+        .run_text_turn(
+            &session,
+            "cache-regression-turn",
+            "increment a bound value twice",
+        )
         .await
+        .expect("RLM cache regression handler")
         .expect("RLM cache regression turn");
 
     captures.lock_recover().clone()

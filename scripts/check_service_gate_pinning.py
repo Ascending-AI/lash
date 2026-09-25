@@ -27,8 +27,8 @@ filter -- so a suite added in either shape is covered by the same rule.
 
 Scope, stated rather than implied. Rule 1 covers GitHub workflow ``env``
 mappings only. Shell scripts also export these variables, but they do so around
-commands that legitimately need the URL without the test-harness flag -- the
-``run-postgres`` CLI takes a database and is not a suite that can skip -- and a
+commands that legitimately need the URL without the test-harness flag -- a
+CLI that takes a database is not a suite that can skip -- and a
 rule with exemptions is a rule the next author edits around. Workflows are
 declarative and exception-free, and "removing it from CI" is the regression the
 ticket names. Rule 2 has no such ambiguity and covers workflows, shell scripts,

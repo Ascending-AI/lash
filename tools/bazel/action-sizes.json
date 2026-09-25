@@ -727,13 +727,6 @@
     "peak_bytes": 1079152640,
     "samples": 498
   },
-  "lash-sim/cross_backend_active_turn_divergence": {
-    "cpu_count": 2,
-    "memory_kb": 2097152,
-    "p95_cores": 1.8,
-    "peak_bytes": 1351450624,
-    "samples": 932
-  },
   "lash-sim/cross_backend_store_differential": {
     "cpu_count": 2,
     "memory_kb": 3670016,

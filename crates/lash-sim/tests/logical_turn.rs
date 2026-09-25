@@ -181,21 +181,39 @@ fn model() -> lash_core::ModelSpec {
 
 #[expect(
     clippy::expect_used,
-    reason = "test support: a SQLite memory backend that refuses to open panics the harness with its case name by design"
+    reason = "test support: a server double that refuses to start panics the harness with its case name by design"
 )]
-async fn memory_backend() -> Arc<lash_sqlite_store::SqliteBackend> {
-    Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("SQLite memory backend"),
-    )
+async fn sim_engine() -> lash_sim::backend::SimEngine {
+    lash_sim::backend::SimEngine::new(0x5eed_7010)
+        .await
+        .expect("sim engine")
+}
+
+/// Drain `session`'s next queued work inside a handler on `engine`.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a drain whose handler never completes panics the harness with its case name by design"
+)]
+async fn drain(
+    engine: &lash_sim::backend::SimEngine,
+    session: &lash::LashSession,
+    drain_id: &str,
+) -> lash::Result<lash::QueuedTurnDrain<lash::TurnOutput>> {
+    engine
+        .run_queued_turn(
+            session,
+            drain_id,
+            Arc::new(|session: &lash::LashSession| session.queued_turn()),
+        )
+        .await
+        .expect("queued drain handler")
 }
 
 async fn standard_core(
     provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
     trace: Arc<RecordingTraceSink>,
-) -> lash::LashCore {
+) -> (lash::LashCore, lash_sim::backend::SimEngine) {
     standard_core_with_attachment_limit(provider, tools, trace, None).await
 }
 
@@ -208,9 +226,10 @@ async fn standard_core_with_attachment_limit(
     tools: Arc<dyn ToolProvider>,
     trace: Arc<RecordingTraceSink>,
     max_attachment_bytes: Option<u64>,
-) -> lash::LashCore {
+) -> (lash::LashCore, lash_sim::backend::SimEngine) {
     let provider_id = provider.kind().to_string();
-    lash::LashCore::standard_builder(memory_backend().await, lash::TurnBudget::Unbounded)
+    let engine = sim_engine().await;
+    let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
         .session_spec(
             lash::SessionSpec::new()
                 .provider_id(provider_id)
@@ -228,7 +247,8 @@ async fn standard_core_with_attachment_limit(
             "logical-turn-test",
             "logical-turn-test-boot",
         ))
-        .expect("build logical-turn sim core")
+        .expect("build logical-turn sim core");
+    (core, engine)
 }
 
 fn canonical_seed_nodes(state: &lash_core::SessionSnapshot, frame_id: &str) -> Vec<Value> {
@@ -310,7 +330,8 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         })
         .build()
         .into_handle();
-    let backend = memory_backend().await;
+    let engine = sim_engine().await;
+    let backend = engine.backend();
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -340,7 +361,9 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
     let pause = Arc::new(PauseAfterFirstCommittedTurn::new(reached_tx));
     session.set_turn_phase_probe(pause.clone()).await;
     let drain_session = session.clone();
-    let first_drain = tokio::spawn(async move { drain_session.queued_turn().run().await });
+    let drain_engine = engine.clone();
+    let first_drain =
+        tokio::spawn(async move { drain(&drain_engine, &drain_session, "first-drain").await });
     first_provider_started_rx
         .await
         .expect("first provider call started");
@@ -441,9 +464,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         vec![second.input_id.as_str()]
     );
 
-    let second_output = session
-        .queued_turn()
-        .run()
+    let second_output = drain(&engine, &session, "second-drain")
         .await
         .expect("second drain succeeds")
         .expect("second queued turn ran");
@@ -547,7 +568,8 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .complete(|_| async { Ok(text_response("finished")) })
         .build()
         .into_handle();
-    let finish_core = standard_core(finish_provider, Arc::new(NoTools), finish_trace.clone()).await;
+    let (finish_core, finish_engine) =
+        standard_core(finish_provider, Arc::new(NoTools), finish_trace.clone()).await;
     let finish_session = finish_core
         .session("logical-turn-finish")
         .open()
@@ -559,9 +581,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .send()
         .await
         .expect("enqueue finish input");
-    finish_session
-        .queued_turn()
-        .run()
+    drain(&finish_engine, &finish_session, "finish-drain")
         .await
         .expect("finish drain succeeds")
         .expect("finish input runs");
@@ -587,7 +607,8 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         })
         .build()
         .into_handle();
-    let cancel_core = standard_core(cancel_provider, Arc::new(NoTools), cancel_trace.clone()).await;
+    let (cancel_core, cancel_engine) =
+        standard_core(cancel_provider, Arc::new(NoTools), cancel_trace.clone()).await;
     let cancel_session = cancel_core
         .session("logical-turn-cancel")
         .open()
@@ -600,7 +621,8 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("enqueue cancel input");
     let drain_session = cancel_session.clone();
-    let cancelled = tokio::spawn(async move { drain_session.queued_turn().run().await });
+    let cancelled =
+        tokio::spawn(async move { drain(&cancel_engine, &drain_session, "cancel-drain").await });
     provider_started_rx.await.expect("cancel provider started");
     assert_eq!(cancel_session.cancel_running_turns(), 1);
     let cancelled = cancelled
@@ -623,7 +645,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .into_handle();
     // An inline attachment over the core's attachment limit fails input
     // normalization before any provider call.
-    let error_core = standard_core_with_attachment_limit(
+    let (error_core, error_engine) = standard_core_with_attachment_limit(
         error_provider,
         Arc::new(NoTools),
         error_trace.clone(),
@@ -646,9 +668,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .send()
         .await
         .expect("enqueue invalid input");
-    let invalid = error_session
-        .queued_turn()
-        .run()
+    let invalid = drain(&error_engine, &error_session, "invalid-drain")
         .await
         .expect("invalid drain succeeds")
         .expect("invalid input terminalizes");
@@ -685,7 +705,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         })
         .build()
         .into_handle();
-    let bound_core = standard_core(
+    let (bound_core, bound_engine) = standard_core(
         bound_provider,
         Arc::new(BoundedSwitchTools {
             switch_count: SWITCH_BOUND,
@@ -704,9 +724,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .send()
         .await
         .expect("enqueue bounded chain");
-    let bounded = bound_session
-        .queued_turn()
-        .run()
+    let bounded = drain(&bound_engine, &bound_session, "bounded-drain")
         .await
         .expect("bounded chain drain succeeds")
         .expect("bounded chain terminalizes");
@@ -779,7 +797,8 @@ finish({ baton: baton });
         })
         .build()
         .into_handle();
-    let backend = memory_backend().await;
+    let engine = sim_engine().await;
+    let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -812,9 +831,7 @@ finish({ baton: baton });
         .send()
         .await
         .expect("enqueue RLM seed turn");
-    let terminal = session
-        .queued_turn()
-        .run()
+    let terminal = drain(&engine, &session, "rlm-seed-drain")
         .await
         .expect("RLM seed drain succeeds")
         .expect("RLM seed turn runs");
@@ -901,7 +918,8 @@ await control.continue_as({
         })
         .build()
         .into_handle();
-    let backend = memory_backend().await;
+    let engine = sim_engine().await;
+    let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -933,9 +951,7 @@ await control.continue_as({
         .send()
         .await
         .expect("enqueue binding turn");
-    let bound = session
-        .queued_turn()
-        .run()
+    let bound = drain(&engine, &session, "binding-drain")
         .await
         .expect("binding drain succeeds")
         .expect("binding turn runs");
@@ -954,9 +970,7 @@ await control.continue_as({
         .send()
         .await
         .expect("enqueue frame-switch turn");
-    let switched = session
-        .queued_turn()
-        .run()
+    let switched = drain(&engine, &session, "frame-switch-drain")
         .await
         .expect("frame-switch drain succeeds")
         .expect("frame-switch turn runs");
@@ -990,8 +1004,10 @@ await control.continue_as({
 
 #[tokio::test]
 async fn terminal_checkpoint_withheld_claim_is_traced_once() {
-    let backend = memory_backend().await;
-    let factory: Arc<dyn lash_core::SessionStoreFactory> = backend.session_store_factory();
+    let engine = sim_engine().await;
+    let backend = engine.backend();
+    let factory: Arc<dyn lash_core::SessionStoreFactory> =
+        lash::Backend::session_store_factory(backend.as_ref());
     let trace = Arc::new(RecordingTraceSink::default());
     let calls = Arc::new(AtomicUsize::new(0));
     let session_id = SessionId::from("logical-turn-withheld-trace");
@@ -1051,9 +1067,7 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
         .send()
         .await
         .unwrap();
-    session
-        .queued_turn()
-        .run()
+    drain(&engine, &session, "withheld-drain")
         .await
         .unwrap()
         .expect("withheld drain runs");

@@ -19,12 +19,8 @@
     "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-claim.v1"
   ],
   "replay_backends": [
-    "model",
-    "sqlite",
-    "postgres_when_available"
+    "model"
   ],
   "replay_command": "kiln run //crates/lash-sim:lash-sim__bin -- replay \"$PWD/crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json\"",
-  "sqlite_replay_command": "kiln run //crates/lash-sim:lash-sim__bin -- replay-sqlite \"$PWD/crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json\" --out /tmp/lash-sim-queued-cancel-replay",
-  "postgres_replay_command": "LASH_POSTGRES_DATABASE_URL=postgres://... kiln run //crates/lash-sim:lash-sim__bin -- replay-postgres \"$PWD/crates/lash-sim/replays/queued-active-turn-cancel-race/trace.json\" --out /tmp/lash-sim-queued-cancel-replay",
   "regeneration_command": "kiln run //crates/lash-sim:lash-sim__bin -- run --out /tmp/fig2113-queued-active-turn-cancel-race --profile fast-random --seed 7313380382653661636"
 }

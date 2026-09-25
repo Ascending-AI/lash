@@ -25,9 +25,10 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         runtime_provider_components(OPENAI_COMPATIBLE, &transport).expect("runtime provider");
     let trace_dir = tempfile::tempdir().expect("trace directory");
     let trace_path = trace_dir.path().join("provider-requests.jsonl");
-    let backend = crate::backend::memory_backend()
+    let engine = crate::backend::SimEngine::new(0x5eed_7005)
         .await
-        .expect("SQLite memory backend");
+        .expect("sim engine");
+    let backend = engine.backend();
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -47,16 +48,16 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .await
         .expect("session");
 
-    let first = session
-        .turn(lash::TurnInput::text("first question"))
-        .run()
+    let first = engine
+        .run_text_turn(&session, "history-snapshot-turn-1", "first question")
         .await
+        .expect("first turn handler")
         .expect("first turn");
     assert_eq!(first.assistant_message(), Some("first reply"));
-    let second = session
-        .turn(lash::TurnInput::text("follow-up question"))
-        .run()
+    let second = engine
+        .run_text_turn(&session, "history-snapshot-turn-2", "follow-up question")
         .await
+        .expect("second turn handler")
         .expect("second turn");
     assert_eq!(second.assistant_message(), Some("second reply"));
     core.flush_trace_sink()

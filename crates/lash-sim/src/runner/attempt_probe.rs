@@ -34,6 +34,7 @@ pub(super) async fn drive_attempt_usage_probe(
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let success = ProviderWireScript::from_json_str(&success.to_string())?;
     let retried = probe_session(
+        seed,
         RETRIED_SESSION,
         vec![retried_failure, success],
         lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
@@ -44,6 +45,7 @@ pub(super) async fn drive_attempt_usage_probe(
     )
     .await?;
     let exhausted = probe_session(
+        seed,
         EXHAUSTED_SESSION,
         vec![failing_attempt_script(seed, EXHAUSTED_SESSION)?],
         lash_core::ChargeSafetyPolicy::default(),
@@ -85,6 +87,7 @@ fn failing_attempt_script(
 }
 
 async fn probe_session(
+    seed: u64,
     session_id: &str,
     scripts: Vec<ProviderWireScript>,
     charge_safety: lash_core::ChargeSafetyPolicy,
@@ -101,14 +104,12 @@ async fn probe_session(
     options.reliability.retry.jitter_ms = 0;
     provider_handle.set_options(options);
     let collector = CheckpointWriteCollector::default();
+    let engine = crate::backend::SimEngine::new(seed).await?;
+    let store_factory: Arc<dyn SessionStoreFactory> =
+        lash::Backend::session_store_factory(engine.backend().as_ref());
     let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?,
+        crate::backend::DecoratedBackend::over_engine(&engine).observing(collector.clone()),
     );
-    let store_factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
-    let backend =
-        Arc::new(crate::backend::DecoratedBackend::over(backend).observing(collector.clone()));
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .lease_timings(crate::lease::sim_runtime_lease_timings())
@@ -127,10 +128,16 @@ async fn probe_session(
     // The exhausted turn is expected to fail; the retried one to succeed. The
     // oracle judges the durable outcome, so either result is evidence here and
     // only the exchange count is a precondition.
-    let _outcome = session
-        .turn(lash::TurnInput::text("Run the attempt usage probe."))
-        .run()
-        .await;
+    let _outcome = engine
+        .run_turn(
+            &session,
+            format!("{session_id}-turn"),
+            Arc::new(super::runtime_proofs::RuntimeProofRecordingEvents::default()),
+            Arc::new(|session: &lash::LashSession| {
+                Ok(session.turn(lash::TurnInput::text("Run the attempt usage probe.")))
+            }),
+        )
+        .await?;
     let exchanged = transport.exchanges()?.len();
     if exchanged != expected_exchanges {
         return Err(FixedScriptRunnerError::Assertion(format!(

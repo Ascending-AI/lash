@@ -94,7 +94,6 @@ const LEASE_TTL_MS: u64 = 30_000;
 pub enum RuntimeEffectReplayStore {
     Memory,
     SqliteFile(PathBuf),
-    Postgres(Arc<lash_postgres_store::PostgresStorage>),
 }
 
 impl RuntimeEffectReplayStore {
@@ -102,14 +101,9 @@ impl RuntimeEffectReplayStore {
         Self::SqliteFile(path.into())
     }
 
-    pub fn postgres(storage: Arc<lash_postgres_store::PostgresStorage>) -> Self {
-        Self::Postgres(storage)
-    }
-
     fn controller_name(&self) -> &'static str {
         match self {
             Self::Memory | Self::SqliteFile(_) => "sqlite_runtime_effect_controller",
-            Self::Postgres(_) => "postgres_runtime_effect_controller",
         }
     }
 }
@@ -119,7 +113,6 @@ impl fmt::Debug for RuntimeEffectReplayStore {
         match self {
             Self::Memory => f.write_str("Memory"),
             Self::SqliteFile(path) => f.debug_tuple("SqliteFile").field(path).finish(),
-            Self::Postgres(_) => f.write_str("Postgres"),
         }
     }
 }
@@ -1447,10 +1440,6 @@ impl RuntimeBoundaryHarness {
                 );
                 (store.clone(), store)
             }
-            RuntimeEffectReplayStore::Postgres(storage) => {
-                let store = Arc::new(storage.process_registry());
-                (store.clone(), store)
-            }
         };
         self.worker_process_registry = Some(Arc::clone(&registry));
         self.worker_process_continuations = Some(continuations);
@@ -1520,9 +1509,6 @@ impl RuntimeBoundaryHarness {
                         ))
                     })?,
                 )
-            }
-            RuntimeEffectReplayStore::Postgres(storage) => {
-                Arc::new(storage.runtime_effect_controller(scope))
             }
         };
         self.effect_controller = Some(Arc::clone(&controller));
