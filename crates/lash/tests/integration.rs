@@ -20,5 +20,7 @@ mod process_scope_fence;
 mod runtime_operation_retirement;
 #[path = "integration/stores_evidence.rs"]
 mod stores_evidence;
+#[path = "integration/support.rs"]
+mod support;
 #[path = "integration/tool_intent_ingress_observability.rs"]
 mod tool_intent_ingress_observability;
