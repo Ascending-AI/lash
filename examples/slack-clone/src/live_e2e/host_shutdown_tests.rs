@@ -142,10 +142,10 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
         .open()
         .await
         .expect("open session");
-    let stream = session
-        .turn(TurnInput::text("fill activity channel"))
-        .stream()
-        .expect("start stream");
+    let handle = session
+        .send(TurnInput::text("fill activity channel"))
+        .await
+        .expect("send");
     provider_entered.notified().await;
     assert!(
         tokio::time::timeout(Duration::from_millis(100), all_executed.notified())
@@ -156,7 +156,7 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
 
     let result = tokio::time::timeout(
         Duration::from_secs(5),
-        finish_smoke_stream_with_timeout(&session, stream, Duration::ZERO),
+        finish_smoke_stream_with_timeout(&session, handle, Duration::ZERO),
     )
     .await
     .expect("timeout cleanup remained finite");

@@ -108,8 +108,8 @@ async fn openai_chat_runtime_respects_expose_thinking() {
             .await
             .expect("session");
         let output = session
-            .turn(lash::TurnInput::text("answer privately"))
-            .run()
+            .send(lash::TurnInput::text("answer privately"))
+            .output()
             .await
             .expect("turn");
         let reasoning = output
@@ -170,8 +170,8 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
         .expect("session");
 
     let output = session
-        .turn(lash::TurnInput::text("reason in two parts"))
-        .run()
+        .send(lash::TurnInput::text("reason in two parts"))
+        .output()
         .await
         .expect("turn");
     let activities = output
