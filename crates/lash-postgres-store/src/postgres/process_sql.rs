@@ -106,6 +106,16 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 lash_store_sql::statements! {
     /// `processes` statements only PostgreSQL issues.
     pub(crate) struct ProcessPostgresStatements @ "process" {
+        /// The preflight's started-process walk (FIG-3571): every live
+        /// process strictly after key `?1` (`NULL` from the start), at most
+        /// `?2`, in key order.
+        list_live_for_preflight = "SELECT process_id, status, wake_session_id, record_json
+             FROM processes
+             WHERE {{live_process_status(status)}}
+               AND (?1::text IS NULL OR process_id > ?1::text)
+             ORDER BY process_id
+             LIMIT ?2";
+
         /// The deployment's parked processes as a `?1`-row page in
         /// `(parked_since_ms, process_id)` order over the parked projection's
         /// partial index: only parks at or before `?2`, strictly after keyset

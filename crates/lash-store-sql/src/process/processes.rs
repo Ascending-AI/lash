@@ -48,6 +48,14 @@ pub const EXECUTABLE_GENERATION_COUNT_COLUMNS: &str = "park_executable_generatio
 /// has already filtered on, because every one of them is in the record.
 pub const KEYED_RECORD_COLUMNS: &str = "process_id, record_json";
 
+/// What the preflight's started-process walk reports per live process
+/// (FIG-3571): the key it pages by, the status and wake session a drain list
+/// names it by, and the record whose start stamp and input the probe compares.
+///
+/// Narrow on purpose: none of the indexed projections the record already
+/// holds, only the key and the two columns a drain list shows beside it.
+pub const PREFLIGHT_STARTED_COLUMNS: &str = "process_id, status, wake_session_id, record_json";
+
 /// What the change feed reports for a live row.
 ///
 /// The feed unions live rows with tombstones, so both arms carry the same

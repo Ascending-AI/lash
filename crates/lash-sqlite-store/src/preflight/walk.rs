@@ -64,7 +64,9 @@ pub(super) async fn scan_durable(
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
     let path: &Path = match scan.surface {
-        DurableSurface::ParkedSegment | DurableSurface::PendingWake => {
+        DurableSurface::ParkedSegment
+        | DurableSurface::PendingWake
+        | DurableSurface::StartedProcess => {
             let Some(path) = preflight.process_registry.as_deref() else {
                 // Not an empty page. A deployment that never declared a process
                 // registry has a registry nobody looked at, and the difference
@@ -159,6 +161,7 @@ fn read_page(
         DurableSurface::ModuleArtifact => read_module_artifacts(conn, after, limit),
         DurableSurface::ParkedSegment => read_parked_segments(conn, after, limit),
         DurableSurface::PendingWake => read_pending_wakes(conn, after, limit),
+        DurableSurface::StartedProcess => read_started_processes(conn, after, limit),
         DurableSurface::SessionCheckpoint => read_session_checkpoints(conn, after, limit),
         DurableSurface::SessionExecutionState => read_session_execution_state(conn, after, limit),
         // Unreachable: `scan_durable` routes unknown surfaces to `NotScanned`
@@ -282,6 +285,39 @@ fn read_parked_segments(
             // only be judged by recomputing it from the inputs the process
             // record holds, and only the registry holds those.
             owner_record: Some(row.get(5)?),
+        })
+    })?;
+    collect_page(rows, limit)
+}
+
+/// One start record per live process (FIG-3571), in key order.
+///
+/// The payload is the process record: its start stamp names the executable
+/// generation the incarnation runs under, and only its input lets the probe
+/// recompute the generation this build would run it as. A process that has not
+/// started yet carries no stamp, and the probe reads nothing from it.
+fn read_started_processes(
+    conn: &Connection,
+    after: Option<&str>,
+    limit: usize,
+) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
+    let mut statement = conn.prepare(
+        crate::process_registry::sql::process_sql()
+            .process_sqlite
+            .list_live_for_preflight
+            .sql(),
+    )?;
+    let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
+        let process_id: String = row.get(0)?;
+        let record: String = row.get(3)?;
+        Ok(DurableItem {
+            surface: DurableSurface::StartedProcess,
+            cursor: process_id.clone(),
+            process_id: Some(ProcessId::from(process_id)),
+            status: Some(row.get(1)?),
+            session_id: row.get::<_, Option<String>>(2)?.map(SessionId::from),
+            owner_record: Some(record.clone()),
+            payload: DurablePayload::Json(record),
         })
     })?;
     collect_page(rows, limit)

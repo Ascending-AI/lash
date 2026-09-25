@@ -1637,6 +1637,12 @@ kind = "parameter cast"
 reason = "Same cursor-cast fork as process.list_parent_end_children."
 
 [[dialect_only]]
+statement = "process.list_live_for_preflight"
+backends = ["sqlite", "postgres"]
+kind = "parameter cast"
+reason = "Same cursor-cast fork as process.list_parent_end_children."
+
+[[dialect_only]]
 statement = "process.list_prunable_terminal"
 backends = ["sqlite", "postgres"]
 kind = "parameter cast"
