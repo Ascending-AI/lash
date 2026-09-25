@@ -186,6 +186,20 @@ impl crate::Backend for LawBackend {
     }
 }
 
+/// A backend over `stores` whose effects journal on `effect_host`, for an
+/// embedder whose substrate is storage only: the law's runtime reaches every
+/// storage port of `stores`, drives its own queued work in process, and runs
+/// its effects on the host the embedder supplies.
+pub fn backend_over(
+    stores: &dyn crate::StoreSet,
+    effect_host: Arc<dyn crate::EffectHost>,
+) -> Arc<dyn crate::Backend> {
+    Arc::new(LawBackend {
+        queued_work: crate::BackendQueuedWork::InProcess,
+        ..LawBackend::over_stores(stores, effect_host)
+    })
+}
+
 /// A backend over `stores` whose effect host is the recording double: for an
 /// embedder's storage law that reaches a backend's storage ports and runs no
 /// effect, over a substrate that is storage only.

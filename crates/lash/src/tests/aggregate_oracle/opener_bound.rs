@@ -16,8 +16,11 @@ use super::*;
 async fn a_loop_of_races_well_past_the_bound_runs_to_its_end(tier: &JournaledTier) -> Result<()> {
     const RACES: usize = 600;
     // Every race journals its group and both leaves, so the loop is a
-    // throughput case: it gets a deadlock budget sized for it.
-    const LOOP_BUDGET: std::time::Duration = std::time::Duration::from_secs(120);
+    // throughput case: it gets a deadlock budget sized for it. Alone it takes
+    // about a minute on the pool; beside the rest of the unit suite it can
+    // take more than two, so the budget leaves room for that contention while
+    // staying inside the unit-test target's 300 s timeout.
+    const LOOP_BUDGET: std::time::Duration = std::time::Duration::from_secs(240);
     let run = drive_cells(
         tier,
         "aggregate-oracle-opener-bound-loop",
