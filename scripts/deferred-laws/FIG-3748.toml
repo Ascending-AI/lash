@@ -14,3 +14,11 @@ suite = "turn_crash_after_commit_redrive_tests"
 recipe = "parked"
 ticket = "FIG-3748"
 reason = "the redrive of a turn crashed after its final commit returns the settled run's receipt from the store (queued_work.rs begin_or_resume_queued_run) without the commands the crashed execution journaled, so the handler returns where the journal holds its next call: Restate reports a journal mismatch (570) and retries until the invocation pauses; repro: run turn_crash_after_commit_redrive_replays_the_committed_receipt on the double with LASH_RESTATE_TEST_WATCHDOG=1"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison::on_the_server_double"
+suite = "queued_after_commit_redrive_tests"
+recipe = "parked"
+ticket = "FIG-3748"
+reason = "a queued drive redriven after its first commit re-decides from the live queue (the second input is now its head) and diverges from its Restate journal; it goes green once queued drains run through the recorded drive admission (FIG-3600 S5a-q3)"
