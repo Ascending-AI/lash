@@ -1370,6 +1370,7 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
 
 mod attachment_owner_cold_replay_on_the_double;
 mod cancellation_and_effects;
+mod cancelled_turn_withheld_input_on_the_double;
 mod completion_routing_on_the_double;
 mod conformance_and_poison;
 mod direct_turn_acceptance_on_the_double;
