@@ -239,33 +239,6 @@ impl<'run> HostBridge<'run> {
         })
     }
 
-    /// The drift refusal of the first aggregate leaf naming a drifted binding.
-    fn aggregate_drift(
-        &self,
-        leaves: &[lashlang::ResourceOperationBatchLeaf],
-    ) -> Option<lash_core::RuntimeEffectControllerError> {
-        if !self.cell_bindings.has_drift() {
-            return None;
-        }
-        leaves.iter().find_map(|leaf| {
-            let lashlang::ResourceOperationBatchLeaf::Operation(operation) = leaf else {
-                return None;
-            };
-            let FlowValue::Resource(receiver) = &operation.receiver else {
-                return None;
-            };
-            let host_operation = resolve_lashlang_module_operation(
-                &self.host_environment,
-                receiver,
-                &operation.operation,
-            )
-            .ok()?;
-            self.cell_bindings
-                .drift_for(&lash_core::ToolId::from(host_operation.as_str()))
-                .map(lash_lashlang_runtime::CellBindingDrift::refusal)
-        })
-    }
-
     fn deferred_grant_for_tool_id(
         &self,
         tool_id: &lash_core::ToolId,
@@ -687,13 +660,6 @@ impl HostBridge<'_> {
         // command by their first-appearance index, never by their own sites.
         let commands = self.commands()?;
         let command = commands.issue()?;
-        // An aggregate's leaves re-drive through the tool child host, which
-        // resolves each tool live: one naming a drifted binding cannot be
-        // served from the recorded binding, so the aggregate refuses before
-        // anything is dispatched (FIG-3587).
-        if let Some(drift) = self.aggregate_drift(&leaves) {
-            return Err(commands.stop(drift));
-        }
         let in_flight = commands.enter(command, CommandShape::Aggregate).await?;
         let mut bridge_leaves = Vec::with_capacity(leaves.len());
         // Per dispatched leaf: its call site, source operation, executed-call
@@ -823,12 +789,19 @@ impl HostBridge<'_> {
                 bridge_leaves.push(lash_lashlang_runtime::BridgeAggregateLeaf::Settled(result));
                 continue;
             }
-            let invocation = self.tool_invocation(
+            let mut invocation = self.tool_invocation(
                 call_id.clone(),
                 &host_operation,
                 payload,
                 call_site.as_ref(),
             );
+            // A leaf on a drifted binding forms the child the journal
+            // recorded, under its recorded binding; the child judges its own
+            // tool where it runs and is served only from its journal
+            // (FIG-3725).
+            if let Some(drift) = self.cell_bindings.drift_for(&invocation.tool_id) {
+                invocation = invocation.with_recorded_binding(drift.recorded_binding());
+            }
             dispatched.insert(
                 leaf_index,
                 (

@@ -599,18 +599,18 @@ worker. `SessionServices` has no members yet; P10a defines them.
     what decides how a call links and dispatches (identity, binding,
     activation, argument projection, retry policy, schemas, output contract):
     the FIG-3587 rule. A reworded description is not drift. A call on a
-    drifted tool is prepared under its recorded definition and served from
-    its recorded result; one the journal does not hold would reach the
-    drifted tool live, so the turn parks before anything is dispatched. There
-    is no whole-catalog digest.
+    drifted tool is prepared under its recorded definition, so the group
+    child it forms is the recorded one. There is no whole-catalog digest.
+  - A group tool child judges its own tool where it runs, against the
+    registry serving it (FIG-3725): a drifted child is served its recorded
+    result, and one the engine would run live refuses, records nothing and
+    parks the turn (ADR 0103, FIG-3725 amendment). The opener refuses nothing
+    before the group opens.
   - A code cell's journaled binding set is judged against the live catalog as
     before, and links against the recorded one.
   - The turn machine starts with no environment and always opens with its
     protocol-start sync; the drive builds no prompt and pins no surface of its
     own.
-  - Restate replays by position and cannot say ahead of the replay whether a
-    call's result is recorded, so there a call on a drifted tool parks either
-    way, as a cell's does (FIG-3587).
   - Effect-journal generation 3.
 - **Implemented (FIG-3683, the first store read as a recorded step).** A tool
   child reads its recorded execution environment through its own

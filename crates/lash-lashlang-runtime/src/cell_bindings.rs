@@ -94,7 +94,8 @@ impl CellToolBindings {
         self.drifted.get(tool_id)
     }
 
-    pub fn has_drift(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn has_drift(&self) -> bool {
         !self.drifted.is_empty()
     }
 

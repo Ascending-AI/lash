@@ -172,6 +172,17 @@ pub struct ServedOnlyRange {
 }
 
 impl ServedOnlyRange {
+    /// Every key the guarded controller issues: a group tool child whose own
+    /// tool drifted serves each dispatching effect it issues only from its
+    /// journal, whatever its key (FIG-3725).
+    pub fn every_key(refusal: RuntimeEffectControllerError) -> Self {
+        Self {
+            lower: String::new(),
+            upper: char::MAX.to_string(),
+            refusal,
+        }
+    }
+
     fn judges(&self, key: &str) -> bool {
         self.lower.as_str() <= key && key <= self.upper.as_str()
     }
@@ -243,9 +254,19 @@ impl CommandJournalGuard {
 
     /// Asks to write the journal under this command, at `key` when the
     /// write names one.
+    ///
+    /// Once any write under the command was refused, every later one is
+    /// refused with the same refusal before it reaches the engine: the first
+    /// refusal is the last thing the command's attempt asks of its journal.
+    /// On a positional journal (Restate) a served-only refusal leaves an
+    /// orphaned run, and anything journaled after it would wedge the next
+    /// replay (FIG-3719, FIG-3725).
     pub fn admit(&self, key: Option<&str>) -> Result<(), RuntimeEffectControllerError> {
         self.touched
             .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(tripped) = self.tripped() {
+            return Err(tripped);
+        }
         let refusal = self
             .refusal
             .as_ref()
@@ -389,15 +410,38 @@ impl<'run> ScopedEffectController<'run> {
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.validate_envelope_scope(&envelope)?;
+        let local_executor = self.guard_local_executor(&envelope, local_executor)?;
+        self.controller()
+            .execute_effect(envelope, local_executor)
+            .await
+    }
+
+    /// Asks this controller's command guard to admit `envelope`, and marks
+    /// `local_executor` served only when the guard serves its command only
+    /// from the journal (FIG-3587, FIG-3719). [`Self::execute_effect`] does
+    /// this for every effect it executes; a caller that hands an effect to
+    /// the engine some other way — a process command proxied through an
+    /// effect task — does it first, so the engine sees the same mark.
+    pub fn guard_local_executor<'executor>(
+        &self,
+        envelope: &RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'executor>,
+    ) -> Result<RuntimeEffectLocalExecutor<'executor>, RuntimeEffectControllerError> {
         let mut local_executor = local_executor;
         if let Some(guard) = &self.journal_guard {
             guard.admit(Some(envelope.invocation.replay_key()))?;
             // A wait on an external completion dispatches nothing
-            // (FIG-3587): only a dispatching effect is served only.
+            // (FIG-3587), and neither does the host's deterministic work
+            // around a call — reading the recorded environment, presenting a
+            // result, recording an incorporation (FIG-3725): only a
+            // dispatching effect is served only.
             let dispatches = !matches!(
                 envelope.command,
                 crate::RuntimeEffectCommand::AwaitEvent { .. }
                     | crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
+                    | crate::RuntimeEffectCommand::LoadExecutionEnv { .. }
+                    | crate::RuntimeEffectCommand::PresentToolResult { .. }
+                    | crate::RuntimeEffectCommand::IncorporateGroupSettlements { .. }
             );
             let key = envelope.invocation.replay_key();
             if let Some(range) = guard
@@ -410,9 +454,7 @@ impl<'run> ScopedEffectController<'run> {
                     local_executor.serving_only_from_journal(refusal, Arc::clone(guard));
             }
         }
-        self.controller()
-            .execute_effect(envelope, local_executor)
-            .await
+        Ok(local_executor)
     }
 
     /// Exposes scope id to effect-host implementors while scoping and journaling durable effects.

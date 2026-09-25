@@ -59,6 +59,31 @@ impl PluginSession {
         ))
     }
 
+    /// The catalog a session's calls resolve against when `tools` is its
+    /// live provider: the registry's manifests and contracts through this
+    /// session's catalog contributions, `tool_access` and `subagent`. It is
+    /// what a recorded tool is judged against, by a turn's recorded surface
+    /// and by a group tool child's recorded admission alike (FIG-3725).
+    pub fn resolve_live_tool_catalog(
+        &self,
+        session_id: &SessionId,
+        tools: Arc<dyn crate::ToolProvider>,
+        tool_access: crate::SessionToolAccess,
+        subagent: Option<crate::SubagentSessionContext>,
+    ) -> Result<crate::ToolCatalog, PluginError> {
+        let manifests = tools.tool_manifests();
+        let resolve_contract: lash_sansio::ToolContractResolver =
+            Arc::new(move |manifest: &ToolManifest| tools.resolve_contract_by_id(&manifest.id));
+        self.resolve_tool_catalog(ToolCatalogContext {
+            session_id: session_id.clone(),
+            tools: manifests,
+            resolve_contract: Some(resolve_contract),
+            tool_access,
+            subagent,
+            extensions: self.extensions.clone(),
+        })
+    }
+
     pub fn resolve_tool_catalog(
         &self,
         ctx: ToolCatalogContext,

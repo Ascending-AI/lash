@@ -10,15 +10,17 @@ mod tests {
         ToolManifest, ToolRetryPolicy,
     };
 
+    /// Serves `search` as the request records it, so the child's own tool is
+    /// judged undrifted (FIG-3725), and never runs it.
     struct NoopTools;
     #[async_trait::async_trait]
     impl crate::ToolProvider for NoopTools {
         fn tool_manifests(&self) -> Vec<ToolManifest> {
-            Vec::new()
+            vec![manifest("search")]
         }
 
-        fn resolve_contract(&self, _name: &str) -> Option<Arc<crate::ToolContract>> {
-            None
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (name == "search").then(|| Arc::new(definition("search").contract))
         }
 
         async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -31,17 +33,19 @@ mod tests {
             crate::SessionPolicy::new(crate::TurnBudget::bounded(turns)),
         )
     }
-    fn manifest(id: &str) -> ToolManifest {
-        let mut manifest = crate::ToolDefinition::raw(
+    fn definition(id: &str) -> crate::ToolDefinition {
+        let mut definition = crate::ToolDefinition::raw(
             id,
             id,
             "a rebind fixture tool",
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
-        )
-        .manifest;
-        manifest.retry_policy = ToolRetryPolicy::safe(4, 10, 100);
-        manifest
+        );
+        definition.manifest.retry_policy = ToolRetryPolicy::safe(4, 10, 100);
+        definition
+    }
+    fn manifest(id: &str) -> ToolManifest {
+        definition(id).manifest
     }
     fn invocation(effect_id: &str) -> crate::RuntimeInvocation {
         crate::RuntimeInvocation::effect(
@@ -82,7 +86,10 @@ mod tests {
             crate::TurnControlBindingId::new("recorded-binding").expect("a valid binding id"),
             ProcessExecutionEnvRef::new("env-ref"),
             ToolChildCompletionRouting::Inline,
-            crate::runtime::effect::ToolChildSessionFacts::default(),
+            crate::runtime::effect::ToolChildSessionFacts {
+                tool_surface: vec![definition("search")],
+                ..Default::default()
+            },
         )
     }
     /// The opener's own context, every recorded field set to something the child

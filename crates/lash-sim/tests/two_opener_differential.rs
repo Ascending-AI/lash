@@ -669,7 +669,12 @@ fn request(
         cancellation,
         side.env_ref.clone(),
         side.routing.clone(),
-        lash_core::runtime::effect::ToolChildSessionFacts::default(),
+        // The opener's recorded surface: the catalog its calls were admitted
+        // against, so the child judges its own tool against it (FIG-3725).
+        lash_core::runtime::effect::ToolChildSessionFacts {
+            tool_surface: side.catalog_definitions.clone(),
+            ..Default::default()
+        },
     );
     if let Some(process) = &side.enclosing_process {
         request = request.with_enclosing_process(process.clone());

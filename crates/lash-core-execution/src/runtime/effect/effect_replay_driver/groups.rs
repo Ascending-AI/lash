@@ -205,6 +205,12 @@ pub(super) struct OpenGroupState {
     /// budget is measured from this instant, per §7: the decision is the
     /// durable fact and what the budget bounds is waiting on the body.
     pub(super) decided_at: HashMap<String, Instant>,
+    /// The tool children this process ran that refused where they park their
+    /// opener and recorded nothing — a tool drifted and would run live
+    /// (FIG-3725), or a replay diverged — by replay key. No settlement will
+    /// come for them, so the opener's rank wait answers with a refusal
+    /// instead, until a reopen dispatches them again.
+    pub(super) refused: std::collections::BTreeMap<String, RuntimeEffectControllerError>,
 }
 
 /// One child's durable identity as this process holds it.
@@ -424,14 +430,13 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 // the new handle.
                 let still_open = {
                     let open = self.groups.open.write_recover();
-                    if let Some(existing) = open.get(group.group_key()) {
+                    open.get(group.group_key()).map(|existing| {
                         existing.state.lock_recover().closed = false;
-                        true
-                    } else {
-                        false
-                    }
+                        Arc::clone(existing)
+                    })
                 };
-                if still_open {
+                if let Some(existing) = still_open {
+                    self.redispatch_refused(scope, &existing, &group).await?;
                     return Ok(handle);
                 }
                 // The entry raced a reap and lost: it existed at the earlier
@@ -442,12 +447,16 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 (children, self.resolve_group_children(&group).await?)
             }
         };
-        {
+        let existing = {
             let open = self.groups.open.write_recover();
-            if let Some(existing) = open.get(group.group_key()) {
+            open.get(group.group_key()).map(|existing| {
                 existing.state.lock_recover().closed = false;
-                return Ok(handle);
-            }
+                Arc::clone(existing)
+            })
+        };
+        if let Some(existing) = existing {
+            self.redispatch_refused(scope, &existing, &group).await?;
+            return Ok(handle);
         }
 
         // Dispatch from the *journal's* membership, never from `group`.
@@ -547,6 +556,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     closed: false,
                     running,
                     decided_at: HashMap::new(),
+                    refused: std::collections::BTreeMap::new(),
                 }),
                 settled: Notify::new(),
             });
@@ -555,6 +565,57 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         };
         self.dispatch_group_children(scope, &state, group, executors);
         Ok(handle)
+    }
+
+    /// Dispatches again the tool children of `state` that refused unrecorded, on
+    /// a reopen of its group here (FIG-3725): a reopen is a redrive, so the
+    /// child is judged again — one whose tool was restored runs — rather than
+    /// the opener being answered with the stale refusal while its siblings
+    /// still run. The child's row stayed pending with its lease released, so
+    /// its claim reclaims it.
+    async fn redispatch_refused(
+        self: &Arc<Self>,
+        scope: &ExecutionScope,
+        state: &Arc<OpenGroup>,
+        group: &RuntimeEffectGroup,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let refused = std::mem::take(&mut state.state.lock_recover().refused);
+        if refused.is_empty() {
+            return Ok(());
+        }
+        let retained = reconstruct_group(
+            group,
+            self.row_store
+                .read_group_membership(group.group_key())
+                .await?,
+            self.vocabulary(),
+        )?;
+        let resolver = self.group_executors()?;
+        let executors = retained
+            .children()
+            .iter()
+            .map(|child| {
+                refused
+                    .contains_key(child.invocation.replay_key())
+                    .then(|| resolver.executor_for(child))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        let redispatched = retained
+            .children()
+            .iter()
+            .zip(&executors)
+            .filter(|(_, executor)| executor.is_some())
+            .map(|(child, _)| child.invocation.replay_key().to_string())
+            .collect::<Vec<_>>();
+        if !redispatched.is_empty() {
+            state
+                .outstanding
+                .fetch_add(redispatched.len(), Ordering::AcqRel);
+            state.state.lock_recover().running.extend(redispatched);
+            self.dispatch_group_children(scope, state, retained, executors);
+        }
+        Ok(())
     }
 
     /// All of them, not one at a time as each is dispatched: resolving lazily
@@ -692,6 +753,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 RuntimeEffectCommand::AwaitEvent { key } => Some(key.clone()),
                 _ => None,
             };
+            let tool_child = matches!(child.command, RuntimeEffectCommand::ToolInvocation { .. });
             // The child inherits its opener's process execution permit, as a
             // batch leaf did, so a nested process await releases and
             // reacquires the slot the worker granted this run.
@@ -701,7 +763,11 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                     // reported to its caller through the journal, by rank, and this
                     // task's return value has no other reader. A failure is already
                     // journaled as that child's terminal.
-                    let _ = Box::pin(driver.execute_effect_cancellable(
+                    //
+                    // The one exception is a tool child that refused where it
+                    // parks its opener: it records nothing (FIG-3725), so the
+                    // opener's rank wait is told here instead.
+                    let result = Box::pin(driver.execute_effect_cancellable(
                         &scope,
                         child,
                         executor,
@@ -709,6 +775,17 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                         None,
                     ))
                     .await;
+                    if let Err(error) = result
+                        && tool_child
+                        && !error.journaled
+                        && error.turn_failure_cause() == crate::TurnFailureCause::Parked
+                    {
+                        state
+                            .state
+                            .lock_recover()
+                            .refused
+                            .insert(replay_key.clone(), error);
+                    }
                     // Released here, after the execution returned, however far
                     // it got: a child the close cancelled while parked, and
                     // one it cancelled before it ever claimed — whose
@@ -855,6 +932,12 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 let settlement = self.decode_settlement(handle.group_key(), &state, stored)?;
                 handle.advance()?;
                 return Ok(settlement);
+            }
+            // A child that refused unrecorded never settles: its refusal is
+            // the answer, and it parks the opener (FIG-3725).
+            let refused = state.state.lock_recover().refused.values().next().cloned();
+            if let Some(refusal) = refused {
+                return Err(refusal);
             }
             tokio::select! {
                 // The execution's own stop: for a rank wait that observes no

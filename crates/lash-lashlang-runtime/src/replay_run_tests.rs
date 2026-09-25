@@ -18,7 +18,6 @@ fn run_over(replay_keys: Vec<String>, group_keys: Vec<String>) -> LashlangReplay
     run.state.lock_recover().frontier = Frontier::Recorded(RecordedRun::read(
         &namespace(),
         RecordedKeys {
-            settled_keys: replay_keys.clone(),
             replay_keys,
             group_keys,
             closing_outcome: None,
@@ -106,7 +105,6 @@ fn a_frontier_read_tells_command_shapes_apart() {
                 namespace().seal(),
             ],
             group_keys: vec![key(3, "")],
-            settled_keys: vec![key(0, "attempt:1"), key(1, "")],
             closing_outcome: Some("{\"compiler\":\"x\"}".to_string()),
         },
     );

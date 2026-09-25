@@ -15,6 +15,8 @@ whether a drifted binding's effect is served, so a positional journal
 Amended 2026-09-25 (FIG-3680): a command the journal holds nothing for refuses
 only writes under the run's namespace, so an orchestrating call that journaled
 no nested effect redrives by serving its presentation.
+Amended 2026-09-25 (FIG-3725): a group tool child judges its own tool where it
+runs; see [Group tool children](#amendment-fig-3725-group-tool-children).
 
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
@@ -371,7 +373,11 @@ commands, which reach Restate through their own journaled commands (a
 drifted orchestrating binding's process start, for one), and timers — cannot
 tell a recorded outcome from a live one before they act, so they refuse up
 front: such a command parks even when its process command or sleep was
-recorded, and never starts a process or journals a sleep. A command a keyed
+recorded, and never starts a process or journals a sleep. A process command
+reaches the engine served only on every route — including the one that
+proxies it through an effect task to the raw controller, which Restate's
+owned turn and group-child controllers take; before FIG-3725 that route lost
+the mark and started the process live. A command a keyed
 journal holds nothing for refuses before it issues anything; on a positional
 journal the command enters and its engine refuses at the live frontier. A
 wait on an external completion (a deferred tool's `{cmd}:await`) dispatches
@@ -383,9 +389,6 @@ the tool is restored, the turn is cancelled, or it is forked.
 
 Limitations, deferred:
 
-- An aggregate naming a drifted binding refuses at any admission, even when
-  every leaf settled: its leaves re-drive through the tool child host, which
-  resolves each tool live.
 - A non-orchestrating provider whose preparation is not the identity would
   prepare a call differently than the recorded identity preparation does;
   such a call diverges instead of replaying.
@@ -393,6 +396,7 @@ Limitations, deferred:
   so a call on it parks even when its nested effects all settled.
 - On Restate, a drifted command whose effects include a process command or a
   timer parks even when those were recorded (they refuse up front, above).
+  FIG-3779 carries the frontier-marker design that would serve them.
 
 **Cell journal grammar 3.** `LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION` (3) is the
 replay-key grammar plus the binding set, and is what the sync's
@@ -439,3 +443,77 @@ PostgreSQL and the Restate server double: each tier's runner cuts the first
 attempt at the journal point the law names (FIG-3665), and on the double a
 drifted binding whose result was recorded replays it while one needed live
 refuses (FIG-3719).
+
+## Amendment (FIG-3725): group tool children
+
+Amended 2026-09-25. A tool call that runs as a child of a durable effect
+group — a model-issued call of a turn's tool group, a leaf of a cell's
+aggregate — judges its own tool where it runs, and a drifted one is served
+only from the child's journal, under the same engine-answered contract as a
+cell's drifted binding.
+
+**The child judges, not the opener.** The child's request already records
+the definition its opener admitted it under (its catalog manifest, and the
+contract the recorded tool surface holds for it, FIG-3712). At execution the
+child judges that definition against the catalog the serving deployment's
+registry resolves to under the child's recorded tool access and subagent
+context, by the one FIG-3587 rule (`ToolSurfaceDrift::judge`). A drifted
+child's controller serves every dispatching effect it issues only from its
+journal (`ServedOnlyRange::every_key`); reading its recorded environment,
+presenting its result and recording an incorporation dispatch nothing and pass.
+The judgment cannot sit with the opener: a turn tool group reopens under its
+retained membership, so a verdict a redrive put in the offered request would
+never reach the child that runs; on Restate the group open is a journaled call
+whose parameter carries the membership, so a changed request is a
+`JOURNAL_MISMATCH` exactly where the recorded result should replay; and a
+Restate child is retried by the engine, on whatever deployment serves it,
+independently of its opener's redrive. The opener prepares a drifted call
+under its recorded definition, so the child it offers is the recorded one; it
+no longer refuses before the group opens, and an aggregate naming a drifted
+binding no longer refuses at admission. The request's bytes do not change. A child whose recorded surface holds no
+definition for its own tool fails closed: it is served only from its journal.
+
+**The first refusal is the last write.** Once any effect under a guarded
+command or child was refused, the guard refuses every later write — an
+effect, a group open, a proxied process command — with the same refusal
+before it reaches the engine. On Restate a refused run is an orphaned
+`ctx.run`, and anything journaled after it (a later nested call of an
+orchestrating body, its `admit_semantic` call) would fail the next replay
+with `JOURNAL_MISMATCH`; with the guard, every retry replays up to the orphan
+and refuses the same way.
+
+**A refused child records nothing and parks its turn.** A child whose effect
+the engine would run live refuses with `lashlang_cell_binding_drift` and
+settles nothing: sealed, the refusal would be served to every later redrive,
+even one after the tool was restored. On Restate the child ends its attempt
+the way a park ends (FIG-3697), after writing its turn's
+`ParkReason::BindingDrift` through the session's own store
+(`park_turn_of_refused_group_child`, keyed by the turn scope's root turn): its
+opener is suspended on the child's rank and cannot learn of a refusal that
+settles nothing. The opener waits; every retry of the child refuses and parks
+again, until the tool is restored — the child then runs and the opener
+resumes — or the turn is cancelled, which closes the group. A child whose
+group its opener already closed or retired (a race or any loser, after the
+opener's end) parks no turn: only its own attempt ends. A child whose scope
+names no turn — a process opener, a queue drain with no attributed turn — has
+no park to write, so it does not retry unseen: a drift refused at the live
+frontier settles as the child's typed outcome, which its opener reads (a
+process segment fails its run). On the SQL tiers the child's claim is released
+unsealed and the opener's rank wait answers with the refusal, so the turn
+parks through its own abort path; a reopen of the group in the same process
+dispatches the refused child again, judged anew, even while its siblings
+still run. A trigger the body emits still ingests its occurrence (keyed,
+idempotent, outside the journal by design, FIG-806); its deliveries are
+served only.
+
+The law `a_group_tool_child_judges_its_own_drifted_tool` runs on SQLite,
+PostgreSQL and the Restate server double: a model-issued call and an
+aggregate's leaves whose results were recorded are served with nothing
+dispatched; calls needed live park, keyed by their turn, with the binding
+drift and nothing dispatched, and park again on every further run; restoring
+the tool finishes the turn; a reworded tool runs live. `lash-restate-test`'s
+`tool_child_drift` laws redeploy under a child in flight on the double, so its
+next attempt runs on a rebuilt context: a plain call parks until the tool is
+restored, a drifted orchestrating body's second nested call is refused before
+the engine and every retry parks with no journal mismatch, and a drifted
+orchestrating body starts no process.
