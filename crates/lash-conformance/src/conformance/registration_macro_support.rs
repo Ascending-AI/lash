@@ -40,6 +40,7 @@ pub use super::process_references::*;
 pub use super::process_registry::status_filters::*;
 pub use super::process_registry::*;
 pub use super::process_trigger_retention::*;
+pub use super::queued_after_commit_redrive::*;
 pub use super::restored_claim_cede::*;
 pub use super::retention::*;
 pub use super::runtime_persistence::*;
