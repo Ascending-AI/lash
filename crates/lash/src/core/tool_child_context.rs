@@ -79,7 +79,7 @@ impl CoreToolChildContextSource {
 impl ToolChildContextSource for CoreToolChildContextSource {
     async fn tool_child_context(
         &self,
-        request: &lash_core::runtime::effect::ToolChildRequest,
+        request: &lash_core::facade_support::ToolChildRequest,
         execution_env: &lash_core::ProcessExecutionEnvSpec,
         lent_controller: ScopedEffectController<'static>,
     ) -> Result<DeploymentToolChildContext, PluginError> {
