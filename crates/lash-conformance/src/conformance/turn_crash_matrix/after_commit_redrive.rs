@@ -109,12 +109,12 @@ async fn run_after_commit_redrive<F, I>(
     let invocation = make_invocation(scenario, scope);
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let control = SeamControl::default();
-    let controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
+    let controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: control.clone(),
         executions: Arc::clone(&executions),
         journal_faults: None,
-    });
+    }
+    .over(invocation.controller_handle());
     let runtime = Box::pin(build_runtime(
         stores,
         SeamStore::wrap(raw, control.clone()),
@@ -162,12 +162,12 @@ async fn run_after_commit_redrive<F, I>(
     wait_for_recovery_lease(make, scenario, point, point_leaves_lane_held(point)).await;
     let successor_invocation = invocation.redrive();
     let successor_control = SeamControl::default();
-    let successor_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: successor_invocation.controller_handle(),
+    let successor_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: successor_control.clone(),
         executions: Arc::clone(&executions),
         journal_faults: None,
-    });
+    }
+    .over(successor_invocation.controller_handle());
     let mut successor = Box::pin(build_runtime_with_lease_timings(
         stores,
         SeamStore::wrap(make(scenario), successor_control.clone()),

@@ -784,6 +784,35 @@ mod on_the_server_double {
         (harness, prefix, effect_host, stores, turn_runner)
     });
 
+    // A cancelled turn drops its tool child even when the tool ignores the
+    // cancellation: on Restate the child's dispatch invocation is cancelled
+    // and its handler future dropped.
+    lash_conformance::tool_child_turn_cancel_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let (process_work, _wait_transport) = conformance_restate_process_work(
+            stores.process_registry(),
+            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!({}),
+            )),
+        );
+        let prefix: &'static str = Box::leak(
+            format!("restate-tool-child-cancel-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        (
+            harness,
+            prefix,
+            effect_host,
+            stores,
+            process_work,
+            turn_runner,
+            |_law: &'static str| async {},
+        )
+    });
+
     // `migrated_tools_redrive_tests` stays off the double for now: in about
     // half of streaming runs the batch tool child stops after its first nested
     // attempt's run completes (FIG-3671, #2140). It runs on the live server,

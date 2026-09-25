@@ -258,12 +258,12 @@ async fn run_error_return_case<F>(
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
     let journal_faults = invocation.effect_journal_faults();
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
+    let effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: control.clone(),
         executions: Arc::clone(&executions),
         journal_faults: journal_faults.clone(),
-    });
+    }
+    .over(invocation.controller_handle());
     let trace_tool = TraceTool {
         journal_faults: journal_faults.clone(),
         ..TraceTool::default()

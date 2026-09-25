@@ -11,6 +11,15 @@
 //! bound child's admissions are fenced exactly where the inner host fences
 //! them. A layer sees the seam operations and may observe, delay, fail or crash
 //! them; it owns no state the substrate answers from.
+//!
+//! A controller the host did not lend can be layered too:
+//! [`LayeredEffectHost::layer_scoped`] layers any scoped controller, including
+//! one borrowed from an engine handler (a Restate turn's `ctx`-bound
+//! controller), for as long as that borrow lives, and
+//! [`LayeredEffectHost::layer_controller`] layers a shared controller. So a law
+//! that runs its turn wherever the tier runs turns (a
+//! `lash_conformance::ConformanceTurnRunner`) layers the controller that runner
+//! lends, and one layer observes the same seam on every tier.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -126,9 +135,9 @@ pub trait EffectLayer: Send + Sync + 'static {
 /// is the trait's composition over this host's resolver and scoped
 /// controllers. Everything else is `inner`'s.
 ///
-/// Testing only. `inner` must lend owned controllers (every store-backed host
-/// does); a controller borrowed from `inner` cannot outlive the call that
-/// lent it, so it cannot be layered, and the host refuses to scope rather than
+/// Testing only. A controller `inner` lends for one call is layered for as
+/// long as that call's borrow lives; the static and group-child controllers
+/// it lends are layered only when they are owned, and the host refuses to
 /// lend an unlayered one.
 pub struct LayeredEffectHost {
     inner: Arc<dyn EffectHost>,
@@ -152,16 +161,58 @@ impl LayeredEffectHost {
         let inner = scoped.owned_controller().ok_or_else(|| {
             RuntimeError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "a LayeredEffectHost layers only a host that lends owned scoped controllers",
+                "a static layered controller needs an owned scoped controller to layer",
             )
         })?;
-        ScopedEffectController::shared(
-            Arc::new(LayeredController {
-                inner,
-                layer: Arc::clone(layer),
-            }),
+        let layered = ScopedEffectController::shared(
+            Self::layer_controller(inner, Arc::clone(layer)),
             scoped.admitted_scope().clone(),
-        )
+        )?;
+        Ok(match scoped.journal_guard() {
+            Some(guard) => layered.with_journal_guard(guard),
+            None => layered,
+        })
+    }
+
+    /// `controller` with `layer` in front of its seam operations: the shared
+    /// twin of [`Self::layer_scoped`], for a controller a law holds by value.
+    pub fn layer_controller(
+        controller: Arc<dyn RuntimeEffectController>,
+        layer: Arc<dyn EffectLayer>,
+    ) -> Arc<dyn RuntimeEffectController> {
+        Arc::new(LayeredController {
+            inner: LayeredInner::Shared(controller),
+            layer,
+        })
+    }
+
+    /// `scoped` with `layer` in front of its seam operations, for as long as
+    /// `scoped` lives: the controller a tier lends a turn, whatever it is — a
+    /// host's owned controller, or one borrowed from an engine handler that
+    /// cannot outlive the handler's execution. A rescope of the layered
+    /// controller rescopes the one it layers, so a child scope the runtime
+    /// narrows to is layered as well, and the command guard `scoped` serves
+    /// under stays in front of every journal write.
+    pub fn layer_scoped<'run>(
+        scoped: ScopedEffectController<'run>,
+        layer: Arc<dyn EffectLayer>,
+    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        if scoped.owned_controller().is_some() {
+            return Self::layered(&layer, &scoped);
+        }
+        let admitted = scoped.admitted_scope().clone();
+        let guard = scoped.journal_guard();
+        let layered = ScopedEffectController::owned(
+            Arc::new(LayeredController {
+                inner: LayeredInner::Scoped(scoped),
+                layer,
+            }),
+            admitted,
+        )?;
+        Ok(match guard {
+            Some(guard) => layered.with_journal_guard(guard),
+            None => layered,
+        })
     }
 
     fn layered_option(
@@ -169,7 +220,7 @@ impl LayeredEffectHost {
         scoped: Option<ScopedEffectController<'static>>,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
         scoped
-            .map(|scoped| Self::layered(&self.layer, &scoped))
+            .map(|scoped| Self::layer_scoped(scoped, Arc::clone(&self.layer)))
             .transpose()
     }
 }
@@ -307,7 +358,7 @@ impl EffectHost for LayeredEffectHost {
         &'run self,
         admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        Self::layered(&self.layer, &self.inner.scoped(admitted)?)
+        Self::layer_scoped(self.inner.scoped(admitted)?, Arc::clone(&self.layer))
     }
 
     fn scoped_static(
@@ -413,15 +464,56 @@ impl EffectHost for LayeredEffectHost {
 
 /// One scoped controller of the inner host, with the layer in front of its
 /// seam operations and everything else forwarded.
-struct LayeredController {
-    inner: Arc<dyn RuntimeEffectController>,
+struct LayeredController<'run> {
+    inner: LayeredInner<'run>,
     layer: Arc<dyn EffectLayer>,
 }
 
+/// The controller a [`LayeredController`] layers: a shared one, or a scoped
+/// one that may be borrowed and that a rescope rescopes.
+enum LayeredInner<'run> {
+    Shared(Arc<dyn RuntimeEffectController>),
+    Scoped(ScopedEffectController<'run>),
+}
+
+impl LayeredInner<'_> {
+    fn as_ref(&self) -> &dyn RuntimeEffectController {
+        match self {
+            Self::Shared(controller) => controller.as_ref(),
+            Self::Scoped(scoped) => scoped.controller(),
+        }
+    }
+}
+
+impl<'run> super::ScopeBoundController for LayeredController<'run> {
+    #[expect(
+        clippy::expect_used,
+        reason = "the outer controller's rescope already refused a process \
+                  repin, the only refusal the layered one's rescope can make"
+    )]
+    fn for_scope<'a>(&self, admitted: AdmittedScope) -> Arc<dyn super::ScopeBoundController + 'a>
+    where
+        Self: 'a,
+    {
+        let inner = match &self.inner {
+            LayeredInner::Shared(controller) => LayeredInner::Shared(Arc::clone(controller)),
+            LayeredInner::Scoped(scoped) => LayeredInner::Scoped(
+                scoped
+                    .rescope(admitted)
+                    .expect("the layered controller rescopes with its outer controller"),
+            ),
+        };
+        Arc::new(LayeredController {
+            inner,
+            layer: Arc::clone(&self.layer),
+        })
+    }
+}
+
 #[async_trait::async_trait]
-impl AwaitEventResolver for LayeredController {
+impl AwaitEventResolver for LayeredController<'_> {
     fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.inner.await_event_authority_binding_id()
+        self.inner.as_ref().await_event_authority_binding_id()
     }
 
     async fn acquire_queued_lane(
@@ -441,6 +533,7 @@ impl AwaitEventResolver for LayeredController {
         may_defer: bool,
     ) -> Result<CompletionKeyPreparation, RuntimeError> {
         self.inner
+            .as_ref()
             .prepare_completion_key(scope, wait, may_defer)
             .await
     }
@@ -450,7 +543,7 @@ impl AwaitEventResolver for LayeredController {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
+        self.inner.as_ref().await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -485,21 +578,30 @@ impl AwaitEventResolver for LayeredController {
         &self,
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
+        self.inner
+            .as_ref()
+            .revoke_await_events_for_session(session_id)
+            .await
     }
 
     async fn cancel_await_events_for_session(
         &self,
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
+        self.inner
+            .as_ref()
+            .cancel_await_events_for_session(session_id)
+            .await
     }
 
     async fn retire_await_events_for_scope(
         &self,
         scope: &ExecutionScope,
     ) -> Result<(), RuntimeError> {
-        self.inner.retire_await_events_for_scope(scope).await
+        self.inner
+            .as_ref()
+            .retire_await_events_for_scope(scope)
+            .await
     }
 
     async fn retire_await_events_for_scope_if_quiescent(
@@ -507,6 +609,7 @@ impl AwaitEventResolver for LayeredController {
         scope: &ExecutionScope,
     ) -> Result<bool, RuntimeError> {
         self.inner
+            .as_ref()
             .retire_await_events_for_scope_if_quiescent(scope)
             .await
     }
@@ -515,19 +618,22 @@ impl AwaitEventResolver for LayeredController {
         &self,
         scope: &ExecutionScope,
     ) -> Result<(), RuntimeError> {
-        self.inner.reinstate_await_event_scope(scope).await
+        self.inner.as_ref().reinstate_await_event_scope(scope).await
     }
 
     async fn await_event_scope_is_retired(
         &self,
         scope: &ExecutionScope,
     ) -> Result<bool, RuntimeError> {
-        self.inner.await_event_scope_is_retired(scope).await
+        self.inner
+            .as_ref()
+            .await_event_scope_is_retired(scope)
+            .await
     }
 }
 
 #[async_trait::async_trait]
-impl RuntimeEffectController for LayeredController {
+impl RuntimeEffectController for LayeredController<'_> {
     fn owns_commit_backpressure(&self) -> bool {
         self.layer.owns_commit_backpressure(self.inner.as_ref())
     }
@@ -536,11 +642,14 @@ impl RuntimeEffectController for LayeredController {
         &self,
         work: Vec<crate::IndependentEffectWork<'work>>,
     ) {
-        self.inner.drive_independent_effect_work(work).await;
+        self.inner
+            .as_ref()
+            .drive_independent_effect_work(work)
+            .await;
     }
 
     fn wants_segment_boundary(&self, progress: &SegmentProgress) -> Option<BoundaryReason> {
-        self.inner.wants_segment_boundary(progress)
+        self.inner.as_ref().wants_segment_boundary(progress)
     }
 
     async fn execute_effect(
@@ -566,7 +675,7 @@ impl RuntimeEffectController for LayeredController {
         &self,
         executors: Arc<dyn GroupExecutors>,
     ) -> Result<(), RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
+        self.inner.as_ref().register_group_executors(executors)
     }
 
     /// The inner substrate mints the bound child, and the layer still sees its
@@ -577,8 +686,9 @@ impl RuntimeEffectController for LayeredController {
         binding: GroupChildBinding,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
         self.inner
+            .as_ref()
             .group_child_scoped_controller(admitted, binding)?
-            .map(|scoped| LayeredEffectHost::layered(&self.layer, &scoped))
+            .map(|scoped| LayeredEffectHost::layer_scoped(scoped, Arc::clone(&self.layer)))
             .transpose()
     }
 
@@ -597,7 +707,10 @@ impl RuntimeEffectController for LayeredController {
         group_key: &str,
         rank: u64,
     ) -> Result<Option<RankedGroupSettlement>, RuntimeEffectControllerError> {
-        self.inner.read_group_settlement(group_key, rank).await
+        self.inner
+            .as_ref()
+            .read_group_settlement(group_key, rank)
+            .await
     }
 
     async fn close_effect_group(
@@ -614,7 +727,7 @@ impl RuntimeEffectController for LayeredController {
         &self,
         commit: GroupChildFinalCommit,
     ) -> Result<EffectGroupChildCommitOutcome, RuntimeEffectControllerError> {
-        self.inner.commit_group_child_final(commit).await
+        self.inner.as_ref().commit_group_child_final(commit).await
     }
 
     async fn await_group_child_drain_admission(
@@ -623,6 +736,7 @@ impl RuntimeEffectController for LayeredController {
         commit_seq: u64,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.inner
+            .as_ref()
             .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
@@ -631,6 +745,6 @@ impl RuntimeEffectController for LayeredController {
         &self,
         range: &crate::RecordedKeyRange,
     ) -> Result<crate::RecordedJournal, crate::RuntimeEffectControllerError> {
-        self.inner.read_recorded_journal(range).await
+        self.inner.as_ref().read_recorded_journal(range).await
     }
 }

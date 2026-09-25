@@ -35,12 +35,12 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
     let invocation = make_invocation(scenario, reference_turn_scope(&identity));
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
+    let effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: control.clone(),
         executions: Arc::clone(&executions),
         journal_faults: invocation.effect_journal_faults(),
-    });
+    }
+    .over(invocation.controller_handle());
     let runtime = Box::pin(build_runtime(
         stores,
         decorated,
@@ -141,13 +141,12 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
 
     let successor_control = SeamControl::default();
     let successor_store = SeamStore::wrap(make(scenario), successor_control.clone());
-    let successor_effect_controller: Arc<dyn RuntimeEffectController> =
-        Arc::new(SeamEffectController {
-            inner: successor_invocation.controller_handle(),
-            control: successor_control.clone(),
-            executions,
-            journal_faults: successor_invocation.effect_journal_faults(),
-        });
+    let successor_effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
+        control: successor_control.clone(),
+        executions,
+        journal_faults: successor_invocation.effect_journal_faults(),
+    }
+    .over(successor_invocation.controller_handle());
     let successor = Box::pin(build_runtime_with_lease_timings(
         stores,
         successor_store,

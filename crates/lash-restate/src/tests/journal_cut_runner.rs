@@ -61,6 +61,17 @@ impl ConformanceTurnRunner for JournalCutRunner {
             .await;
     }
 
+    async fn run_turn_until_crash(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        attempt: ConformanceTurnAttempt,
+        crash: lash_conformance::ConformanceCrash,
+    ) {
+        self.inner
+            .run_turn_until_crash(admitted, attempt, crash)
+            .await;
+    }
+
     /// The replay keys of every run the double journaled whose name spells
     /// `scope`'s session and turn, in journal order across invocations.
     async fn recorded_replay_keys(&self, scope: &lash_core::ExecutionScope) -> Option<Vec<String>> {

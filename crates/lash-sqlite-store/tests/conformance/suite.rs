@@ -1339,43 +1339,25 @@ lash_conformance::turn_crash_level_1_tests!(
     }
 );
 
-/// FIG-3571: a turn the pre-cutover build left in flight is refused, typed,
-/// before any effect when this build redrives it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_pre_cutover_generation_turn_redrive_is_refused_before_any_effect() {
+// The turn crash laws that run their turns on a turn runner: the FIG-3571
+// generation-refusal pair, the direct-acceptance crash and the cancel-closure
+// cuts, on the crash journal's own host. A crash drops the turn's task, and
+// the recovery is a fresh runtime over the same stores and journal.
+lash_conformance::turn_crash_runner_tests!({
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
     let retained = Retained::default();
     let stores = retained.open_blocking().as_stores();
     let journal = crash_journal();
     retained.keep(&journal);
-    Box::pin(
-        lash_conformance::pre_cutover_generation_turn_redrive_is_refused_before_any_effect(
-            stores,
-            |scenario| scenarios.concrete_store(scenario),
-            |_, scope| journaled_crash_invocation(&journal, scope),
-        ),
+    let host = journal.effect_host() as Arc<dyn EffectHost>;
+    (
+        retained,
+        stores,
+        move |scenario: &str| scenarios.concrete_store(scenario),
+        Arc::clone(&host),
+        lash_conformance::HostTurnRunner::shared(host),
     )
-    .await;
-}
-
-/// FIG-3619: a runtime already open on a session whose marker moves behind
-/// this build is refused, typed and terminal, at the turn-lane claim.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_pre_cutover_generation_turn_claim_is_refused_typed() {
-    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
-    let retained = Retained::default();
-    let stores = retained.open_blocking().as_stores();
-    let journal = crash_journal();
-    retained.keep(&journal);
-    Box::pin(
-        lash_conformance::pre_cutover_generation_turn_claim_is_refused_typed(
-            stores,
-            |scenario| scenarios.concrete_store(scenario),
-            |_, scope| journaled_crash_invocation(&journal, scope),
-        ),
-    )
-    .await;
-}
+});
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {

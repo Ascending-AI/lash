@@ -251,6 +251,12 @@ impl<'run> ScopedEffectController<'run> {
         self
     }
 
+    /// The command guard this controller serves under, when it serves one.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn journal_guard(&self) -> Option<Arc<CommandJournalGuard>> {
+        self.journal_guard.clone()
+    }
+
     /// Asks this controller's command guard, when it has one, to admit a
     /// journal write. Every path that writes the journal under a scoped
     /// controller without going through [`Self::execute_effect`] — a group

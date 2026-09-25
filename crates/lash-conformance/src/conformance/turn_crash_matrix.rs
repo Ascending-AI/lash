@@ -90,6 +90,7 @@ use crate::{
 };
 
 mod after_commit_redrive;
+mod cancel_closure;
 mod cold_process;
 mod direct_acceptance;
 mod error_return;
@@ -103,6 +104,7 @@ mod seam_controllers;
 use recovery::run_crash_matrix_case;
 
 pub use after_commit_redrive::turn_crash_after_commit_redrive_replays_the_committed_receipt;
+pub use cancel_closure::turn_cancel_closure_recovers_from_a_crash_at_every_cut;
 use cold_process::ColdProcessTurnAction;
 pub use cold_process::{
     cold_process_durable_recovery_expectation, cold_process_real_turn_driver,
@@ -125,7 +127,7 @@ pub use pre_cutover_generation::{
     pre_cutover_generation_turn_redrive_is_refused_before_any_effect,
 };
 use pretty_assertions::assert_eq;
-pub(crate) use seam_controllers::{CrashAfterCheckpointExecutionController, SeamEffectController};
+pub(crate) use seam_controllers::{CrashAfterCheckpointExecutionController, SeamLayer};
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
@@ -1195,6 +1197,9 @@ struct TraceTool {
     /// retried, so the lease-renewal loop is guaranteed to reach the fault
     /// before the effect completes.
     journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
+    /// How many times the tool body ran: the external effect every tier runs
+    /// in process, wherever its engine dispatches the tool child.
+    executed: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 fn trace_tool_definition() -> crate::ToolDefinition {
@@ -1220,6 +1225,8 @@ impl crate::ToolProvider for TraceTool {
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        self.executed
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if let Some(marker) = &self.marker {
             use std::io::Write as _;
             let mut file = std::fs::OpenOptions::new()
@@ -1445,10 +1452,9 @@ async fn try_build_runtime_with_lease_timings(
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
-    mut trace_tool: TraceTool,
+    trace_tool: TraceTool,
     lease_timings: crate::LeaseTimings,
 ) -> Result<crate::LashRuntime, crate::SessionError> {
-    super::bind_conformance_session(&store, &identity.session_id).await;
     assert!(
         effect_controller
             .await_event_authority_binding_id()
@@ -1458,6 +1464,58 @@ async fn try_build_runtime_with_lease_timings(
     let effect_host: Arc<dyn crate::EffectHost> = Arc::new(InvocationEffectHost {
         inner: Arc::clone(&effect_controller),
     });
+    Box::pin(try_build_runtime_over_host(
+        stores,
+        store,
+        control,
+        effect_host,
+        identity,
+        trace_tool,
+        lease_timings,
+    ))
+    .await
+}
+
+/// The reference runtime on the tier's own `host`, behind `seam`: the runtime
+/// a runner-driven crash law builds inside its attempt. The turn itself runs
+/// on the controller the tier's [`ConformanceTurnRunner`](crate::ConformanceTurnRunner)
+/// lends, behind the same seam ([`SeamLayer::over_scoped`]), so the seam sees
+/// the turn's effects and turn-control resolutions on every tier.
+async fn try_build_runtime_on_host(
+    stores: &dyn crate::StoreSet,
+    store: Arc<dyn RuntimePersistence>,
+    seam: &SeamLayer,
+    host: Arc<dyn crate::EffectHost>,
+    identity: &ReferenceIdentity,
+    trace_tool: TraceTool,
+    lease_timings: crate::LeaseTimings,
+) -> Result<crate::LashRuntime, crate::SessionError> {
+    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::testing::LayeredEffectHost::new(
+        host,
+        Arc::new(seam.clone()),
+    ));
+    Box::pin(try_build_runtime_over_host(
+        stores,
+        store,
+        seam.control.clone(),
+        effect_host,
+        identity,
+        trace_tool,
+        lease_timings,
+    ))
+    .await
+}
+
+async fn try_build_runtime_over_host(
+    stores: &dyn crate::StoreSet,
+    store: Arc<dyn RuntimePersistence>,
+    control: SeamControl,
+    effect_host: Arc<dyn crate::EffectHost>,
+    identity: &ReferenceIdentity,
+    mut trace_tool: TraceTool,
+    lease_timings: crate::LeaseTimings,
+) -> Result<crate::LashRuntime, crate::SessionError> {
+    super::bind_conformance_session(&store, &identity.session_id).await;
     let mut host = crate::LawBackend::over_stores(stores, effect_host)
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -1546,6 +1604,40 @@ async fn drive_turn(
     .map(crate::facade_support::QueuedTurnDrain::ran)
 }
 
+/// Drain the reference turn on the controller a tier's runner lent it.
+async fn drive_turn_on(
+    mut runtime: crate::LashRuntime,
+    scoped: crate::ScopedEffectController<'_>,
+) -> Result<Option<crate::AssembledTurn>, crate::RuntimeError> {
+    Box::pin(runtime.stream_next_queued_work(crate::TurnOptions::new(
+        tokio_util::sync::CancellationToken::new(),
+        scoped,
+    )))
+    .await
+    .map(crate::facade_support::QueuedTurnDrain::ran)
+}
+
+/// Park the turn at `control`'s armed point and fire `crash` there: the crash
+/// trigger a runner-driven law hands [`ConformanceTurnRunner::run_turn_until_crash`](crate::ConformanceTurnRunner::run_turn_until_crash).
+/// The seam marks the process crashed first, so no best-effort release of the
+/// dying execution's lease reaches the store.
+fn crash_at_armed_point(control: &SeamControl) -> crate::ConformanceCrash {
+    let crash = crate::ConformanceCrash::new();
+    let trigger = crash.clone();
+    let control = control.clone();
+    crate::task::spawn(async move {
+        control.wait_for_hit().await;
+        control.simulate_process_crash();
+        trigger.fire();
+    });
+    crash
+}
+
+/// The admitted scope a runner runs the reference turn under.
+fn reference_admitted_scope(identity: &ReferenceIdentity) -> crate::AdmittedScope {
+    crate::AdmittedScope::queue_drain(&identity.session_id, identity.turn_id.as_str())
+}
+
 fn generated_points(trace: &[TurnSeamOperation]) -> Vec<TurnCrashPoint> {
     let mut points = Vec::new();
     for operation in trace {
@@ -1616,12 +1708,12 @@ pub async fn turn_crash_trace_drift_check<F, I>(
     seed_reference_ingress(&raw, &identity, "trace-drift").await;
     let decorated = SeamStore::wrap(raw, control.clone());
     let invocation = make_invocation("trace-drift", reference_turn_scope(&identity));
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
+    let effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: control.clone(),
         executions,
         journal_faults: None,
-    });
+    }
+    .over(invocation.controller_handle());
     let runtime = Box::pin(build_runtime_with_lease_timings(
         stores,
         decorated,

@@ -1,79 +1,98 @@
-//! The FIG-3571 cutover law of the turn-crash matrix: a turn left in flight
-//! by the pre-cutover build is refused, typed, before any effect.
+//! The FIG-3571 cutover laws of the turn-crash matrix: a turn left in flight
+//! by the pre-cutover build is refused, typed, before any effect, and so is a
+//! claim on a session whose generation moved behind a runtime already open on
+//! it (FIG-3619).
 //!
-//! Split out of `turn_crash_matrix.rs` to keep that file under the line
-//! budget; the law keeps its path through the parent's re-export.
+//! Both laws run their turns on the tier's
+//! [`ConformanceTurnRunner`](crate::ConformanceTurnRunner), so one body states
+//! the refusal on every engine: in process, and inside a Restate handler.
 
 use super::*;
 use pretty_assertions::assert_eq;
 
+/// What a refused run of a law's turn reports: the builder's admission
+/// refusal, or the turn's own.
+type Refusal = Result<crate::SessionError, crate::RuntimeError>;
+
 /// A turn in flight under the previous session-state generation is refused
 /// before any model, tool or provider effect when the next build redrives it.
 ///
-/// The reference turn runs and crashes after its tool attempt executed and
-/// before the outcome reached the runtime, so the durable prefix holds a
-/// claimed run, a journaled model response and a dispatched tool. The
-/// session's physical generation marker is then stamped to the generation
+/// The reference turn runs on the tier's runner and crashes after its tool
+/// ran and its group settled, before the outcome reached the runtime, so the
+/// durable prefix holds a claimed run, a model response and an executed tool.
+/// The session's physical generation marker is then stamped to the generation
 /// before [`crate::store::CURRENT_SESSION_STATE_VERSION`] — the marker every
 /// session the pre-cutover build created carries — with every payload left as
 /// the crashed turn wrote it, so without the generation gate the successor
-/// would redrive the turn. Recovery builds a successor runtime over the same store the way a restarted
-/// host does. Admission must refuse it with the typed
-/// `SessionStateVersionUnsupported` store error, and no provider request, tool
-/// dispatch, effect execution or durable commit may cross a seam.
+/// would redrive the turn. The tier then recovers the turn its own way (a
+/// fresh runtime in process, a redelivered invocation on Restate). Admission
+/// must refuse it with the typed `SessionStateVersionUnsupported` store error,
+/// and no provider request, tool dispatch, effect execution or durable commit
+/// may cross a seam.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F, S, I>(
+pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
-    make_invocation: I,
+    host: Arc<dyn crate::EffectHost>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
-    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
-    let stores = stores.as_ref();
     let scenario = "pre-cutover-generation-redrive";
-    let make_runtime = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
     let identity = ReferenceIdentity::for_scenario(scenario);
-    let raw = make_runtime(scenario);
-    seed_reference_ingress(&raw, &identity, scenario).await;
-    let control = SeamControl::default();
+    let store = make(scenario) as Arc<dyn RuntimePersistence>;
+    seed_reference_ingress(&store, &identity, scenario).await;
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let decorated = SeamStore::wrap(raw, control.clone());
-    let invocation = make_invocation(scenario, reference_turn_scope(&identity));
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
+    let tool = TraceTool::default();
+    let control = SeamControl::default();
+    let seam = SeamLayer {
         control: control.clone(),
         executions: Arc::clone(&executions),
         journal_faults: None,
-    });
-    let runtime = Box::pin(build_runtime(
-        stores,
-        decorated,
-        control.clone(),
-        Arc::clone(&effect_controller),
-        &identity,
-        TraceTool::default(),
-    ))
-    .await;
+    };
     let point = TurnCrashPoint {
-        operation: TurnSeamOperation::Effect(EffectOperation::ToolAttempt {
-            name: "trace_effect".to_string(),
-        }),
-        placement: CrashPlacement::AfterExternalEffectBeforeOutcome,
+        operation: TurnSeamOperation::Effect(EffectOperation::GroupSettle),
+        placement: CrashPlacement::InsideCall,
     };
     control.arm(point.clone());
-    let task_identity = identity.clone();
-    let task = crate::task::spawn(async move {
-        Box::pin(drive_turn(runtime, effect_controller, &task_identity)).await
-    });
-    control.wait_for_hit().await;
-    control.simulate_process_crash();
-    task.abort();
-    let _ = task.await;
+    let crash = crash_at_armed_point(&control);
+    let crashing: crate::ConformanceTurnAttempt = {
+        let stores = Arc::clone(&stores);
+        let store = Arc::clone(&store);
+        let host = Arc::clone(&host);
+        let identity = identity.clone();
+        let tool = tool.clone();
+        Arc::new(move |scoped| {
+            let stores = Arc::clone(&stores);
+            let store = SeamStore::wrap(Arc::clone(&store), seam.control.clone());
+            let host = Arc::clone(&host);
+            let identity = identity.clone();
+            let seam = seam.clone();
+            let tool = tool.clone();
+            Box::pin(async move {
+                let runtime = Box::pin(try_build_runtime_on_host(
+                    stores.as_ref(),
+                    store,
+                    &seam,
+                    host,
+                    &identity,
+                    tool,
+                    crashed_turn_timings(),
+                ))
+                .await
+                .expect("build the crashing reference runtime");
+                let turn = Box::pin(drive_turn_on(runtime, seam.over_scoped(scoped))).await;
+                panic!("the armed crash point was never reached: {turn:?}");
+            })
+        })
+    };
+    runner
+        .run_turn_until_crash(reference_admitted_scope(&identity), crashing, crash)
+        .await;
     let crashed = control.trace();
     assert!(
         crashed
@@ -81,12 +100,19 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
             .any(|operation| matches!(operation, TurnSeamOperation::Provider(_))),
         "the crashed turn asked the model before it died: {crashed:?}"
     );
-    let dispatched_before = executions.load(std::sync::atomic::Ordering::SeqCst);
+    let executed_before = tool.executed.load(std::sync::atomic::Ordering::SeqCst);
     assert!(
-        dispatched_before > 0,
-        "the crashed turn dispatched its tool before it died"
+        executed_before > 0,
+        "the crashed turn executed its tool before it died"
     );
-    wait_for_recovery_lease(&make_runtime, scenario, &point, true).await;
+    let dispatched_before = executions.load(std::sync::atomic::Ordering::SeqCst);
+    wait_for_recovery_lease(
+        &|scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>,
+        scenario,
+        &point,
+        true,
+    )
+    .await;
 
     // What the pre-cutover build left behind: a session on the previous
     // generation.
@@ -103,41 +129,87 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
         .expect("stamp the pre-cutover generation marker");
 
     let successor_control = SeamControl::default();
-    let successor_store = SeamStore::wrap(make_runtime(scenario), successor_control.clone());
-    let successor_invocation = invocation.redrive();
-    let successor_effect_controller: Arc<dyn RuntimeEffectController> =
-        Arc::new(SeamEffectController {
-            inner: successor_invocation.controller_handle(),
-            control: successor_control.clone(),
-            executions: Arc::clone(&executions),
-            journal_faults: None,
-        });
-    successor_control.clear();
-    let refused = Box::pin(try_build_runtime_with_lease_timings(
-        stores,
-        successor_store,
-        successor_control.clone(),
-        successor_effect_controller,
-        &identity,
-        TraceTool::default(),
-        nominal_recovery_timings(),
-    ))
-    .await
-    .err()
-    .expect("a pre-cutover session must not be admitted by the next build");
-    successor_invocation.end();
-
-    let crate::SessionError::Store { source, .. } = &refused else {
-        panic!("the refusal must be the typed store error, got {refused:?}");
+    let successor_seam = SeamLayer {
+        control: successor_control.clone(),
+        executions: Arc::clone(&executions),
+        journal_faults: None,
     };
-    assert!(
-        matches!(
-            source,
-            StoreError::SessionStateVersionUnsupported { found, current }
-                if *found == previous && *current == crate::store::CURRENT_SESSION_STATE_VERSION
+    let (refusals, mut refused) = tokio::sync::mpsc::unbounded_channel::<Refusal>();
+    let redrive: crate::ConformanceTurnAttempt = {
+        let stores = Arc::clone(&stores);
+        let store = make(scenario) as Arc<dyn RuntimePersistence>;
+        let host = Arc::clone(&host);
+        let identity = identity.clone();
+        let tool = tool.clone();
+        Arc::new(move |scoped| {
+            let stores = Arc::clone(&stores);
+            let store = SeamStore::wrap(Arc::clone(&store), successor_seam.control.clone());
+            let host = Arc::clone(&host);
+            let identity = identity.clone();
+            let seam = successor_seam.clone();
+            let tool = tool.clone();
+            let refusals = refusals.clone();
+            Box::pin(async move {
+                seam.control.clear();
+                match Box::pin(try_build_runtime_on_host(
+                    stores.as_ref(),
+                    store,
+                    &seam,
+                    host,
+                    &identity,
+                    tool,
+                    nominal_recovery_timings(),
+                ))
+                .await
+                {
+                    Err(refusal) => {
+                        let _ = refusals.send(Ok(refusal));
+                        crate::ConformanceTurnEnd::Settled
+                    }
+                    Ok(runtime) => {
+                        let turn = Box::pin(drive_turn_on(runtime, seam.over_scoped(scoped))).await;
+                        let end = crate::ConformanceTurnEnd::of(&turn);
+                        let _ = refusals.send(match turn {
+                            Err(error) => Err(error),
+                            Ok(turn) => panic!(
+                                "a pre-cutover session must not be admitted by the next build: \
+                                 {turn:?}"
+                            ),
+                        });
+                        end
+                    }
+                }
+            })
+        })
+    };
+    runner
+        .run_turn(reference_admitted_scope(&identity), redrive)
+        .await;
+    let refused = refused
+        .recv()
+        .await
+        .expect("the redrive reported its refusal");
+
+    match refused {
+        Ok(crate::SessionError::Store { source, .. }) => assert!(
+            matches!(
+                &source,
+                StoreError::SessionStateVersionUnsupported { found, current }
+                    if *found == previous
+                        && *current == crate::store::CURRENT_SESSION_STATE_VERSION
+            ),
+            "the pre-cutover generation must be refused as unsupported, got {source:?}"
         ),
-        "the pre-cutover generation must be refused as unsupported, got {source:?}"
-    );
+        Ok(other) => panic!("the refusal must be the typed store error, got {other:?}"),
+        Err(error) => assert_eq!(
+            error.session_state_version_refusal(),
+            Some(crate::SessionStateVersionRefusal {
+                found: previous,
+                current: crate::store::CURRENT_SESSION_STATE_VERSION,
+            }),
+            "the pre-cutover generation must be refused as unsupported, got {error:?}"
+        ),
+    }
     let redriven = successor_control.trace();
     assert_eq!(
         redriven
@@ -157,6 +229,11 @@ pub async fn pre_cutover_generation_turn_redrive_is_refused_before_any_effect<F,
         executions.load(std::sync::atomic::Ordering::SeqCst),
         dispatched_before,
         "the refused redrive dispatched no effect"
+    );
+    assert_eq!(
+        tool.executed.load(std::sync::atomic::Ordering::SeqCst),
+        executed_before,
+        "the refused redrive ran no tool"
     );
 }
 
@@ -181,28 +258,20 @@ enum ClaimPath {
 /// string a durable engine would retry — on both the direct and the queued
 /// claim. Exactly one claim is attempted, and no provider request, effect or
 /// commit follows it.
-pub async fn pre_cutover_generation_turn_claim_is_refused_typed<F, S, I>(
+pub async fn pre_cutover_generation_turn_claim_is_refused_typed<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
-    make_invocation: I,
+    host: Arc<dyn crate::EffectHost>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
-    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
-    let stores = stores.as_ref();
     for (scenario, path) in [
         ("pre-cutover-generation-claim-direct", ClaimPath::Direct),
         ("pre-cutover-generation-claim-queued", ClaimPath::Queued),
     ] {
-        Box::pin(refuse_claim(
-            stores,
-            &make,
-            &make_invocation,
-            scenario,
-            path,
-        ))
-        .await;
+        Box::pin(refuse_claim(&stores, &make, &host, &runner, scenario, path)).await;
     }
 }
 
@@ -210,40 +279,20 @@ pub async fn pre_cutover_generation_turn_claim_is_refused_typed<F, S, I>(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn refuse_claim<F, S, I>(
-    stores: &dyn crate::StoreSet,
+async fn refuse_claim<F, S>(
+    stores: &Arc<dyn crate::StoreSet>,
     make: &F,
-    make_invocation: &I,
+    host: &Arc<dyn crate::EffectHost>,
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
     scenario: &str,
     path: ClaimPath,
 ) where
     F: Fn(&str) -> Arc<S>,
     S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
-    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
     let identity = ReferenceIdentity::for_scenario(scenario);
-    let raw = make(scenario) as Arc<dyn RuntimePersistence>;
-    seed_reference_ingress(&raw, &identity, scenario).await;
-    let control = SeamControl::default();
-    let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let invocation = make_invocation(scenario, reference_turn_scope(&identity));
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
-        control: control.clone(),
-        executions: Arc::clone(&executions),
-        journal_faults: None,
-    });
-    let mut runtime = Box::pin(build_runtime(
-        stores,
-        SeamStore::wrap(raw, control.clone()),
-        control.clone(),
-        Arc::clone(&effect_controller),
-        &identity,
-        TraceTool::default(),
-    ))
-    .await;
-
-    // The pre-cutover build's marker lands under the open runtime.
+    let store = make(scenario) as Arc<dyn RuntimePersistence>;
+    seed_reference_ingress(&store, &identity, scenario).await;
     let previous = crate::store::CURRENT_SESSION_STATE_VERSION - 1;
     let predecessor = make(scenario);
     super::super::bind_conformance_session(
@@ -251,33 +300,76 @@ async fn refuse_claim<F, S, I>(
         &identity.session_id,
     )
     .await;
-    predecessor
-        .stamp_session_state_version_for_testing(previous)
-        .await
-        .expect("stamp the pre-cutover generation marker");
-
-    control.clear();
-    let refused = match path {
-        ClaimPath::Direct => {
-            let mut input = crate::TurnInput::text("direct turn on a pre-cutover session");
-            input.trace_turn_id = Some(identity.turn_id.clone());
-            runtime
-                .stream_turn(
-                    input,
-                    crate::TurnOptions::new(
-                        tokio_util::sync::CancellationToken::new(),
-                        scoped_controller(effect_controller, &identity),
-                    ),
-                )
+    let control = SeamControl::default();
+    let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seam = SeamLayer {
+        control: control.clone(),
+        executions: Arc::clone(&executions),
+        journal_faults: None,
+    };
+    let tool = TraceTool::default();
+    let (refusals, mut refused) = tokio::sync::mpsc::unbounded_channel();
+    let attempt: crate::ConformanceTurnAttempt = {
+        let stores = Arc::clone(stores);
+        let host = Arc::clone(host);
+        let identity = identity.clone();
+        let tool = tool.clone();
+        Arc::new(move |scoped| {
+            let stores = Arc::clone(&stores);
+            let store = SeamStore::wrap(Arc::clone(&store), seam.control.clone());
+            let host = Arc::clone(&host);
+            let identity = identity.clone();
+            let seam = seam.clone();
+            let tool = tool.clone();
+            let predecessor = Arc::clone(&predecessor);
+            let refusals = refusals.clone();
+            Box::pin(async move {
+                let mut runtime = Box::pin(try_build_runtime_on_host(
+                    stores.as_ref(),
+                    store,
+                    &seam,
+                    host,
+                    &identity,
+                    tool,
+                    crashed_turn_timings(),
+                ))
                 .await
-                .err()
-        }
-        ClaimPath::Queued => Box::pin(drive_turn(runtime, effect_controller, &identity))
-            .await
-            .err(),
-    }
-    .unwrap_or_else(|| panic!("{path:?}: a pre-cutover session must not run a turn"));
-    invocation.end();
+                .expect("build the reference runtime while its generation is current");
+                // The pre-cutover build's marker lands under the open runtime.
+                predecessor
+                    .stamp_session_state_version_for_testing(previous)
+                    .await
+                    .expect("stamp the pre-cutover generation marker");
+                seam.control.clear();
+                let scoped = seam.over_scoped(scoped);
+                let refused = match path {
+                    ClaimPath::Direct => {
+                        let mut input =
+                            crate::TurnInput::text("direct turn on a pre-cutover session");
+                        input.trace_turn_id = Some(identity.turn_id.clone());
+                        runtime
+                            .stream_turn(
+                                input,
+                                crate::TurnOptions::new(
+                                    tokio_util::sync::CancellationToken::new(),
+                                    scoped,
+                                ),
+                            )
+                            .await
+                            .err()
+                    }
+                    ClaimPath::Queued => Box::pin(drive_turn_on(runtime, scoped)).await.err(),
+                }
+                .unwrap_or_else(|| panic!("{path:?}: a pre-cutover session must not run a turn"));
+                let _ = refusals.send(refused);
+                crate::ConformanceTurnEnd::Settled
+            })
+        })
+    };
+    runner
+        .run_turn(reference_admitted_scope(&identity), attempt)
+        .await;
+    let refused: crate::RuntimeError = refused.recv().await.expect("the turn reported its refusal");
 
     assert_eq!(
         refused.code,
@@ -333,5 +425,10 @@ async fn refuse_claim<F, S, I>(
         executions.load(std::sync::atomic::Ordering::SeqCst),
         0,
         "{path:?}: the refused turn dispatched no effect"
+    );
+    assert_eq!(
+        tool.executed.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "{path:?}: the refused turn ran no tool"
     );
 }

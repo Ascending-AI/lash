@@ -48,6 +48,9 @@ struct QueuedAttempt {
     attempt: lash_conformance::ConformanceTurnAttempt,
     /// The attempt must crash; its crash is a redelivery, not a failure.
     crashing: bool,
+    /// The law's trigger that kills this attempt from outside it, when the
+    /// law crashes the turn at a point of its own choosing.
+    crash: Option<lash_conformance::ConformanceCrash>,
 }
 
 /// How one execution of the handler ended, as the runner is told.
@@ -97,6 +100,7 @@ enum NextAttempt {
         admitted: lash_core::AdmittedScope,
         attempt: lash_conformance::ConformanceTurnAttempt,
         crashing: bool,
+        crash: Option<lash_conformance::ConformanceCrash>,
         ends: tokio::sync::mpsc::UnboundedSender<AttemptEnd>,
     },
     /// The law has queued no attempt yet.
@@ -119,6 +123,7 @@ fn next_attempt(key: &str) -> NextAttempt {
         admitted: turn.admitted.clone(),
         attempt: Arc::clone(&front.attempt),
         crashing: front.crashing,
+        crash: front.crash.clone(),
         ends: turn.ends.clone(),
     }
 }
@@ -140,7 +145,7 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
         ctx: WorkflowContext<'_>,
         Json(key): Json<String>,
     ) -> HandlerResult<Json<bool>> {
-        let (admitted, attempt, crashing, ends) = loop {
+        let (admitted, attempt, crashing, crash, ends) = loop {
             let queued = attempt_queued().notified();
             tokio::pin!(queued);
             queued.as_mut().enable();
@@ -149,8 +154,9 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
                     admitted,
                     attempt,
                     crashing,
+                    crash,
                     ends,
-                } => break (admitted, attempt, crashing, ends),
+                } => break (admitted, attempt, crashing, crash, ends),
                 // An invocation that finds nothing to run fails terminally
                 // rather than silently succeeding without the turn it was
                 // asked to run.
@@ -178,11 +184,27 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
         let scoped = controller
             .scoped_effect_controller(admitted)
             .map_err(TerminalError::from_error)?;
-        let (end, result) = match (CatchUnwind {
+        let run = CatchUnwind {
             inner: attempt(scoped),
-        })
-        .await
-        {
+        };
+        // A law's crash trigger kills this execution where it stands: the
+        // attempt's future is dropped mid-poll, as a dying deployment drops
+        // its handler, and the attempt fails retryably so Restate redelivers
+        // the invocation to the law's next run of the scope.
+        let ran = match crash {
+            Some(crash) => tokio::select! {
+                biased;
+                () = crash.fired() => Err(()),
+                ran = run => match ran {
+                    Ok(end) => panic!(
+                        "conformance turn `{key}` ended ({end:?}) before its crash fired"
+                    ),
+                    Err(()) => Err(()),
+                },
+            },
+            None => run.await,
+        };
+        let (end, result) = match ran {
             Ok(lash_conformance::ConformanceTurnEnd::Settled) => {
                 (AttemptEnd::Settled, Ok(Json(true)))
             }
@@ -283,6 +305,9 @@ impl LiveTurnRunner {
     async fn run_attempts(&self, admitted: lash_core::AdmittedScope, attempts: Vec<QueuedAttempt>) {
         let scope = format!("{:?}", admitted.scope());
         let crash_expected = attempts.iter().any(|attempt| attempt.crashing);
+        let leave_open_on_crash = attempts
+            .last()
+            .is_some_and(|attempt| attempt.crash.is_some());
         let (ends, mut ended) = tokio::sync::mpsc::unbounded_channel();
         let mut open = self.open.lock().await;
         let reopened = open.remove(&scope);
@@ -334,6 +359,14 @@ impl LiveTurnRunner {
                 // pick could take the finished call and miss the report.
                 biased;
                 end = ended.recv() => match end {
+                    // The law crashed this turn from outside: the invocation
+                    // stays open, and the law's next run of the scope is
+                    // Restate's redelivery of it.
+                    Some(AttemptEnd::Crashed) if leave_open_on_crash => {
+                        open.insert(scope, OpenInvocation { key: key.clone(), call });
+                        crashed = true;
+                        break;
+                    }
                     Some(AttemptEnd::Crashed) => crashed = true,
                     Some(AttemptEnd::Settled) => {
                         let ran = (&mut call).await.expect("the probe's ingress call task");
@@ -385,6 +418,7 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
             vec![QueuedAttempt {
                 attempt,
                 crashing: false,
+                crash: None,
             }],
         )
         .await;
@@ -402,12 +436,31 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
                 QueuedAttempt {
                     attempt: crashing,
                     crashing: true,
+                    crash: None,
                 },
                 QueuedAttempt {
                     attempt: redrive,
                     crashing: false,
+                    crash: None,
                 },
             ],
+        )
+        .await;
+    }
+
+    async fn run_turn_until_crash(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        attempt: lash_conformance::ConformanceTurnAttempt,
+        crash: lash_conformance::ConformanceCrash,
+    ) {
+        self.run_attempts(
+            admitted,
+            vec![QueuedAttempt {
+                attempt,
+                crashing: true,
+                crash: Some(crash),
+            }],
         )
         .await;
     }

@@ -26,12 +26,12 @@ pub(super) async fn run_crash_matrix_case<F, I>(
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());
     let invocation = make_invocation(scenario, reference_turn_scope(&identity));
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
+    let effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: control.clone(),
         executions: Arc::clone(&executions),
         journal_faults: None,
-    });
+    }
+    .over(invocation.controller_handle());
     let runtime = Box::pin(build_runtime(
         stores,
         decorated,
@@ -75,13 +75,12 @@ pub(super) async fn run_crash_matrix_case<F, I>(
         RenewalPressure::Nominal => nominal_recovery_timings(),
         RenewalPressure::Starved => recovery_timings(),
     };
-    let successor_effect_controller: Arc<dyn RuntimeEffectController> =
-        Arc::new(SeamEffectController {
-            inner: successor_invocation.controller_handle(),
-            control: successor_control.clone(),
-            executions: Arc::clone(&executions),
-            journal_faults: None,
-        });
+    let successor_effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
+        control: successor_control.clone(),
+        executions: Arc::clone(&executions),
+        journal_faults: None,
+    }
+    .over(successor_invocation.controller_handle());
     let successor = Box::pin(build_runtime_with_lease_timings(
         stores,
         Arc::clone(&successor_store),
@@ -130,12 +129,12 @@ pub(super) async fn run_crash_matrix_case<F, I>(
         );
         let redrive = successor_invocation.redrive();
         let control = SeamControl::default();
-        let controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-            inner: redrive.controller_handle(),
+        let controller: Arc<dyn RuntimeEffectController> = SeamLayer {
             control: control.clone(),
             executions: Arc::clone(&executions),
             journal_faults: None,
-        });
+        }
+        .over(redrive.controller_handle());
         let runtime = Box::pin(build_runtime_with_lease_timings(
             stores,
             SeamStore::wrap(make(scenario), control.clone()),
@@ -292,12 +291,12 @@ async fn drive_drain_turn<F, I>(
     let control = SeamControl::default();
     let store = SeamStore::wrap(make(scenario), control.clone());
     let invocation = make_invocation(&identity.turn_id, reference_turn_scope(identity));
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
+    let effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
         control: control.clone(),
         executions: Arc::clone(executions),
         journal_faults: None,
-    });
+    }
+    .over(invocation.controller_handle());
     let runtime = Box::pin(build_runtime_with_lease_timings(
         stores,
         store,

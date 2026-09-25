@@ -137,52 +137,41 @@ lash_conformance::turn_crash_level_1_tests!(
     }
 );
 
-/// FIG-3571: a turn the pre-cutover build left in flight is refused, typed,
-/// before any effect when this build redrives it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_pre_cutover_generation_turn_redrive_is_refused_before_any_effect_when_configured()
-{
-    let Some((_database_lock, storage)) = storage().await else {
+// The turn crash laws that run their turns on a turn runner: the FIG-3571
+// generation-refusal pair, the direct-acceptance crash and the cancel-closure
+// cuts, on a PostgreSQL effect host whose leases lapse on the recovery
+// timings. A crash drops the turn's task, and the recovery is a fresh runtime
+// over the same database.
+lash_conformance::turn_crash_runner_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
-            "skipping Postgres pre-cutover generation law: LASH_POSTGRES_DATABASE_URL is not set"
+            "skipping Postgres runner turn crash laws: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
     reset(storage.pool()).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    let (_attachments, stores) = pg_law_stores(&storage);
-    Box::pin(
-        lash_conformance::pre_cutover_generation_turn_redrive_is_refused_before_any_effect(
-            stores,
-            |scenario| crash_law_store(&database_url, scenario),
-            |_, scope| journaled_crash_invocation(&database_url, scope),
-        ),
+    let (attachments, stores) = pg_law_stores(&storage);
+    let host: Arc<dyn lash_core_execution::EffectHost> =
+        Arc::new(lash_postgres_store::PostgresEffectHost::with_options(
+            &storage,
+            PostgresEffectReplayOptions {
+                lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
+                    std::time::Duration::from_millis(600),
+                    std::time::Duration::from_millis(100),
+                )
+                .expect("crash-law effect lease timings"),
+                ..PostgresEffectReplayOptions::default()
+            },
+        ));
+    (
+        (database_lock, attachments),
+        stores,
+        move |scenario: &str| crash_law_store(&database_url, scenario),
+        Arc::clone(&host),
+        lash_conformance::HostTurnRunner::shared(host),
     )
-    .await;
-}
-
-/// FIG-3619: a runtime already open on a session whose marker moves behind
-/// this build is refused, typed and terminal, at the turn-lane claim.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_pre_cutover_generation_turn_claim_is_refused_typed_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres pre-cutover generation claim law: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    let database_url = database_url().expect("configured Postgres database URL");
-    let (_attachments, stores) = pg_law_stores(&storage);
-    Box::pin(
-        lash_conformance::pre_cutover_generation_turn_claim_is_refused_typed(
-            stores,
-            |scenario| crash_law_store(&database_url, scenario),
-            |_, scope| journaled_crash_invocation(&database_url, scope),
-        ),
-    )
-    .await;
-}
+});
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_held_turn_input_visibility_survives_claim_holder_crash_when_configured() {
