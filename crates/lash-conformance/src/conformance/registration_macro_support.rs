@@ -21,6 +21,7 @@ pub use super::effect_group_drain::*;
 pub use super::effect_group_host::*;
 pub use super::effect_host::*;
 pub use super::fence_integrity::*;
+pub use super::frame_switch_redrive::*;
 pub use super::graph_integrity::*;
 pub use super::hostile_input::*;
 pub use super::lineage::*;
