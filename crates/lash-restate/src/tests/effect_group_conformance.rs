@@ -451,9 +451,7 @@ impl HarnessAdmin {
                     .unwrap_or_else(|error| panic!("find the run of `{service}/{key}`: {error}"))
                     .unwrap_or_else(|| panic!("an invocation of `{service}/{key}/run`"));
                 admin
-                    .kill_invocation_for_test_cleanup(&crate::RestateInvocationId::new(
-                        open.id.clone(),
-                    ))
+                    .kill_invocation(&crate::RestateInvocationId::new(open.id.clone()))
                     .await
                     .unwrap_or_else(|error| panic!("kill `{}`: {error}", open.id));
                 open.id

@@ -102,10 +102,6 @@ impl EffectGroupDispatch {
         let parked = crate::turn_handler::park_refused_group_child(
             self.sessions.as_ref(),
             child.scope.admitted_scope.scope(),
-            child
-                .attempt_identity
-                .parent_invocation()
-                .and_then(|parent| parent.attribution.turn_id.as_ref()),
             refusal,
         )
         .await;

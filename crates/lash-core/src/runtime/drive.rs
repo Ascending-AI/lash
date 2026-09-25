@@ -34,11 +34,16 @@
 
 mod admission;
 mod control;
+mod park;
 mod reconcile;
 mod root;
 
 pub use control::apply_control_intent;
-pub use reconcile::{ReconcileReport, reconcile_drive_request, reconcile_session_work};
+pub use park::StoreParkRecovery;
+pub use reconcile::{
+    ReconcileParts, ReconcileProcesses, drain_hand_over_slot, reconcile_drive_request,
+    reconcile_once, reconcile_parent_end_plans_slot, reconcile_session_drives,
+};
 
 use std::sync::Arc;
 

@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
     EnginePark, ParkCancelCause, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
-    RootTerminalWriteDecision, TurnParkEventKind, close_admission, decide_root_terminal_write,
+    RootTerminalWriteDecision, ParkEventKind, close_admission, decide_root_terminal_write,
     root_binding_conflict, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
@@ -399,7 +399,7 @@ pub(crate) async fn begin_session_close_tx(
             session_id,
             &parked_root,
             park_id,
-            &TurnParkEventKind::Cancelled {
+            &ParkEventKind::Cancelled {
                 cause: ParkCancelCause::SessionDeleted,
             },
             at_ms,

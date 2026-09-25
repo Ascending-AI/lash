@@ -1573,10 +1573,7 @@ pub(super) async fn restate_admin_client_cancels_kills_and_queries_invocation_st
         .cancel_invocation(&invocation_id)
         .await
         .expect("cancel");
-    client
-        .kill_invocation_for_test_cleanup(&invocation_id)
-        .await
-        .expect("kill");
+    client.kill_invocation(&invocation_id).await.expect("kill");
     let status = client
         .invocation_status(&invocation_id)
         .await
