@@ -1,0 +1,20 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3731	1	accept	"(() => { try { decodeURI('%C0%zz'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	2	accept	"(() => { try { decodeURI('%E0%A0%zz'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	3	accept	"(() => { try { decodeURI('%F0%A0%A0%zz'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	4	accept	"(() => { try { decodeURIComponent('%C0%zz'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	5	accept	"(() => { try { decodeURIComponent('%z1'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	6	accept	"(() => { try { decodeURI('%ED%A0%80'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	7	accept	"(() => { try { decodeURI('%C0%AF'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	8	accept	"(() => { try { decodeURI('%F4%90%80%80'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	9	accept	"(() => { try { decodeURI('%'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	10	accept	"decodeURI('%41%42')"	"AB"	-
+FIG-3731	11	accept	"decodeURI('%C3%A9%3F')"	"é%3F"	-
+FIG-3731	12	accept	"decodeURIComponent('%F0%9F%98%80')"	"😀"	-
+FIG-3731	13	accept	"encodeURI('a b/é')"	"a%20b/%C3%A9"	-
+FIG-3731	14	accept	"(() => { try { encodeURI('\\uD800'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	15	accept	"(() => { try { encodeURIComponent('\\uDC00'); return 'returned'; } catch (e) { return `${e.name}|${e instanceof URIError}`; } })()"	"URIError|true"	-
+FIG-3731	16	reject	"decodeURI('\\uD800')"	"\ud800"	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
+FIG-3731	17	runtime-reject	"String.fromCharCode(0xD800)"	"\ud800"	TS_LONE_SURROGATE_UNSUPPORTED
+FIG-3731	18	runtime-reject	"decodeURI(String.fromCharCode(0xD800))"	"\ud800"	TS_LONE_SURROGATE_UNSUPPORTED
+FIG-3731	19	runtime-reject	"encodeURI(String.fromCharCode(0xD800))"	"ERR<URIError>"	TS_LONE_SURROGATE_UNSUPPORTED
