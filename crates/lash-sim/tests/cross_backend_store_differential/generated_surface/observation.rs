@@ -276,6 +276,8 @@ pub(super) fn normalize_json_fields(
                     | "resolved_at_ms"
                     | "lease_expires_at_ms"
                     | "due_at_ms"
+                    | "since_ms"
+                    | "last_refused_ms"
                     | "occurred_at" => {
                         if !value.is_null() {
                             *value = serde_json::json!("normalized_timestamp");
@@ -697,15 +699,20 @@ pub(super) fn read_sqlite_surface(
         group_outcomes: Vec::new(),
         turn_parks: sqlite_simple_json_rows(
             &runtime,
-            "SELECT session_id, turn_id, reason_json, parked_at_ms FROM turn_parks \
+            "SELECT session_id, turn_id, park_id, reason_code, reason_json,
+                    since_ms, last_refused_ms, attempts FROM turn_parks
              ORDER BY session_id",
             |row| {
-                let reason: String = row.get(2)?;
+                let reason: String = row.get(4)?;
                 Ok(normalized_json(serde_json::json!({
                     "session_id": row.get::<_, String>(0)?,
                     "turn_id": row.get::<_, String>(1)?,
+                    "park_id": row.get::<_, i64>(2)?,
+                    "reason_code": row.get::<_, String>(3)?,
                     "reason": serde_json::from_str::<serde_json::Value>(&reason).unwrap(),
-                    "parked_at_ms": row.get::<_, i64>(3)?,
+                    "since_ms": row.get::<_, i64>(5)?,
+                    "last_refused_ms": row.get::<_, i64>(6)?,
+                    "attempts": row.get::<_, i64>(7)?,
                 })))
             },
         ),
@@ -993,22 +1000,39 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
 pub(super) async fn read_postgres_turn_parks(pool: &PgPool) -> Vec<serde_json::Value> {
-    sqlx::query_as::<_, (String, String, String, i64)>(
-        "SELECT session_id, turn_id, reason_json, parked_at_ms FROM lash_turn_parks \
-         ORDER BY session_id",
+    type Row = (String, String, i64, String, String, i64, i64, i64);
+    sqlx::query_as::<_, Row>(
+        "SELECT session_id, turn_id, park_id, reason_code, reason_json,
+                since_ms, last_refused_ms, attempts
+         FROM lash_turn_parks ORDER BY session_id",
     )
     .fetch_all(pool)
     .await
     .unwrap()
     .into_iter()
-    .map(|(session_id, turn_id, reason, parked_at_ms)| {
-        normalized_json(serde_json::json!({
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "reason": serde_json::from_str::<serde_json::Value>(&reason).unwrap(),
-            "parked_at_ms": parked_at_ms,
-        }))
-    })
+    .map(
+        |(
+            session_id,
+            turn_id,
+            park_id,
+            reason_code,
+            reason,
+            since_ms,
+            last_refused_ms,
+            attempts,
+        )| {
+            normalized_json(serde_json::json!({
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "park_id": park_id,
+                "reason_code": reason_code,
+                "reason": serde_json::from_str::<serde_json::Value>(&reason).unwrap(),
+                "since_ms": since_ms,
+                "last_refused_ms": last_refused_ms,
+                "attempts": attempts,
+            }))
+        },
+    )
     .collect()
 }
 
