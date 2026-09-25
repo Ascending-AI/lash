@@ -147,7 +147,7 @@ struct ReplayOrdinalsState {
 /// command ordinals live in the run itself.
 struct ReplayOrdinals {
     event_sequence: AtomicU64,
-    signal_wait_ordinals: tokio::sync::Mutex<BTreeMap<String, u64>>,
+    signal_wait_ordinals: std::sync::Mutex<BTreeMap<String, u64>>,
 }
 
 impl ReplayOrdinals {
@@ -155,7 +155,7 @@ impl ReplayOrdinals {
         let ordinals = state.map(|state| &state.ordinals);
         Self {
             event_sequence: AtomicU64::new(ordinals.map_or(0, |o| o.event_sequence)),
-            signal_wait_ordinals: tokio::sync::Mutex::new(
+            signal_wait_ordinals: std::sync::Mutex::new(
                 ordinals.map_or_else(BTreeMap::new, |o| o.signal_wait_ordinals.clone()),
             ),
         }
@@ -169,11 +169,11 @@ impl ReplayOrdinals {
         })
     }
 
-    async fn snapshot(&self, run: &crate::LashlangReplayRun) -> ReplayOrdinalsState {
+    fn snapshot(&self, run: &crate::LashlangReplayRun) -> ReplayOrdinalsState {
         ReplayOrdinalsState {
             commands: run.ordinals(),
             event_sequence: self.event_sequence.load(Ordering::Relaxed),
-            signal_wait_ordinals: self.signal_wait_ordinals.lock().await.clone(),
+            signal_wait_ordinals: self.signal_wait_ordinals.lock_recover().clone(),
         }
     }
 }
@@ -782,7 +782,7 @@ async fn execute_lashlang(
                         let segment_state = LashlangSegmentState {
                             version: LASHLANG_SEGMENT_STATE_VERSION,
                             vm: continuation,
-                            ordinals: host.ordinals.snapshot(&host.run).await,
+                            ordinals: host.ordinals.snapshot(&host.run),
                             started_process_ids: host.ctx.started_process_ids(),
                             child_max_attempts: host.child_max_attempts,
                             incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
@@ -1271,7 +1271,7 @@ impl LashlangProcessHost<'_> {
             .enter(command, crate::CommandShape::SignalWait)
             .await?;
         let event_ordinal = {
-            let mut wait_ordinals = self.ordinals.signal_wait_ordinals.lock().await;
+            let mut wait_ordinals = self.ordinals.signal_wait_ordinals.lock_recover();
             let ordinal = wait_ordinals.entry(name.clone()).or_insert(0);
             *ordinal += 1;
             *ordinal

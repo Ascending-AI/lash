@@ -1062,10 +1062,6 @@ fn drain_area_witnesses() {
     });
     // W0251: lash::durability::BoundaryReason [enum]
     type_witness::<lash::durability::BoundaryReason>();
-    // W0252: lash::durability::BoundaryReason::DurationCap [variant]
-    variant_witness(|value: &lash::durability::BoundaryReason| {
-        matches!(value, lash::durability::BoundaryReason::DurationCap)
-    });
     // W0253: lash::durability::BoundaryReason::JournalBudget [variant]
     variant_witness(|value: &lash::durability::BoundaryReason| {
         matches!(value, lash::durability::BoundaryReason::JournalBudget)

@@ -52,8 +52,6 @@ crates/lash-core/src/runtime/turn_loop/execute.rs  |  tokio::select! {  |  1  # 
 crates/lash-core/src/runtime/turn_loop/resident_session.rs  |  uuid::Uuid::new_v4()  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/lib.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/process.rs  |  Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB3
-crates/lash-lashlang-runtime/src/process.rs  |  signal_wait_ordinals: tokio::sync::Mutex::new(  |  1  # UNMAPPED
-crates/lash-lashlang-runtime/src/process.rs  |  signal_wait_ordinals: tokio::sync::Mutex<BTreeMap<String, u64>>,  |  1  # AC40
 crates/lash-lashlang-runtime/src/process.rs  |  tokio::select! {  |  2  # AC20
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  Pin<Box<dyn Future<Output = Result<AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB2
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  active_nodes: std::sync::Arc<Mutex<HashSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,  |  1  # UNMAPPED

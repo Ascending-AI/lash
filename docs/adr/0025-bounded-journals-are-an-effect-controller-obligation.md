@@ -126,9 +126,12 @@ Journal/replay growth (§2) is one reason. The other is **code-version pinning**
 incarnation stays bound to the code version it started on and blocks clean rolling upgrades
 (Restate's documented motivation for "end and reschedule," which is *not* journal size). This is
 an engine-specific operational lever (Restate version pinning; Temporal worker versioning), a
-host preference ("I want to deploy within T"), and it folds into the same predicate as an
-optional construction-time wall-clock cap returning `Some(DurationCap)`. It is closer to the
-ADR-0023 host-lever pattern than to the journal obligation and must not be baked into it.
+host preference ("I want to deploy within T"), and it would fold into the same predicate as an
+optional construction-time wall-clock cap. It is closer to the ADR-0023 host-lever pattern than
+to the journal obligation and must not be baked into it. No such cap is implemented: the unused
+`segment_duration_cap` option and its `DurationCap` boundary reason were deleted (FIG-3673), and a
+wall-clock cap would also have to be a recorded input to keep the cut point replay-stable
+(ADR 0105).
 
 ### 5. The handover, and the requirements that survive
 
