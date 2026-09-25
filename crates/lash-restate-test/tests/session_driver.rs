@@ -134,6 +134,7 @@ impl ScriptedDriver {
                     checkpoint: None,
                 },
                 1,
+                lash_core::engine::AdmittedWork::Queued,
             )),
             None => AdmitVerdict::Idle,
         })
@@ -160,7 +161,7 @@ impl SessionDriver for ScriptedDriver {
     ) -> Result<AdmitVerdict, DriveAbort> {
         let address = EffectAddress::new(
             controller.execution_scope().clone(),
-            drive_admission_replay_key(ordinal),
+            drive_admission_replay_key(&request.request, ordinal),
         )
         .map_err(|error| DriveAbort::Refused(runtime_error(error.to_string())))?;
         let envelope = RuntimeEffectEnvelope::new(
@@ -261,6 +262,7 @@ fn committed_roots(outcome: &DriveOutcome) -> Vec<String> {
             RootOutcome::Refused { root, verdict } => {
                 panic!("root {root} was refused: {verdict:?}")
             }
+            RootOutcome::Ceded { root } => panic!("root {root} ceded"),
         })
         .collect()
 }
@@ -462,6 +464,7 @@ async fn a_request_of_another_generation_is_refused_before_any_journal_command()
                             checkpoint: None,
                         },
                         1,
+                        lash_core::engine::AdmittedWork::Queued,
                     ),
                 },
             )
