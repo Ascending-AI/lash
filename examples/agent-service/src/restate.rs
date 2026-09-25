@@ -22,7 +22,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::db::{ChatMessage, ChatModelSelection};
 use crate::routes::{
-    ChannelTurnEvents, StreamItem, TurnAttempt, TurnPersistenceState,
+    ChannelTurnEvents, StreamItem, TurnAttempt, TurnPersistenceState, ZERO_MOVE_RETRIES,
     assistant_text_for_persistence, model_spec_for_chat_selection,
     run_turn_with_zero_move_recovery, spawn_live_replay_forwarder, wait_for_live_replay_flush,
 };
@@ -281,8 +281,30 @@ async fn run_restate_chat_turn_and_persist(
         model: request.model.clone(),
         model_variant: request.model_variant.clone(),
     })?;
-    let session = state.open_session(&request.chat_id, turn_model).await?;
     let chat_id = request.chat_id.clone();
+    let session = match state.open_lash_session(&chat_id, turn_model).await {
+        Ok(session) => session,
+        // A redrive the generation gate refused while a turn of this request
+        // is in flight parks it (FIG-3735): the zero-move re-prompts run under
+        // their own turn ids, so every one this request may have started is a
+        // candidate.
+        Err(error)
+            if state
+                .park_generation_refused_turn(
+                    &chat_id,
+                    std::iter::once(request.turn_id.clone()).chain(
+                        (1..=ZERO_MOVE_RETRIES)
+                            .map(|retry| zero_move_retry_turn_id(&request.turn_id, retry)),
+                    ),
+                    &error,
+                )
+                .await =>
+        {
+            return Ok(TurnAttempt::Parked);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    state.record_tool_loss_notice(&chat_id, &session).await?;
     // The outbox is keyed by the turn id the client is streaming, so every
     // attempt writes to it even when a re-prompt runs under a fresh Lash turn.
     let outbox_turn_id = request.turn_id.clone();
@@ -296,7 +318,7 @@ async fn run_restate_chat_turn_and_persist(
         let turn_id = request.turn_id.clone();
         move || {
             retries += 1;
-            TurnId::from(format!("{turn_id}:zero-move-retry-{retries}"))
+            zero_move_retry_turn_id(&turn_id, retries)
         }
     };
 
@@ -324,7 +346,7 @@ async fn run_restate_chat_turn_and_persist(
                 );
                 let output = session
                     .turn(TurnInput::text(turn_input))
-                    .turn_id(attempt_turn_id)
+                    .turn_id(attempt_turn_id.clone())
                     .require_finish()?
                     // Durable in-flight work crosses the EffectHost boundary;
                     // the terminal product row below is derived from Lash's
@@ -359,6 +381,15 @@ async fn run_restate_chat_turn_and_persist(
                     }
                     // A parked turn records nothing: no error row, no Done.
                     Err(err) if parks_turn(&err) => Ok(TurnAttempt::Parked),
+                    // So does an in-flight turn whose redrive the generation
+                    // gate refused at its claim (FIG-3735).
+                    Err(err)
+                        if state
+                            .park_generation_refused_turn(&chat_id, [attempt_turn_id.clone()], &err)
+                            .await =>
+                    {
+                        Ok(TurnAttempt::Parked)
+                    }
                     Err(err) => {
                         state
                             .with_db({
@@ -402,6 +433,12 @@ async fn run_restate_chat_turn_and_persist(
         })
         .await?;
     Ok(attempt)
+}
+
+/// The turn id of the `retry`th zero-move re-prompt of `turn_id`. It is
+/// derived, not drawn at random: the handler body that mints it is replayed.
+fn zero_move_retry_turn_id(turn_id: &TurnId, retry: usize) -> TurnId {
+    TurnId::from(format!("{turn_id}:zero-move-retry-{retry}"))
 }
 
 /// Whether `err` parked its turn: its park is written and its claims held.

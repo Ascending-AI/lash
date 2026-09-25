@@ -43,7 +43,7 @@ const DEFAULT_CONTEXT_WINDOW_TOKENS: usize = 200_000;
 
 /// How many extra turns the host will spend re-prompting an agent that
 /// finished a turn owing an O move (FIG-3181). One: a nudge, then a forfeit.
-const ZERO_MOVE_RETRIES: usize = 1;
+pub(crate) const ZERO_MOVE_RETRIES: usize = 1;
 
 /// The nudge. It is turn input, never a persisted `user` row: the transcript
 /// still holds exactly one user row per board click.

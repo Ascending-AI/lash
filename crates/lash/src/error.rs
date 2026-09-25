@@ -190,6 +190,27 @@ impl EmbedError {
         }
     }
 
+    /// The session-state generations the generation gate refused, when this
+    /// is its refusal (FIG-3571, FIG-3619): at a session's open, at a turn's
+    /// claim, or at a store call.
+    ///
+    /// A durable engine's turn handler that meets it on a redrive of a turn
+    /// still in flight parks the turn rather than ending the invocation
+    /// where its journal holds the next command (FIG-3735): see
+    /// `lash_restate::park_generation_refused_turn`.
+    pub fn session_state_version_refusal(&self) -> Option<lash_core::SessionStateVersionRefusal> {
+        match self {
+            Self::Store(error) | Self::Session(SessionError::Store { source: error, .. }) => {
+                lash_core::SessionStateVersionRefusal::of_store_error(error)
+            }
+            Self::Runtime(error) => error.session_state_version_refusal(),
+            Self::Plugin(lash_core::PluginError::Runtime(error)) => {
+                error.session_state_version_refusal()
+            }
+            _ => None,
+        }
+    }
+
     /// True only when a typed signal says the failed operation is safe to
     /// retry as-is; `false` means "no typed retryable signal", not "known
     /// permanent" (see [`is_terminal`](Self::is_terminal) for that).

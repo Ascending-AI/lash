@@ -389,6 +389,62 @@ async fn a_parked_turn_fails_its_attempt_retryably_without_settling() {
     );
 }
 
+/// FIG-3735: a generation refusal whose scope has no turn in flight ran
+/// nothing a journal could hold, so the handler path keeps it terminal: it
+/// settles, records the failure, and writes no park.
+#[tokio::test]
+async fn a_generation_refusal_with_nothing_in_flight_stays_terminal() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        crate::tests::memory_trigger_store(),
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let turn_id = TurnId::from("never-accepted-turn");
+    state.track_turn(&session_id, &turn_id);
+    let refusal = lash::EmbedError::Store(
+        lash::persistence::StoreError::SessionStateVersionUnsupported {
+            found: 1,
+            current: 2,
+        },
+    );
+    assert!(refusal.session_state_version_refusal().is_some());
+    let error = super::session_admission::park_generation_refused_turn(
+        &state,
+        lash::runtime::ExecutionScope::turn(session_id.as_str(), turn_id.clone()),
+        refusal,
+        AppError::runtime,
+    )
+    .await;
+    assert_ne!(
+        error.verdict,
+        crate::AppErrorVerdict::Parked,
+        "nothing was in flight: {}",
+        error.message
+    );
+    let handler_error = super::terminalize_turn_execution(
+        &state,
+        &session_id,
+        &turn_id,
+        "restate_user_turn.failed",
+        Ok(Err(error)),
+    )
+    .await
+    .expect_err("the refused turn fails its attempt");
+    let rendered =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&handler_error)
+            .to_string();
+    assert!(
+        rendered.starts_with("Terminal error"),
+        "a refusal with nothing journaled ends the invocation: {rendered}"
+    );
+    assert!(
+        state.active_turns.for_session(&session_id).is_none(),
+        "the terminal refusal settles its turn"
+    );
+}
+
 #[test]
 fn foreign_effect_controller_codes_remain_explicit_extensions() {
     let error = lash::runtime::RuntimeEffectControllerError::foreign(
