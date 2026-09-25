@@ -32,6 +32,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-restate__doc",
     crate = ":lash-restate",
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     testonly = True,
 )
 

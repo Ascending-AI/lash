@@ -162,10 +162,45 @@ class TableTest(unittest.TestCase):
         )
 
     def test_too_few_samples_make_no_row(self) -> None:
-        self.assertEqual(table([record(cores=4.0)] * (sizes.MIN_SAMPLES - 1)), {})
+        lines = [record(pkg="lash-sim", crate="logical_turn", cores=4.0)] * (
+            sizes.MIN_SAMPLES - 1
+        )
+        self.assertNotIn("lash-sim/logical_turn", table(lines))
 
     def test_a_row_at_the_defaults_is_dropped(self) -> None:
-        self.assertEqual(table([record(cores=1.0, peak_bytes=GIB)] * 20), {})
+        lines = [record(pkg="lash-sim", crate="logical_turn", cores=1.0)] * 20
+        self.assertNotIn("lash-sim/logical_turn", table(lines))
+
+    def test_the_minimum_floor_keeps_and_roughly_sizes_a_row(self) -> None:
+        saved = dict(sizes.MINIMUM_MEMORY_KB)
+        try:
+            sizes.MINIMUM_MEMORY_KB["lash-internal-core/lash_core"] = 5 * 1024 * 1024
+            # The formula lands at 1.5 GiB from a 1 GiB peak; the floor wins.
+            lines = [record(cores=2.0, peak_bytes=GIB)] * 20
+            entry = table(lines)["lash-internal-core/lash_core"]
+            self.assertEqual(entry["memory_kb"], 5242880)
+            self.assertEqual(entry["cpu_count"], 2)
+            # Too few samples to measure still yields the floor, not absence.
+            entry = table([record(cores=1.0, peak_bytes=GIB)] * 3)[
+                "lash-internal-core/lash_core"
+            ]
+            self.assertEqual(entry["memory_kb"], 5242880)
+            self.assertEqual(entry["samples"], 3)
+        finally:
+            sizes.MINIMUM_MEMORY_KB.clear()
+            sizes.MINIMUM_MEMORY_KB.update(saved)
+
+    def test_a_measured_need_above_the_minimum_wins(self) -> None:
+        saved = dict(sizes.MINIMUM_MEMORY_KB)
+        try:
+            sizes.MINIMUM_MEMORY_KB["lash-internal-core/lash_core"] = 2 * 1024 * 1024
+            lines = [record(cores=2.0, peak_bytes=3 * GIB)] * 20
+            self.assertEqual(
+                table(lines)["lash-internal-core/lash_core"]["memory_kb"], 4718592
+            )
+        finally:
+            sizes.MINIMUM_MEMORY_KB.clear()
+            sizes.MINIMUM_MEMORY_KB.update(saved)
 
     def test_rendered_table_is_sorted_and_newline_terminated(self) -> None:
         lines = [record(cores=2.0)] * 20
@@ -201,8 +236,18 @@ class TableTest(unittest.TestCase):
                     "an entry that asks for no more than the defaults is noise",
                 )
                 self.assertEqual(entry["cpu_count"], sizes.cpu_count_for(entry["p95_cores"]))
-                self.assertEqual(entry["memory_kb"], sizes.memory_kb_for(entry["peak_bytes"]))
-                self.assertGreaterEqual(entry["samples"], sizes.MIN_SAMPLES)
+                self.assertEqual(
+                    entry["memory_kb"],
+                    max(
+                        sizes.memory_kb_for(entry["peak_bytes"]),
+                        sizes.MINIMUM_MEMORY_KB.get(key, 0),
+                    ),
+                )
+                self.assertTrue(
+                    entry["samples"] >= sizes.MIN_SAMPLES
+                    or key in sizes.MINIMUM_MEMORY_KB,
+                    "an unmeasured row survives only on an explicit minimum",
+                )
 
 
 class CompileRequestTest(unittest.TestCase):
@@ -229,6 +274,9 @@ class CompileRequestTest(unittest.TestCase):
             properties = properties_of(block)
             if "cpu_count" not in properties:
                 continue
+            if block.startswith("rust_doc("):
+                # Covered by test_every_generated_doc_request_matches_its_library.
+                continue
             package = re.search(r'package_name = "([^"]+)"', block)
             crate = re.search(r'crate_name = "([^"]+)"', block)
             self.assertIsNotNone(package, f"{path}: sized block without package_name")
@@ -238,6 +286,29 @@ class CompileRequestTest(unittest.TestCase):
             with self.subTest(path=str(path), crate=crate.group(1)):
                 self.assertEqual(properties["cpu_count"], str(entry["cpu_count"]))
                 self.assertEqual(properties["memory_kb"], str(entry["memory_kb"]))
+        self.assertGreater(seen, 0)
+
+    def test_every_generated_doc_request_matches_its_library(self) -> None:
+        """A rust_doc target states exactly its library's compile row."""
+        seen = 0
+        per_file: dict[pathlib.Path, list[str]] = {}
+        for path, block in generated_blocks():
+            per_file.setdefault(path, []).append(block)
+        for path, blocks in per_file.items():
+            requests = {}
+            for block in blocks:
+                name = re.search(r'^    name = "([^"]+)"', block, re.M)
+                if name and "cpu_count" in properties_of(block):
+                    requests[name.group(1)] = properties_of(block)
+            for block in blocks:
+                if not block.startswith("rust_doc("):
+                    continue
+                crate = re.search(r'crate = ":([^"]+)"', block)
+                self.assertIsNotNone(crate, f"{path}: rust_doc without a crate")
+                properties = properties_of(block)
+                seen += 1
+                with self.subTest(path=str(path), doc=crate.group(1)):
+                    self.assertEqual(properties, requests.get(crate.group(1), {}))
         self.assertGreater(seen, 0)
 
 
@@ -519,10 +590,11 @@ class TableValidationTest(unittest.TestCase):
 
 
 class DefaultsAgreeTest(unittest.TestCase):
-    """The two defaults are written down in three places; they must match.
+    """The two defaults are written down in four places; they must match.
 
-    `.bazelrc` is what the pool is actually asked for, and the other two decide
-    which rows are worth keeping and what an unmeasured target inherits.
+    `.bazelrc` is what the pool is actually asked for, the two tools decide
+    which rows are worth keeping, and the generated `pool_sizes.bzl` is what
+    the pool platform hands an aspect action that names no measured bucket.
     """
 
     def test_bazelrc_and_the_tools_agree(self) -> None:
@@ -534,6 +606,11 @@ class DefaultsAgreeTest(unittest.TestCase):
             self.assertIn(f"build --remote_default_exec_properties={name}={value}\n", bazelrc)
         self.assertEqual(generator.DEFAULT_CPU_COUNT, sizes.DEFAULT_CPU_COUNT)
         self.assertEqual(generator.DEFAULT_MEMORY_KB, sizes.DEFAULT_MEMORY_KB)
+
+    def test_the_pool_platform_carries_the_same_unscoped_defaults(self) -> None:
+        pool = (ROOT / "tools/bazel/pool_sizes.bzl").read_text(encoding="utf-8")
+        self.assertIn(f'"cpu_count": "{sizes.DEFAULT_CPU_COUNT}"', pool)
+        self.assertIn(f'"memory_kb": "{sizes.DEFAULT_MEMORY_KB}"', pool)
 
     def test_ci_inherits_the_same_defaults(self) -> None:
         action = (ROOT / ".github/actions/bazel-shared-cache/action.yml").read_text()

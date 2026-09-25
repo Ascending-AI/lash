@@ -28,6 +28,31 @@ table itself when the target under it has none (FIG-3176).
 # buildifier: disable=bzl-visibility
 load("@rules_rust//rust/private:providers.bzl", "LintsInfo")
 load("@rules_rust//rust:defs.bzl", "rust_clippy_action", "rust_common")
+load(":pool_sizes.bzl", "POOL_EXEC_GROUPS")
+
+# Bazel merges a target's `exec_properties` only into actions a rule creates,
+# never into aspect-created ones, so the measured crate row would stop at the
+# Rustc/RustcMetadata actions and every lint action below would fall back to
+# the pool default. The aspects instead declare one exec group per distinct
+# request in `tools/bazel/action-sizes.json` (generated as `pool_sizes.bzl`)
+# and run the action in the group named by the target's `exec_properties`;
+# the `//tools/bazel:pool` execution platform carries the same request under
+# the group's name, so the action requests what the crate's row says.
+def _pool_exec_group(rule_attr):
+    """The pool exec group matching the target's compile request, or None.
+
+    Args:
+        rule_attr: `ctx.rule.attr` of the target being linted.
+
+    Returns:
+        The exec group name, or None for the default group.
+    """
+    properties = getattr(rule_attr, "exec_properties", None) or {}
+    name = "pool_{}_{}".format(
+        properties.get("cpu_count", ""),
+        properties.get("memory_kb", ""),
+    )
+    return name if name in POOL_EXEC_GROUPS else None
 
 # Cargo appends the `-- -D warnings` arguments after the lint-table flags, and
 # `rust_clippy_action` appends `extra_clippy_flags` after them too, so a warning
@@ -103,6 +128,7 @@ def _lash_clippy_aspect_impl(target, ctx):
         config = _nearest_config(target.label.package, configs),
         success_marker = marker,
         extra_clippy_flags = _lint_flags(ctx),
+        exec_group = _pool_exec_group(ctx.rule.attr),
     )
 
     return [OutputGroupInfo(clippy_checks = depset([marker]))]
@@ -149,6 +175,7 @@ _TOOLCHAINS = [
 
 lash_clippy_aspect = aspect(
     implementation = _lash_clippy_aspect_impl,
+    exec_groups = POOL_EXEC_GROUPS,
     fragments = ["cpp"],
     attrs = {
         "_workspace_lints": attr.label(
@@ -264,11 +291,13 @@ def _lash_check_aspect_impl(target, ctx):
         crate_info = crate_info,
         config = ctx.file._config,
         success_marker = marker,
+        exec_group = _pool_exec_group(ctx.rule.attr),
     )
     return [OutputGroupInfo(check_markers = depset([marker]))]
 
 lash_check_aspect = aspect(
     implementation = _lash_check_aspect_impl,
+    exec_groups = POOL_EXEC_GROUPS,
     fragments = ["cpp"],
     attrs = {
         "_config": attr.label(

@@ -3,8 +3,8 @@
 
 Every remote action carries a `cpu_count` and a `memory_kb` request. Both are
 part of the action key, so the repository defaults in `.bazelrc` are the small
-action (1 CPU, 2 GiB) and never move; a compile that needs more says so per
-target, from this measured table.
+action (1 CPU, 1.5 GiB) and move only deliberately; a compile that needs more
+says so per target, from this measured table.
 
 The input is the usage log every pool worker appends to, one tab-separated
 record per action (`ACTION_USAGE_LOG`, written by the executor's action
@@ -46,9 +46,12 @@ The rule, per `<package>/<crate>`:
   under a one-core quota and measure the cap, not the need, so they are left out
   whenever the crate also has samples at a larger request.
 * `memory_kb` = the largest peak x 1.5, rounded up to 512 MiB, never below the
-  2 GiB default. Memory is not compressible, so it follows the worst sample, not
-  a percentile.
-* At least 20 samples, or no row. Fewer samples are not enough for a p95.
+  1.5 GiB default, and never below the crate's entry in `MINIMUM_MEMORY_KB`.
+  Memory is not compressible, so it follows the worst sample, not a
+  percentile.
+* At least 20 samples, or no row -- except for a crate in
+  `MINIMUM_MEMORY_KB`, whose floor keeps its row even on too few or too
+  small samples. Fewer samples are not enough for a p95.
 * A row that asks for no more than the defaults is dropped: absence from the
   file *is* the default request.
 
@@ -91,8 +94,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-# Must match `build --remote_default_exec_properties=...` in `.bazelrc`.
-DEFAULT_MEMORY_KB = 2097152
+# Must match `build --remote_default_exec_properties=...` in `.bazelrc` and the
+# unscoped `exec_properties` of the `//tools/bazel:pool` execution platform.
+DEFAULT_MEMORY_KB = 1572864
 DEFAULT_CPU_COUNT = 1
 
 COMPILE_TOOL = "process_wrapper"
@@ -109,6 +113,29 @@ MEMORY_MARGIN = 1.5
 # A request is a scheduling reservation; a finer granularity only fragments the
 # pool's budget.
 MEMORY_GRANULARITY_KB = 512 * 1024
+
+# Explicit per-crate floors, in KiB. The table is regenerated from whatever the
+# pool last measured, and a formula row can vanish on too few samples or land
+# under the default. These crates are known to need more than the default, so
+# a floor keeps the row; a measured need above the floor still wins. The
+# values are the requests `pool-reservation-2026-09-25.md` derived from the
+# 24-hour peaks of these crates' non-Rustc actions (peak x ~1.25, rounded to
+# 512 MiB), which now include the Clippy/check/doc actions the row reaches
+# through `//tools/bazel:pool` exec groups.
+MINIMUM_MEMORY_KB = {
+    "lash-internal-sqlite-store/conformance_memory": 3 * 1024 * 1024,
+    "lash-internal-conformance/lash_conformance": 2560 * 1024,
+    "lash-internal-remote-protocol/lash_remote_protocol": 2 * 1024 * 1024,
+    "lash-internal-core-execution/lash_core_execution": 2 * 1024 * 1024,
+    "lash-internal-core-execution/store_backed": 2 * 1024 * 1024,
+    "lash-internal-restate-test/turn_crash_replay": 2 * 1024 * 1024,
+    "lash-internal-protocol-rlm/cell_binding_drift": 2 * 1024 * 1024,
+    "lash-internal-subagents/lash_subagents": 2 * 1024 * 1024,
+    "lash-internal-restate-test/suspended_turn": 2 * 1024 * 1024,
+    "lash-internal-restate-test/start_gate_peek": 2 * 1024 * 1024,
+    "lash-internal-core/runtime_turns": 2 * 1024 * 1024,
+    "lash-internal-core-worker/lash_core_worker": 2 * 1024 * 1024,
+}
 
 
 class Samples:
@@ -289,19 +316,24 @@ def test_run_table(measured: dict[str, TestRuns]) -> dict[str, dict[str, float |
 
 def table(measured: dict[str, Samples]) -> dict[str, dict[str, float | int]]:
     sizes = {}
-    for key, samples in measured.items():
-        if len(samples.records) < MIN_SAMPLES:
+    for key in sorted(set(measured) | set(MINIMUM_MEMORY_KB)):
+        samples = measured.get(key, Samples())
+        minimum = MINIMUM_MEMORY_KB.get(key)
+        if len(samples.records) < MIN_SAMPLES and minimum is None:
             continue
-        p95 = percentile(samples.cpu_basis(), CPU_PERCENTILE)
+        p95 = percentile(samples.cpu_basis(), CPU_PERCENTILE) if samples.records else 0.0
         cpu_count = cpu_count_for(p95)
-        memory_kb = memory_kb_for(samples.peak_bytes())
+        memory_kb = max(
+            memory_kb_for(samples.peak_bytes()) if samples.records else 0,
+            minimum or 0,
+        )
         if cpu_count <= DEFAULT_CPU_COUNT and memory_kb <= DEFAULT_MEMORY_KB:
             continue
         sizes[key] = {
             "cpu_count": cpu_count,
             "memory_kb": memory_kb,
             "p95_cores": round(p95, 2),
-            "peak_bytes": samples.peak_bytes(),
+            "peak_bytes": samples.peak_bytes() if samples.records else 0,
             "samples": len(samples.records),
         }
     return dict(sorted(sizes.items()))

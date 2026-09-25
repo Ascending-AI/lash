@@ -62,9 +62,25 @@ common --experimental_repository_downloader_retries=5
 #
 # Both values are part of every action key, so changing either re-keys this
 # repository's whole remote cache. That cost was paid once, deliberately, when
-# these lines moved from 4 cores / 4 GiB to the values below. They do not
-# change again: an action that is OOM-killed or starved is a missing row in
-# action-sizes.json, never a reason to move a default.
+# these lines moved from 4 cores / 4 GiB to 1 core / 2 GiB, and again when
+# memory moved to 1.5 GiB: over 24 h of pool measurements, compiles at the
+# 2 GiB default peaked at 2.083 GiB (p99.9 1.60 GiB, p99 1.20 GiB), and the
+# request is a scheduler reservation, not the cgroup ceiling (the executor
+# keeps the cap at max(request, per-action share), never below ~2.08 GiB), so
+# the smaller default only lets the scheduler pack more actions per box. An
+# action that is OOM-killed or starved is a missing row in action-sizes.json,
+# never a reason to move a default.
+#
+# The same defaults live in `//tools/bazel:pool`, the workspace's registered
+# execution platform, which additionally carries each sized crate's request
+# under a `pool_<cpu>_<memory_kb>.`-scoped exec-group name. The Clippy/cargo-check aspect
+# actions cannot inherit a target's `exec_properties` (Bazel applies them only
+# to rule-owned actions), so `tools/bazel/clippy.bzl` reads the crate's row
+# back out of the target's `exec_properties` and runs the lint action in the
+# matching pool exec group, where the platform's scoped properties apply.
+# These flag lines remain the default request for any action that resolves to
+# a platform without exec properties, e.g. a development host whose
+# architecture the pool platform does not match.
 #
 # A test RUN is sized apart from its compile, through Bazel's `test` exec group:
 # the generator writes `test.cpu_count` / `test.memory_kb` on every test target,
@@ -82,7 +98,7 @@ common --experimental_repository_downloader_retries=5
 # dependency actions without explicit requests. Different defaults produce
 # different remote action keys.
 build --remote_default_exec_properties=cpu_count=1
-build --remote_default_exec_properties=memory_kb=2097152
+build --remote_default_exec_properties=memory_kb=1572864
 build:shared --remote_local_fallback=false
 # Remote-connection flags. They reach CI too, which composes its own flag list
 # but inherits `build` lines (see the pipelining note below).

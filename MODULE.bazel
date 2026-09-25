@@ -16,6 +16,16 @@ toolchains.toolchain(
 use_repo(toolchains, "default_rust_toolchains")
 
 rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+# `ctx.actions.run` inside `rust_clippy_action` has no `exec_group` parameter
+# upstream, and exec-group-scoped platform exec_properties are the only channel
+# by which an aspect action can carry a per-crate request (Bazel merges target
+# `exec_properties` only into rule-owned actions). `tools/bazel/clippy.bzl`
+# uses the parameter to run each lint action in the pool exec group that
+# carries the crate's row; see `//tools/bazel:pool`.
+rules_rust.patch(
+    patches = ["//tools/bazel:patches/rules-rust-clippy-action-exec-group.patch"],
+    strip = 1,
+)
 use_repo(rules_rust, "rules_rust")
 
 rules_rust_bindgen = use_extension("@rules_rs//rs:rules_rust_bindgen.bzl", "rules_rust_bindgen")
@@ -26,6 +36,11 @@ register_toolchains(
     "@llvm//toolchain:all",
     "@rules_rust_bindgen//:all",
 )
+
+# Actions resolve to this platform for the pool's request properties: the
+# small default plus each measured crate request scoped to a pool exec group,
+# which is how the Clippy/check aspect actions carry a crate's row.
+register_execution_platforms("//tools/bazel:pool")
 
 crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
 crate.from_cargo(

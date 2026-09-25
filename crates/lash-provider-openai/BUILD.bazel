@@ -34,6 +34,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-provider-openai__doc",
     crate = ":lash-provider-openai",
+    exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
     testonly = True,
 )
 
