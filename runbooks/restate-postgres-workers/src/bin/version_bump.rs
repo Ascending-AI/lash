@@ -60,9 +60,11 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// The tables component 101 lacks: the cancellation affected-input child table
 /// component 102 installed (FIG-3263), the queued-run tables, the session
-/// ingress component 127 installs (FIG-3540), and the park-feed clock and
-/// event tables component 128 installs (FIG-3659).
-const POST_FLOOR_TABLES: [&str; 6] = [
+/// ingress component 127 installs (FIG-3540), the park-feed clock and event
+/// tables component 128 installs (FIG-3659), and the catalog identity
+/// component 132 installs (FIG-3667).
+const POST_FLOOR_TABLES: [&str; 7] = [
+    "lash_catalog_identity",
     "lash_queued_run_members",
     "lash_queued_runs",
     "lash_session_ingress",

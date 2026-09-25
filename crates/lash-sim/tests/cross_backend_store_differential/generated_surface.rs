@@ -390,7 +390,7 @@ impl SurfaceRunner {
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
 async fn reset_postgres_surface(storage: &PostgresStorage) {
-    let tables: Vec<String> = sqlx::query_scalar("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'lash\\_%' AND tablename NOT IN ('lash_schema_versions') ORDER BY tablename").fetch_all(storage.pool()).await.unwrap();
+    let tables: Vec<String> = sqlx::query_scalar("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'lash\\_%' AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity') ORDER BY tablename").fetch_all(storage.pool()).await.unwrap();
     sqlx::query(&format!(
         "TRUNCATE {} RESTART IDENTITY CASCADE",
         tables.join(", ")

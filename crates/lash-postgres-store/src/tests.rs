@@ -369,7 +369,7 @@ async fn direct_session_store_defers_missing_identity_validation() {
         "SELECT tablename FROM pg_tables
          WHERE schemaname = 'public'
            AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions')
+           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity')
          ORDER BY tablename",
     )
     .fetch_all(storage.pool())
@@ -406,7 +406,7 @@ lash_conformance::unbound_session_meta_tests!({
         "SELECT tablename FROM pg_tables
          WHERE schemaname = 'public'
            AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions')
+           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity')
          ORDER BY tablename",
     )
     .fetch_all(storage.pool())

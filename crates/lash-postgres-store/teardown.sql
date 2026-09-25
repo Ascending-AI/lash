@@ -113,3 +113,5 @@ DROP TABLE IF EXISTS lash_artifact_owners CASCADE;
 DROP TABLE IF EXISTS lash_artifact_owner_retirements CASCADE;
 
 DROP TABLE IF EXISTS lash_release_stamp CASCADE;
+
+DROP TABLE IF EXISTS lash_catalog_identity CASCADE;

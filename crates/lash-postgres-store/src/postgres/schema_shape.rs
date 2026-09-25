@@ -74,10 +74,13 @@ const SHAPE_ARTIFACT: &str = include_str!("../../schema-shape.txt");
 /// outside the verified scope, so a host port that omits it can hold a
 /// `singleton = FALSE` row that satisfies "the table has rows" and then fails
 /// every runtime read.
-const SEED_ROWS: [(&str, &str); 1] = [(
-    "lash_process_change_clock",
-    "transactional process-change clock",
-)];
+const SEED_ROWS: [(&str, &str); 2] = [
+    (
+        "lash_process_change_clock",
+        "transactional process-change clock",
+    ),
+    ("lash_catalog_identity", "catalog identity"),
+];
 
 /// The namespace-anchoring table. Its resolution through `search_path` decides
 /// which installation every other object is read from.
@@ -108,15 +111,15 @@ const ANCHOR_TABLE: &str = "lash_schema_versions";
 ///   Other mismatches remain fatal, so a valve
 ///   adopted for a structural false positive cannot silently run one build
 ///   against another schema generation.
-/// - **The await-event signing secret row.** Without it there is no key to
-///   authenticate durable promises with, so there is nothing for open to return:
-///   no secret, no store.
+/// - **The catalog identity row.** Without it there is no identity to hand
+///   the session catalogs open builds, so there is nothing for open to return:
+///   no identity, no store.
 ///
 /// The `lash_process_change_clock` seed row is deliberately *not* in that list.
 /// It is reported as an ordinary finding, so [`SchemaCheck::WarnOnly`] opens
 /// without it and every process-registry write then fails at runtime. The
 /// asymmetry is not that one row matters more than the other — both are required
-/// — it is that the secret is something open must physically read and hand back,
+/// — it is that the identity is something open must physically read and hand back,
 /// while the clock row is only something writes will later need. A valve that
 /// could not be overridden for the clock row would be a valve that cannot be used
 /// to work around a checker bug, which is its entire purpose.
@@ -1384,13 +1387,13 @@ impl fmt::Display for SchemaReport {
                 " The component schema is a reject-and-recreate boundary: a stamp that is not \
                  this build's own component version is refused before any migration DDL runs, \
                  whichever direction it differs in. Drain the affected sessions and recreate the \
-                 whole Lash trust domain with this build, resetting the session tombstones, the \
-                 await-event revocation ledger, the effect journal, and the Restate state \
-                 together — any one of them left behind still refers to sessions the recreated \
-                 database does not have. \
-                 `PostgresStorage::teardown_ddl()` (committed as \
-                 crates/lash-postgres-store/teardown.sql) drops every lash-owned object so \
-                 `schema.sql` can be re-applied cleanly. \
+                 whole Lash trust domain with this build: drop the schema lash owns \
+                 (`DROP SCHEMA ... CASCADE`) or recreate the database, then reset the Restate \
+                 state with it — Restate left behind still refers to sessions the recreated \
+                 database does not have. `PostgresStorage::teardown_ddl()` (committed as \
+                 crates/lash-postgres-store/teardown.sql) drops only the objects this build \
+                 owns: an older build's catalog can hold tables this build no longer declares, \
+                 so tearing that catalog down with it leaves them behind. \
                  docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md \
                  records why this boundary refuses instead of migrating. This gate is \
                  unconditional and no `SchemaCheck` relaxes it."

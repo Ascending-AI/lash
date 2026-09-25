@@ -49,9 +49,9 @@ for the landing commit, so alpha.113 predates it). Figments' pinned revision
   schema under `HostProvisioned`.
 - **Seed data ships in the same artifact.** `schema.sql` ends with the required
   seeds: the `lash_schema_versions` component stamp, the `lash_process_change_clock`
-  singleton, and the `lash_await_event_meta` signing secret. A schema that skipped
-  them is *provisioned but incomplete*: open refuses naming `lash_await_event_meta`
-  and `schema.sql`. Apply the artifact whole.
+  and `lash_turn_park_clock` singletons, and the `lash_catalog_identity` row. A
+  schema that skipped them is *provisioned but incomplete*: open refuses naming
+  `lash_catalog_identity` and `schema.sql`. Apply the artifact whole.
 - **Ordering: migrate → verify → deploy.** Run the host migration to completion,
   gate on `verify_schema_for` conforming against the release being deployed, *then*
   roll the runtime. Verification is read-only and takes the published advisory lock
@@ -73,7 +73,8 @@ seeds what the host did not.
 |---|---|
 | Version stamp ≠ this build's `SCHEMA_VERSION` | Open refuses, naming found and expected. Fatal under every `SchemaCheck`. |
 | Structural drift (missing/extra/diverged objects) | `SchemaCheck::Enforce` refuses with a per-object diff naming the drifted objects. `WarnOnly` logs and opens — for diagnosis, never production. |
-| Seed row missing (`lash_await_event_meta`) | `verify_schema_for` reports a `SEED ROWS` finding; open refuses naming the table and `schema.sql`. No `SchemaCheck` relaxes it. |
+| Seed row missing (`lash_catalog_identity`) | `verify_schema_for` reports a `SEED ROWS` finding; open refuses naming the table and `schema.sql`. No `SchemaCheck` relaxes it. |
+| Upgrading across a reject-and-recreate bump | Drop the schema lash owns (`DROP SCHEMA ... CASCADE`) or recreate the database, then re-apply this build's `schema.sql`. This build's `teardown.sql` names only this build's tables; an older catalog can hold tables it no longer declares (component 132 retired the effect engine's eight tables), and teardown leaves those behind. |
 | `verify_schema_for` non-conformant | CI gate fails pre-deploy; the runtime never starts. |
 
 After any refusal the database is exactly as the host left it — the companion asserts

@@ -99,6 +99,17 @@ CREATE TABLE lash_durable_read_fixture.lash_blobs (
 
 
 --
+-- Name: lash_catalog_identity; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_catalog_identity (
+    singleton boolean DEFAULT true NOT NULL,
+    catalog_id text NOT NULL,
+    CONSTRAINT ck_catalog_identity_singleton CHECK (singleton)
+);
+
+
+--
 -- Name: lash_checkpoint_blob_refs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -993,6 +1004,13 @@ INSERT INTO lash_durable_read_fixture.lash_blobs VALUES ('2434987d35bc0578e36407
 
 
 --
+-- Data for Name: lash_catalog_identity; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+INSERT INTO lash_durable_read_fixture.lash_catalog_identity VALUES (true, '00000000-0000-4000-8000-000000000887');
+
+
+--
 -- Data for Name: lash_checkpoint_blob_refs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1360,6 +1378,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_attachment_manifest
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_blobs
     ADD CONSTRAINT lash_blobs_pkey PRIMARY KEY (hash);
+
+
+--
+-- Name: lash_catalog_identity lash_catalog_identity_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_catalog_identity
+    ADD CONSTRAINT lash_catalog_identity_pkey PRIMARY KEY (singleton);
 
 
 --

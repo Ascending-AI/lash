@@ -59,6 +59,10 @@ table lash_blobs
   column content bytea not-null
   column hash text not-null
   primary-key (hash)
+table lash_catalog_identity
+  column catalog_id text not-null
+  column singleton boolean not-null default
+  primary-key (singleton)
 table lash_checkpoint_blob_refs
   column blob_ref text not-null
   column checkpoint_ref text not-null

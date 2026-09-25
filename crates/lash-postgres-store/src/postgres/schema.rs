@@ -376,7 +376,7 @@ pub(crate) struct SchemaOpenOptions {
 }
 
 /// Brings the database to the state this build requires and returns the
-/// store-resident await-event signing secret.
+/// catalog's identity.
 ///
 /// Both provisioning modes end in the same structural verification, so a
 /// database that opens is a database whose shape lash has read — never one whose
@@ -544,7 +544,14 @@ pub(crate) async fn ensure_schema(
         }
     };
 
-    let catalog_id = read_catalog_id(&mut *tx).await.map_err(store_sqlx_error)?;
+    // The identity is a data precondition, not a shape: `SchemaCheck::WarnOnly`
+    // relaxes structural enforcement, never the store's ability to construct
+    // itself. The admission is recorded only after this succeeds, so a refused
+    // open never logs an admission first.
+    let Some(catalog_id) = read_catalog_id(&mut *tx).await.map_err(store_sqlx_error)? else {
+        record_schema_gate_decision(&report, options, "denied_seed_catalog_identity_missing");
+        return Err(missing_catalog_identity_error());
+    };
     record_schema_gate_decision(&report, options, admitted_as);
     // Only an admitted open stamps. A refused open has not written this
     // database and must not claim it did, and the write rides the admitting
@@ -557,17 +564,26 @@ pub(crate) async fn ensure_schema(
     Ok(catalog_id)
 }
 
-/// The identity of the catalog a connection resolves: `<database>.<schema>`.
-///
-/// Two lash installations are two catalogs exactly when they differ in
-/// database or in schema, so the pair names one without any stored row.
-pub(crate) async fn read_catalog_id<'e, E>(executor: E) -> Result<String, sqlx::Error>
+/// The catalog's identity row, the random id the seed statements wrote at
+/// install, or `None` when the row is absent.
+pub(crate) async fn read_catalog_id<'e, E>(executor: E) -> Result<Option<String>, sqlx::Error>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    sqlx::query_scalar("SELECT current_database()::text || '.' || current_schema()::text")
-        .fetch_one(executor)
+    sqlx::query_scalar("SELECT catalog_id FROM lash_catalog_identity WHERE singleton = TRUE")
+        .fetch_optional(executor)
         .await
+}
+
+/// The refusal for a catalog whose identity row is missing: a data
+/// precondition no `SchemaCheck` relaxes, because open has no identity to hand
+/// its session catalogs without it.
+pub(crate) fn missing_catalog_identity_error() -> StoreError {
+    StoreError::Backend(
+        "Postgres catalog identity row is missing from lash_catalog_identity; apply the seed \
+         statements from this build's schema.sql artifact"
+            .to_string(),
+    )
 }
 
 enum SchemaMigrationOutcome {
@@ -1205,12 +1221,13 @@ fn forward_migration_sentence(found: i32) -> String {
 /// a link. Every SQL-store refusal that ends in reject-and-recreate shares this
 /// text so the four durable surfaces are always named together (FIG-3173).
 fn recreate_trust_domain_remedy() -> String {
-    "Drain the affected sessions and recreate the whole Lash trust domain with this build: \
-     provision the database from the DDL artifact this build ships \
-     (`PostgresStorage::schema_ddl()`, committed as crates/lash-postgres-store/schema.sql), then \
-     reset the session tombstones, the await-event revocation ledger, the effect journal, and the \
-     Restate state together — any one of them left behind still refers to sessions the recreated \
-     database does not have. \
+    "Drain the affected sessions and recreate the whole Lash trust domain with this build: drop \
+     the schema lash owns (`DROP SCHEMA ... CASCADE`) or recreate the database, provision it from \
+     the DDL artifact this build ships (`PostgresStorage::schema_ddl()`, committed as \
+     crates/lash-postgres-store/schema.sql), and reset the Restate state with it — Restate left \
+     behind still refers to sessions the recreated database does not have. An older build's \
+     catalog can hold tables this build's teardown no longer names, so this build's \
+     `teardown_ddl()` does not clear it. \
      docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md records why \
      this boundary refuses instead of migrating."
         .to_string()

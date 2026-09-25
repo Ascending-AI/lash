@@ -337,6 +337,7 @@ async fn regenerate_postgres_durable_fixture() {
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
         .expect("provision Postgres durable-fixture schema");
+    install_fixed_catalog_identity(&storage).await;
     let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
     let expected = Box::pin(fixture::seed(&handles)).await;
     normalize_server_authoritative_fixture_rows(&storage).await;
@@ -443,6 +444,18 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("discard the effect-engine tables");
+    sqlx::raw_sql(schema_table_ddl("lash_catalog_identity"))
+        .execute(&pool)
+        .await
+        .expect("create the catalog identity from the authoritative DDL");
+    sqlx::query(
+        "INSERT INTO lash_catalog_identity (singleton, catalog_id) VALUES (TRUE, $1)
+         ON CONFLICT (singleton) DO UPDATE SET catalog_id = EXCLUDED.catalog_id",
+    )
+    .bind(FIXTURE_CATALOG_ID)
+    .execute(&pool)
+    .await
+    .expect("seed the fixed fixture catalog identity");
     sqlx::query("DROP TABLE lash_attachment_condemnations")
         .execute(&pool)
         .await
@@ -1169,6 +1182,18 @@ async fn drop_fixture_schema(database_url: &str) {
         .await
         .expect("drop dedicated Postgres durable-fixture schema");
     pool.close().await;
+}
+
+/// The committed dump's catalog identity: the seed draws a random one per
+/// install, so a regeneration would otherwise differ on every run.
+const FIXTURE_CATALOG_ID: &str = "00000000-0000-4000-8000-000000000887";
+
+async fn install_fixed_catalog_identity(storage: &PostgresStorage) {
+    sqlx::query("UPDATE lash_catalog_identity SET catalog_id = $1 WHERE singleton = TRUE")
+        .bind(FIXTURE_CATALOG_ID)
+        .execute(storage.pool())
+        .await
+        .expect("install the fixed fixture catalog identity");
 }
 
 async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) {
