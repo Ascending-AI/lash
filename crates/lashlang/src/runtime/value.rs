@@ -96,10 +96,8 @@ impl FromIterator<Value> for ListValue {
 /// `ListValue` does: a buffer that still has aliases is cloned, while one the
 /// binding holds alone is appended into. That is what lets `s = s + "x"`
 /// reuse its accumulator buffer instead of copying it each step (FIG-3733).
-#[derive(Debug)]
 pub struct StringValue(Repr);
 
-#[derive(Debug)]
 enum Repr {
     /// A `CompactString` that fits inline — the `Owned` invariant. An owned
     /// string never holds a heap buffer, so cloning one is a fixed-size copy.
@@ -183,6 +181,15 @@ impl Clone for StringValue {
             }
             Repr::Shared(value) => Self(Repr::Shared(Arc::clone(value))),
         }
+    }
+}
+
+/// The Owned/Shared split is an implementation detail: a `StringValue` debugs
+/// exactly like the `CompactString` it replaced, so `Value`'s Debug output —
+/// and every golden that compares it — is unchanged by the representation.
+impl fmt::Debug for StringValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_str(), formatter)
     }
 }
 
