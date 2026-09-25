@@ -1053,7 +1053,7 @@ pub(super) async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_t
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned
     );
     assert!(
         error.code.is_terminal(),
@@ -1097,7 +1097,7 @@ pub(super) async fn fig1464_over_budget_envelope_gives_up_with_a_fixed_size_pois
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned
     );
     assert!(
         error.code.is_terminal(),
@@ -1215,7 +1215,7 @@ pub(super) async fn fig1464_over_budget_group_open_gives_up_before_the_group_is_
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned,
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned,
         "the group open must give up with the process-command arm's typed failure: {}",
         error.message
     );
@@ -1265,7 +1265,7 @@ pub(super) async fn fig1464_over_budget_group_open_replay_under_a_larger_budget_
 
     assert_eq!(
         replayed.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned,
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned,
         "the replay must render the journaled give-up: {}",
         replayed.message
     );
@@ -1465,7 +1465,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
 
     assert_eq!(
         recorded_proc_err.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned
     );
 
     // Redrive process command under a larger budget — must read journaled verdict and execute nothing.
@@ -1504,7 +1504,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
 
     assert_eq!(
         replayed_proc_err.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned
     );
     assert!(
         !process_executed.load(Ordering::SeqCst),

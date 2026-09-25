@@ -63,9 +63,9 @@ impl TurnAttach for RestateTurnAttach {
             .await
             .map_err(|err| {
                 let code = if err.is_timeout() {
-                    lash_core::RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed
+                    lash_core::RuntimeErrorCode::EngineTurnTerminalAttachCeilingElapsed
                 } else {
-                    lash_core::RuntimeErrorCode::RestateTurnTerminalAttach
+                    lash_core::RuntimeErrorCode::EngineTurnTerminalAttach
                 };
                 // A shared handler: a deployment that never bound the
                 // durable-wait workflow fails every attach this way, and so
@@ -87,7 +87,7 @@ impl TurnAttach for RestateTurnAttach {
         match resolution {
             Resolution::Ok(value) => serde_json::from_value(value).map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateTurnTerminalDecode,
+                    lash_core::RuntimeErrorCode::EngineTurnTerminalDecode,
                     err.to_string(),
                 )
             }),
@@ -99,7 +99,7 @@ impl TurnAttach for RestateTurnAttach {
                 ),
             )),
             other => Err(RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateTurnTerminalInvalidResolution,
+                lash_core::RuntimeErrorCode::EngineTurnTerminalInvalidResolution,
                 format!(
                     "terminal promise for turn `{}` in session `{}` resolved with {other:?}",
                     address.turn_id, address.session_id

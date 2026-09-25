@@ -178,14 +178,12 @@ engine-neutral opaque ids (landed: `RuntimeExecutionContext::engine_execution_id
 `LeaseOwnerIdentity::engine_process_execution` and
 `engine_process_execution_id`, and the `engine_execution_id` field of
 lash-trace's language-execution identity with its OpenTelemetry attribute
-`lash.language_execution.engine_execution_id`), moves the Restate error and
-format vocabulary below `lash-restate` (with the B5 error-code rename), and
-makes the substrate boundary gate refuse new ones. None may be added.
+`lash.language_execution.engine_execution_id`), renames the
+`RuntimeErrorCode::Restate*` error vocabulary to `Engine*` variants with
+`engine_*` wire strings (landed), moves the Restate format vocabulary below
+`lash-restate`, and makes the substrate boundary gate refuse new ones. None
+may be added.
 
-- The Restate error vocabulary of `RuntimeErrorCode` in `lash-core-store`
-  (`RestateAwaitEvent*`, `RestateEffectController`,
-  `RestateEffectHostRequiresHandlerScope`, `RestateJournaledEffectPoisoned`;
-  `runtime_error/classification.rs`).
 - The Restate durable formats in the facade's format registry
   (`DurableFormat::Restate*`, `crates/lash/src/formats.rs`).
 

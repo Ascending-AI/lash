@@ -839,7 +839,7 @@ impl LiveConformanceHarness {
             .expect("an over-budget group open must give up");
         assert_eq!(
             refused.code,
-            RuntimeErrorCode::RestateJournaledEffectPoisoned,
+            RuntimeErrorCode::EngineJournaledEffectPoisoned,
             "the group open must give up with the process-command arm's typed failure: {}",
             refused.message
         );
@@ -2100,7 +2100,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
         .unwrap_or_else(|| panic!("the refusal is typed: {refused}"));
     assert_eq!(
         typed.code,
-        RuntimeErrorCode::RestateEffectGroupProtocolRetired
+        RuntimeErrorCode::EngineEffectGroupProtocolRetired
     );
     println!("EFFECT_GROUP_WITNESS o stale-protocol-refused-typed PASS");
 }

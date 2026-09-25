@@ -580,7 +580,7 @@ pub(super) async fn restate_turn_wait_rejects_missing_cancel_scope() {
         )
         .await
         .expect_err("turn sleep must not silently disable durable cancellation");
-    assert_eq!(error.code.as_str(), "restate_turn_cancel_scope_missing");
+    assert_eq!(error.code.as_str(), "engine_turn_cancel_scope_missing");
 }
 
 /// FIG-3672 P9: a Restate timer races only the turn's durable gate. The

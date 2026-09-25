@@ -141,7 +141,7 @@ where
     };
     let Json(recorded) = journaled.map_err(|terminal| {
         RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateEffectController,
+            RuntimeErrorCode::EngineEffectController,
             format!("Restate frontier marker `{name}` failed: {terminal}"),
         )
     })?;

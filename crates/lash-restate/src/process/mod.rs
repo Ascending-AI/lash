@@ -119,7 +119,7 @@ pub(crate) fn process_ingress_submit_error(
 ) -> PluginError {
     if err.is_service_unregistered() {
         PluginError::Runtime(RuntimeError::new(
-            RuntimeErrorCode::RestateServiceUnregistered,
+            RuntimeErrorCode::EngineServiceUnregistered,
             crate::ingress::unregistered_service_message(
                 crate::LashService::ProcessWorkflow.name(),
                 "run",
@@ -128,7 +128,7 @@ pub(crate) fn process_ingress_submit_error(
         ))
     } else {
         PluginError::Runtime(RuntimeError::new(
-            RuntimeErrorCode::RestateProcessIngressSubmit,
+            RuntimeErrorCode::EngineProcessIngressSubmit,
             format!("ingress submit for process `{process_id}` failed: {err}"),
         ))
     }
@@ -158,7 +158,7 @@ pub(crate) fn restate_process_terminal_resolution(
         .map(Resolution::Ok)
         .map_err(|err| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateProcessTerminalEncode,
+                lash_core::RuntimeErrorCode::EngineProcessTerminalEncode,
                 err.to_string(),
             )
         })
@@ -762,7 +762,7 @@ impl RestateProcessIngressRunner {
                 // client cannot tell them apart: nothing binds the service,
                 // or nothing is left of this process's invocation.
                 Err(PluginError::Runtime(RuntimeError::new(
-                    RuntimeErrorCode::RestateProcessAwait,
+                    RuntimeErrorCode::EngineProcessAwait,
                     crate::ingress::unresolvable_call_target_message(
                         crate::LashService::ProcessWorkflow.name(),
                         "await_terminal",
@@ -771,7 +771,7 @@ impl RestateProcessIngressRunner {
                 )))
             } else {
                 Err(PluginError::Runtime(RuntimeError::new(
-                    RuntimeErrorCode::RestateProcessAwait,
+                    RuntimeErrorCode::EngineProcessAwait,
                     format!(
                         "ingress await for process `{}` failed: {err}",
                         process_ref.process_id

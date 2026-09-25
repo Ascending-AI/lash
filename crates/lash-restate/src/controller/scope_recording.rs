@@ -56,7 +56,7 @@ where
 
     fn record_error(operation: &str, error: TerminalError) -> RuntimeEffectControllerError {
         RuntimeEffectControllerError::from(RuntimeError::new(
-            lash_core::RuntimeErrorCode::RestateEffectController,
+            lash_core::RuntimeErrorCode::EngineEffectController,
             format!("LashDurableWaitIndex/{operation} failed: {error}"),
         ))
     }

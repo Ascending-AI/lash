@@ -196,7 +196,7 @@ pub async fn a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ra
     let incorporated = match context.incorporate_group_prefix(&handle).await {
         Ok(incorporated) => incorporated,
         Err(error)
-            if error.code == crate::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope =>
+            if error.code == crate::RuntimeErrorCode::EngineEffectHostRequiresHandlerScope =>
         {
             // This tier executes journaled commands only inside a handler
             // context, so the incorporation record is cut there, not on the

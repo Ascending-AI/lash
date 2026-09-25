@@ -181,7 +181,7 @@ pub enum TurnTerminal {
 
 /// Backend-specific terminal attachment for a foreground turn.
 ///
-/// [`crate::RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed`] means only a
+/// [`crate::RuntimeErrorCode::EngineTurnTerminalAttachCeilingElapsed`] means only a
 /// bounded transport attachment elapsed. The durable terminal wait remains
 /// live, so the host must re-attach with the same [`TurnAddress`].
 #[async_trait::async_trait]
