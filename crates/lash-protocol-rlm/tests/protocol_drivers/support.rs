@@ -1029,7 +1029,6 @@ pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
             RlmProtocolPluginConfig::builder()
                 .channel(lash_protocol_rlm::RlmChannel::Cell)
                 .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
-                .wall_clock(lash_protocol_rlm::WallClockBound::unbounded())
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
             &memory_artifact_backend(),

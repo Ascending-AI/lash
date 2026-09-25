@@ -89,18 +89,6 @@ async fn method_values_keep_their_identity_resident() {
     );
 }
 
-/// A continuation's JSON less the wall-clock time the run spent, which is the
-/// one field two runs of one program never share.
-fn without_wall_clock(bytes: &[u8]) -> serde_json::Value {
-    let mut value: serde_json::Value = serde_json::from_slice(bytes).expect("continuation JSON");
-    value
-        .as_object_mut()
-        .expect("a continuation is an object")
-        .remove("active_execution_elapsed")
-        .expect("a continuation records its elapsed time");
-    value
-}
-
 /// At every instruction boundary the run can park at, a continuation restored
 /// from its bytes finishes exactly as the resident VM does, and a second cold
 /// run parked at the same boundary captures the same state: a replay rebuilds
@@ -131,8 +119,7 @@ async fn method_values_survive_every_suspension_point_and_replay_to_the_same_byt
         let cold_bytes =
             serde_json::to_vec(&cold.suspend().expect("the cold run captures")).expect("encode");
         assert_eq!(
-            without_wall_clock(&cold_bytes),
-            without_wall_clock(&bytes),
+            cold_bytes, bytes,
             "boundary {budget} replays to another state"
         );
 

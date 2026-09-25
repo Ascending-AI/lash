@@ -483,7 +483,6 @@ async fn suspension_inside_a_finally_entered_by_break_resumes_to_the_break() {
             ExecutionOutcome::Continued
         );
         let mut continuation = vm.suspend().expect("cleanup continuation");
-        continuation.active_execution_elapsed = std::time::Duration::ZERO;
         continuation
     };
     assert_eq!(

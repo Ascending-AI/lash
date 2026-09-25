@@ -1,7 +1,4 @@
-use super::{
-    ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures,
-    WallClockBound,
-};
+use super::{ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -12,7 +9,6 @@ pub struct RlmProtocolPluginConfig {
     /// Session-pinned transport used for model-authored programs.
     pub channel: super::RlmChannel,
     pub instruction_limit: InstructionBound,
-    pub wall_clock: WallClockBound,
     pub memory_limit: MemoryBound,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
@@ -60,26 +56,19 @@ pub struct UnsetChannel;
 /// channel are set by name and carry their own type, so required values cannot
 /// be omitted or transposed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RlmProtocolPluginConfigBuilder<
-    I = UnsetBound,
-    W = UnsetBound,
-    M = UnsetBound,
-    C = UnsetChannel,
-> {
+pub struct RlmProtocolPluginConfigBuilder<I = UnsetBound, M = UnsetBound, C = UnsetChannel> {
     instruction_limit: I,
-    wall_clock: W,
     memory_limit: M,
     channel: C,
 }
 
-impl<I, W, M, C> RlmProtocolPluginConfigBuilder<I, W, M, C> {
+impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
     pub fn channel(
         self,
         channel: super::RlmChannel,
-    ) -> RlmProtocolPluginConfigBuilder<I, W, M, super::RlmChannel> {
+    ) -> RlmProtocolPluginConfigBuilder<I, M, super::RlmChannel> {
         RlmProtocolPluginConfigBuilder {
             instruction_limit: self.instruction_limit,
-            wall_clock: self.wall_clock,
             memory_limit: self.memory_limit,
             channel,
         }
@@ -88,22 +77,9 @@ impl<I, W, M, C> RlmProtocolPluginConfigBuilder<I, W, M, C> {
     pub fn instruction_limit(
         self,
         instruction_limit: InstructionBound,
-    ) -> RlmProtocolPluginConfigBuilder<InstructionBound, W, M, C> {
+    ) -> RlmProtocolPluginConfigBuilder<InstructionBound, M, C> {
         RlmProtocolPluginConfigBuilder {
             instruction_limit,
-            wall_clock: self.wall_clock,
-            memory_limit: self.memory_limit,
-            channel: self.channel,
-        }
-    }
-
-    pub fn wall_clock(
-        self,
-        wall_clock: WallClockBound,
-    ) -> RlmProtocolPluginConfigBuilder<I, WallClockBound, M, C> {
-        RlmProtocolPluginConfigBuilder {
-            instruction_limit: self.instruction_limit,
-            wall_clock,
             memory_limit: self.memory_limit,
             channel: self.channel,
         }
@@ -112,26 +88,22 @@ impl<I, W, M, C> RlmProtocolPluginConfigBuilder<I, W, M, C> {
     pub fn memory_limit(
         self,
         memory_limit: MemoryBound,
-    ) -> RlmProtocolPluginConfigBuilder<I, W, MemoryBound, C> {
+    ) -> RlmProtocolPluginConfigBuilder<I, MemoryBound, C> {
         RlmProtocolPluginConfigBuilder {
             instruction_limit: self.instruction_limit,
-            wall_clock: self.wall_clock,
             memory_limit,
             channel: self.channel,
         }
     }
 }
 
-impl
-    RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBound, super::RlmChannel>
-{
-    /// Available only once all three bounds are chosen.
+impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmChannel> {
+    /// Available only once both bounds are chosen.
     pub fn build(self) -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig {
             discovery: None,
             channel: self.channel,
             instruction_limit: self.instruction_limit,
-            wall_clock: self.wall_clock,
             memory_limit: self.memory_limit,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             lashlang_abilities: RlmAbilities::default(),
@@ -153,14 +125,13 @@ impl RlmProtocolPluginConfig {
     pub fn builder() -> RlmProtocolPluginConfigBuilder {
         RlmProtocolPluginConfigBuilder {
             instruction_limit: UnsetBound,
-            wall_clock: UnsetBound,
             memory_limit: UnsetBound,
             channel: UnsetChannel,
         }
     }
 
     pub(crate) fn execution_bounds(&self) -> ExecutionBounds {
-        ExecutionBounds::new(self.instruction_limit, self.wall_clock, self.memory_limit)
+        ExecutionBounds::new(self.instruction_limit, self.memory_limit)
     }
 
     pub fn with_lashlang_abilities(mut self, abilities: impl Into<RlmAbilities>) -> Self {
@@ -186,7 +157,6 @@ mod tests {
         let config = RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
             .instruction_limit(InstructionBound::unbounded())
-            .wall_clock(WallClockBound::unbounded())
             .memory_limit(MemoryBound::unbounded())
             .build();
 
@@ -199,14 +169,12 @@ mod tests {
             .channel(crate::RlmChannel::Cell)
             .memory_limit(MemoryBound::mebibytes(64))
             .instruction_limit(InstructionBound::instructions(1_000_000))
-            .wall_clock(WallClockBound::secs(30))
             .build();
 
         assert_eq!(
             config.instruction_limit,
             InstructionBound::instructions(1_000_000)
         );
-        assert_eq!(config.wall_clock, WallClockBound::secs(30));
         assert_eq!(
             config.memory_limit,
             MemoryBound::logical_bytes(64 * 1024 * 1024)
@@ -216,8 +184,7 @@ mod tests {
     #[test]
     fn serialized_config_requires_all_execution_bounds() {
         let missing_instruction = serde_json::json!({
-            "channel": "cell",
-            "wall_clock": "unbounded"
+            "channel": "cell"
         });
         let error = serde_json::from_value::<RlmProtocolPluginConfig>(missing_instruction)
             .expect_err("instruction limit must be explicit");
@@ -226,15 +193,6 @@ mod tests {
         let missing = serde_json::json!({
             "channel": "cell",
             "instruction_limit": "unbounded"
-        });
-        let error = serde_json::from_value::<RlmProtocolPluginConfig>(missing)
-            .expect_err("wall clock must be explicit");
-        assert!(error.to_string().contains("wall_clock"));
-
-        let missing = serde_json::json!({
-            "channel": "cell",
-            "instruction_limit": "unbounded",
-            "wall_clock": "unbounded"
         });
         let error = serde_json::from_value::<RlmProtocolPluginConfig>(missing)
             .expect_err("memory limit must be explicit");
@@ -246,17 +204,12 @@ mod tests {
         let config = RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
             .instruction_limit(InstructionBound::instructions(1_000_000))
-            .wall_clock(WallClockBound::millis(30_000))
             .memory_limit(MemoryBound::mebibytes(64))
             .build();
         let encoded = serde_json::to_value(&config).expect("serialize config");
         assert_eq!(
             encoded["instruction_limit"],
             serde_json::json!({ "bounded": 1_000_000 })
-        );
-        assert_eq!(
-            encoded["wall_clock"],
-            serde_json::json!({ "bounded": 30_000 })
         );
         assert_eq!(
             encoded["memory_limit"],
@@ -271,7 +224,6 @@ mod tests {
     fn serialized_config_requires_channel() {
         let missing_channel = serde_json::json!({
             "instruction_limit": "unbounded",
-            "wall_clock": "unbounded",
             "memory_limit": "unbounded"
         });
         let error = serde_json::from_value::<RlmProtocolPluginConfig>(missing_channel)

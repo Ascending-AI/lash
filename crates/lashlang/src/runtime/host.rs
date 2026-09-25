@@ -12,7 +12,6 @@ use lash_sansio::{
 };
 use std::future::Future;
 use std::sync::Mutex;
-use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -339,18 +338,6 @@ impl ExecutionBound<std::num::NonZeroU64> {
     }
 }
 
-impl ExecutionBound<Duration> {
-    /// Construct a finite active-VM deadline in milliseconds.
-    pub const fn millis(milliseconds: u64) -> Self {
-        Self::Bounded(Duration::from_millis(milliseconds))
-    }
-
-    /// Construct a finite active-VM deadline in seconds.
-    pub const fn secs(seconds: u64) -> Self {
-        Self::Bounded(Duration::from_secs(seconds))
-    }
-}
-
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ExecutionBoundWire<T> {
@@ -384,49 +371,17 @@ impl<'de> serde::Deserialize<'de> for ExecutionBound<std::num::NonZeroU64> {
     }
 }
 
-impl serde::Serialize for ExecutionBound<Duration> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Self::Bounded(value) => {
-                let milliseconds =
-                    u64::try_from(value.as_millis()).map_err(serde::ser::Error::custom)?;
-                ExecutionBoundWire::Bounded(milliseconds).serialize(serializer)
-            }
-            Self::Unbounded => ExecutionBoundWire::<u64>::Unbounded.serialize(serializer),
-        }
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for ExecutionBound<Duration> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(
-            match ExecutionBoundWire::<u64>::deserialize(deserializer)? {
-                ExecutionBoundWire::Bounded(milliseconds) => Self::millis(milliseconds),
-                ExecutionBoundWire::Unbounded => Self::Unbounded,
-            },
-        )
-    }
-}
-
 /// Independent limits for active Lashlang VM execution.
 ///
 /// Foreground executions receive fresh meters for each block. Durable process
 /// executions persist both meters in every continuation, so the limits are
-/// cumulative across segment handovers for the process's entire life. The
-/// deadline counts active VM time only: time parked on awaited host effects is
-/// excluded. Enforcement occurs after intrinsic dispatch, before and after
-/// effects, at cooperative yields, and at terminal VM exits, so instruction
-/// and time limits can overshoot only by one bounded dispatch/check interval.
+/// cumulative across segment handovers for the process's entire life.
+/// Enforcement occurs after intrinsic dispatch, before and after effects, at
+/// cooperative yields, and at terminal VM exits, so instruction limits can
+/// overshoot only by one bounded dispatch/check interval.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutionBounds {
     pub instruction_budget: ExecutionBound<std::num::NonZeroU64>,
-    pub deadline: ExecutionBound<Duration>,
     pub memory_limit: ExecutionBound<std::num::NonZeroU64>,
     pub max_frame_depth: std::num::NonZeroU64,
 }
@@ -453,17 +408,15 @@ pub const DEFAULT_HOST_MEMORY_LIMIT_BYTES: std::num::NonZeroU64 =
     std::num::NonZeroU64::new(512 * 1024 * 1024).expect("the default memory limit is nonzero");
 
 impl ExecutionBounds {
-    /// All three limits are stated: a host that does not decide how much
+    /// Both limits are stated: a host that does not decide how much
     /// logical memory an execution may hold has not finished configuring it,
     /// and a silent default here would be a bound nobody chose.
     pub const fn new(
         instruction_budget: ExecutionBound<std::num::NonZeroU64>,
-        deadline: ExecutionBound<Duration>,
         memory_limit: ExecutionBound<std::num::NonZeroU64>,
     ) -> Self {
         Self {
             instruction_budget,
-            deadline,
             memory_limit,
             max_frame_depth: DEFAULT_MAX_VM_FRAME_DEPTH,
         }
@@ -482,22 +435,17 @@ impl ExecutionBounds {
         self
     }
 
-    /// Unbounded time and instructions with the default memory ceiling: what a
+    /// Unbounded instructions with the default memory ceiling: what a
     /// host gets when it does not override `execution_bounds`.
     pub const fn memory_bounded_default() -> Self {
         Self::new(
-            ExecutionBound::Unbounded,
             ExecutionBound::Unbounded,
             ExecutionBound::Bounded(DEFAULT_HOST_MEMORY_LIMIT_BYTES),
         )
     }
 
     pub const fn unbounded() -> Self {
-        Self::new(
-            ExecutionBound::Unbounded,
-            ExecutionBound::Unbounded,
-            ExecutionBound::Unbounded,
-        )
+        Self::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded)
     }
 }
 

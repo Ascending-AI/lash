@@ -6,14 +6,13 @@
 // through `instructions(..)`. Both attempts below are type errors.
 
 use lash::rlm::{
-    ExecutionBounds, InstructionBound, MemoryBound, RlmProtocolPluginConfig, WallClockBound,
+    ExecutionBounds, InstructionBound, MemoryBound, RlmProtocolPluginConfig,
 };
 
 fn a_memory_limit_cannot_be_an_instruction_budget() {
     let _ = RlmProtocolPluginConfig::builder()
         .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(InstructionBound::instructions(1_000_000))
-        .wall_clock(WallClockBound::secs(30))
         .memory_limit(InstructionBound::instructions(64 * 1024 * 1024))
         .build();
 }
@@ -22,7 +21,6 @@ fn an_instruction_limit_cannot_be_a_memory_bound() {
     let _ = RlmProtocolPluginConfig::builder()
         .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(MemoryBound::mebibytes(64))
-        .wall_clock(WallClockBound::secs(30))
         .memory_limit(MemoryBound::mebibytes(64))
         .build();
 }
@@ -30,7 +28,6 @@ fn an_instruction_limit_cannot_be_a_memory_bound() {
 fn bounds_cannot_be_transposed() {
     let _ = ExecutionBounds::new(
         MemoryBound::mebibytes(64),
-        WallClockBound::secs(30),
         InstructionBound::instructions(1_000_000),
     );
 }

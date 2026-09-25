@@ -536,7 +536,6 @@ mod tests {
             RlmProtocolPluginConfig::builder()
                 .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
-                .wall_clock(crate::plugin::WallClockBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build(),
         );
@@ -568,7 +567,6 @@ mod tests {
             RlmProtocolPluginConfig::builder()
                 .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
-                .wall_clock(crate::plugin::WallClockBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build(),
         );
@@ -598,7 +596,6 @@ mod tests {
             ..RlmProtocolPluginConfig::builder()
                 .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
-                .wall_clock(crate::plugin::WallClockBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build()
         });
@@ -648,7 +645,6 @@ mod tests {
             ..RlmProtocolPluginConfig::builder()
                 .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
-                .wall_clock(crate::plugin::WallClockBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build()
         });

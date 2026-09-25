@@ -16,7 +16,6 @@ pub use config::{
 };
 pub use config_types::{
     ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures,
-    WallClockBound,
 };
 pub use factory::{
     LashlangCompileSurface, LashlangCompileSurfaceRequest, LashlangModuleCompileError,

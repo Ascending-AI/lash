@@ -532,7 +532,6 @@ fn pushing_past_the_memory_budget_is_a_clean_refusal() {
     .expect("an unbounded push loop compiles");
     let environment = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::Unbounded,
-        ExecutionBound::Unbounded,
         ExecutionBound::logical_bytes(4 * 1024 * 1024),
     ));
     assert!(

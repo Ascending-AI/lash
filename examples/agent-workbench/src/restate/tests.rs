@@ -750,7 +750,6 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-                .wall_clock(lash::rlm::WallClockBound::secs(30))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
             backend.as_ref(),
