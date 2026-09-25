@@ -1,0 +1,11 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3732	1	accept	"(() => { let s = 0; for (var [...{ length }] = [1, 2, 3]; s < 1; ) { s += length; } return s; })()"	"3"	-
+FIG-3732	2	accept	"(() => { let s = 0; for (let [...{ length }] = [1, 2, 3]; s < 1; ) { s += length; } return s; })()"	"3"	-
+FIG-3732	3	accept	"(() => { let s = 0; for (const [...{ length }] = [1, 2, 3]; s < 1; ) { s += length; } return s; })()"	"3"	-
+FIG-3732	4	accept	"(() => { let s = ''; for (var [...{ 0: v, 1: w, 2: x, 3: y, length: z }] = [7, 8, 9]; s.length < 3; ) { s += `${v}${w}${x}${y}${z}`; } return s; })()"	"789undefined3"	-
+FIG-3732	5	accept	"(() => { const [a, ...{ length }] = [4, 5, 6]; return a * 10 + length; })()"	"42"	-
+FIG-3732	6	accept	"(() => { const [...{ length: n, 0: first }] = [2, 4]; return first * 10 + n; })()"	"22"	-
+FIG-3732	7	accept	"(() => { const [a, ...{ length }] = [1]; return a * 10 + length; })()"	"10"	-
+FIG-3732	8	accept	"(() => { const [...{ length }] = []; return length; })()"	"0"	-
+FIG-3732	9	accept	"(() => [1, 2, 3][\"length\"])()"	"3"	-
+FIG-3732	10	accept	"(() => [1, 2, 3][\"len\" + \"gth\"])()"	"3"	-
