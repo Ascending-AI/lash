@@ -109,6 +109,12 @@ pub struct ToolChildHost {
     /// clock is known (`RuntimeHostConfig::with_clock` follows `new`), and a
     /// second install cannot replace it.
     clock: Arc<std::sync::Mutex<Arc<dyn crate::Clock>>>,
+    /// The deployment's builder of a child's context when its opener is not
+    /// live here (FIG-3712). **Weak** for the same reason `host` is: the
+    /// source is the embedder's session wiring, which owns the backend this
+    /// host belongs to. A source that is gone builds nothing, and the child
+    /// is then a routing miss as it would be with none installed.
+    context_source: Arc<std::sync::Mutex<Option<std::sync::Weak<dyn ToolChildContextSource>>>>,
     /// Testing only: the resolver a law installs *behind* this host, asked
     /// for a command no group child can be (a law's synthetic children). A
     /// conformance world whose laws open synthetic groups and whose runtime
@@ -140,6 +146,7 @@ impl ToolChildHost {
             host: Arc::downgrade(host),
             process_env_store: Arc::new(std::sync::Mutex::new(process_env_store)),
             clock: Arc::new(std::sync::Mutex::new(Arc::new(crate::SystemClock))),
+            context_source: Arc::new(std::sync::Mutex::new(None)),
             #[cfg(any(test, feature = "testing"))]
             law_fallback: Arc::new(std::sync::OnceLock::new()),
         })
@@ -175,6 +182,115 @@ impl ToolChildHost {
     #[must_use]
     pub fn openers(&self) -> &Arc<LiveOpenerRegistry> {
         &self.openers
+    }
+
+    /// Installs the deployment's builder of a child's context for when its
+    /// opener is not live here (FIG-3712), and returns whether it is the one
+    /// installed.
+    ///
+    /// One host has one answer, as it has one resolver: while an installed
+    /// source is alive a second is refused, so which wiring a child runs under
+    /// never depends on which embedder was built last. A source that has been
+    /// dropped is replaced.
+    pub fn install_context_source(&self, source: &Arc<dyn ToolChildContextSource>) -> bool {
+        let mut installed = self.context_source.lock_recover();
+        if installed
+            .as_ref()
+            .is_some_and(|existing| existing.strong_count() > 0)
+        {
+            return installed
+                .as_ref()
+                .and_then(std::sync::Weak::upgrade)
+                .is_some_and(|existing| Arc::ptr_eq(&existing, source));
+        }
+        *installed = Some(Arc::downgrade(source));
+        true
+    }
+
+    /// The installed context source, while it is alive.
+    fn context_source(&self) -> Option<Arc<dyn ToolChildContextSource>> {
+        self.context_source
+            .lock_recover()
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade)
+    }
+
+    /// Where a tool child finds the context it runs under: its opener's, lent
+    /// by the registry, when the opener is live here; otherwise the
+    /// deployment's, when a source is installed; otherwise nowhere, the
+    /// routing fact "not mine".
+    fn child_opener(&self, opener: &crate::EffectOpener) -> Option<ChildOpenerContext> {
+        match self.openers.context_for(opener) {
+            Some(live) => Some(ChildOpenerContext::Live(live)),
+            None => self
+                .context_source()
+                .is_some()
+                .then_some(ChildOpenerContext::Deployment),
+        }
+    }
+
+    /// The controller a deployment-built context's controller slots are lent,
+    /// as a live opener lends its admitted scope's: the rebind replaces both.
+    fn lent_controller(
+        &self,
+        request: &ToolChildRequest,
+    ) -> Result<ScopedEffectController<'static>, RuntimeEffectControllerError> {
+        self.effect_host()?
+            .scoped_static(request.scope.admitted_scope.clone())
+            .map_err(RuntimeEffectControllerError::from)?
+            .ok_or_else(|| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                    "this effect host hands out no owned scoped controller to lend a \
+                     deployment-built tool-child context",
+                )
+            })
+    }
+
+    /// The context a child runs under, resolved at execution: the live
+    /// opener's lent context, or one the deployment builds now for the child's
+    /// recorded session and environment, with its stream recorded.
+    async fn resolve_child_context(
+        &self,
+        opener: &ChildOpenerContext,
+        request: &ToolChildRequest,
+        execution_env: &crate::ProcessExecutionEnvSpec,
+    ) -> Result<ResolvedChildContext, RuntimeEffectControllerError> {
+        match opener {
+            ChildOpenerContext::Live(live) => Ok(ResolvedChildContext {
+                context: live.clone(),
+                recorder: None,
+                _keepalive: None,
+            }),
+            ChildOpenerContext::Deployment => {
+                let source = self.context_source().ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                        format!(
+                            "tool child `{}` has no live opener here and the deployment's \
+                             context source is gone",
+                            request.call.call_id
+                        ),
+                    )
+                })?;
+                let built = source
+                    .tool_child_context(request, execution_env, self.lent_controller(request)?)
+                    .await
+                    .map_err(|error| {
+                        RuntimeEffectControllerError::from(
+                            error.into_turn_failure(crate::RuntimeErrorCode::Plugin),
+                        )
+                    })?;
+                let (mut dispatch, keepalive) = built.into_parts();
+                let recorder = ChildStreamRecorder::start();
+                recorder.attach(&mut dispatch);
+                Ok(ResolvedChildContext {
+                    context: LiveOpenerContext::deployment_built(dispatch),
+                    recorder: Some(recorder),
+                    _keepalive: Some(keepalive),
+                })
+            }
+        }
     }
 
     /// The host this resolver routes for, or the routing fact "gone".
@@ -292,11 +408,11 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
         match &envelope.command {
             RuntimeEffectCommand::ToolInvocation { request } => {
-                let live = self.openers.context_for(&request.scope.opener)?;
+                let opener = self.child_opener(&request.scope.opener)?;
                 Some(RuntimeEffectLocalExecutor::owned_runner(
                     Box::new(ToolChildRunner {
                         host: self.clone(),
-                        live,
+                        opener,
                     }),
                     None,
                 ))
@@ -411,27 +527,45 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
         };
         Box::pin(run_tool_child(
             &self.host,
-            &self.context,
+            &ChildOpenerContext::Live(self.context.clone()),
             &request,
             envelope.invocation.address.clone(),
             self.host
                 .child_controller(&request.scope.admitted_scope, binding)?,
-            self.context.cancellation().child_token(),
         ))
         .await
     }
 }
 
+/// Where a routed child's context comes from.
+enum ChildOpenerContext {
+    /// Its opener is live here and lends this context.
+    Live(LiveOpenerContext),
+    /// Its opener is not live here; the deployment's context source builds
+    /// one at execution (FIG-3712).
+    Deployment,
+}
+
+/// A child's context for one execution, with the recorder of its stream when
+/// the deployment built it, and whatever the built context must keep alive.
+struct ResolvedChildContext {
+    context: LiveOpenerContext,
+    recorder: Option<ChildStreamRecorder>,
+    _keepalive: Option<Arc<dyn std::any::Any + Send + Sync>>,
+}
+
 /// One routed child, waiting to be handed its envelope.
 ///
-/// The runner owns the exact [`LiveOpenerContext`] `executor_for` resolved —
-/// the journaled request was admitted against that context, so execution uses
-/// it rather than asking the registry again: an opener guard dropped between
+/// The runner owns the exact opener context `executor_for` resolved — the
+/// journaled request was admitted against that context, so execution uses it
+/// rather than asking the registry again: an opener guard dropped between
 /// resolution and execution must not stall the child on a re-registration
-/// nothing guarantees, nor rebind it to a successor opener's context.
+/// nothing guarantees, nor rebind it to a successor opener's context. A child
+/// routed with no live opener builds its context from the deployment when it
+/// runs.
 struct ToolChildRunner {
     host: ToolChildHost,
-    live: LiveOpenerContext,
+    opener: ChildOpenerContext,
 }
 
 #[async_trait::async_trait]
@@ -456,12 +590,11 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
         };
         Box::pin(run_tool_child(
             &self.host,
-            &self.live,
+            &self.opener,
             &request,
             envelope.invocation.address.clone(),
             self.host
                 .child_controller(&request.scope.admitted_scope, binding)?,
-            self.live.cancellation().child_token(),
         ))
         .await
     }
@@ -486,9 +619,10 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
 pub trait ToolChildDriver: Send {
     /// Runs the child to a terminal on `controller`, returning its settlement
     /// outcome. `child` is the child's own `ToolInvocation` envelope address —
-    /// the replay row its §4 final commits against (ADR 0099 §4). Cancellation
-    /// comes from the captured live opener's token, the same parent the
-    /// in-process `execute` mints the child token from.
+    /// the replay row its §4 final commits against (ADR 0099 §4). A live
+    /// opener's token is the parent of the child's body token, as it is for
+    /// the in-process `execute`; a deployment-built context has none, and the
+    /// opener's turn cancel reaches the child through its durable gate.
     async fn drive<'run>(
         &self,
         request: &ToolChildRequest,
@@ -507,11 +641,10 @@ impl ToolChildDriver for ToolChildRunner {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         Box::pin(run_tool_child(
             &self.host,
-            &self.live,
+            &self.opener,
             request,
             child,
             controller,
-            self.live.cancellation().child_token(),
         ))
         .await
     }
@@ -648,13 +781,12 @@ fn admitted_catalog(
 /// or its resolved completion — against its own replay row (`child`), and
 /// its drain is admitted by the recorded `commit_seq` barrier before the
 /// first declared intent runs.
-pub(crate) async fn run_tool_child<'run>(
+async fn run_tool_child<'run>(
     host: &ToolChildHost,
-    live: &LiveOpenerContext,
+    opener: &ChildOpenerContext,
     request: &ToolChildRequest,
     child: crate::EffectAddress,
     controller: ScopedEffectController<'run>,
-    cancel: CancellationToken,
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
     // Refused here as well as at decode: a request this build cannot
     // reconstruct completely is a child it would run under partial authority.
@@ -673,6 +805,11 @@ pub(crate) async fn run_tool_child<'run>(
     // reconciled with the opener.
     validate_recorded_authorities(host, &controller, request).await?;
 
+    let resolved = host
+        .resolve_child_context(opener, request, &execution_env_spec)
+        .await?;
+    let live = &resolved.context;
+    let cancel = live.cancellation().child_token();
     let usage_ledger = ToolUsageLedger::new();
     let dispatch = Arc::new(rebind_child_dispatch(
         live.dispatch().as_ref(),
@@ -715,6 +852,9 @@ pub(crate) async fn run_tool_child<'run>(
         .triggers
         .extend(dispatch.trigger_outcomes.drain());
     settlement.usage.extend(usage_ledger.take());
+    if let Some(recorder) = resolved.recorder {
+        settlement.stream = recorder.finish().await;
+    }
     for process_id in orchestrating_sinks.drain() {
         if !settlement.possession.contains(&process_id) {
             settlement.possession.push(process_id);
@@ -1277,6 +1417,10 @@ async fn resolve_model_return(
 pub fn opener_for_execution_scope(admitted: &AdmittedScope) -> Option<EffectOpener> {
     EffectOpener::for_scope(admitted).ok()
 }
+
+mod deployment_context;
+use deployment_context::ChildStreamRecorder;
+pub use deployment_context::{DeploymentToolChildContext, ToolChildContextSource};
 
 #[cfg(test)]
 #[path = "tool_child_driver/tests.rs"]

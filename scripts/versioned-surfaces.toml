@@ -768,9 +768,23 @@ paths = [
   "crates/lash-sansio/src/tool_output.rs",
   "crates/lash-sansio/src/effect_identity.rs",
   "crates/lash-sansio/src/causal.rs",
+  "crates/lash-core-execution/src/runtime/vocabulary.rs",
+  "crates/lash-core-store/src/turn_input_vocabulary.rs",
+  "crates/lash-sansio/src/session.rs",
+  "crates/lash-sansio/src/sansio/turn_protocol.rs",
 ]
 symbols = [
   "ToolSettlement",
+  # FIG-3712: a settlement records the stream of a child that ran with no
+  # live opener, so the stream DTOs are in its serialized closure.
+  "ChildStreamEvent",
+  "SessionStreamEvent",
+  "TurnActivity",
+  "TurnActivityId",
+  "TurnEvent",
+  "TurnCause",
+  "CellFailure",
+  "CellFailureKind",
   "ToolUsageDelta",
   "ToolDispatchOutcome",
   "PendingToolDispatchOutcome",

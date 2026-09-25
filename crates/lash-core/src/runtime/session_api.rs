@@ -560,6 +560,20 @@ impl LashRuntime {
         Ok(Arc::new(RuntimeSessionServices::new(self, true, None)?))
     }
 
+    /// This session's tool-execution context for a group tool child whose
+    /// opener is not live where the child runs (FIG-3712): what a deployment's
+    /// [`ToolChildContextSource`](crate::facade_support::ToolChildContextSource)
+    /// builds a child's context from. `lent_controller` fills the controller
+    /// slots the tool-child driver's rebind replaces.
+    pub fn tool_child_dispatch(
+        &self,
+        lent_controller: crate::ScopedEffectController<'static>,
+    ) -> Result<crate::tool_dispatch::ToolDispatchContext<'static>, crate::PluginError> {
+        self.runtime_session_services()
+            .map_err(|error| crate::PluginError::Session(error.to_string()))?
+            .tool_child_dispatch(lent_controller)
+    }
+
     pub(super) fn runtime_session_services_for_turn(
         &self,
         held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,

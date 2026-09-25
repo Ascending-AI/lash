@@ -110,6 +110,7 @@ fn settlement() -> ToolSettlement {
         triggers: Vec::new(),
         checkpoint_messages: Vec::new(),
         usage: Vec::new(),
+        stream: Vec::new(),
         model_return: model_return(),
     }
 }

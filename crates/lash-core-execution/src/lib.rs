@@ -97,8 +97,8 @@ pub mod triggers;
 
 pub mod facade_support {
     pub use crate::runtime::effect::{
-        LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry, ToolChildDriver, ToolChildHost,
-        opener_for_execution_scope,
+        DeploymentToolChildContext, LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry,
+        ToolChildContextSource, ToolChildDriver, ToolChildHost, opener_for_execution_scope,
     };
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second

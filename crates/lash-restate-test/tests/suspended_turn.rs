@@ -9,18 +9,12 @@
 //! live turn: each law here drives a real tool turn into that state and
 //! requires it to finish anyway.
 //!
-//! # Status: red, ignored until FIG-3712 lands
-//!
-//! Root cause: on Restate a group tool child can only run against its
-//! opener's in-process dispatch context, which it finds in the
-//! `LiveOpenerRegistry`. A handler suspension drops the turn's registration,
-//! and the turn resumes only when the child settles. So every child attempt
-//! that starts while the turn is suspended answers `no executor currently
-//! routes … tool child`, and the child backs off until the engine pauses it.
-//!
-//! Both laws are `#[ignore]`d with that reason. Run them with
-//! `kiln run //crates/lash-restate-test:suspended_turn__test -- --ignored`,
-//! and delete both `#[ignore]` lines in the change that fixes FIG-3712.
+//! Before FIG-3712 a group tool child could only run against its opener's
+//! in-process dispatch context, found in the `LiveOpenerRegistry`, which a
+//! handler suspension drops; every child attempt that started while the turn
+//! was suspended answered `no executor currently routes … tool child` until
+//! the engine paused it. A child with no live opener now builds its context
+//! from the deployment's `ToolChildContextSource`.
 
 #![expect(
     clippy::unwrap_used,
@@ -49,8 +43,9 @@ fn response(parts: Vec<LlmOutputPart>) -> LlmResponse {
     }
 }
 
-/// Asks for the tool once, then answers `done` once it sees the result.
-fn model_reply(request: &LlmRequest) -> LlmResponse {
+/// Asks for the tool once, directly or through `batch`, then answers `done`
+/// once it sees the result.
+fn model_reply(request: &LlmRequest, via_batch: bool) -> LlmResponse {
     let saw_tool_result = serde_json::to_string(&request.messages)
         .unwrap_or_default()
         .contains("gated result");
@@ -60,10 +55,18 @@ fn model_reply(request: &LlmRequest) -> LlmResponse {
             response_meta: None,
         }])
     } else {
+        let (tool_name, input) = if via_batch {
+            (
+                "batch".to_owned(),
+                json!({"tool_calls": [{"tool": TOOL, "parameters": {}}]}),
+            )
+        } else {
+            (TOOL.to_owned(), json!({}))
+        };
         response(vec![LlmOutputPart::ToolCall {
             call_id: "call-1".into(),
-            tool_name: TOOL.into(),
-            input_json: "{}".into(),
+            tool_name,
+            input_json: input.to_string(),
             replay: None,
         }])
     }
@@ -108,14 +111,20 @@ impl lash_core::ToolProvider for GatedTool {
 /// One tool turn on a fresh backend: its handler, its tool gate, and where it
 /// records its answer.
 struct Turn {
+    /// Held for the turn's life, as a deployment holds its core: the core's
+    /// wiring is what a child builds its context from when its turn is
+    /// suspended.
+    _core: lash::LashCore,
     backend: RestateTestBackend,
     gate: Arc<tokio::sync::Semaphore>,
     executions: Arc<AtomicUsize>,
     answer: Arc<Mutex<Option<String>>>,
+    /// The activities the turn reported on its last run.
+    activities: Arc<Mutex<Vec<lash::TurnActivity>>>,
     run: tokio::task::JoinHandle<Result<(), String>>,
 }
 
-async fn start_turn(config: ServerConfig, gate_open: bool) -> Turn {
+async fn start_turn(config: ServerConfig, gate_open: bool, via_batch: bool) -> Turn {
     let backend = lash_restate_test::backend(0x3712, config)
         .await
         .expect("build the Restate test backend");
@@ -127,7 +136,7 @@ async fn start_turn(config: ServerConfig, gate_open: bool) -> Turn {
     let provider = lash_core::testing::TestProvider::builder()
         .kind("suspended-turn")
         .complete(move |request: LlmRequest| async move {
-            Ok::<_, LlmTransportError>(model_reply(&request))
+            Ok::<_, LlmTransportError>(model_reply(&request, via_batch))
         })
         .build()
         .into_handle();
@@ -160,12 +169,15 @@ async fn start_turn(config: ServerConfig, gate_open: bool) -> Turn {
     let admitted = lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
         .expect("admit the turn scope");
     let answer = Arc::new(Mutex::new(None));
+    let activities = Arc::new(Mutex::new(Vec::new()));
     let attempt: lash_restate_test::HandlerAttempt = {
         let answer = Arc::clone(&answer);
+        let activities = Arc::clone(&activities);
         Arc::new(move |scoped| {
             let session = session.clone();
             let turn_id = turn_id.clone();
             let answer = Arc::clone(&answer);
+            let activities = Arc::clone(&activities);
             Box::pin(async move {
                 let output = session
                     .turn(lash::TurnInput::text("call the gated tool"))
@@ -174,10 +186,13 @@ async fn start_turn(config: ServerConfig, gate_open: bool) -> Turn {
                     .run_with_scope(scoped)
                     .await;
                 *answer.lock().unwrap() = Some(match output {
-                    Ok(output) => output
-                        .result
-                        .assistant_message()
-                        .map_or_else(|| format!("{:?}", output.result.outcome), str::to_owned),
+                    Ok(output) => {
+                        *activities.lock().unwrap() = output.activities.clone();
+                        output
+                            .result
+                            .assistant_message()
+                            .map_or_else(|| format!("{:?}", output.result.outcome), str::to_owned)
+                    }
                     Err(error) => format!("error: {error}"),
                 });
             })
@@ -188,10 +203,12 @@ async fn start_turn(config: ServerConfig, gate_open: bool) -> Turn {
         async move { backend.run_in_handler(admitted, attempt).await }
     });
     Turn {
+        _core: core,
         backend,
         gate,
         executions,
         answer,
+        activities,
         run,
     }
 }
@@ -208,7 +225,12 @@ impl Turn {
                 .unwrap()
                 .clone()
                 .unwrap_or_else(|| "the handler completed without an answer".to_owned()),
-            Ok(Ok(Err(error))) => format!("stuck: {error}"),
+            Ok(Ok(Err(error))) => {
+                format!(
+                    "stuck: {error}; the turn last answered {:?}",
+                    self.answer.lock().unwrap().clone()
+                )
+            }
             Ok(Err(join)) => format!("the handler task failed: {join}"),
             Err(_) => {
                 let open: Vec<_> = server
@@ -265,9 +287,8 @@ impl Turn {
 /// live turn in the process. The turn must still finish with the tool's
 /// answer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-3712: a suspended turn drops its live opener, so the child's next attempt never routes; un-ignore with the FIG-3712 fix"]
 async fn a_child_attempt_after_its_turn_was_suspended_still_finishes_the_turn() {
-    let turn = start_turn(ServerConfig::default().time(TimeMode::Manual), false).await;
+    let turn = start_turn(ServerConfig::default().time(TimeMode::Manual), false, false).await;
     let child = turn.tool_child().await;
     while turn.executions.load(Ordering::SeqCst) == 0 {
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -296,10 +317,62 @@ async fn a_child_attempt_after_its_turn_was_suspended_still_finishes_the_turn() 
 /// With every await suspending the handler that makes it (the
 /// `INACTIVITY_TIMEOUT=0s` mode), the turn is suspended before its tool child
 /// ever starts. The turn must still finish with the tool's answer.
+///
+/// Ignored against FIG-3682 on this branch's base: the tool child runs and the
+/// turn reaches its answer, but the handler is then replayed after its final
+/// commit, and the replayed acceptance diverges on the committed turn index.
+/// FIG-3682's fix (#2195) is on main; this passes on main with it, so the
+/// ignore goes when this branch's base carries it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-3712: a suspended turn drops its live opener, so the child's next attempt never routes; un-ignore with the FIG-3712 fix"]
+#[ignore = "FIG-3682: the replayed acceptance diverges on the committed turn index until this branch's base carries #2195"]
 async fn a_tool_turn_finishes_when_every_await_suspends_its_handler() {
-    let turn = start_turn(ServerConfig::default().always_replay(true), true).await;
+    let turn = start_turn(ServerConfig::default().always_replay(true), true, false).await;
     let answer = turn.finish(Duration::from_secs(20)).await;
     assert_eq!(answer, "done");
+}
+
+/// The same suspension, with the tool reached through `batch`: the batch
+/// child, running with no live turn, has no stream to send its nested call's
+/// events to. They are recorded on its settlement and reach the turn when it
+/// incorporates the child, never dropped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_batch_child_with_no_live_turn_records_its_nested_events_for_the_turn() {
+    let turn = start_turn(ServerConfig::default().time(TimeMode::Manual), false, true).await;
+    let child = turn.tool_child().await;
+    while turn.executions.load(Ordering::SeqCst) == 0 {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    turn.backend.server().advance(Duration::from_secs(61));
+    turn.turn_suspended().await;
+    assert!(turn.backend.server().crash(&child), "the child is running");
+    turn.gate.add_permits(tokio::sync::Semaphore::MAX_PERMITS);
+    let server = turn.backend.server().clone();
+    let ticker = tokio::spawn(async move {
+        loop {
+            server.advance(Duration::from_secs(1));
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    });
+    let activities = Arc::clone(&turn.activities);
+    let answer = turn.finish(Duration::from_secs(20)).await;
+    ticker.abort();
+    assert_eq!(answer, "done");
+    let nested: Vec<_> = activities
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            lash::TurnEvent::ToolCallCompleted {
+                name,
+                parent_call_id: Some(parent),
+                ..
+            } => Some((name.clone(), parent.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        nested,
+        vec![(TOOL.to_owned(), "call-1".to_owned())],
+        "the batch's nested call completed on the turn's stream, under the batch"
+    );
 }

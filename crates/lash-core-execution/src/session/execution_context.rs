@@ -662,6 +662,27 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    /// Emits the stream events a group child recorded because no opener was
+    /// live where it ran (FIG-3712): its session events on the session
+    /// stream, its turn activities as they were recorded.
+    pub(super) async fn emit_recorded_child_stream(
+        &self,
+        stream: &[crate::runtime::effect::ChildStreamEvent],
+    ) {
+        for event in stream {
+            match event {
+                crate::runtime::effect::ChildStreamEvent::Session(event) => {
+                    crate::session_model::send_event(&self.dispatch.event_tx, event.clone()).await;
+                }
+                crate::runtime::effect::ChildStreamEvent::Activity(activity) => {
+                    if let Some(tx) = &self.turn_event_tx {
+                        let _ = tx.send(activity.clone()).await;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn with_turn_event_sender(mut self, turn_event_tx: Sender<TurnActivity>) -> Self {
         self.turn_event_tx = Some(turn_event_tx);
         self

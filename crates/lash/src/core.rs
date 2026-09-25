@@ -21,6 +21,7 @@ mod drain;
 pub(crate) mod queued_work;
 mod runtime_host_config;
 mod session_policy;
+mod tool_child_context;
 mod work_drivers;
 mod worker_capacity;
 
@@ -70,6 +71,12 @@ pub struct LashCore {
     pub(crate) process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     pub(crate) tool_intent_submission_gates:
         Arc<crate::tool_intent_ingress::RuntimeSubmissionGates>,
+    /// The context a group tool child of this core's sessions runs under when
+    /// its opener is not live where it runs (FIG-3712). The backend's
+    /// tool-child host holds it weakly; this keeps it alive for the core's
+    /// lifetime.
+    pub(crate) _tool_child_context_source:
+        Arc<dyn lash_core::facade_support::ToolChildContextSource>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1217,6 +1224,26 @@ impl LashCoreBuilder {
             },
         };
 
+        let substrate_slot = Arc::new(NativeSubstrateSlot::new(substrate));
+        let plugin_factories = Arc::new(plugin_factories);
+        let tool_child_context_source = tool_child_context::CoreToolChildContextSource::install(
+            &env,
+            protocol_factory.clone(),
+            Arc::clone(&plugin_factories),
+            self.provider.clone(),
+            process_lifecycle_available,
+            {
+                let substrate_slot = Arc::clone(&substrate_slot);
+                Arc::new(move || {
+                    let substrate_slot = Arc::clone(&substrate_slot);
+                    Box::pin(async move {
+                        let ports = substrate_slot.ports().await;
+                        (Some(ports.process.clone()), ports.queued_port())
+                    }) as futures_util::future::BoxFuture<'static, _>
+                })
+            },
+            session_execution_owner.clone(),
+        );
         Ok(LashCore {
             session_execution_owner,
             env,
@@ -1225,7 +1252,7 @@ impl LashCoreBuilder {
             backend,
             store_factory,
             process_registry,
-            plugin_factories: Arc::new(plugin_factories),
+            plugin_factories,
             provider: self.provider,
             live_replay_store,
             process_observation_hub,
@@ -1236,9 +1263,10 @@ impl LashCoreBuilder {
             host_process_engines,
             process_execution_concurrency,
             worker_slot_supplier,
-            substrate_slot: Arc::new(NativeSubstrateSlot::new(substrate)),
+            substrate_slot,
             process_event_sink,
             tool_intent_submission_gates: Default::default(),
+            _tool_child_context_source: tool_child_context_source,
         })
     }
 

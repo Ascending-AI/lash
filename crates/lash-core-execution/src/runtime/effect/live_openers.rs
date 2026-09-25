@@ -58,6 +58,16 @@
 //! the children it left behind become runnable again without anything being
 //! re-decided.
 //!
+//! # When the opener is not live here
+//!
+//! A deployment that installs a
+//! [`ToolChildContextSource`](super::ToolChildContextSource) on its tool-child
+//! host lets a child whose opener is not live here build its context from the
+//! deployment's wiring instead (FIG-3712): an engine can suspend an opener
+//! while it waits on its children, so a child that could run only beside its
+//! live opener would wait on an opener that waits on it. The registry stays the
+//! fast path; the rule below holds for a host with no source installed.
+//!
 //! # An unregistered opener is a routing fact, not a failure
 //!
 //! [`context_for`](LiveOpenerRegistry::context_for) answering `None` means "not
@@ -150,6 +160,20 @@ impl LiveOpenerContext {
         Self {
             dispatch: Arc::new(dispatch.lend_static(lent_controller)),
             cancellation,
+        }
+    }
+
+    /// A context the deployment built for a child whose opener is not live
+    /// here (FIG-3712). Its cancellation is its own: nothing local signals it,
+    /// because the opener's turn cancel reaches such a child only through the
+    /// durable gate its recorded authority observes.
+    #[must_use]
+    pub(crate) fn deployment_built(
+        dispatch: crate::tool_dispatch::ToolDispatchContext<'static>,
+    ) -> Self {
+        Self {
+            dispatch: Arc::new(dispatch),
+            cancellation: CancellationToken::new(),
         }
     }
 

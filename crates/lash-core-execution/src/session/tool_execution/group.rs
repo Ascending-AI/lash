@@ -715,6 +715,11 @@ impl RuntimeExecutionContext<'_> {
         // exactly the recorded prefix, never a rank that settled after the
         // record was cut. This seam keeps presentation (the recorded
         // `settlement.model_return`) and the activity events.
+        //
+        // A child that ran with no live opener recorded its stream instead of
+        // sending it (FIG-3712); it reaches the stream here, before the
+        // child's own completion.
+        self.emit_recorded_child_stream(&settlement.stream).await;
         for intent_outcome in &outcome.intent_outcomes {
             self.emit_turn_activity(
                 correlation_id.clone(),
