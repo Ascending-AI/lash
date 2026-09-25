@@ -211,9 +211,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
         })
     }
 
+    /// The VM's dispatch loop.
+    ///
+    /// Active time is wall time spent in this loop, less the time the host
+    /// takes to answer an effect or a cooperative yield. The loop reads the
+    /// clock only where it already checks its bounds, and never per
+    /// instruction (FIG-3734): around an effect, at each cooperative yield
+    /// (every [`COOPERATIVE_YIELD_INSTRUCTION_BUDGET`] dispatched
+    /// instructions), after an intrinsic once the work charged since the last
+    /// read reaches that same budget, and when the loop ends. Where the loop
+    /// checks its bounds, and so the instruction a cancellation lands on, is
+    /// unchanged.
     async fn run_loop(&mut self, stop_after_effect: bool) -> Result<VmOutcome, VmTrap> {
         let mut budget = COOPERATIVE_YIELD_INSTRUCTION_BUDGET;
         let mut active_started = Instant::now();
+        let mut next_clock_read = self.next_clock_read();
         if let Err(error) = self.enforce_execution_bounds() {
             return Err(VmTrap {
                 error,
@@ -254,7 +266,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let roots = self.heap_roots();
                 self.heap.begin_allocation_scope(roots);
             }
-            active_started = Instant::now();
             self.ip += 1;
             self.instructions_executed = self.instructions_executed.saturating_add(1);
             let profile = self
@@ -308,7 +319,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.record_instruction_profile(tag, start.elapsed().as_nanos());
             }
             if result.is_ok() && matches!(instruction, super::Instruction::Intrinsic(_)) {
-                self.active_execution_elapsed += active_started.elapsed();
+                // An intrinsic can charge far more work than one dispatch, so
+                // enough charged work reads the clock here rather than waiting
+                // for the next yield.
+                if self.instructions_executed >= next_clock_read {
+                    self.active_execution_elapsed += active_started.elapsed();
+                    active_started = Instant::now();
+                    next_clock_read = self.next_clock_read();
+                }
                 if let Err(error) = self.enforce_execution_bounds() {
                     return Err(VmTrap {
                         error,
@@ -316,7 +334,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         span: None,
                     });
                 }
-                active_started = Instant::now();
             }
             match result {
                 Ok(Some(outcome)) => {
@@ -360,6 +377,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 self.host.yield_now().await;
                 active_started = Instant::now();
+                next_clock_read = self.next_clock_read();
                 budget = COOPERATIVE_YIELD_INSTRUCTION_BUDGET;
             }
         }
@@ -397,6 +415,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             });
         }
         result
+    }
+
+    /// The instruction count past which an intrinsic reads the clock.
+    fn next_clock_read(&self) -> u64 {
+        self.instructions_executed
+            .saturating_add(COOPERATIVE_YIELD_INSTRUCTION_BUDGET as u64)
     }
 
     /// Charges an intrinsic's proportional work to the instruction budget.
