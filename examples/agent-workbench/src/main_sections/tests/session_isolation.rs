@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0xf9_0003;
+
 #[test]
 fn concurrent_sessions_isolate_transcripts_triggers_and_processes() {
     run_async_test_on_stack_budget("workbench-session-isolation-test", || {
@@ -12,10 +14,25 @@ async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() 
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let backend = test_file_backend(&data_dir);
+    let double = test_double_backend(SEED).await;
+    let backend = double.lash_backend();
     let process_registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
     let trigger_store = backend.trigger_store();
-    let core = test_workbench_core(backend);
+    let core = explicit_durable_test_facets_on(backend)
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .provider(trigger_registration_provider())
+        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
+        .model(test_model())
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
+        .build(crate::test_core_owner())
+        .expect("build core");
+    double.install_process_worker(
+        lash::durability::DurableProcessWorker::new(
+            core.durable_process_worker_config()
+                .expect("build process worker config"),
+        )
+        .expect("valid test process worker"),
+    );
     let session_a_id = "workbench-isolation-a";
     let session_b_id = "workbench-isolation-b";
     let session_a = core
