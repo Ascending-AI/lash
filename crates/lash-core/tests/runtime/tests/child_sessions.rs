@@ -1080,7 +1080,7 @@ fn session_input_tokens(runtime: &LashRuntime) -> i64 {
 /// reusable: no turn registration outlives the future, so a later turn on the
 /// same child runs to completion and reports its own usage.
 #[tokio::test]
-#[ignore = "FIG-3600 S5a: an in-process dropped turn future wedges the next turn on its session: the next drive redrives the dropped root first, and the native replay driver waits on the tool-group child the dropped attempt still holds; follow-up to FIG-3600"]
+#[ignore = "FIG-3600 S5a: an in-process dropped turn future wedges the next turn on its session: the next drive redrives the dropped root first, and the native replay driver waits on the tool-group child the dropped attempt still holds; FIG-3823"]
 async fn dropped_child_turn_leaves_the_session_reusable() {
     let backend = memory_backend().await;
     let transport = mock_provider(vec![
