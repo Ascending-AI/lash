@@ -1,10 +1,10 @@
-use super::queued_work::{NativeQueuedWorkRunConfig, NativeQueuedWorkRunHandle};
+use super::queued_work::NativeQueuedWorkRunHandle;
 #[cfg(test)]
 use crate::support::DurableProcessWorkerConfig;
 use crate::support::{
-    Arc, DurableProcessWorker, NativeProcessWork, NativeSubstrateConfig, NoQueuedWork,
-    ProcessRegistry, ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkSubstrate,
-    SessionStoreFactory, SessionWorkTarget, WorkerProcessWork, WorkerSlotSupplier, async_trait,
+    Arc, DurableProcessWorker, NativeProcessWork, NativeSubstrateConfig, NoSessionWork,
+    ProcessRegistry, ProcessWorkSubstrate, ProcessWorkWiring, SessionStoreFactory,
+    SessionWorkEngine, WorkerProcessWork, WorkerSlotSupplier,
 };
 use lash_core::facade_support;
 
@@ -75,12 +75,12 @@ pub(super) enum QueuedWorkSource {
 pub(super) enum QueuedPortSetup {
     Disabled,
     Native {
-        config: Arc<NativeQueuedWorkRunConfig>,
+        driver: Arc<NativeQueuedWorkRunHandle>,
         slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         execution_concurrency: usize,
     },
     External {
-        port: Arc<dyn QueuedWorkSubstrate>,
+        port: Arc<dyn SessionWorkEngine>,
     },
 }
 
@@ -106,18 +106,18 @@ pub(crate) struct ResolvedPorts {
 }
 
 impl ResolvedPorts {
-    pub(crate) fn queued_port(&self) -> Arc<dyn QueuedWorkSubstrate> {
+    pub(crate) fn queued_port(&self) -> Arc<dyn SessionWorkEngine> {
         self.queued.clone()
     }
 }
 
 pub(crate) struct ResolvedQueuedWork {
-    port: Arc<dyn QueuedWorkSubstrate>,
+    port: Arc<dyn SessionWorkEngine>,
     wake: std::sync::Mutex<Option<facade_support::WakeDeliveryDriver>>,
 }
 
 impl ResolvedQueuedWork {
-    fn new(port: Arc<dyn QueuedWorkSubstrate>) -> Self {
+    fn new(port: Arc<dyn SessionWorkEngine>) -> Self {
         Self {
             port,
             wake: std::sync::Mutex::new(None),
@@ -161,18 +161,20 @@ impl Drop for ResolvedQueuedWork {
     }
 }
 
-#[async_trait]
-impl QueuedWorkSubstrate for ResolvedQueuedWork {
-    fn notify_session_work(&self, target: SessionWorkTarget, reason: &str) {
-        self.port.notify_session_work(target, reason);
+impl SessionWorkEngine for ResolvedQueuedWork {
+    fn schedule_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) {
+        self.port.schedule_drive(session, request);
     }
 
-    async fn drain_session_work(
+    fn install_session_driver(
         &self,
-        target: SessionWorkTarget,
-        reason: &str,
-    ) -> std::result::Result<lash_core::SessionDrainOutcome, lash_core::PluginError> {
-        self.port.drain_session_work(target, reason).await
+        driver: Arc<dyn lash_core::SessionDriver>,
+    ) -> Arc<dyn lash_core::SessionDriver> {
+        self.port.install_session_driver(driver)
     }
 }
 
@@ -212,16 +214,15 @@ impl NativeSubstrateSlot {
     pub(crate) async fn ports(&self) -> ResolvedPorts {
         self.drivers
             .get_or_init(|| async {
-                let queued_port: Arc<dyn QueuedWorkSubstrate> = match &self.setup.queued {
-                    QueuedPortSetup::Disabled => Arc::new(NoQueuedWork::new()),
+                let queued_port: Arc<dyn SessionWorkEngine> = match &self.setup.queued {
+                    QueuedPortSetup::Disabled => Arc::new(NoSessionWork::new()),
                     QueuedPortSetup::External { port } => Arc::clone(port),
                     QueuedPortSetup::Native {
-                        config,
+                        driver,
                         slot_supplier,
                         execution_concurrency,
                     } => {
-                        let run_handle =
-                            Arc::new(NativeQueuedWorkRunHandle::new(Arc::clone(config)));
+                        let run_handle = Arc::clone(driver);
                         let work_cadence = self.setup.config.work_cadence.clone();
                         Arc::new(match slot_supplier {
                             Some(slot_supplier) => {
@@ -268,7 +269,7 @@ impl NativeSubstrateSlot {
                 };
                 let queued = Arc::new(ResolvedQueuedWork::new(queued_port));
                 let setup = &self.setup.wake;
-                let queued_for_wake: Arc<dyn QueuedWorkSubstrate> = queued.clone();
+                let queued_for_wake: Arc<dyn SessionWorkEngine> = queued.clone();
                 let wake = facade_support::wake_delivery_driver_with_work_cadence(
                     Arc::clone(&setup.registry),
                     Arc::clone(&setup.factory),
@@ -298,7 +299,7 @@ impl NativeSubstrateSlot {
         match &self.setup.process {
             ProcessPortSetup::NativeDefault { config, .. } => Some(
                 config
-                    .build(Arc::new(NoQueuedWork::new()))
+                    .build(Arc::new(NoSessionWork::new()))
                     .expect("native process-worker assembly was validated at build"),
             ),
             ProcessPortSetup::External { .. } => None,

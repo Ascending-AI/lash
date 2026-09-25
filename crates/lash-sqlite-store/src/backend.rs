@@ -638,8 +638,8 @@ impl lash_core_execution::EffectEngine for SqliteBackend {
         None
     }
 
-    fn queued_work(&self) -> lash_core_execution::BackendQueuedWork {
-        lash_core_execution::BackendQueuedWork::InProcess
+    fn session_work(&self) -> Option<Arc<dyn lash_core_execution::SessionWorkEngine>> {
+        None
     }
 }
 

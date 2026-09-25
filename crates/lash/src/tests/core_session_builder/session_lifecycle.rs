@@ -2391,6 +2391,7 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
 async fn reused_exact_store_factory_reports_session_creation_guidance() -> Result<()> {
     let reused_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(BoundSessionStore {
         session_id: SessionId::from("root-store"),
+        drive_epochs: Default::default(),
     });
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend_serving(reused_store).await.into(),

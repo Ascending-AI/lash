@@ -48,7 +48,7 @@ mod tests {
             process_work: crate::testing::process_work_wiring_for_registry(registry),
             store: None,
             session_store_factory: None,
-            queued_work: Arc::new(crate::NoQueuedWork::new()),
+            queued_work: Arc::new(crate::NoSessionWork::new()),
             process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
             clock: Arc::new(crate::SystemClock),
         }

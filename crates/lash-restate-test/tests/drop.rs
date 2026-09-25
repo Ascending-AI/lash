@@ -13,7 +13,6 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use lash_core::llm::transport::LlmTransportError;
@@ -138,8 +137,9 @@ impl lash_core::ToolProvider for CountingTool {
 }
 
 /// One lash turn — a model call that asks for a tool, the tool as an effect
-/// group child, a model call that answers — on a fresh backend, which is
-/// dropped when the turn is done. Returns the watch on its server.
+/// group child, a model call that answers — driven by the engine on a fresh
+/// backend, which is dropped when the turn is done. Returns the watch on its
+/// server.
 async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
     let backend = lash_restate_test::backend(seed, ServerConfig::default())
         .await
@@ -196,37 +196,36 @@ async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
         );
     }
     let session = core.session("drop").open().await.expect("open the session");
-    let turn_id = lash::TurnId::from("turn-1");
-    let admitted = lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
-        .expect("admit the turn scope");
-    let answered = Arc::new(AtomicUsize::new(0));
-    let attempt: lash_restate_test::HandlerAttempt = {
-        let answered = Arc::clone(&answered);
-        Arc::new(move |scoped| {
-            let session = session.clone();
-            let turn_id = turn_id.clone();
-            let answered = Arc::clone(&answered);
-            Box::pin(async move {
-                let output = session
-                    .turn(lash::TurnInput::text("count once"))
-                    .turn_id(turn_id)
-                    .advanced()
-                    .run_with_scope(scoped)
-                    .await
-                    .expect("the turn runs");
-                assert_eq!(output.result.assistant_message(), Some("done"));
-                answered.fetch_add(1, Ordering::SeqCst);
-            })
-        })
-    };
-    tokio::time::timeout(
+    let receipt = session
+        .durable()
+        .enqueue(lash::TurnInput::text("count once"))
+        .send()
+        .await
+        .expect("accept the turn input");
+    // The engine drives the accepted input: its LashSession drive admits it
+    // and its root runs in a LashTurn workflow.
+    let outcome = tokio::time::timeout(
         Duration::from_secs(20),
-        backend.run_in_handler(admitted, attempt),
+        backend.attach_drive(
+            &lash_core::SessionId::from("drop"),
+            lash_core::engine::DriveRequestId::new(receipt.input_id.to_string()),
+        ),
     )
     .await
     .expect("the turn finishes")
-    .expect("the turn's handler completes");
-    assert_eq!(answered.load(Ordering::SeqCst), 1);
+    .expect("the drive answers");
+    match outcome.ran.as_slice() {
+        [lash_core::engine::RootOutcome::Committed { outcome, .. }] => assert!(
+            matches!(
+                outcome,
+                lash_core::facade_support::TurnOutcome::Finished(
+                    lash_core::facade_support::TurnFinish::AssistantMessage { text }
+                ) if text == "done"
+            ),
+            "the turn answers: {outcome:?}"
+        ),
+        other => panic!("the drive runs the one root: {other:?}"),
+    }
     watch
 }
 

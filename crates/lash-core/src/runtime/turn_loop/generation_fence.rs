@@ -10,8 +10,9 @@
 //!
 //! This file is the whole fence: [`current`] is the one place the stamp is
 //! read from the build, and [`admit`] the one place it is checked. Each
-//! admission site calls them with one line; FIG-3600 moves those calls onto
-//! the one driver claim.
+//! admission site calls them with one line: a drive root's recorded input
+//! claim (`runtime::drive::root`) and a queue drain's run admission; S5a-q3
+//! moves the second onto the drive's admission too.
 //!
 //! [`CodeExecutorPlugin::executable_generation`]: crate::plugin::CodeExecutorPlugin::executable_generation
 //! [`ParkReason::RetiredGeneration`]: crate::store::ParkReason::RetiredGeneration
@@ -21,7 +22,7 @@ use super::*;
 /// The executable generation this build runs `runtime`'s turns under: the one
 /// a new admission records.
 /// FIG-3795 E: this is where the build-generation stamp (`park_build_generation`) is also written.
-pub(super) fn current(runtime: &LashRuntime) -> Option<crate::ExecutableGeneration> {
+pub(in crate::runtime) fn current(runtime: &LashRuntime) -> Option<crate::ExecutableGeneration> {
     runtime
         .session
         .as_ref()
@@ -34,7 +35,7 @@ pub(super) fn current(runtime: &LashRuntime) -> Option<crate::ExecutableGenerati
 /// the turn parks on. An admission that recorded no generation is admitted
 /// only by a build whose executor names none: a missing stamp is never taken
 /// for this build's.
-pub(super) fn admit(
+pub(in crate::runtime) fn admit(
     runtime: &LashRuntime,
     recorded: Option<&crate::ExecutableGeneration>,
 ) -> Result<(), RuntimeError> {

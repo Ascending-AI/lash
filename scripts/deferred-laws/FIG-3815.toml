@@ -1,0 +1,16 @@
+# Deferred conformance laws (FIG-3472), sharded so two changes never queue on
+# one file. The checker merges every `*.toml` in `scripts/deferred-laws/`; a
+# new deferred invocation adds a shard named for the recipe that runs it, or
+# for the ticket that brings a parked invocation back (`FIG-<n>.toml`).
+#
+# A row whose recipe is "parked" runs nowhere yet: it must name the `ticket`
+# (FIG-n) that brings the invocation back and the `reason` it is parked, and
+# no other row may carry either field.
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/drive_laws_on_the_double.rs"
+claimant = "lash_restate::tests::drive_laws_on_the_double"
+suite = "root_start_marker_tests"
+recipe = "parked"
+ticket = "FIG-3815"
+reason = "no root start marker yet: a fresh execution of a started root re-seals its admission (the drive-epoch seal is idempotent per admission) and runs again instead of answering SubstrateLost; the store start marker keyed by a nonce drawn in the root's own journal brings it back"

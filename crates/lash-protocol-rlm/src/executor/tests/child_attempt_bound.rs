@@ -272,7 +272,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
             )),
             runtime_host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy.clone()),

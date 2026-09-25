@@ -114,7 +114,7 @@ async fn build_runtime(parts: &Parts) -> crate::LashRuntime {
             .with_initial_state(state)
             .with_plugin_factories(factories)
             .with_store(Arc::clone(&parts.store))
-            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await

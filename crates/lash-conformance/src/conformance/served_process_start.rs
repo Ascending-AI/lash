@@ -179,7 +179,7 @@ impl SpawnWorld {
                 Arc::new(crate::facade_support::PluginHost::new(worker_factories)),
                 host.clone(),
                 lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
-                Arc::new(crate::NoQueuedWork::new()),
+                Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
             ),
         )
@@ -234,7 +234,7 @@ impl SpawnWorld {
                 .with_store(store)
                 .with_process_registry(Arc::clone(&self.registry))
                 .with_process_work(self.process_work.clone())
-                .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+                .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                 .build(),
         )
         .await

@@ -67,12 +67,10 @@ impl DecoratedBackend {
     /// Drive queued turns through `driver` instead of the in-process driver.
     pub(crate) fn with_queued_work(
         self,
-        driver: Arc<dyn lash::runtime::QueuedWorkSubstrate>,
+        driver: Arc<dyn lash::runtime::SessionWorkEngine>,
     ) -> Self {
         Self {
-            layered: self
-                .layered
-                .with_queued_work(lash::BackendQueuedWork::Engine(driver)),
+            layered: self.layered.with_session_work(Some(driver)),
         }
     }
 

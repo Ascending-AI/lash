@@ -85,7 +85,7 @@ async fn build_runtime(parts: DriftParts, temperature: Option<f64>) -> crate::La
                     .collect(),
             )
             .with_store(parts.store)
-            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await

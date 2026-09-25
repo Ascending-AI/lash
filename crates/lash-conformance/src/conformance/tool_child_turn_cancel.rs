@@ -84,7 +84,7 @@ async fn build_runtime(parts: TurnParts) -> crate::LashRuntime {
             .with_process_work(crate::testing::process_work_wiring_for_registry(
                 stores.process_registry(),
             ))
-            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await

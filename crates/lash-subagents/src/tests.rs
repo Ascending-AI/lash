@@ -1145,7 +1145,7 @@ async fn run_seed_probe_inner(
                 )
             },
             lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(policy.clone()),
@@ -1156,7 +1156,7 @@ async fn run_seed_probe_inner(
     let host = ProcessRuntimeHost::with_ports(
         embedded,
         lash_core::ProcessWorkWiring::new(watched, process_port),
-        Arc::new(lash_core::NoQueuedWork::new()),
+        Arc::new(lash_core::NoSessionWork::new()),
     );
     let runtime_host = host;
     let runtime_services = RuntimeServices::new(

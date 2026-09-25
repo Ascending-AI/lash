@@ -1,5 +1,5 @@
 use crate::admin::SessionConfigPatch;
-use crate::support::QueuedWorkSubstrate;
+use crate::support::SessionWorkEngine;
 use crate::support::{
     Arc, BTreeMap, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory,
     ProcessRegistry, PromptContribution, PromptLayerSink, PromptSlot, PromptTemplate,
@@ -96,6 +96,8 @@ fn session_completion_matches(
 
 #[derive(Default)]
 struct SnapshotStore {
+    /// The drive epoch each session drive's seal raises (FIG-3600).
+    drive_epochs: lash_core::store::InMemoryDriveEpochs,
     read: std::sync::Mutex<Option<lash_core::store::PersistedSessionRead>>,
     session_meta: std::sync::Mutex<Option<lash_core::SessionMeta>>,
     runtime_turn_commits: std::sync::Mutex<
@@ -157,6 +159,7 @@ impl SnapshotStore {
             );
         }
         Self {
+            drive_epochs: Default::default(),
             read: std::sync::Mutex::new(Some(lash_core::store::PersistedSessionRead {
                 session_id: state.session_id,
                 head_revision: 7,
@@ -626,6 +629,27 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
 }
 
 #[async_trait]
+impl lash_core::store::DriveEpochStore for SnapshotStore {
+    async fn seal_drive_epoch(
+        &self,
+        session_id: &SessionId,
+        admission: &lash_core::store::AdmissionId,
+        observed_epoch: u64,
+    ) -> std::result::Result<lash_core::store::DriveEpochSeal, lash_core::StoreError> {
+        Ok(self
+            .drive_epochs
+            .seal(session_id, admission, observed_epoch))
+    }
+
+    async fn drive_epoch(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<lash_core::store::StoredDriveEpoch, lash_core::StoreError> {
+        Ok(self.drive_epochs.epoch(session_id))
+    }
+}
+
+#[async_trait]
 impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn select_queued_run(
         &self,
@@ -939,6 +963,7 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
 
 struct BoundSessionStore {
     session_id: SessionId,
+    drive_epochs: lash_core::store::InMemoryDriveEpochs,
 }
 
 lash_core::impl_noop_attachment_manifest!(BoundSessionStore);
@@ -1083,6 +1108,27 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
 
 // The reuse test fails before any turn runs, so this double serves neither
 // pending turn input nor queued work.
+
+#[async_trait]
+impl lash_core::store::DriveEpochStore for BoundSessionStore {
+    async fn seal_drive_epoch(
+        &self,
+        session_id: &SessionId,
+        admission: &lash_core::store::AdmissionId,
+        observed_epoch: u64,
+    ) -> std::result::Result<lash_core::store::DriveEpochSeal, lash_core::StoreError> {
+        Ok(self
+            .drive_epochs
+            .seal(session_id, admission, observed_epoch))
+    }
+
+    async fn drive_epoch(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<lash_core::store::StoredDriveEpoch, lash_core::StoreError> {
+        Ok(self.drive_epochs.epoch(session_id))
+    }
+}
 
 #[async_trait]
 impl lash_core::QueuedWorkStore for BoundSessionStore {

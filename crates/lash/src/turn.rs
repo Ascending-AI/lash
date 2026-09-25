@@ -974,6 +974,68 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
     Ok(drain)
 }
 
+/// Drive `request` on `runtime`'s session to a stop through the session drive
+/// (FIG-3600), recording every turn activity on the session's observation.
+pub(crate) async fn drive_session_observed(
+    runtime: &RuntimeHandle,
+    controller: &ScopedEffectController<'_>,
+    request: &lash_core::engine::DriveRequest,
+) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
+    let writer_handle = runtime.writer();
+    let mut writer = writer_handle.lock().await;
+    let observation_sink = SessionObservationTurnActivitySink {
+        runtime: runtime.clone(),
+        live: None,
+    };
+    let sinks = lash_core::drive::DriveSinks {
+        events: &lash_core::runtime::NoopEventSink,
+        turn_events: &observation_sink,
+        local_stop: LocalTurnStop::default(),
+    };
+    let outcome =
+        lash_core::drive::drive_session_with(&mut writer, controller, request, sinks).await;
+    runtime.publish_from(&writer);
+    outcome
+}
+
+/// One recorded admission of `request` on `runtime`'s session (FIG-3600).
+pub(crate) async fn admit_drive_observed(
+    runtime: &RuntimeHandle,
+    controller: &ScopedEffectController<'_>,
+    request: &lash_core::engine::DriveRequest,
+    ordinal: u32,
+) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
+    let writer_handle = runtime.writer();
+    let mut writer = writer_handle.lock().await;
+    let verdict = lash_core::drive::admit_drive(&mut writer, controller, request, ordinal).await;
+    runtime.publish_from(&writer);
+    verdict
+}
+
+/// Run one admitted root on `runtime`'s session (FIG-3600), recording every
+/// turn activity on the session's observation.
+pub(crate) async fn run_admitted_root_observed(
+    runtime: &RuntimeHandle,
+    controller: &ScopedEffectController<'_>,
+    admitted: lash_core::engine::Admitted,
+) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
+    let writer_handle = runtime.writer();
+    let mut writer = writer_handle.lock().await;
+    let observation_sink = SessionObservationTurnActivitySink {
+        runtime: runtime.clone(),
+        live: None,
+    };
+    let sinks = lash_core::drive::DriveSinks {
+        events: &lash_core::runtime::NoopEventSink,
+        turn_events: &observation_sink,
+        local_stop: LocalTurnStop::default(),
+    };
+    let outcome =
+        lash_core::drive::run_admitted_root_with(&mut writer, controller, admitted, sinks).await;
+    runtime.publish_from(&writer);
+    outcome
+}
+
 pub(crate) async fn stream_selected_queued_prepared_turn(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,

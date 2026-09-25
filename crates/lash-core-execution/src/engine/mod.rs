@@ -26,6 +26,7 @@ mod commands;
 mod commit;
 mod context;
 mod contracts;
+mod drive;
 mod groups;
 /// The determinism harness every slice that makes the drive deterministic
 /// proves its change with (FIG-3672).
@@ -33,9 +34,9 @@ mod groups;
 pub mod testing;
 
 pub use admission::{
-    AdmissionId, AdmitRequest, AdmitVerdict, Admitted, CancelGate, ChildOutcome, ChildStart,
-    DriveAdmission, DriveContext, DriveFence, DriveRequestId, FenceSource, Fenced, InheritVerdict,
-    InheritedAuthority, ParkRef, SealVerdict, TurnCancelSignal,
+    AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, CancelGate, ChildOutcome,
+    ChildStart, DriveAdmission, DriveContext, DriveFence, DriveRequestId, FenceSource, Fenced,
+    InheritVerdict, InheritedAuthority, ParkRef, SealVerdict, TurnCancelSignal,
 };
 pub use commands::{
     AdmissionCommand, AdmissionExecutors, AdmissionResult, AdmissionStepContext, CooperativeCancel,
@@ -56,6 +57,10 @@ pub use contracts::{
     BuildGeneration, BuildGenerationParseError, DriveHandover, DriveRequest, Never,
     PendingResolution, ResolveAck, RootProgress, TurnSegmentHandover, UnresolvedChild,
     UpgradePolicy,
+};
+pub use drive::{
+    DriveAbort, DriveOutcome, DriveStop, RootOutcome, admission_body, drive_admission_replay_key,
+    drive_admission_scope, drive_root_scope, drive_seal_replay_key,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 

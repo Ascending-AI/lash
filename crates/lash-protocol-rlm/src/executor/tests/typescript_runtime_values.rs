@@ -56,7 +56,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
             )),
             runtime_host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy.clone()),

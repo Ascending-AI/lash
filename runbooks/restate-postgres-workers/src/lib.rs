@@ -468,15 +468,7 @@ pub fn e2e_backend(
             storage,
             attachment_store,
         )),
-        lash::restate::config(
-            restate_ingress_url,
-            restate_authority_id,
-            // Restate turns must enter through an explicit handler-scoped effect
-            // controller. The harness drains durable ingress from its workflow
-            // handlers, so an ambient local queue pump would race those handlers
-            // and cannot legally execute their effects.
-            lash_restate::RestateQueuedWork::Disabled,
-        ),
+        lash::restate::config(restate_ingress_url, restate_authority_id),
     ))
 }
 

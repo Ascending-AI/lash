@@ -143,7 +143,7 @@ async fn build_migrated_runtime(parts: MigratedRuntimeParts) -> crate::LashRunti
             .with_store(parts.store)
             .with_process_registry(parts.registry)
             .with_process_work(parts.process_work)
-            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await
@@ -245,7 +245,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
             Arc::new(crate::facade_support::PluginHost::new(factories.clone())),
             host.clone(),
             lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             crate::testing::runtime_lease_owner(),
         ),
     )

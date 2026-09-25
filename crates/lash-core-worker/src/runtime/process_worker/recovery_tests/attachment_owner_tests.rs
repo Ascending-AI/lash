@@ -260,7 +260,7 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
             )),
             runtime_host,
             crate::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             local_owner("attachment-parent-worker", "host-a", "parent-start-a"),
         )
         .with_session_policy(policy.clone())
@@ -347,7 +347,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
             )),
             runtime_host,
             crate::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             local_owner("attachment-worker", "host-a", "start-a"),
         )
         .with_session_policy(policy)
@@ -461,7 +461,7 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
             )),
             runtime_host,
             crate::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             local_owner("attachment-reincarnation-worker", "host-a", "start-a"),
         )
         .with_session_policy(policy)

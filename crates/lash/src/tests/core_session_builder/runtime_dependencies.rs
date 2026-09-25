@@ -367,7 +367,7 @@ async fn backend_process_work_configures_the_core_registry() -> Result<()> {
 }
 
 #[tokio::test]
-async fn external_process_port_composes_native_queued_port_and_refreshes_after_ran() -> Result<()> {
+async fn external_process_port_composes_native_queued_port_and_drives_the_command() -> Result<()> {
     let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(
         backend_with_external_process_work().await.into(),
     ))
@@ -385,24 +385,21 @@ async fn external_process_port_composes_native_queued_port_and_refreshes_after_r
         .commands()
         .refresh_tool_catalog("native queue regression guard", "native-queue-refresh")
         .await?;
-    let cursor_after = session
-        .observe()
-        .current_observation()
-        .cursor
-        .as_str()
-        .to_string();
-
-    let ports = core.substrate_slot.ports().await;
-    let outcome = ports
-        .queued
-        .drain_session_work(
-            lash_core::SessionWorkTarget::Any,
-            "figments-regression-guard",
-        )
-        .await?;
-
-    assert_eq!(outcome, lash_core::SessionDrainOutcome::Ran);
-    assert_ne!(cursor_after, cursor_before);
+    // The command drains asynchronously: the backend's in-process engine
+    // drives the session and applies it (FIG-3600).
+    let _ = cursor_before;
+    let mut settled = false;
+    for _ in 0..1_000 {
+        if session.durable().queued_work().await?.is_empty() {
+            settled = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        settled,
+        "the native engine drives the command to its settlement"
+    );
     Ok(())
 }
 

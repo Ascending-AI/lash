@@ -1,5 +1,5 @@
 //! Registration macros for turn-ingress laws: direct-turn acceptance
-//! (ADR 0069), the aborted turn's bound input (FIG-3589), the cancelled
+//! (ADR 0069), the cancelled
 //! turn's withheld input (FIG-3531), and the redrive that cedes rows it
 //! restored from its journal (FIG-3552). All take the same
 //! `(guard, prefix, backend, store)` fixture: the backend under test and a
@@ -14,19 +14,15 @@ macro_rules! direct_turn_acceptance_tests {
             (orphaned_direct_turn_input_is_drivable_by_another_worker, "direct-turn-orphan-recovery"),
             (direct_turn_acceptance_mints_no_idempotency_key, "direct-turn-identity"),
             (unclaimed_turn_input_settlement_is_a_conditional_write, "direct-turn-conditional-settlement"),
-            (busy_execution_lane_refuses_direct_turn_before_acceptance, "direct-turn-busy-lane"),
+            (busy_execution_lane_defers_an_accepted_direct_turn, "direct-turn-busy-lane"),
             (vacuum_then_redrive_replays_receipt_single_row, "direct-turn-vacuum-redrive-single"),
             (vacuum_then_redrive_replays_receipt_absorbed_rows, "direct-turn-vacuum-redrive-absorbed"),
             (cancelled_vacuumed_acceptance_is_not_resurrected, "direct-turn-cancelled-vacuumed"),
             (uncommitted_redrive_drives_journaled_set_not_live_claim, "direct-turn-uncommitted-redrive"),
             (uncommitted_redrive_cedes_when_a_drain_answered_its_rows, "direct-turn-redrive-after-drain"),
             (drive_effect_refusal_is_journaled, "direct-turn-refused-drive"),
-            (queued_direct_turn_input_is_answered_in_order_by_the_drain, "direct-turn-queued-input"),
+            (direct_turn_behind_earlier_admissions_runs_after_them, "direct-turn-queued-input"),
             (accept_turn_input_redrive_after_store_commit_admits_one_row, "direct-turn-acceptance-lost-outcome"),
-            (aborted_direct_turn_input_is_bound_until_its_redrive, "direct-turn-bound-until-redrive"),
-            (later_direct_turn_never_folds_in_a_bound_input, "direct-turn-bound-later-turn"),
-            (cancelling_a_bound_input_returns_its_drive_to_the_queue, "direct-turn-bound-cancel"),
-            (lost_drive_outcome_still_binds_its_claimed_input, "direct-turn-bound-lost-drive-outcome"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

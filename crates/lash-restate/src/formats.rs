@@ -15,6 +15,7 @@ use crate::controller::{EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_
 use crate::durable_wait::{DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION};
 use crate::effect_group::EFFECT_GROUP_INDEX_PROTOCOL_VERSION;
 use crate::process::RESTATE_PROCESS_JOURNAL_VERSION;
+use crate::session_driver::LASH_SESSION_DRIVE_VERSION;
 
 // The rows are comparable counters whose bytes live in the engine's
 // deployment, so no bounded walk of lash's own store enumerates them.
@@ -100,6 +101,14 @@ static DURABLE_FORMATS: &[EngineDurableFormat] = &[
         name: "Restate effect journal",
         version: EFFECT_JOURNAL_VERSION,
         constant: "EFFECT_JOURNAL_VERSION",
+        upgrade_policy: UpgradePolicy::Drain,
+        unwalkable_reason: UNWALKABLE_REASON,
+    },
+    EngineDurableFormat {
+        id: "restate.session_drive",
+        name: "Restate session drive prefix",
+        version: LASH_SESSION_DRIVE_VERSION,
+        constant: "LASH_SESSION_DRIVE_VERSION",
         upgrade_policy: UpgradePolicy::Drain,
         unwalkable_reason: UNWALKABLE_REASON,
     },

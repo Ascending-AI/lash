@@ -472,7 +472,13 @@ async fn refuse_claim<F, S>(
                 TurnSeamOperation::Store(StoreOperation::ClaimSessionExecutionLease)
             ))
             .count(),
-        1,
+        // A direct turn meets the generation gate before its acceptance and
+        // before the drive takes the lane (FIG-3600); a queued drain meets it
+        // at its lane claim.
+        match path {
+            ClaimPath::Direct => 0,
+            ClaimPath::Queued => 1,
+        },
         "{path:?}: the refusal is not retried: {trace:?}"
     );
     assert_eq!(

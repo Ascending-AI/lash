@@ -112,7 +112,7 @@ pub struct DurableProcessWorkerConfig {
     pub process_event_sink: Option<Arc<dyn crate::ProcessEventSink>>,
     pub native_substrate: crate::NativeSubstrateConfig,
     process_work: WorkerProcessWork,
-    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+    queued_work: Arc<dyn crate::SessionWorkEngine>,
     pub turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot,
     /// A run holds its slot while doing its own work and releases it while parked on work that
     /// another process or external owner must complete.
@@ -141,7 +141,7 @@ impl DurableProcessWorkerConfig {
         plugin_host: Arc<PluginHost>,
         runtime_host: RuntimeHostConfig,
         process_work: WorkerProcessWork,
-        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+        queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self {
@@ -228,7 +228,7 @@ impl DurableProcessWorkerConfig {
         plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
         runtime_host: RuntimeHostConfig,
         process_work: WorkerProcessWork,
-        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+        queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::new(
@@ -244,7 +244,7 @@ impl DurableProcessWorkerConfig {
         plugin_stack: PluginStack,
         runtime_host: RuntimeHostConfig,
         process_work: WorkerProcessWork,
-        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+        queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::from_plugin_factories(

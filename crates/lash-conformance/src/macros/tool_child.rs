@@ -84,6 +84,48 @@ macro_rules! admitted_head_redrive_tests {
     };
 }
 
+/// Register the session drive's admission laws (FIG-3600, ADR 0105 §2): a
+/// drive admits and seals every root before its first effect, one admission
+/// at a time holds the session, and a replay mints no ownership. The fixture
+/// is the admitted-head one: a guard, a prefix, the tier's effect host, the
+/// store set under test and its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
+///
+/// A tier that must quarantine a law registers the laws by name and marks the
+/// quarantined ones:
+/// `drive_admission_tests!(@laws [] { fixture }; [(law, "label"), #[ignore = "why"] (other, "label"), ...])`.
+#[macro_export]
+macro_rules! drive_admission_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::drive_admission_tests!(@laws [$(#[$attr])*] $fixture; [
+            (one_authorized_drive_per_session, "drive-one-authorized"),
+            (one_drive_claims_many_items, "drive-many-items"),
+            (claim_identity_is_idempotent_within_ownership, "drive-claim-idempotent"),
+            (replay_cannot_mint_ownership, "drive-replay-ownership"),
+            (admission_precedes_first_effect, "drive-admission-first"),
+            (reset_before_admission_admits_fresh, "drive-reset-admission"),
+            (parked_root_blocks_admission, "drive-parked-root"),
+            (fence_is_not_in_the_envelope_hash, "drive-fence-envelope"),
+            (every_driver_turn_is_owned_by_its_root, "drive-owned-root"),
+        ]);
+    };
+    (@laws $attrs:tt $fixture:block; [$($(#[$law_attr:meta])* ( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            $crate::drive_admission_tests!(@law $attrs [$(#[$law_attr])*] $fixture; ($law, $label));
+        )*
+    };
+    (@law [$($attr:tt)*] [$($law_attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        $($law_attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
 /// Register the segment re-drive law (FIG-3547): a re-drive never
 /// re-executes a recorded effect, an unrecorded one runs once more under the
 /// same identity, and a segment whose engine lost its record ends

@@ -14,6 +14,12 @@
 //! `internal:{turn_id}` rather than the provider-abort id the live token used
 //! to mint.
 //!
+//! Every pin was retaken once more for a change of value and not of shape
+//! (FIG-3600): drive admission mints a turn's root from its durable input, so
+//! a direct turn's accepted input now carries its turn id in the existing
+//! optional `source_key` field. With that field removed, each commit digests
+//! to its previous pin.
+//!
 //! The digest is over the commit's serialized form with the values that differ
 //! between two runs of the same turn masked: worker and lease identities,
 //! random ids, wall-clock timestamps, and the hashes computed over them. Every
@@ -173,7 +179,7 @@ async fn tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "tool turn",
         &pinned,
-        &["c56a2b3be67f6a99c67e0dae7de6156f7e4a85a7da48286161a599019c8b47b6"],
+        &["fb91013bf9e95f7c8f571eda41cf50c0da8a632b02c8308c57fea44fbf5ed1dc"],
         r#"{
             "assistant_output": "done",
             "errors": [],
@@ -247,7 +253,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "parallel tool turn",
         &pinned,
-        &["ef6e41872adead619b12ff0bd37177cb49742e3875a76668556e7e41d1d4f1df"],
+        &["cef41e5cda12e486a8f896d9ffeade22c56b65d22cf47a16158b022f33b234cb"],
         r#"{
             "assistant_output": "all three echoed",
             "errors": [],
@@ -344,7 +350,7 @@ async fn provider_failure_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "provider failure",
         &pinned,
-        &["7c024fa0c5a8f94eed7c01aee801b0ec144ad5e4f5db7743b921190e7aed13cc"],
+        &["cb4d3a13a070305e20a95b75a6426b043f00e9326b7b68be2de9c73ff9588b03"],
         r#"{
             "assistant_output": "",
             "errors": [
@@ -382,7 +388,7 @@ async fn cancelled_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled",
         &pinned,
-        &["1b7d36d03fb453a120b768d68098152b8c50beb3016e25f2733479822f2718a8"],
+        &["59f8d07a787b40e9583a15258760cb39af4c1422b76b6e6cd29da82dc5f4502d"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -444,7 +450,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled mid tool",
         &pinned,
-        &["4e5fc8f7136b0aaa3fb01714b84bf0b79f7905b8f3ed00f47787db301550fd54"],
+        &["34c9eecafc3517d074812cefdefb6fb87a6c6fba05cdd49908350280136ffb06"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -586,7 +592,7 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     crate::runtime_support::commit_pins::assert_commit_pins(
         "blocked host",
         &store.runtime_commits(),
-        &["ef6e41872adead619b12ff0bd37177cb49742e3875a76668556e7e41d1d4f1df"],
+        &["cef41e5cda12e486a8f896d9ffeade22c56b65d22cf47a16158b022f33b234cb"],
     );
     assert!(host.received().is_empty(), "the host has taken nothing yet");
 

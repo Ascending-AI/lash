@@ -816,15 +816,18 @@ pub(super) async fn foreground_turn_is_refused_when_session_lane_is_held() {
         error.code,
         lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
     );
-    assert!(
+    // Acceptance precedes the drive (FIG-3600): the input stays accepted and
+    // pending for the session's next drive.
+    assert_eq!(
         lash_core::TurnInputStore::list_pending_turn_inputs(
             store.as_ref(),
             &SessionId::from("root")
         )
         .await
         .expect("read pending turn inputs after refusal")
-        .is_empty(),
-        "lease refusal must precede durable input acceptance"
+        .len(),
+        1,
+        "the refused drive leaves the accepted input pending"
     );
     lash_core::store::SessionExecutionLeaseStore::release_session_execution_lease(
         store.as_ref(),
@@ -1635,13 +1638,12 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
 
     let first_result = first.await.expect("first product turn task");
     let second_result = second.await.expect("second product turn task");
+    // The session drive serializes the two turns (FIG-3600): the second is
+    // admitted, sealed and claimed under the lease the first released, so it
+    // commits on the first one's head instead of racing it to a refused CAS.
     assert!(
-        first_result.is_ok() || second_result.is_ok(),
-        "one admitted real turn must advance the store head: first={first_result:?}, second={second_result:?}"
-    );
-    assert!(
-        first_result.is_err() || second_result.is_err(),
-        "the stale/superseded real turn must still be refused by durable authority"
+        first_result.is_ok() && second_result.is_ok(),
+        "both admitted turns advance the head in turn: first={first_result:?}, second={second_result:?}"
     );
 
     let observations =
@@ -1650,8 +1652,9 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
         );
     assert!(
         observations.iter().any(|observation| {
+            // The second runtime's drive takes over the first turn's root
+            // (its lease lapsed) and waits behind the first's commit.
             observation.path == "turn_final_commit"
-                && observation.work_identity == "product-admission-second"
                 && observation.queue_depth > 0
                 && !observation.waited.is_zero()
         }),
@@ -1828,12 +1831,18 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
         .await
         .expect("stale runtime task joins")
         .expect_err("the intent-owning stale conversational tail loses head CAS");
+    // The successor's drive admitted the stale turn's own root first and
+    // committed it (FIG-3600), so the stale runtime's final commit of that
+    // root is refused as different content under the same commit identity.
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::StoreCommitSuperseded
+        lash_core::RuntimeErrorCode::StoreCommitFailed,
+        "{error:?}"
     );
     assert!(
-        error.message.contains("head revision conflict"),
+        error
+            .message
+            .contains("retried with different commit content"),
         "the same-turn loser must retain typed CAS diagnostics: {error:?}"
     );
     assert_eq!(

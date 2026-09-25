@@ -11,10 +11,9 @@ use std::sync::Arc;
 
 use crate::engine::BuildGeneration;
 use crate::{
-    AttachmentStore, Backend, BackendQueuedWork, Clock, EffectEngine, EffectHost,
-    ModuleArtifactStore, ProcessContinuationStore, ProcessDefinitionRegistry,
-    ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, SessionStoreFactory,
-    StoreBindingId, StoreSet, TriggerStore,
+    AttachmentStore, Backend, Clock, EffectEngine, EffectHost, ModuleArtifactStore,
+    ProcessContinuationStore, ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry,
+    ProcessWorkWiring, SessionStoreFactory, StoreBindingId, StoreSet, TriggerStore,
 };
 
 /// One backend with some of its ports decorated. See the module
@@ -32,7 +31,7 @@ pub struct LayeredBackend {
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     process_work: Option<ProcessWorkWiring>,
-    queued_work: BackendQueuedWork,
+    session_work: Option<Arc<dyn crate::SessionWorkEngine>>,
 }
 
 impl LayeredBackend {
@@ -49,7 +48,7 @@ impl LayeredBackend {
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
             process_work: inner.process_work(),
-            queued_work: inner.queued_work(),
+            session_work: inner.session_work(),
             inner,
         }
     }
@@ -159,9 +158,12 @@ impl LayeredBackend {
         self
     }
 
-    /// Run the backend's queued work on `queued_work`.
-    pub fn with_queued_work(mut self, queued_work: BackendQueuedWork) -> Self {
-        self.queued_work = queued_work;
+    /// Drive the backend's sessions on `session_work` (`None`: in process).
+    pub fn with_session_work(
+        mut self,
+        session_work: Option<Arc<dyn crate::SessionWorkEngine>>,
+    ) -> Self {
+        self.session_work = session_work;
         self
     }
 
@@ -185,7 +187,7 @@ impl LayeredBackend {
             effect_host: self.effect_host,
             build_generation: self.inner.build_generation().clone(),
             process_work: self.process_work,
-            queued_work: self.queued_work,
+            session_work: self.session_work,
         }))
     }
 }
@@ -195,7 +197,7 @@ struct LayeredEngine {
     effect_host: Arc<dyn EffectHost>,
     build_generation: BuildGeneration,
     process_work: Option<ProcessWorkWiring>,
-    queued_work: BackendQueuedWork,
+    session_work: Option<Arc<dyn crate::SessionWorkEngine>>,
 }
 
 impl EffectEngine for LayeredEngine {
@@ -217,8 +219,8 @@ impl EffectEngine for LayeredEngine {
         self.process_work.clone()
     }
 
-    fn queued_work(&self) -> BackendQueuedWork {
-        self.queued_work.clone()
+    fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
+        self.session_work.clone()
     }
 }
 

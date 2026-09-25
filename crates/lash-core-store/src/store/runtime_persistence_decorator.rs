@@ -101,6 +101,10 @@ macro_rules! persistence_operations {
                 fn list_queued_work(&self, session_id: &SessionId) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
                 fn list_pending_queued_work(&self, session_id: &SessionId) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
             }
+            DriveEpochStore {
+                fn seal_drive_epoch(&self, session_id: &SessionId, admission: &AdmissionId, observed_epoch: u64) -> Result<DriveEpochSeal, StoreError>;
+                fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
+            }
             StoreMaintenance {
                 fn vacuum(&self) -> MaintenanceResult<VacuumReport>;
                 fn gc_unreachable(&self) -> MaintenanceResult<GcReport>;

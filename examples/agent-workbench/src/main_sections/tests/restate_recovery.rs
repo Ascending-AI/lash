@@ -2133,8 +2133,6 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
                 std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),
             )
             .expect("valid Restate authority id"),
-            // Only its turn-work driver is used; no core runs on it.
-            lash_restate::RestateQueuedWork::Disabled,
         ),
     )
     .turn_work_driver();

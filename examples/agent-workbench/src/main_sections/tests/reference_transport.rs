@@ -456,7 +456,7 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    queued_work_driver: Option<Arc<dyn lash::runtime::QueuedWorkSubstrate>>,
+    queued_work_driver: Option<Arc<dyn lash::runtime::SessionWorkEngine>>,
     context_window_tokens: usize,
     live_replay_store: Option<Arc<dyn lash::observe::LiveReplayStore>>,
     effect_layer: Option<Arc<dyn lash::testing::EffectLayer>>,

@@ -169,7 +169,7 @@ async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
                 ),
             ])
             .with_store(parts.store)
-            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await

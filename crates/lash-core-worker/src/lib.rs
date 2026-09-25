@@ -30,9 +30,9 @@ pub mod runtime {
     pub mod native_substrate {
         pub use crate::{
             NativeProcessAdmissionDriver, NativeProcessWork, NativeSubstrateConfig,
-            NativeSubstrateConfigError, NoQueuedWork, ProcessTerminalWait, ProcessWorkSubstrate,
-            ProcessWorkWiring, QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget,
-            WakeDeliveryDriveReport, WakeDeliveryDriver, WorkCadencePolicy, WorkerSweepPolicy,
+            NativeSubstrateConfigError, NoSessionWork, ProcessTerminalWait, ProcessWorkSubstrate,
+            ProcessWorkWiring, SessionWorkEngine, WakeDeliveryDriveReport, WakeDeliveryDriver,
+            WorkCadencePolicy, WorkerSweepPolicy,
         };
         pub use lash_core_execution::runtime::native_substrate::NativeProcessAwaiter;
     }

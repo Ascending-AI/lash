@@ -634,6 +634,12 @@ impl LiveConformanceHarness {
                     Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
                     Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessContinuationStore>,
                 ),
+                // The laws run their turns in the probe's handler; no core
+                // installs a session driver on this endpoint.
+                session_driver: crate::RestateSessionDriverSlot::new(),
+                build_generation: lash_core::engine::BuildGeneration::for_test(
+                    "effect-group-conformance",
+                ),
             },
         )
         .bind(ScopeLivenessProbeImpl.serve())
@@ -820,7 +826,6 @@ impl LiveConformanceHarness {
                         crate::RestateAuthorityId::new("lash-conformance-backend-laws")
                             .expect("valid authority"),
                         lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
-                        crate::RestateQueuedWork::Disabled,
                     ),
                 )))
             })

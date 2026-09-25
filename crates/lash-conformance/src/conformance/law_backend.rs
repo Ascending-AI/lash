@@ -108,8 +108,8 @@ impl crate::EffectEngine for HostOverStores {
         None
     }
 
-    fn queued_work(&self) -> crate::BackendQueuedWork {
-        crate::BackendQueuedWork::Disabled
+    fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
+        Some(Arc::new(crate::NoSessionWork::new()))
     }
 }
 
@@ -146,7 +146,7 @@ pub fn backend_over(
     LawBackend {
         layered: LawBackend::over_stores(stores, effect_host)
             .layered
-            .with_queued_work(crate::BackendQueuedWork::InProcess),
+            .with_session_work(None),
     }
     .into_backend()
 }
@@ -219,8 +219,8 @@ impl crate::EffectEngine for StoreLawBackend {
         None
     }
 
-    fn queued_work(&self) -> crate::BackendQueuedWork {
-        crate::BackendQueuedWork::Disabled
+    fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
+        Some(Arc::new(crate::NoSessionWork::new()))
     }
 }
 

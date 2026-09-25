@@ -11,47 +11,14 @@ use std::sync::Arc;
 
 use lash_core::engine::BuildGeneration;
 use lash_core::facade_support::{ProcessEventSink, TurnWorkDriver};
-use lash_core::{BackendQueuedWork, EffectHost as _, QueuedWorkSubstrate, StoreSet};
+use lash_core::{EffectHost as _, SessionWorkEngine, StoreSet};
 
 use crate::effect_host::RestateEffectHost;
 use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
 use crate::process::{RestateProcessDeployment, RestateProcessServing};
 use crate::services::{LashServiceParts, bind_lash_services};
+use crate::session_driver::RestateSessionWork;
 use crate::turn::RestateTurnAttach;
-
-/// Who runs a [`RestateEngine`]'s queued session work: a required,
-/// explicit choice with no default.
-///
-/// There is no in-process choice. The runtime's in-process driver would claim
-/// and run queued turns outside any Restate handler, racing the handlers that
-/// own them, and cannot legally execute their effects.
-#[derive(Clone)]
-pub enum RestateQueuedWork {
-    /// The engine-backed driver: the port that hands each queued turn to the
-    /// host's Restate workflow, so the turn runs inside a handler.
-    Engine(Arc<dyn QueuedWorkSubstrate>),
-    /// No driver: the host drains queued work from its own handlers, or runs
-    /// no queued work at all.
-    Disabled,
-}
-
-impl std::fmt::Debug for RestateQueuedWork {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::Engine(_) => "Engine",
-            Self::Disabled => "Disabled",
-        })
-    }
-}
-
-impl From<RestateQueuedWork> for BackendQueuedWork {
-    fn from(queued_work: RestateQueuedWork) -> Self {
-        match queued_work {
-            RestateQueuedWork::Engine(driver) => Self::Engine(driver),
-            RestateQueuedWork::Disabled => Self::Disabled,
-        }
-    }
-}
 
 /// How a [`RestateEngine`] reaches Restate and under which authority and
 /// build it journals.
@@ -60,14 +27,14 @@ pub struct RestateConfig {
     connection: RestateConnection,
     authority: RestateAuthorityId,
     build_generation: BuildGeneration,
-    queued_work: RestateQueuedWork,
     process_event_sink: Option<Arc<dyn ProcessEventSink>>,
 }
 
 impl RestateConfig {
     /// Reach Restate at `connection` under `authority` as a deployment of the
-    /// build whose drain generation is `build_generation`, with `queued_work`
-    /// running the store set's queued session work.
+    /// build whose drain generation is `build_generation`. The engine's
+    /// sessions' drives run on the `LashSession` and `LashTurn` services its
+    /// endpoint builder binds, and both record and stamp that generation.
     ///
     /// `build_generation` is the facade's `formats::build_generation()`
     /// answer: lash-restate cannot compute it (the format manifest lives in
@@ -78,13 +45,11 @@ impl RestateConfig {
         connection: impl Into<RestateConnection>,
         authority: RestateAuthorityId,
         build_generation: BuildGeneration,
-        queued_work: RestateQueuedWork,
     ) -> Self {
         Self {
             connection: connection.into(),
             authority,
             build_generation,
-            queued_work,
             process_event_sink: None,
         }
     }
@@ -111,7 +76,7 @@ pub struct RestateEngine {
     build_generation: BuildGeneration,
     effect_host: Arc<RestateEffectHost>,
     process: Arc<RestateProcessDeployment>,
-    queued_work: BackendQueuedWork,
+    session_work: Arc<RestateSessionWork>,
 }
 
 impl RestateEngine {
@@ -121,7 +86,6 @@ impl RestateEngine {
             connection,
             authority,
             build_generation,
-            queued_work,
             process_event_sink,
         } = config;
         let effect_host = Arc::new(RestateEffectHost::new(
@@ -135,13 +99,18 @@ impl RestateEngine {
             stores.process_continuations(),
             process_event_sink,
         ));
+        let session_work = Arc::new(RestateSessionWork::new(
+            RestateIngressClient::new(connection.clone()),
+            crate::RestateSessionDriverSlot::new(),
+            build_generation.clone(),
+        ));
         Self {
             stores,
             connection,
             build_generation,
             effect_host,
             process,
-            queued_work: queued_work.into(),
+            session_work,
         }
     }
 
@@ -150,8 +119,10 @@ impl RestateEngine {
     /// bound: the durable-wait workflow and index, process attach, the
     /// process workflow over `processes` (a [`DurableProcessWorker`], or a
     /// [`RestateProcessServing`] that also sets the segment policy), and the
-    /// effect-group index, payload and dispatcher. The host binds only its own services — its
-    /// turn workflows, triggers and cron — on the builder, then builds it.
+    /// effect-group index, payload and dispatcher, and the session driver
+    /// (`LashSession`, `LashTurn`) that runs every session's turns. The host
+    /// binds only its own services — its triggers and cron — on the builder,
+    /// then builds it.
     ///
     /// There is no other way to bind lash's services, so an endpoint cannot
     /// serve a subset of them. A process that only submits work to Restate
@@ -174,6 +145,8 @@ impl RestateEngine {
                 ingress: RestateIngressClient::new(self.connection.clone()),
                 sessions: self.stores.session_store_factory(),
                 process_workflow: self.process.workflow(processes.into()),
+                session_driver: self.session_work.driver_slot().clone(),
+                build_generation: self.build_generation.clone(),
             },
         )
     }
@@ -216,6 +189,12 @@ impl RestateEngine {
         )
     }
 
+    /// The engine that runs this backend's session drives: a drive is a send
+    /// to the session's `LashSession` object.
+    pub fn session_work_engine(&self) -> &Arc<RestateSessionWork> {
+        &self.session_work
+    }
+
     /// Attachment to a turn's reserved terminal promise.
     pub fn turn_attach(&self) -> Arc<RestateTurnAttach> {
         self.effect_host.turn_attach_handle()
@@ -239,8 +218,8 @@ impl lash_core::EffectEngine for RestateEngine {
         Some(self.process.process_work())
     }
 
-    fn queued_work(&self) -> BackendQueuedWork {
-        self.queued_work.clone()
+    fn session_work(&self) -> Option<Arc<dyn SessionWorkEngine>> {
+        Some(Arc::clone(&self.session_work) as Arc<dyn SessionWorkEngine>)
     }
 }
 

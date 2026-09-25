@@ -67,11 +67,14 @@ pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effect
             .iter()
             .any(|record| record.kind == lash_core::RuntimeEffectKind::LlmCall)
     );
+    // Every effect but the drive's admission names its turn: admission runs
+    // before a root exists, and names the session alone (FIG-3600).
     assert!(invocations.iter().all(|record| {
-        record
-            .turn_id
-            .as_deref()
-            .is_some_and(|turn_id| !turn_id.trim().is_empty())
+        record.kind == lash_core::RuntimeEffectKind::AdmitDrive
+            || record
+                .turn_id
+                .as_deref()
+                .is_some_and(|turn_id| !turn_id.trim().is_empty())
     }));
     Ok(())
 }
@@ -127,10 +130,24 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
     assert_eq!(run.assistant_message(), Some("echo: run"));
     assert_eq!(
         recorder.scopes(),
+        // Each direct turn runs its admission under the drive request's own
+        // scope, then its root under the turn's (FIG-3600).
         vec![
             lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-stream-to"),
+            lash_core::ExecutionScope::queue_drain(
+                "durable-default-effect-host",
+                "drive:turn:durable-stream-to"
+            ),
             lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-run"),
+            lash_core::ExecutionScope::queue_drain(
+                "durable-default-effect-host",
+                "drive:turn:durable-run"
+            ),
             lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-stream"),
+            lash_core::ExecutionScope::queue_drain(
+                "durable-default-effect-host",
+                "drive:turn:durable-stream"
+            ),
             lash_core::ExecutionScope::queue_drain(
                 "durable-default-effect-host",
                 "durable-queue-drain"

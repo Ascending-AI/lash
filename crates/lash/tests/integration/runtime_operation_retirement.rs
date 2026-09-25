@@ -424,8 +424,8 @@ impl lash::EffectEngine for WithHost {
         self.inner.process_work()
     }
 
-    fn queued_work(&self) -> lash::BackendQueuedWork {
-        self.inner.queued_work()
+    fn session_work(&self) -> Option<std::sync::Arc<dyn lash::runtime::SessionWorkEngine>> {
+        self.inner.session_work()
     }
 }
 

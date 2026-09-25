@@ -84,7 +84,8 @@ pub use commit_identity::{
 pub use config_command_plan::{ConfigCommandPlan, plan_config_commands};
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
-    SessionHeadRef, StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
+    InMemoryDriveEpochs, SessionHeadRef, StoredDriveEpoch, decide_drive_epoch_seal,
+    require_current_drive_fence,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{
@@ -2195,8 +2196,9 @@ pub trait StoreMaintenance: Send + Sync {
 /// [`SessionCommitStore`] (atomic graph/head commits, reads, metadata, and the
 /// attachment write-ahead manifest), [`TurnInputStore`] (pending turn-input
 /// lifecycle), [`QueuedWorkStore`] (queued-work ingress and claiming),
-/// [`SessionExecutionLeaseStore`] (single-writer execution lane), and
-/// [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
+/// [`SessionExecutionLeaseStore`] (single-writer execution lane),
+/// [`DriveEpochStore`] (the drive epoch a session drive's seal raises, FIG-3600)
+/// and [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
 /// domain: claims granted by the input and queue segments settle atomically in
 /// [`SessionCommitStore::commit_runtime_state`]. In-flight nondeterministic
 /// work belongs to the active [`EffectHost`](crate::EffectHost), not to the
@@ -2214,6 +2216,7 @@ pub trait RuntimePersistence:
     + TurnInputStore
     + SessionExecutionLeaseStore
     + QueuedWorkStore
+    + DriveEpochStore
     + StoreMaintenance
 {
 }
@@ -2223,6 +2226,7 @@ impl<T> RuntimePersistence for T where
         + TurnInputStore
         + SessionExecutionLeaseStore
         + QueuedWorkStore
+        + DriveEpochStore
         + StoreMaintenance
         + ?Sized
 {
