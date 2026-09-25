@@ -135,7 +135,7 @@ fn registration(label: &str, leased: bool) -> lash_core::ProcessRegistration {
 }
 
 struct Fixture {
-    _dir: tempfile::TempDir,
+    _dir: Option<tempfile::TempDir>,
     registry: Arc<dyn ProcessRegistry>,
     hub: Arc<ProcessObservationHub>,
     process_id: ProcessId,
@@ -148,15 +148,26 @@ impl Fixture {
     }
 
     async fn with_config(name: &str, leased: bool, config: ProcessObservationConfig) -> Self {
-        let dir = tempfile::tempdir().expect("L8 tempdir");
-        let registry: Arc<dyn ProcessRegistry> = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(
-                &dir.path().join("processes.db"),
-                dir.path().join("sessions"),
+        // A leased fixture stays on the file registry: `claim_process_lease`
+        // below is an S6 fence signal (D5). An unleased fixture only needs
+        // the store port, so it runs on the memory store set.
+        let (dir, registry): (_, Arc<dyn ProcessRegistry>) = if leased {
+            let dir = tempfile::tempdir().expect("L8 tempdir");
+            let registry = Arc::new(
+                lash_sqlite_store::SqliteProcessRegistry::open(
+                    &dir.path().join("processes.db"),
+                    dir.path().join("sessions"),
+                )
+                .await
+                .expect("open SQLite process registry"),
+            );
+            (Some(dir), registry)
+        } else {
+            (
+                None,
+                crate::tests::memory_store_set().await.process_registry(),
             )
-            .await
-            .expect("open SQLite process registry"),
-        );
+        };
         let process_id = registry
             .register_process(registration(name, leased))
             .await
