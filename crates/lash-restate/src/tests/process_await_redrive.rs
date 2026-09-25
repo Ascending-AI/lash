@@ -1930,41 +1930,6 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
     );
 }
 
-#[test]
-pub(super) fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_state() {
-    let error = validate_durable_wait_index_epoch(None, &["waits".to_string()])
-        .expect_err("pre-cutover aggregate state must be rejected");
-    assert!(error.contains("drain and recreate"));
-    assert!(
-        validate_durable_wait_index_epoch(None, &["wait-index/v1/metadata".to_string()])
-            .expect_err("v1 wait-index state must be rejected")
-            .contains("pre-cutover")
-    );
-    validate_durable_wait_index_epoch(None, &[]).expect("fresh state opens");
-    validate_durable_wait_index_epoch(
-        Some(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
-        &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
-    )
-    .expect("matching epoch reopens current state");
-    let wrong_epoch = validate_durable_wait_index_epoch(
-        Some(DURABLE_WAIT_INDEX_IDENTITY_EPOCH - 1),
-        &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
-    )
-    .expect_err("wrong identity epoch must be rejected");
-    assert!(wrong_epoch.contains("incompatible with epoch 6"));
-    assert!(wrong_epoch.contains("drain and recreate"));
-    assert!(DURABLE_WAIT_INDEX_METADATA_KEY.starts_with("wait-index/v2/"));
-}
-
-#[test]
-pub(super) fn durable_wait_identity_epoch_six_rejects_epoch_five_state() {
-    let error =
-        validate_durable_wait_index_epoch(Some(5), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
-            .expect_err("epoch-5 durable-wait state must not open under epoch 6");
-    assert!(error.contains("identity epoch 5 is incompatible with epoch 6"));
-    assert!(error.contains("drain and recreate"));
-}
-
 pub(super) fn wait_index_measurement_key(ordinal: usize) -> AwaitEventKey {
     restate_await_event_key(
         &durable_turn_scope("restate-postgres-workers-e2e", "measurement"),

@@ -19,12 +19,9 @@
 //! from ingress-side `RestateEffectHostController::await_event_key`, which is not
 //! executing inside a Restate journal and still refuses revoked sessions eagerly.
 //!
-//! Identity epoch 6 is a hard cutover: every externally minted wait request
-//! and indexed state value carries the full authority-bound [`AwaitEventKey`]
-//! preimage, and handlers derive scope, classification, and workflow address
-//! locally. Deployments must drain and recreate both durable-wait services
-//! before upgrading; there is no tolerant decoder, address migration, or
-//! overlap window for pre-epoch-6 state.
+//! Every externally minted wait request and indexed state value carries the
+//! full authority-bound [`AwaitEventKey`] preimage, and handlers derive scope,
+//! classification, and workflow address locally.
 
 use lash_sansio::SessionId;
 use std::time::Duration;
@@ -132,11 +129,6 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// decoder rejects the version-1 field instead of silently granting a fresh
 /// relative timeout after a worker replacement.
 pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
-/// Identity epoch the durable-wait index stamps into its object state; an
-/// object holding another epoch, or pre-cutover state with none, is refused at
-/// open with a drain-and-recreate instruction.
-pub const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 6;
-const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
 const DURABLE_WAIT_INDEX_RESOLUTION_PREFIX: &str = "wait-index/v2/resolution/";
@@ -756,10 +748,9 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
                 serde_json::from_str(&payload).map_err(TerminalError::from_error)?
             };
 
-        // A workflow that wakes after a deployment upgrade must cross the
-        // index epoch gate before it can return a resolution. Restate replays
-        // the old registration command, so this settle call is the first new
-        // command a previously parked invocation can execute. Fully parked v2
+        // A workflow that wakes after a deployment upgrade replays the old
+        // registration command, so this settle call is the first new command
+        // a previously parked invocation can execute. Fully parked v2
         // invocations never reach it; the module and migration docs therefore
         // require a pre-cutover drain/purge rather than claiming self-healing.
         let settle = ctx
@@ -963,54 +954,15 @@ pub(crate) fn durable_wait_address_from_state_key(
         .then_some(address)
 }
 
-pub(crate) fn validate_durable_wait_index_epoch(
-    stored_epoch: Option<u8>,
-    existing_keys: &[String],
-) -> Result<(), String> {
-    match stored_epoch {
-        Some(DURABLE_WAIT_INDEX_IDENTITY_EPOCH) => Ok(()),
-        Some(epoch) => Err(format!(
-            "Lash Restate await-event identity epoch {epoch} is incompatible with epoch {DURABLE_WAIT_INDEX_IDENTITY_EPOCH}; drain and recreate LashDurableWaitIndex and LashDurableWaitWorkflow state before opening this deployment"
-        )),
-        None if existing_keys.is_empty() => Ok(()),
-        None => Err(format!(
-            "pre-cutover Lash Restate await-event state was found without identity epoch {DURABLE_WAIT_INDEX_IDENTITY_EPOCH}; drain and recreate LashDurableWaitIndex and LashDurableWaitWorkflow state before opening this deployment"
-        )),
-    }
-}
-
-async fn open_durable_wait_index_epoch(ctx: &ObjectContext<'_>) -> Result<(), TerminalError> {
-    let stored_epoch = ctx
-        .get::<Json<u8>>(DURABLE_WAIT_INDEX_EPOCH_KEY)
-        .await?
-        .map(|Json(epoch)| epoch);
-    let existing_keys = if stored_epoch == Some(DURABLE_WAIT_INDEX_IDENTITY_EPOCH) {
-        Vec::new()
-    } else {
-        ctx.get_keys().await?
-    };
-    validate_durable_wait_index_epoch(stored_epoch, &existing_keys).map_err(TerminalError::new)?;
-    if stored_epoch.is_none() {
-        ctx.set(
-            DURABLE_WAIT_INDEX_EPOCH_KEY,
-            Json(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
-        );
-    }
-    Ok(())
-}
-
-/// Open the v2 wait index only inside the await-event v4 identity epoch.
+/// Load the index's metadata, initializing it for a pristine object.
 ///
 /// Restate object state is not part of an invocation's replayed journal: these
 /// index handlers are short-lived single calls, so changing their command
 /// sequence does not alter an in-flight multi-call journal. Object state does,
-/// however, survive a deployment upgrade. Any object with pre-cutover state
-/// but no matching epoch marker is rejected with a recreate instruction; old
-/// wait addresses are never migrated into the v4 identity world.
+/// however, survive a deployment upgrade.
 async fn load_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<RestateDurableWaitIndexMetadata, TerminalError> {
-    open_durable_wait_index_epoch(ctx).await?;
     if let Some(Json(metadata)) = ctx
         .get::<Json<RestateDurableWaitIndexMetadata>>(DURABLE_WAIT_INDEX_METADATA_KEY)
         .await?
@@ -1023,24 +975,23 @@ async fn load_durable_wait_index_metadata(
     Ok(metadata)
 }
 
+/// The index's metadata when the object holds any state, `None` when the
+/// object is pristine. State without a metadata row reads as a default one,
+/// the same answer the epoch era gave a marked object whose metadata had not
+/// yet been written.
 async fn read_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
-    let existing_keys = ctx.get_keys().await?;
-    let stored_epoch = ctx
-        .get::<Json<u8>>(DURABLE_WAIT_INDEX_EPOCH_KEY)
+    if let Some(Json(metadata)) = ctx
+        .get::<Json<RestateDurableWaitIndexMetadata>>(DURABLE_WAIT_INDEX_METADATA_KEY)
         .await?
-        .map(|Json(epoch)| epoch);
-    validate_durable_wait_index_epoch(stored_epoch, &existing_keys).map_err(TerminalError::new)?;
-    let Some(_) = stored_epoch else {
+    {
+        return Ok(Some(metadata));
+    }
+    if ctx.get_keys().await?.is_empty() {
         return Ok(None);
-    };
-    Ok(Some(
-        ctx.get::<Json<RestateDurableWaitIndexMetadata>>(DURABLE_WAIT_INDEX_METADATA_KEY)
-            .await?
-            .map(|Json(metadata)| metadata)
-            .unwrap_or_default(),
-    ))
+    }
+    Ok(Some(RestateDurableWaitIndexMetadata::default()))
 }
 
 async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey>, TerminalError> {
@@ -1164,10 +1115,6 @@ async fn revoke_index(
     let awakeables = std::mem::take(&mut metadata.awakeables);
     metadata.revoked = true;
     ctx.clear_all();
-    ctx.set(
-        DURABLE_WAIT_INDEX_EPOCH_KEY,
-        Json(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
-    );
     ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
     for entry in awakeables {
         revoke_durable_wait_awakeable(ctx, &entry);
