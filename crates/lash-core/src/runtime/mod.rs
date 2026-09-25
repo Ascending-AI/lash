@@ -376,10 +376,7 @@ pub use turn_input_ingress::{
     TurnInputIngress, TurnInputSettlementClaim, TurnInputState, TurnInputStateKind,
 };
 pub use turn_loop::ensure_durable_effect_input;
-#[cfg(feature = "testing")]
 pub use turn_queue::SessionCommandSettlement;
-#[cfg(not(feature = "testing"))]
-pub(crate) use turn_queue::SessionCommandSettlement;
 pub(crate) use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
     DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
