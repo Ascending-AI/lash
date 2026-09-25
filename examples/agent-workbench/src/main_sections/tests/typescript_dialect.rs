@@ -274,11 +274,11 @@ fn the_workbench_typescript_tutorials_link() {
 /// Linking is not execution: the refusals that matter most to prompt copy fire
 /// in the VM.
 ///
-/// `"..." + handle` links cleanly and then refuses at runtime with
-/// `TS_OBJECT_STRING_COERCION` (a plain object has no string the dialect will
-/// guess), which is exactly what a model copying the tutorial verbatim hit on
-/// the workbench (FIG-3211). So every tutorial is *run*, not just linked, and
-/// the control below proves this harness can still see that refusal.
+/// `"..." + handle` links cleanly and then finishes with `[object Object]` in
+/// place of the handle's key (a plain object's string is its type tag), which
+/// is the placeholder a model copying the old tutorial verbatim produced on the
+/// workbench (FIG-3211). So every tutorial is *run*, not just linked, and the
+/// control below proves this harness can still see that placeholder.
 struct TutorialHost {
     environment: lashlang::LashlangHostEnvironment,
 }
@@ -469,8 +469,10 @@ async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
 
     // Non-vacuity, and the regression itself: put the handle back into the
     // string the way the prompt used to spell it, and the same harness must
-    // refuse it. A prompt that stopped rendering a handle field would fail the
-    // substitution assertion rather than pass this test vacuously.
+    // show the placeholder it would finish with: a plain object's string is
+    // ECMA's type tag (FIG-3652). A prompt that stopped rendering a handle
+    // field would fail the substitution assertion rather than pass this test
+    // vacuously.
     let button_watcher = programs
         .iter()
         .find(|program| program.contains("button watcher"))
@@ -481,12 +483,12 @@ async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
         "the button-watcher tutorial must render the handle's string-formed field"
     );
     let regressed = button_watcher.replace("handle.subscription_key", "handle");
-    let problem = run_tutorial(&regressed)
+    let finished = run_tutorial(&regressed)
         .await
-        .expect_err("string-concatenating a registration handle must be refused");
+        .expect("string-concatenating a registration handle runs");
     assert!(
-        problem.contains("TS_OBJECT_STRING_COERCION"),
-        "the refusal this prompt copy must never teach: {problem}"
+        format!("{finished:?}").contains("[object Object]"),
+        "the placeholder this prompt copy must never teach: {finished:?}"
     );
 }
 

@@ -72,10 +72,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 bindings,
             );
             refresh_iterators(&mut frame.iter_stack, bindings);
-            if let ReturnTarget::Callback(driver) = &mut frame.return_target {
-                projected_refresh::refresh_value(&mut driver.function, bindings);
-                projected_refresh::refresh_values(&mut driver.calls, bindings);
-                projected_refresh::refresh_values(&mut driver.results, bindings);
+            match &mut frame.return_target {
+                ReturnTarget::Callback(driver) => {
+                    projected_refresh::refresh_value(&mut driver.function, bindings);
+                    projected_refresh::refresh_values(&mut driver.calls, bindings);
+                    projected_refresh::refresh_values(&mut driver.results, bindings);
+                }
+                ReturnTarget::Coercion(driver) => {
+                    projected_refresh::refresh_value(&mut driver.object, bindings);
+                }
+                ReturnTarget::Direct => {}
             }
         }
         for finally in &mut self.finally_stack {

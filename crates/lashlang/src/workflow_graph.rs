@@ -51,8 +51,11 @@ pub use projection::{
 /// (FIG-3700) adds call receivers: `FunctionExpr.receiver`, `Expr::MethodCall`
 /// and `Expr::ThisCall`; v17 graph documents are refused. Version 19
 /// (FIG-3730) adds the bitwise and shift operators to `JavaScriptUnaryOp` and
-/// `JavaScriptBinaryOp`; v18 graph documents are refused.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 19;
+/// `JavaScriptBinaryOp`; v18 graph documents are refused. Version 20
+/// (FIG-3652) adds the `JavaScriptUnaryOp::ToString` operator the lowerer now
+/// wraps template and concatenation operands in; v19 graph documents are
+/// refused.
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 20;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(

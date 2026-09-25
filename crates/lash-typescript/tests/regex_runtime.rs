@@ -775,13 +775,11 @@ fn match_and_search_coerce_non_regexp_arguments() {
         finished("finish('xBy'.match(/b/i)[0]);"),
         Value::String("B".into())
     );
-    // An object whose own methods would answer ToString must refuse: the
-    // dialect cannot run guest code inside the coercion.
-    let error = execute("finish('AB'.match({ toString: function() { return 'AB'; } }));")
-        .expect_err("an object with a guest toString must refuse");
-    assert!(
-        error.to_string().contains("TS_OBJECT_STRING_COERCION"),
-        "the refusal is the named one: {error}"
+    // An object's own toString answers the ToString RegExpCreate performs
+    // (FIG-3652).
+    assert_eq!(
+        finished("finish('xAB'.match({ toString: function() { return 'AB'; } })[0]);"),
+        Value::String("AB".into())
     );
 }
 
@@ -810,16 +808,14 @@ fn match_and_search_evaluate_every_argument_in_order() {
 }
 
 #[test]
-fn regexp_constructor_flags_object_coercion_refuses() {
-    // `new RegExp(regexp, flags)` must apply the same guest-coercion guard to
-    // flags as the string-coercion paths do (FIG-3698).
-    let error = execute(
-        "const p=/a/g; const f={toString:function(){return 'i';}}; finish(new RegExp(p, f).flags);",
-    )
-    .expect_err("an object with a guest toString must refuse as flags");
-    assert!(
-        error.to_string().contains("TS_OBJECT_STRING_COERCION"),
-        "the refusal is the named one: {error}"
+fn regexp_constructor_flags_object_coercion_runs_the_hook() {
+    // `new RegExp(regexp, flags)` coerces flags through ToString, which runs
+    // the object's own `toString` (FIG-3652).
+    assert_eq!(
+        finished(
+            "const p=/a/g; const f={toString:function(){return 'i';}}; finish(new RegExp(p, f).flags);",
+        ),
+        Value::String("i".into())
     );
     // String and absent flags still work.
     assert_eq!(

@@ -38,6 +38,9 @@ impl CallArguments<'_> {
 pub(super) enum ReturnTarget {
     Direct,
     Callback(CallbackDriver),
+    /// A guest `valueOf`/`toString` a coercion called (FIG-3652): its answer
+    /// goes to the suspended instruction's log, not the operand stack.
+    Coercion(CoercionDriver),
 }
 
 #[derive(Clone)]
@@ -472,10 +475,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     /// Hands a call's `result` to whatever started the call: the operand
-    /// stack for a direct call, or the callback driver, which records it and
-    /// starts the next callback. A frame's return and a built-in that answers
-    /// without a frame both finish here, so a built-in used as a callback is
-    /// driven exactly as a closure is.
+    /// stack for a direct call, the callback driver, which records it and
+    /// starts the next callback, or the coercion driver, which logs the
+    /// primitive a guest `valueOf`/`toString` hook answered. A frame's return
+    /// and a built-in that answers without a frame both finish here, so a
+    /// built-in used as a callback or a coercion hook is driven exactly as a
+    /// closure is.
     ///
     /// A built-in callee answers without a frame, so its callbacks are driven
     /// here in a loop rather than by recursing once per element.
@@ -485,9 +490,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
         mut return_target: ReturnTarget,
     ) -> Result<(), RuntimeError> {
         loop {
-            let ReturnTarget::Callback(mut callback) = return_target else {
-                self.stack.push(result);
-                return Ok(());
+            let mut callback = match return_target {
+                ReturnTarget::Direct => {
+                    self.stack.push(result);
+                    return Ok(());
+                }
+                // A hook's answer goes to the suspended instruction's log,
+                // not the operand stack.
+                ReturnTarget::Coercion(driver) => {
+                    return self.finish_guest_hook(driver, result);
+                }
+                ReturnTarget::Callback(callback) => callback,
             };
             {
                 if matches!(callback.completion, CallbackCompletion::Collect) {

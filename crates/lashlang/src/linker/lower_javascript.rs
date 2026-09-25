@@ -10,7 +10,9 @@ impl<'module> Linker<'module> {
     ) -> Result<(Expr, Binding), LinkError> {
         let ty = match op {
             crate::ast::JavaScriptUnaryOp::Not => TypeExpr::Bool,
-            crate::ast::JavaScriptUnaryOp::TypeOf => TypeExpr::Str,
+            crate::ast::JavaScriptUnaryOp::TypeOf | crate::ast::JavaScriptUnaryOp::ToString => {
+                TypeExpr::Str
+            }
             crate::ast::JavaScriptUnaryOp::Plus
             | crate::ast::JavaScriptUnaryOp::Negate
             | crate::ast::JavaScriptUnaryOp::BitNot => TypeExpr::Float,

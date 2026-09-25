@@ -58,8 +58,18 @@ impl Lowerer {
             .collect::<Vec<_>>();
         // A call this lowering cannot type with placeholder arguments is left
         // to the dynamic path, as it was before builtins took spreads.
-        let Ok(mut lowered) = self.lower_call(callee, &marked) else {
-            return Ok(None);
+        let mut lowered = match self.lower_call(callee, &marked) {
+            Ok(lowered) => lowered,
+            // A built-in method the surface refuses is refused whatever its
+            // argument list; only a shape the placeholders cannot type takes
+            // the dynamic path.
+            Err(refusal)
+                if matches!(callee, Expr::Member { .. })
+                    && refusal.kind == crate::DiagnosticKind::Refusal =>
+            {
+                return Err(refusal);
+            }
+            Err(_) => return Ok(None),
         };
         let arguments = self.lower_argument_list(args)?;
         let mut arguments = Some(arguments);

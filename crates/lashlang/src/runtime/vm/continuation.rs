@@ -94,9 +94,15 @@ use super::exceptions::PendingErrorOrigin;
 /// continuation was laid out without them and its reader meets an unknown
 /// kind, so it is refused.
 ///
+/// v25 (FIG-3652) extends the serialized error vocabulary: a pending error
+/// may be `GuestCoercionPending`, the internal marker a coercing instruction
+/// raises so the VM can run the object's `valueOf`/`toString` hook and rerun
+/// the instruction. A v24 continuation's reader meets the unknown variant, so
+/// it is refused.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 24;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 25;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
@@ -1108,6 +1114,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_function: None,
             frames: Vec::new(),
             slot_scratch: None,
+            guest_coercions: Vec::new(),
             projected_bindings: host.projected_bindings(),
             handlers: Vec::new(),
             finally_stack: Vec::new(),
@@ -1171,6 +1178,14 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 .collect::<Result<Vec<_>, _>>()?;
             let return_target = match &frame.return_target {
                 ReturnTarget::Direct => VmFrameReturnContinuation::Direct,
+                // Unreachable at a suspension point: a hook cannot perform the
+                // effect a continuation is captured after.
+                ReturnTarget::Coercion(_) => {
+                    return Err(ContinuationError::UnserializableValue {
+                        location: "frame return target".to_string(),
+                        variant: "guest coercion",
+                    });
+                }
                 ReturnTarget::Callback(callback) => VmFrameReturnContinuation::Callback {
                     function: callback.function.clone(),
                     calls: callback.calls.clone(),
@@ -1492,6 +1507,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_function,
             frames,
             slot_scratch: None,
+            guest_coercions: Vec::new(),
             projected_bindings: host.projected_bindings(),
             handlers,
             finally_stack,

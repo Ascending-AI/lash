@@ -238,6 +238,9 @@ pub struct Vm<'a, H> {
     /// is all such a loop needs: every element returns before the next one is
     /// called.
     slot_scratch: Option<SlotState>,
+    /// The answers each instruction suspended for a guest `valueOf`/`toString`
+    /// has collected, innermost last (FIG-3652). Empty outside a coercion.
+    guest_coercions: Vec<GuestCoercionLog>,
     /// The host's projected-binding declaration, captured once at build or
     /// resume — the same map `SlotState::from_globals` and
     /// `refresh_projected` seed from. A root slot whose name is in it is
@@ -1636,6 +1639,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 }
 mod functions;
 use functions::*;
+mod guest_coercion;
+use guest_coercion::*;
 mod assignment;
 mod iteration;
 mod projected_restore;

@@ -102,6 +102,7 @@ impl FrameRootView for CallFrame {
             ReturnTarget::Callback(callback) => {
                 Some((&callback.function, &callback.calls, &callback.results))
             }
+            ReturnTarget::Coercion(driver) => Some((&driver.object, &[], &[])),
         }
     }
 }

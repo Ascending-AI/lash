@@ -3,7 +3,7 @@ FIG-3698	1	accept	"(() => { let i=0; 'a'.match(/a/, i++); return i; })()"	"1"	-
 FIG-3698	2	accept	"(() => { let i=0; 'a'.search(/a/, i++); return i; })()"	"1"	-
 FIG-3698	3	accept	"(() => { let i=0; return 'ab'.match(/b/, i++)[0] + '|' + i; })()"	"b|1"	-
 FIG-3698	4	accept	"(() => { let i=0; return 'ab'.search(/b/, i++) + '|' + i; })()"	"1|1"	-
-FIG-3698	5	runtime-reject	"(() => { const p=/a/g; const f={toString: function() { return 'i'; }}; return new RegExp(p,f).flags; })()"	"i"	TS_OBJECT_STRING_COERCION
+FIG-3698	5	accept	"(() => { const p=/a/g; const f={toString: function() { return 'i'; }}; return new RegExp(p,f).flags; })()"	"i"	-
 FIG-3698	6	accept	"/\\u017F/i.test('s')"	"false"	-
 FIG-3698	7	accept	"/\\u017F/i.test('\\u017F')"	"true"	-
 FIG-3698	8	accept	"/k/i.test('\\u212A')"	"false"	-

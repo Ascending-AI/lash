@@ -5,6 +5,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 mod builtin_functions;
 mod closure_reach;
+pub(crate) mod guest_coercion;
 mod id;
 mod javascript_exotics;
 mod object;
@@ -105,14 +106,14 @@ pub(crate) struct Heap {
     /// the clock is not a decision input: warm and cold workers persist the
     /// same state (`warm_and_cold_captures_persist_byte_identical_state`).
     revisions: FxHashMap<HeapId, u64>,
-    /// The stamp every object not in `revisions` answers with: drawn when the
-    /// heap is built, so a heap rebuilt from a wire reads as entirely unlike
-    /// any capture taken before, rather than as unwritten.
+    /// The stamp of every object absent from `revisions`, drawn at build: a
+    /// heap rebuilt from a wire reads as unlike any capture, not unwritten.
     base_revision: u64,
     /// The one object each built-in function value lives in. It is an index
     /// over `entries`, never state of its own: a wire rebuilds it from the
     /// objects it carries, and a sweep drops what it collected.
     builtin_functions: BTreeMap<BuiltinFunction, HeapId>,
+    pub(crate) guest_coercion: guest_coercion::GuestCoercionReplay,
 }
 
 /// The next write stamp; see [`Heap::revisions`].
@@ -148,6 +149,7 @@ impl Default for Heap {
             revisions: FxHashMap::default(),
             base_revision: next_revision(),
             builtin_functions: BTreeMap::new(),
+            guest_coercion: guest_coercion::GuestCoercionReplay::default(),
         }
     }
 }
@@ -1588,6 +1590,7 @@ impl Clone for Heap {
             revisions: self.revisions.clone(),
             base_revision: self.base_revision,
             builtin_functions: self.builtin_functions.clone(),
+            guest_coercion: guest_coercion::GuestCoercionReplay::default(),
         }
     }
 }

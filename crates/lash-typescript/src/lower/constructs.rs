@@ -237,7 +237,7 @@ impl Lowerer {
         let value = self.temporary("conversion_value");
         let input = Self::variable(&value);
         let body = match name {
-            "String" => js_add(LashExpr::String("".into()), input),
+            "String" => js_unary(JavaScriptUnaryOp::ToString, input),
             "Number" => js_unary(JavaScriptUnaryOp::Plus, input),
             "Boolean" => js_unary(
                 JavaScriptUnaryOp::Not,

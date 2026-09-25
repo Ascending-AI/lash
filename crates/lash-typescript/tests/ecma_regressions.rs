@@ -1428,7 +1428,7 @@ fn array_last_index_of_distinguishes_omitted_from_explicit_undefined() {
 /// while a `fromIndex` whose coercion would run a guest `toString`/`valueOf`
 /// refuses rather than silently reading `NaN`.
 #[test]
-fn array_searches_keep_reference_identity_and_refuse_guest_from_index() {
+fn array_searches_keep_reference_identity_and_convert_a_guest_from_index() {
     assert_eq!(
         finished("const r=/x/; finish([0,true,r,3,false].lastIndexOf(r,2));"),
         Value::Number(2.0)
@@ -1446,12 +1446,10 @@ fn array_searches_keep_reference_identity_and_refuse_guest_from_index() {
         finished("const r=/x/; finish([[r],r].includes(r));"),
         Value::Bool(true)
     );
-    let error =
-        execute("finish([0,1,2].lastIndexOf(2, { toString: function() { return '2'; } }));")
-            .expect_err("a fromIndex with a guest toString must refuse");
-    assert!(
-        error.to_string().contains("TS_OBJECT_STRING_COERCION"),
-        "the refusal is the named one: {error}"
+    // A fromIndex object's own toString answers its ToNumber (FIG-3652).
+    assert_eq!(
+        finished("finish([0,1,2].lastIndexOf(2, { toString: function() { return '2'; } }));"),
+        Value::Number(2.0)
     );
     // An object with no coercion methods has only a type tag for ECMA: NaN.
     assert_eq!(
@@ -2283,12 +2281,21 @@ fn builtin_method_reads_are_identity_stable_functions() {
     ] {
         assert_eq!(finished(source), Value::Bool(true), "{source}");
     }
-    assert_eq!(
-        finished("finish(String([].map) + '|' + ('x'.includes + ''));"),
-        Value::String(
-            "function map() { [native code] }|function includes() { [native code] }".into()
-        )
-    );
+    // A built-in method value in a coercion is a function: its primitive
+    // would be Function.prototype.toString's source text, which the runtime
+    // does not keep, so it refuses as `TS_FUNCTION_STRING_COERCION` (the
+    // FIG-3652 ruling).
+    for source in [
+        "finish(String([].map));",
+        "finish('x'.includes + '');",
+        "finish(`${'x'.includes}`);",
+    ] {
+        let error = execute(source).expect_err("a built-in function has no primitive");
+        assert!(
+            error.to_string().contains("TS_FUNCTION_STRING_COERCION"),
+            "the refusal is the named one for {source}: {error}"
+        );
+    }
     assert_eq!(
         finished("finish(JSON.stringify({ f: 'x'.includes, a: [[].map], n: 1 }));"),
         Value::String("{\"a\":[null],\"n\":1}".into())

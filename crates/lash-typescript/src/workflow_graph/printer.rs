@@ -978,6 +978,9 @@ impl<'p> Printer<'p> {
                     JavaScriptUnaryOp::Not => "!",
                     JavaScriptUnaryOp::TypeOf => "typeof ",
                     JavaScriptUnaryOp::BitNot => "~",
+                    JavaScriptUnaryOp::ToString => {
+                        return Ok(format!("String({})", self.expression(expr)?));
+                    }
                 };
                 Ok(format!("{op}{}", self.unary_operand(expr)?))
             }
@@ -989,9 +992,9 @@ impl<'p> Printer<'p> {
             )),
             Expr::JavaScriptBinary { left, op, right } => Ok(format!(
                 "({} {} {})",
-                self.expression(left)?,
+                self.binary_operand(left)?,
                 javascript_binary_op(*op),
-                self.expression(right)?
+                self.binary_operand(right)?
             )),
             Expr::JavaScriptLogical { left, op, right } => Ok(format!(
                 "({} {} {})",
@@ -1260,6 +1263,17 @@ impl<'p> Printer<'p> {
             | Expr::Index { .. } => self.expression(expression),
             _ => Ok(format!("({})", self.expression(expression)?)),
         }
+    }
+
+    /// An arrow is an AssignmentExpression, so as an operand it needs
+    /// parentheses.
+    fn binary_operand(&self, expression: &Expr) -> Printed {
+        let printed = self.expression(expression)?;
+        Ok(if matches!(expression, Expr::Function(_)) {
+            format!("({printed})")
+        } else {
+            printed
+        })
     }
 
     fn unary_operand(&self, expression: &Expr) -> Printed {

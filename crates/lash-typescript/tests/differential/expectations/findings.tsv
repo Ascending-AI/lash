@@ -383,8 +383,8 @@ findings	381	accept	"(() => { const r=/x/; return [0,true,r,3,false].lastIndexOf
 findings	382	accept	"(() => { const r=/x/; return [0,true,3,r,false].lastIndexOf(r,2); })()"	"-1"	-
 findings	383	accept	"[0,/x/,3].indexOf(/x/)"	"-1"	-
 findings	384	accept	"(() => { const r=/x/; return [[r],r].includes(r); })()"	"true"	-
-findings	385	runtime-reject	"'AB'.match({ toString: function() { return 'AB'; } })"	"AB"	TS_OBJECT_STRING_COERCION
-findings	386	runtime-reject	"[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	"2"	TS_OBJECT_STRING_COERCION
+findings	385	accept	"'AB'.match({ toString: function() { return 'AB'; } })"	"AB"	-
+findings	386	accept	"[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	"2"	-
 findings	387	accept	"(() => {}).name"	""	-
 findings	388	accept	"(function () {}).name"	""	-
 findings	389	accept	"(function g() {}).name"	"g"	-

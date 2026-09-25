@@ -243,6 +243,7 @@ typescript	exotic-own-properties
 typescript	function-constructor
 typescript	function-receivers
 typescript	function-redeclaration
+typescript	function-string-coercion
 typescript	generics
 typescript	instanceof-arbitrary
 typescript	interfaces

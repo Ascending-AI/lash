@@ -189,6 +189,7 @@ const typescriptNames = [
   "temporal-dead-zone",
   "this",
   "function-receivers",
+  "function-string-coercion",
   "unresolvable-references",
   "with",
   "source-size",

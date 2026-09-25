@@ -739,11 +739,9 @@ fn join_json_container(
 /// exponent form), booleans, `null`, `undefined`, dates, regexps and errors.
 ///
 /// This is the single seam that owns console observation text: the lowerer
-/// hands over the argument values untouched. It is also the reason this seam
-/// still reaches ECMAScript's type tag for a `Map` or a `Set` while `+`,
-/// template literals and `String(value)` refuse it (`TS_OBJECT_STRING_COERCION`,
-/// FIG-3166) — rendering the value is what this call is for, so naming the type
-/// it could not give a JSON body is informative here and a dropped value there.
+/// hands over the argument values untouched. A `Map` or a `Set` has no JSON
+/// body, so it renders as its ECMAScript type tag, as `+` and template
+/// literals also answer.
 pub(super) fn javascript_console_observation_text(
     heap: &Heap,
     values: &[Value],

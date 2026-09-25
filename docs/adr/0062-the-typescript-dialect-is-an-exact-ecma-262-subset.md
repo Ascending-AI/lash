@@ -70,6 +70,19 @@ CreatePerIterationEnvironment copies it, so a closure keeps its iteration's
 binding. The "non-canonical classic `for` forms" rejection class below is
 overruled: `TS_FOR_UNSUPPORTED` now names only register entry 23.
 
+Amended 2026-09-25 (FIG-3652): **ToPrimitive runs guest hooks.** Every
+coercion the VM performs — operators, property keys, template substitutions,
+`String()`, and the arguments the built-ins convert — calls an object's own
+`valueOf`/`toString` in ECMA hint order, with the object as the receiver,
+through the same call path as any other call, under the same frame and
+instruction limits. A hook is a builtin callback and cannot perform an
+effect (entry 2). The instruction that needed the hook reruns once it has
+answered, replaying each answer in order, so a coercion is deterministic on
+replay. Register entry 13's refusal of string coercion for a plain object, a
+`Map` or a `Set` is retired: those answer their ECMA type tags. A function
+has no primitive the runtime can give (its source text), so converting one
+refuses as `TS_FUNCTION_STRING_COERCION`; see ADR 0064.
+
 ## Context
 
 Lash accepts model-authored code, and a model's prior on TypeScript is far
@@ -670,27 +683,12 @@ that each entry is a limit taken knowingly.
     limits as any other string this dialect builds. Node's inspector formatting
     is still not reproduced.
 
-    String coercion elsewhere is *not* ECMA-262's answer for the three values
-    whose only string is a type tag. `"" + {a: 1}`, `` `${{a: 1}}` `` and
-    `String({a: 1})` all lower to `+`, and each of them refuses as
-    `TS_OBJECT_STRING_COERCION` for a plain object, a `Map` or a `Set`
-    (FIG-3166); the refusal names the value and points at `console.log` or
-    `JSON.stringify(value)`. Refusal, not an automatic JSON body, for three
-    reasons. Exactness: this dialect's promise is that an accepted program means
-    what ECMA-262 says it means, and quietly answering `{"a":1}` where ECMA says
-    `[object Object]` would be a silent divergence in the one direction a cell
-    cannot detect. Gaps are refusals: every other place this dialect cannot
-    honour its own promise — sparse arrays, `Date` coercion, cyclic values,
-    prototype mutation — stops with a stable `TS_*` code rather than guessing,
-    and this is the same kind of gap. And the habit: `[object Object]` reaching
-    an observation is almost always a cell finishing a whole tool result it
-    never examined, so the refusal is the signal that sends the model back to
-    read the value instead of shipping a placeholder for it. Everything with a
-    string of its own is untouched — arrays, `Error`, `RegExp`, `URL`, numbers,
-    booleans, `null` and `undefined` keep their exact ECMA-262 strings; so do
-    property-key coercion (`obj[{a: 1}]` still reads the `"[object Object]"`
-    slot), `map.toString()`, `Number({})`, loose equality, and the `console.log`
-    rendering above.
+    String coercion elsewhere is ECMA-262's (FIG-3652). `"" + {a: 1}`,
+    `` `${{a: 1}}` `` and `String({a: 1})` once stopped a cell for a plain
+    object, a `Map` or a `Set` (FIG-3166); they are supported constructs, so
+    they now answer what Node answers: ToPrimitive runs an object's own
+    `valueOf`/`toString` in hint order, and an object with no string of its
+    own answers `[object Object]`, `[object Map]` or `[object Set]`.
 14. **Shadowing residual** — *retired by FIG-3571.* A block binding that
     shadows a name in scope still lowers to a generated slot, but a generated
     slot is private: the VM neither imports nor exports it, so none reaches

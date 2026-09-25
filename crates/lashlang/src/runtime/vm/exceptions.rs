@@ -272,6 +272,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         while self.frames.len() > handler.frame_depth {
             self.unwind_exception_frame()?;
         }
+        // An instruction suspended for a guest `valueOf`/`toString` at or
+        // above the handler's frame was abandoned by this throw; its answers
+        // must not reach the next run of the same instruction.
+        self.abandon_guest_coercions(handler.frame_depth);
         if self.active_function != handler.frame_function {
             return Err(RuntimeError::InvalidExceptionState {
                 reason: "handler frame identity does not match the active frame".into(),

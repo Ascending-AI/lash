@@ -29,9 +29,9 @@ function formatIdentityFreeValue(value) {
   return undefined;
 }
 
-// Upstream falls back to `String(value)`. A dialect object has no string
-// conversion to fall back to (ToString of a plain object is refused as
-// TS_OBJECT_STRING_COERCION), so an object is named by its kind: a failing
+// Upstream falls back to `String(value)`. Here an object is named by its kind
+// instead, so building a failing assertion's message never runs an object's
+// own toString or converts a function (TS_FUNCTION_STRING_COERCION): the
 // assertion must report its failure, never a refusal raised by its message.
 function formatSimpleValue(value) {
   const basic = formatIdentityFreeValue(value);

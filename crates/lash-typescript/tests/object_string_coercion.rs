@@ -1,15 +1,13 @@
-//! String coercion of a value whose only ECMA string is a type tag refuses.
+//! String coercion of an object is ECMA-262's answer (FIG-3652).
 //!
-//! `"" + value`, `` `${value}` `` and `String(value)` all lower to `+`. For a
-//! plain object, a `Map` or a `Set` ECMA-262 answers `[object Object]`,
-//! `[object Map]` or `[object Set]` — text that names the type and discards
-//! everything the cell computed. FIG-3166 refuses those three spellings with
-//! `TS_OBJECT_STRING_COERCION` rather than guessing a JSON body for them,
-//! matching every other gap in this dialect.
-//!
-//! Everything else keeps its exact ECMA-262 string, and the conversions that
-//! ask for the type tag on purpose — property keys, `.toString()`,
-//! `console.log`'s fallback — are untouched. This suite pins both halves.
+//! `"" + value`, `` `${value}` `` and `String(value)` run ToPrimitive: an
+//! object's own `valueOf`/`toString` answer in hint order, and an object with
+//! no string of its own answers its type tag — `[object Object]`,
+//! `[object Map]`, `[object Set]` — exactly as Node does. Register entry 13's
+//! refusal of those three spellings (FIG-3166) is retired: they are supported
+//! constructs, so the dialect answers them rather than refusing them. A
+//! function has no string the dialect keeps (its source text), so converting
+//! one refuses as `TS_FUNCTION_STRING_COERCION`.
 
 use lashlang::{AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, State, Value};
 
@@ -55,12 +53,11 @@ fn refusal(source: &str) -> String {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     let host = Host::default();
     let error = futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
-        .expect_err("string coercion of a tag-only object refuses");
+        .expect_err("the coercion refuses");
     format!("{error:?}")
 }
 
-/// Every spelling of "put this value into a string", for a value the dialect
-/// has no string for.
+/// Every spelling of "put this value into a string".
 fn coercion_spellings(expression: &str) -> Vec<String> {
     vec![
         format!(r#"finish("" + ({expression}));"#),
@@ -71,126 +68,39 @@ fn coercion_spellings(expression: &str) -> Vec<String> {
 }
 
 #[test]
-fn every_string_coercion_of_a_plain_object_refuses() {
-    for source in coercion_spellings("{ a: 1 }") {
-        let text = refusal(&source);
-        assert!(
-            text.contains("TS_OBJECT_STRING_COERCION"),
-            "expected the refusal code for {source}, got {text}"
-        );
-        assert!(
-            text.contains("[object Object]"),
-            "the refusal names the string it would have produced: {text}"
-        );
-        assert!(
-            text.contains("JSON.stringify"),
-            "the refusal points at an explicit serialization: {text}"
-        );
-        assert!(
-            text.contains("console.log"),
-            "the refusal points at examining the value: {text}"
-        );
-    }
-}
-
-#[test]
-fn every_string_coercion_of_a_map_or_set_refuses() {
+fn every_string_coercion_of_a_tag_only_object_answers_its_type_tag() {
     for (expression, tag) in [
+        ("{ a: 1 }", "[object Object]"),
         (r#"new Map([["k", 1]])"#, "[object Map]"),
         ("new Set([1])", "[object Set]"),
     ] {
         for source in coercion_spellings(expression) {
-            let text = refusal(&source);
-            assert!(
-                text.contains("TS_OBJECT_STRING_COERCION") && text.contains(tag),
-                "expected the {tag} refusal for {source}, got {text}"
-            );
+            assert_eq!(finished_string(&source), tag, "{source}");
         }
     }
 }
 
 #[test]
-fn an_object_reached_through_a_container_refuses_and_says_so() {
-    let text = refusal("finish(`${[{ a: 1 }]}`);");
-    assert!(
-        text.contains("TS_OBJECT_STRING_COERCION") && text.contains("inside a container"),
-        "a nested object names where it was reached: {text}"
+fn an_object_reached_through_a_container_answers_its_type_tag() {
+    assert_eq!(
+        finished_string("finish(`${[{ a: 1 }, 2]}`);"),
+        "[object Object],2"
+    );
+    assert_eq!(
+        finished_string(
+            "const result = { rows: [{ id: 1 }], total: 1 };\nfinish(`found ${result}`);"
+        ),
+        "found [object Object]"
     );
 }
 
 #[test]
-fn a_tool_result_shaped_object_refuses_rather_than_finishing_a_placeholder() {
-    // The shape FIG-3166 was filed for: a cell interpolates the whole result of
-    // a tool call instead of the field it was asked for.
-    let text =
-        refusal("const result = { rows: [{ id: 1 }], total: 1 };\nfinish(`found ${result}`);");
-    assert!(
-        text.contains("TS_OBJECT_STRING_COERCION"),
-        "expected the refusal, got {text}"
-    );
-}
-
-#[test]
-fn arrays_keep_their_exact_ecma_string() {
-    assert_eq!(finished_string("finish(String([1, 2, 3]));"), "1,2,3");
-    assert_eq!(finished_string("finish(`${[1, 2, 3]}`);"), "1,2,3");
-    assert_eq!(finished_string(r#"finish("" + [1, 2, 3]);"#), "1,2,3");
-    assert_eq!(finished_string("finish(String([]));"), "");
-    assert_eq!(
-        finished_string(r#"finish(String([1, null, undefined, 2]));"#),
-        "1,,,2"
-    );
-    assert_eq!(finished_string(r#"finish(String(["a", "b"]));"#), "a,b");
-}
-
-#[test]
-fn errors_keep_their_exact_ecma_string() {
-    assert_eq!(
-        finished_string(r#"finish(String(new Error("boom")));"#),
-        "Error: boom"
-    );
-    assert_eq!(
-        finished_string(r#"finish(`${new Error("boom")}`);"#),
-        "Error: boom"
-    );
-    assert_eq!(
-        finished_string(r#"finish(new Error("boom") + "");"#),
-        "Error: boom"
-    );
-}
-
-#[test]
-fn regexps_and_urls_keep_their_exact_ecma_string() {
-    assert_eq!(finished_string("finish(String(/ab+c/gi));"), "/ab+c/gi");
-    assert_eq!(
-        finished_string(r#"finish(String(new URL("https://example.com/a?b=1")));"#),
-        "https://example.com/a?b=1"
-    );
-}
-
-#[test]
-fn primitives_keep_their_exact_ecma_string() {
-    for (expression, expected) in [
-        ("1", "1"),
-        ("2.5", "2.5"),
-        ("-0", "0"),
-        ("1e21", "1e+21"),
-        ("NaN", "NaN"),
-        ("Infinity", "Infinity"),
-        ("true", "true"),
-        ("false", "false"),
-        ("null", "null"),
-        ("undefined", "undefined"),
-    ] {
-        assert_eq!(
-            finished_string(&format!("finish(String({expression}));")),
-            expected,
-            "String({expression})"
-        );
-        assert_eq!(
-            finished_string(&format!("finish(`${{{expression}}}`);")),
-            expected,
-            "`${{{expression}}}`"
+fn converting_a_function_to_a_string_refuses_by_name() {
+    for source in coercion_spellings("() => 1") {
+        let text = refusal(&source);
+        assert!(
+            text.contains("TS_FUNCTION_STRING_COERCION"),
+            "expected the function refusal for {source}, got {text}"
         );
     }
 }
@@ -213,8 +123,7 @@ fn property_key_coercion_is_untouched() {
     let text = refusal("const a: any = [1]; a[{ b: 2 }] = 3;");
     assert!(
         text.contains("TypeScriptArrayNonIndexPropertyUnsupported")
-            && text.contains("[object Object]")
-            && !text.contains("TS_OBJECT_STRING_COERCION"),
+            && text.contains("[object Object]"),
         "key coercion still produces the type tag: {text}"
     );
 }
@@ -262,4 +171,27 @@ fn json_stringify_is_the_documented_way_out() {
         finished_string("finish(`rows=${JSON.stringify({ a: 1 })}`);"),
         r#"rows={"a":1}"#
     );
+}
+
+#[test]
+fn an_object_with_its_own_hooks_converts_through_them() {
+    // `+` asks valueOf first; ToString (templates and String()) asks toString
+    // first; with neither answering, the built-in toString's type tag does.
+    let cases = [
+        (
+            "const o = { toString() { return 'T'; }, valueOf() { return 5; } }; finish([o + '', `${o}`, String(o)].join('|'));",
+            "5|T|T",
+        ),
+        (
+            "const o = { toString() { return 'only'; } }; finish('<' + o + '>');",
+            "<only>",
+        ),
+        (
+            "const o = { n: 3, valueOf() { return this.n; } }; finish(`${o}` + (o + 1));",
+            "[object Object]4",
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(finished_string(source), expected, "{source}");
+    }
 }

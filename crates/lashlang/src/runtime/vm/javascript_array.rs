@@ -2,7 +2,7 @@ use super::super::javascript::javascript_to_number;
 use super::javascript::js_stdlib_error;
 use super::javascript_stdlib::{
     array_includes, array_index_of, array_last_index_of, clamp_relative_index,
-    last_index_exclusive, normalized_instance_arguments, search_index_argument,
+    last_index_exclusive, normalized_instance_arguments,
 };
 use super::*;
 
@@ -55,10 +55,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let argument_count = args.len();
             let args = normalized_instance_arguments(method, args);
             let (needle, from) = (args[0].clone(), args[1].clone());
-            let result = if method == "lastIndexOf" && argument_count < 2 {
+            // An empty array answers before `fromIndex` is converted, so its
+            // `valueOf` never runs (ECMA-262 steps 3-4).
+            let result = if current.is_empty() {
+                Ok(if method == "includes" {
+                    Value::Bool(false)
+                } else {
+                    Value::Number(-1.0)
+                })
+            } else if method == "lastIndexOf" && argument_count < 2 {
                 array_last_index_of(current, &needle, current.len())
             } else {
-                let from = search_index_argument(&self.heap, &from)?;
+                let from = self.heap.javascript_to_number(&from)?;
                 match method {
                     "includes" => {
                         array_includes(current, &needle, clamp_relative_index(from, current.len()))

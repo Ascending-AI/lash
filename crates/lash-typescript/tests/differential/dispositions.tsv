@@ -27,15 +27,7 @@
 # back. A registered over-rejection, not a conformance claim.
 "JSON.stringify(JSON.parse('{\"__proto__\":1,\"a\":2}'))"	runtime-reject	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 "Object.keys(JSON.parse('{\"a\":1,\"__proto__\":2}')).join(',')"	runtime-reject	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-# FIG-3166: string coercion of a plain object refuses rather than answering
-# ECMA's bare type tag.
-"({}) + 1"	runtime-reject	TS_OBJECT_STRING_COERCION
-"1 + ({})"	runtime-reject	TS_OBJECT_STRING_COERCION
-"`${({})}`"	runtime-reject	TS_OBJECT_STRING_COERCION
-"[] + {}"	runtime-reject	TS_OBJECT_STRING_COERCION
-"1 + {}"	runtime-reject	TS_OBJECT_STRING_COERCION
-"`${{}}`"	runtime-reject	TS_OBJECT_STRING_COERCION
-"`${{a:1}}`"	runtime-reject	TS_OBJECT_STRING_COERCION
+
 # FIG-3604: a closure copies what it captures, so one created before its
 # binding is reassigned refuses rather than reading the stale copy (register
 # entry 5, the read path).
@@ -50,11 +42,11 @@
 "({a:1}).b"	accept-unlinked	TS_LINK_ERROR
 "({a:1}).missing"	accept-unlinked	TS_LINK_ERROR
 "(() => { const o = { a: 1, b: 2 }; return `${o.c}`; })()"	accept-unlinked	TS_LINK_ERROR
-# FIG-3658: ToString/ToIntegerOrInfinity on an object whose own toString or
-# valueOf would answer means running guest code inside a builtin, which this
-# value model cannot do — refused by name rather than silently coerced.
-"'AB'.match({ toString: function() { return 'AB'; } })"	runtime-reject	TS_OBJECT_STRING_COERCION
-"[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	runtime-reject	TS_OBJECT_STRING_COERCION
+# FIG-3652: a function's string is its source text, which the runtime does
+# not keep; converting one to a primitive refuses by name. A built-in method
+# value is a function too, so the same ruling covers it (FIG-3701).
+"'' + function () { return 1; }"	runtime-reject	TS_FUNCTION_STRING_COERCION
+"String([].map)"	runtime-reject	TS_FUNCTION_STRING_COERCION
 # FIG-3650/FIG-3651: ECMA-262 early errors reject as TS_SYNTAX_ERROR; the two
 # forms tsc --strict rejects (TS2393/TS2300, TS2703) refuse by name.
 "(() => { { let f; var f; } })()"	reject	TS_SYNTAX_ERROR
@@ -74,7 +66,6 @@
 "`\\uD800`"	reject	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
 "`\\8`"	reject	TS_SYNTAX_ERROR
 "`\\u{1F_639}`"	reject	TS_SYNTAX_ERROR
-"(() => { const p=/a/g; const f={toString: function() { return 'i'; }}; return new RegExp(p,f).flags; })()"	runtime-reject	TS_OBJECT_STRING_COERCION
 # FIG-3704: a GetSetRecord-valid set-like object still cannot be a Set
 # argument — its `has`/`keys` are guest closures and a synchronous builtin
 # cannot invoke them — so the method refuses by name rather than silently

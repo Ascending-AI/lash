@@ -261,10 +261,23 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .profile
                 .as_ref()
                 .map(|_| (instruction.profile_tag(), Instant::now()));
+            let replayed = self.begin_instruction_coercions(instruction_ip);
+            let operands = self.coercion_operands(instruction);
             let step = match self.step_instruction_fast(instruction) {
                 Ok(Some(step)) => Ok(step),
                 Ok(None) => Box::pin(self.step_instruction(instruction)).await,
                 Err(error) => Err(error),
+            };
+            let step = match step {
+                Err(RuntimeError::GuestCoercionPending) => self
+                    .suspend_for_guest_coercion(instruction_ip, operands)
+                    .map(|()| VmStep::Continue),
+                step => {
+                    if let Some(depth) = replayed {
+                        self.end_instruction_coercions(instruction_ip, depth);
+                    }
+                    step
+                }
             };
             let completed_effect = matches!(&step, Ok(VmStep::Effect(_)));
             let result = match step {
@@ -275,7 +288,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             &frame.return_target,
                             super::ReturnTarget::Callback(callback)
                                 if !callback.allow_effects
-                        )
+                        ) || matches!(&frame.return_target, super::ReturnTarget::Coercion(_))
                     }) {
                         self.route_runtime_error(
                             RuntimeError::EffectInBuiltinCallback,

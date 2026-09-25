@@ -4,6 +4,7 @@ use super::super::{
     ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
 };
 use super::*;
+use crate::runtime::heap::guest_coercion::PrimitiveHint;
 
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn javascript_unary_needs_async(
@@ -14,7 +15,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Ok(true);
         };
         Ok(matches!(value, Value::Projected(_))
-            || op.coerces_to_number() && self.heap.javascript_coercion_contains_projected(value)?)
+            || (op.coerces_to_number() || op == JavaScriptUnaryOp::ToString)
+                && self.heap.javascript_coercion_contains_projected(value)?)
     }
 
     pub(super) fn javascript_binary_needs_async(
@@ -53,6 +55,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let number = self.heap.javascript_to_number(&value)?;
             self.stack
                 .push(eval_javascript_unary(Value::Number(number), op)?);
+        } else if op == JavaScriptUnaryOp::ToString {
+            let text = self.heap.javascript_to_string_for_output(&value)?;
+            ensure_javascript_string_size(text.len())?;
+            self.stack.push(Value::String(text.into()));
         } else if op == JavaScriptUnaryOp::Not && matches!(value, Value::Ref(_)) {
             self.stack.push(Value::Bool(false));
         } else {
@@ -69,7 +75,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if op.coerces_to_number() {
             value = self
                 .heap
-                .javascript_to_primitive_string_or_number_async(&value)
+                .javascript_to_primitive_with_hint_async(&value, PrimitiveHint::Number)
+                .await?;
+        } else if op == JavaScriptUnaryOp::ToString {
+            value = self
+                .heap
+                .javascript_to_primitive_with_hint_async(&value, PrimitiveHint::String)
                 .await?;
         }
         self.stack.push(value);
@@ -135,21 +146,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok((left, right))
     }
 
-    /// `+` is the one binary operator that can put an object's string into the
-    /// program's output — `String(value)` and template interpolation both lower
-    /// to it — so it converts its operands through the refusing path
-    /// (FIG-3166). Every other operator reads the primitive to compare or to do
-    /// arithmetic with it, never to show it, and keeps ECMA's answer.
+    /// ECMA-262 ToPrimitive on an object operand: `+` and loose equality ask
+    /// the default hint; every other operator's is number — a Date's default
+    /// hint is its string, so the distinction is observable.
     fn javascript_binary_operand_primitive(
         &self,
         op: JavaScriptBinaryOp,
         value: &Value,
     ) -> Result<Value, RuntimeError> {
-        if op == JavaScriptBinaryOp::Add {
-            self.heap.javascript_to_primitive_for_string_operand(value)
-        } else {
-            self.heap.javascript_to_primitive_string_or_number(value)
-        }
+        self.heap
+            .javascript_to_primitive_with_hint(value, javascript_binary_hint(op))
     }
 
     async fn javascript_binary_operand_primitive_async(
@@ -157,15 +163,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
         op: JavaScriptBinaryOp,
         value: &Value,
     ) -> Result<Value, RuntimeError> {
-        if op == JavaScriptBinaryOp::Add {
-            self.heap
-                .javascript_to_primitive_for_string_operand_async(value)
-                .await
-        } else {
-            self.heap
-                .javascript_to_primitive_string_or_number_async(value)
-                .await
-        }
+        self.heap
+            .javascript_to_primitive_with_hint_async(value, javascript_binary_hint(op))
+            .await
+    }
+}
+
+/// The hint ECMA-262 gives `op`'s ToPrimitive: default for `+` and loose
+/// equality, number for every other operator.
+fn javascript_binary_hint(op: JavaScriptBinaryOp) -> PrimitiveHint {
+    match op {
+        JavaScriptBinaryOp::Add
+        | JavaScriptBinaryOp::LooseEqual
+        | JavaScriptBinaryOp::LooseNotEqual => PrimitiveHint::Default,
+        _ => PrimitiveHint::Number,
     }
 }
 
