@@ -52,10 +52,7 @@ pub(super) fn semantic_summary() -> AbstractWorldSummary {
                 trigger_count: 4,
                 backend_failure_count: 2,
                 provider_mutation_count: 3,
-                process_wake_count: 2,
-                process_lifecycle_count: 1,
                 durable_effect_keys: vec!["durable/session-001".to_string()],
-                lease_time_ticks: vec![1, 2],
                 checkpoint_commit_count: 0,
                 checkpoint_component_stored_count: 0,
                 checkpoint_component_ref_count: 0,
@@ -78,10 +75,7 @@ pub(super) fn semantic_summary() -> AbstractWorldSummary {
                 trigger_count: 0,
                 backend_failure_count: 0,
                 provider_mutation_count: 0,
-                process_wake_count: 0,
-                process_lifecycle_count: 0,
                 durable_effect_keys: Vec::new(),
-                lease_time_ticks: vec![1, 2],
                 checkpoint_commit_count: 0,
                 checkpoint_component_stored_count: 0,
                 checkpoint_component_ref_count: 0,
@@ -93,18 +87,6 @@ pub(super) fn semantic_summary() -> AbstractWorldSummary {
             execution_count: 1,
             replay_count: 1,
             result_digest: "digest".to_string(),
-        }],
-        vec![WorkerAbstractSummary {
-            worker_alias: "worker-001".to_string(),
-            session_alias: "session-001".to_string(),
-            active_incarnation_id: "worker-001:incarnation-002".to_string(),
-            active_fencing_token: 2,
-            lease_owner_changes: 1,
-            stale_completion_rejections: 1,
-            process_stale_completion_rejected: true,
-            process_stale_output_absent: true,
-            process_terminal_writer: "successor".to_string(),
-            process_terminal_event_count: 1,
         }],
     )
 }
@@ -263,101 +245,21 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             }),
         ),
         delivered_with_payload(
-            7,
-            "session-001:process-wake:001",
-            "session-001",
-            BoundaryKind::ProcessWake,
-            json!({
-                "process_id": "process-001",
-                "sequence": 1,
-                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 7),
-            }),
-            json!({
-                "claimed_once": true,
-                "runtime_process_wake": {
-                    "process_id": "process-001",
-                    "sequence": 1,
-                    "event_invocation": {
-                        "subject": {
-                            "process_id": "process-001"
-                        }
-                    }
-                },
-                "runtime_queued_work": {
-                    "claimed": true,
-                    "source_key": "process:process-001:event:1:wake"
-                },
-                "session": "session-001",
-                "wake_id": "wake:duplicate"
-            }),
-        ),
-        delivered_with_payload(
-            8,
-            "session-001:process-wake:002",
-            "session-001",
-            BoundaryKind::ProcessWake,
-            json!({
-                "process_id": "process-001",
-                "sequence": 1,
-                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 8),
-            }),
-            json!({
-                "claimed_once": false,
-                "runtime_process_wake": {
-                    "process_id": "process-001",
-                    "sequence": 1,
-                    "event_invocation": {
-                        "subject": {
-                            "process_id": "process-001"
-                        }
-                    }
-                },
-                "runtime_queued_work": {
-                    "claimed": false,
-                    "source_key": "process:process-001:event:1:wake"
-                },
-                "session": "session-001",
-                "wake_id": "wake:duplicate"
-            }),
-        ),
-        delivered_with_payload(
-            9,
-            "worker-001:worker:001",
-            "worker-001",
-            BoundaryKind::Worker,
-            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 9)}),
-            json!({
-                "stale_completion_rejected": true,
-                "runtime_active_lease": {},
-                "runtime_stale_completion": {},
-            }),
-        ),
-        delivered_with_payload(
             10,
-            "session-001:durable:001:first",
+            "session-001:durable:001",
             "session-001",
             BoundaryKind::DurableEffect,
             json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 10)}),
             json!({
                 "durable_key": "durable/session-001",
-                "replayed": false,
-                "runtime_effect": {"local_executor_called": true},
-                "result_digest": "digest",
-                "execution_count": 1,
-                "replay_count": 0,
-            }),
-        ),
-        delivered_with_payload(
-            11,
-            "session-001:durable:001:replay",
-            "session-001",
-            BoundaryKind::DurableEffect,
-            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 11)}),
-            json!({
-                "durable_key": "durable/session-001",
                 "replayed": true,
-                "runtime_effect": {"local_executor_called": false},
+                "redrive_served_recorded_result": true,
+                "runtime_effect": {
+                    "local_executor_called": true,
+                    "redrive_local_executor_called": false,
+                },
                 "result_digest": "digest",
+                "redrive_result_digest": "digest",
                 "execution_count": 1,
                 "replay_count": 1,
             }),
@@ -784,7 +686,6 @@ fn interleaving_oracle_passes_when_two_sessions_overlap() {
                 vec!["session-a".to_string(), "session-b".to_string()],
                 2,
                 0,
-                0,
             )
         )
         .is_passed()
@@ -804,12 +705,7 @@ fn interleaving_oracle_fails_when_multi_session_turns_never_overlap() {
     assert_eq!(peak_concurrent_live_turns(&events), 1);
     let verdict = provider_turn_interleaving_depth(
         &events,
-        &WorkloadExpectations::new(
-            vec!["session-a".to_string(), "session-b".to_string()],
-            2,
-            0,
-            0,
-        ),
+        &WorkloadExpectations::new(vec!["session-a".to_string(), "session-b".to_string()], 2, 0),
     );
     assert!(!verdict.is_passed());
     assert_eq!(verdict.oracle_id, PROVIDER_TURN_INTERLEAVING_ORACLE);
@@ -824,7 +720,7 @@ fn interleaving_oracle_is_exempt_only_for_a_declared_single_session() {
     assert_eq!(peak_concurrent_live_turns(&events), 1);
     let verdict = provider_turn_interleaving_depth(
         &events,
-        &WorkloadExpectations::new(vec!["session-a".to_string()], 1, 0, 0),
+        &WorkloadExpectations::new(vec!["session-a".to_string()], 1, 0),
     );
     assert!(verdict.is_passed(), "{}", verdict.message);
     assert!(

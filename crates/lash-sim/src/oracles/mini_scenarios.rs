@@ -166,67 +166,6 @@ pub(super) fn mini_runtime_cancellation_prevents_idle_claim(
     }
 }
 
-pub(super) fn mini_runtime_process_wake_duplicate_rejected(
-    events: &[DeliveredBoundary],
-) -> OracleVerdict {
-    let mut source_events: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
-    for event in events
-        .iter()
-        .filter(|event| event.kind == BoundaryKind::ProcessWake)
-    {
-        if let Some(source_key) = process_wake_source_key(event) {
-            source_events.entry(source_key).or_default().push(event);
-        }
-    }
-    if source_events.values().any(|events| {
-        let claims = events
-            .iter()
-            .filter_map(|event| event.observed.get("claimed_once").and_then(Value::as_bool))
-            .collect::<Vec<_>>();
-        let strict_claim_dedupe =
-            claims.iter().filter(|claimed| **claimed).count() == 1 && claims.contains(&false);
-        let in_flight_rejection = events.iter().any(|event| {
-            event
-                .observed
-                .get("lease_busy")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-                && event
-                    .observed
-                    .pointer("/runtime_queued_work/enqueued")
-                    .and_then(Value::as_bool)
-                    == Some(false)
-        }) && claims.contains(&false);
-        strict_claim_dedupe || in_flight_rejection
-    }) {
-        OracleVerdict::passed(
-            SCENARIO_MINI_RUNTIME_PROCESS_WAKE_DEDUPE_ORACLE,
-            "duplicate process wake used the same structural process/event source key and was claimed at most once",
-        )
-    } else {
-        OracleVerdict::failed(
-            SCENARIO_MINI_RUNTIME_PROCESS_WAKE_DEDUPE_ORACLE,
-            "no structural process/event source key showed a claim/rejection pair or in-flight lease rejection",
-        )
-    }
-}
-
-pub(super) fn mini_runtime_stale_lease_commit_rejected(
-    events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
-) -> OracleVerdict {
-    let stale_rejected = worker_runtime_lease_dto_observed(events)
-        && summary.workers.iter().any(|worker| {
-            worker.active_fencing_token > 1 && worker.stale_completion_rejections > 0
-        });
-    verdict_from_bool(
-        SCENARIO_MINI_RUNTIME_STALE_LEASE_ORACLE,
-        stale_rejected,
-        "stale worker lease completion was rejected while the reclaimed live lease stayed renewable",
-        "worker lease evidence did not prove stale completion rejection",
-    )
-}
-
 pub(super) fn mini_standard_streamed_text_finalizes_once(
     events: &[DeliveredBoundary],
 ) -> OracleVerdict {
@@ -363,19 +302,12 @@ pub(super) fn mini_rlm_lashlang_cell_exec_continues(events: &[DeliveredBoundary]
 }
 
 pub(super) fn mini_agent_durable_input_resolution(events: &[DeliveredBoundary]) -> OracleVerdict {
-    let durable = events.iter().any(|event| {
-        event.kind == BoundaryKind::DurableEffect
-            && event
-                .observed
-                .get("replayed")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-    });
+    let durable = events.iter().any(durable_redrive_served);
     verdict_from_bool(
         SCENARIO_MINI_AGENT_DURABLE_INPUT_ORACLE,
-        durable && process_wake_runtime_dto_observed(events) && observer_reconnect_has_any(events),
-        "durable input mini-replay observed durable replay, process wake, and observer reconnect resolution",
-        "durable input mini-replay lacked durable replay/process wake/observer reconnect evidence",
+        durable && observer_reconnect_has_any(events),
+        "durable input mini-replay observed a durable redrive served its recorded result, and observer reconnect resolution",
+        "durable input mini-replay lacked durable redrive/observer reconnect evidence",
     )
 }
 
@@ -386,12 +318,11 @@ pub(super) fn mini_agent_child_failure_graph(
     verdict_from_bool(
         SCENARIO_MINI_AGENT_CHILD_FAILURE_ORACLE,
         summary.session_count >= 2
-            && worker_runtime_lease_dto_observed(events)
             && events
                 .iter()
                 .any(|event| event.kind == BoundaryKind::BackendFailure),
-        "child failure mini-replay kept multi-session graph evidence while worker/backend failure boundaries executed",
-        "child failure mini-replay lacked multi-session worker/backend failure evidence",
+        "child failure mini-replay kept multi-session graph evidence while backend failure boundaries executed",
+        "child failure mini-replay lacked multi-session backend failure evidence",
     )
 }
 
@@ -399,22 +330,27 @@ pub(super) fn mini_agent_parallel_spawn_join(
     events: &[DeliveredBoundary],
     summary: &AbstractWorldSummary,
 ) -> OracleVerdict {
-    let wake_sessions = events
+    let provider_sessions = events
         .iter()
-        .filter(|event| event.kind == BoundaryKind::ProcessWake)
-        .filter_map(|event| event.observed.get("session").and_then(Value::as_str))
+        .filter(|event| event.kind == BoundaryKind::Provider)
+        .filter_map(|event| {
+            event
+                .observed
+                .get("runtime_session_id")
+                .and_then(Value::as_str)
+        })
         .collect::<BTreeSet<_>>();
     let ordered_sequences = events
         .iter()
-        .filter(|event| matches!(event.kind, BoundaryKind::ProcessWake | BoundaryKind::Worker))
+        .filter(|event| event.kind == BoundaryKind::Provider)
         .map(|event| event.sequence)
         .collect::<Vec<_>>();
     let deterministic_order = ordered_sequences.windows(2).all(|pair| pair[0] < pair[1]);
     verdict_from_bool(
         SCENARIO_MINI_AGENT_PARALLEL_JOIN_ORACLE,
-        summary.session_count >= 2 && !wake_sessions.is_empty() && deterministic_order,
-        "parallel spawn/join mini-replay recorded deterministic process/worker sequence ordering",
-        "parallel spawn/join mini-replay did not record deterministic process/worker ordering",
+        summary.session_count >= 2 && provider_sessions.len() >= 2 && deterministic_order,
+        "parallel spawn/join mini-replay recorded deterministic provider completion ordering across runtime sessions",
+        "parallel spawn/join mini-replay did not record provider completions across runtime sessions",
     )
 }
 
@@ -538,27 +474,6 @@ pub(super) fn scenario_evidence_satisfied(
             .sessions
             .iter()
             .any(|session| session.cancellation_count > 0),
-        "process_wake" => {
-            summary
-                .sessions
-                .iter()
-                .any(|session| session.process_wake_count > 0)
-                && process_wake_runtime_dto_observed(events)
-        }
-        "worker_stale_completion" => {
-            summary.workers.iter().any(|worker| {
-                worker.lease_owner_changes > 0
-                    && worker.stale_completion_rejections > 0
-                    && worker.active_fencing_token > 1
-            }) && worker_runtime_lease_dto_observed(events)
-        }
-        "lease_time" => summary.sessions.iter().any(|session| {
-            !session.lease_time_ticks.is_empty()
-                && session
-                    .lease_time_ticks
-                    .windows(2)
-                    .all(|ticks| ticks[0] <= ticks[1])
-        }),
         "provider_turn" => {
             let provider_turns = summary
                 .sessions
@@ -793,23 +708,6 @@ pub(super) fn runtime_contract_semantics(
     // specific runtime boundary it governs — no `|`-grouped shared arms and no
     // single global condition standing in for per-contract evidence.
     match semantic_oracle {
-        // Advisory lease state does not authorize a stale durable completion.
-        "runtime.advisory_lease_head_cas" => assert_semantic(
-            worker_runtime_lease_dto_observed(events)
-                && summary
-                    .workers
-                    .iter()
-                    .any(|worker| worker.stale_completion_rejections > 0),
-            "the stale worker completion was rejected by durable commit fencing",
-        ),
-        // A new incarnation waits for TTL expiry and the fence strictly advances.
-        "runtime.stale_lease_ttl" => assert_semantic(
-            worker_runtime_lease_dto_observed(events)
-                && summary.workers.iter().any(|worker| {
-                    worker.lease_owner_changes > 0 && worker.active_fencing_token > 1
-                }),
-            "a second incarnation acquired the stale lease after TTL at a strictly higher fence",
-        ),
         "runtime.checkpoint_redrive_cancel" => assert_semantic(
             queued_inputs_have_cancel_targets(events)
                 && observer_convergence_law(summary, None).is_passed(),
@@ -828,18 +726,15 @@ pub(super) fn runtime_contract_semantics(
                 }),
             "a queued turn input source key was followed by a completed subsequent turn",
         ),
-        // A command-only queue drains against monotonic lease fencing tokens.
+        // A command-only queue drains its queued source keys.
         "runtime.command_only_queue_drain" => assert_semantic(
-            queued_ingress_has_source_keys(events)
-                && lease_time_monotonic_law(events, None).is_passed(),
-            "command queue source keys drained against monotonically advancing lease fences",
+            queued_ingress_has_source_keys(events),
+            "command queue source keys drained",
         ),
         // A command applied before turn work still lets later provider turns run.
         "runtime.command_before_turn_work" => assert_semantic(
-            queued_ingress_has_source_keys(events)
-                && provider_turns_after_queue(summary)
-                && lease_time_monotonic_law(events, None).is_passed(),
-            "a command queued before turn work preserved later turns and lease ordering",
+            queued_ingress_has_source_keys(events) && provider_turns_after_queue(summary),
+            "a command queued before turn work preserved later turns",
         ),
         "runtime.observation_replay_preserves_input" => assert_semantic(
             observer_reconnect_has_matching_turn(events, summary),

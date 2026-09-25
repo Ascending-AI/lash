@@ -372,191 +372,48 @@ pub(super) fn durable_replay_fact(
     events: &[DeliveredBoundary],
     fact: &'static str,
 ) -> Result<ScenarioContractGeneratedFact, String> {
-    let mut by_key: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
-    for event in events
-        .iter()
-        .filter(|event| event.kind == BoundaryKind::DurableEffect)
-    {
-        if let Some(key) = event.observed.get("durable_key").and_then(Value::as_str) {
-            by_key.entry(key.to_string()).or_default().push(event);
-        }
-    }
-    let Some((key, mut durable_events)) = by_key.into_iter().find(|(_key, events)| {
-        let first = events.iter().any(|event| {
-            event.observed.get("replayed").and_then(Value::as_bool) == Some(false)
-                && event
-                    .observed
-                    .pointer("/runtime_effect/local_executor_called")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-        });
-        let replay = events.iter().any(|event| {
-            event.observed.get("replayed").and_then(Value::as_bool) == Some(true)
-                && event
-                    .observed
-                    .pointer("/runtime_effect/local_executor_called")
-                    .and_then(Value::as_bool)
-                    == Some(false)
-                && event
-                    .observed
-                    .get("execution_count")
-                    .and_then(Value::as_u64)
-                    == Some(1)
-        });
-        first && replay
-    }) else {
+    let Some(durable) = events.iter().find(|event| durable_redrive_served(event)) else {
         return Err(format!(
-            "durable semantic fact `{fact}` did not find first-execution plus replay evidence for one durable key"
+            "durable semantic fact `{fact}` did not find a durable effect whose redrive was served the recorded result"
         ));
     };
-    durable_events.sort_by_key(|event| event.sequence);
     generated_fact(
         fact,
-        "durable effect executes locally once and replay returns stored history without local execution",
-        durable_events,
+        "durable effect executes locally once and its redrive is served the recorded result without local execution",
+        vec![durable],
         json!({
-            "durable_key": key,
+            "durable_key": durable.observed.get("durable_key").cloned().unwrap_or(Value::Null),
             "first_execution": true,
             "replay": true,
         }),
     )
 }
 
-pub(super) fn process_wake_fact(
-    events: &[DeliveredBoundary],
-    fact: &'static str,
-) -> Result<ScenarioContractGeneratedFact, String> {
-    let mut by_source_key: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
-    for event in events
-        .iter()
-        .filter(|event| event.kind == BoundaryKind::ProcessWake)
-    {
-        if let Some(source_key) = process_wake_source_key(event) {
-            by_source_key.entry(source_key).or_default().push(event);
-        }
-    }
-    let Some((source_key, mut wake_events)) = by_source_key.into_iter().find(|(_key, events)| {
-        events.iter().any(|event| {
-            event
-                .observed
-                .pointer("/runtime_process_wake/event_invocation/subject/process_id")
-                .and_then(Value::as_str)
-                .is_some()
-                && event
-                    .observed
-                    .get("session")
-                    .and_then(Value::as_str)
-                    .is_some()
-        }) && events
-            .iter()
-            .filter_map(|event| event.observed.get("claimed_once").and_then(Value::as_bool))
-            .collect::<Vec<_>>()
-            .contains(&false)
-    }) else {
-        return Err(format!(
-            "process wake semantic fact `{fact}` did not find structural source-key evidence with a rejected duplicate"
-        ));
-    };
-    wake_events.sort_by_key(|event| event.sequence);
-    let sessions = wake_events
-        .iter()
-        .filter_map(|event| event.observed.get("session").and_then(Value::as_str))
-        .collect::<BTreeSet<_>>();
-    let claimed_once_values = wake_events
-        .iter()
-        .filter_map(|event| event.observed.get("claimed_once").and_then(Value::as_bool))
-        .collect::<Vec<_>>();
-    generated_fact(
-        fact,
-        "process wake carries runtime DTO process id, session, structural source key, and at-most-once claim evidence",
-        wake_events,
-        json!({
-            "source_key": source_key,
-            "sessions": sessions,
-            "claimed_once_values": claimed_once_values,
-        }),
-    )
-}
-
-pub(super) fn agent_session_turn_child_provider_fact(
-    events: &[DeliveredBoundary],
-) -> Result<ScenarioContractGeneratedFact, String> {
-    let Some((wake, provider)) = events
-        .iter()
-        .filter(|event| {
-            event.kind == BoundaryKind::ProcessWake
-                && event
-                    .observed
-                    .pointer("/runtime_process_wake/event_invocation/subject/process_id")
-                    .and_then(Value::as_str)
-                    .is_some()
-                && event
-                    .observed
-                    .get("session")
-                    .and_then(Value::as_str)
-                    .is_some()
-                && event
-                    .observed
-                    .pointer("/runtime_queued_work/claimed")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-        })
-        .find_map(|wake| {
-            let provider = successful_provider_events(events)
-                .into_iter()
-                .min_by_key(|provider| provider.sequence)?;
-            Some((wake, provider))
-        })
-    else {
-        return Err(
-            "agent session-turn child did not find a claimed process wake and scheduler-owned provider completion in the same generated trace"
-                .to_string(),
-        );
-    };
-    generated_fact(
-        "agent_session_turn_process_child_provider",
-        "session-turn process child wake is claimed through runtime queued work while the same generated trace carries scheduler-owned provider completion evidence",
-        vec![wake, provider],
-        json!({
-            "process_wake_boundary": wake.boundary_id,
-            "child_provider_boundary": provider.boundary_id,
-            "child_session": wake.observed.get("session").cloned().unwrap_or(Value::Null),
-            "process_id": wake.observed.pointer("/runtime_process_wake/event_invocation/subject/process_id").cloned().unwrap_or(Value::Null),
-            "runtime_queued_work_claimed": true,
-            "wake_sequence": wake.sequence,
-            "provider_sequence": provider.sequence,
-        }),
-    )
-}
-
-pub(super) fn worker_stale_fact(
-    events: &[DeliveredBoundary],
-    fact: &'static str,
-) -> Result<ScenarioContractGeneratedFact, String> {
-    let Some(worker) = events.iter().find(|event| {
-        event.kind == BoundaryKind::Worker
-            && event.observed.get("runtime_active_lease").is_some()
-            && event.observed.get("runtime_stale_completion").is_some()
-            && event
-                .observed
-                .get("stale_completion_rejected")
-                .and_then(Value::as_bool)
-                == Some(true)
-    }) else {
-        return Err(format!(
-            "worker semantic fact `{fact}` did not find stale completion rejection evidence"
-        ));
-    };
-    generated_fact(
-        fact,
-        "worker evidence rejects stale completion while preserving active lease data",
-        vec![worker],
-        json!({
-            "worker_boundary": worker.boundary_id,
-            "session": worker.observed.get("session").cloned().unwrap_or(Value::Null),
-            "stale_completion_rejected": true,
-        }),
-    )
+/// A durable effect ran its executor once, and the engine served the
+/// redrive the recorded result without running it again.
+pub(super) fn durable_redrive_served(event: &DeliveredBoundary) -> bool {
+    event.kind == BoundaryKind::DurableEffect
+        && event
+            .observed
+            .pointer("/runtime_effect/local_executor_called")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && event
+            .observed
+            .pointer("/runtime_effect/redrive_local_executor_called")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && event
+            .observed
+            .get("redrive_served_recorded_result")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && event
+            .observed
+            .get("execution_count")
+            .and_then(Value::as_u64)
+            == Some(1)
+        && event.observed.get("replay_count").and_then(Value::as_u64) == Some(1)
 }
 
 pub(super) fn observer_reconnect_fact(
@@ -847,80 +704,7 @@ pub(super) fn duplicate_delivery_semantics(
     events: &[DeliveredBoundary],
     summary: &AbstractWorldSummary,
 ) -> bool {
-    structural_process_wake_identity_semantics(events)
-        && durable_effect_replay_semantics(events, summary)
-}
-
-pub(super) fn structural_process_wake_identity_semantics(events: &[DeliveredBoundary]) -> bool {
-    let mut by_source_key: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
-    for event in events
-        .iter()
-        .filter(|event| event.kind == BoundaryKind::ProcessWake)
-    {
-        if let Some(source_key) = process_wake_source_key(event) {
-            by_source_key.entry(source_key).or_default().push(event);
-        }
-    }
-    by_source_key.values().any(|events| {
-        let claims = events
-            .iter()
-            .filter_map(|event| event.observed.get("claimed_once").and_then(Value::as_bool))
-            .collect::<Vec<_>>();
-        let queued_claims = events
-            .iter()
-            .filter_map(|event| {
-                event
-                    .observed
-                    .pointer("/runtime_queued_work/claimed")
-                    .and_then(Value::as_bool)
-            })
-            .collect::<Vec<_>>();
-        let strict_claim_dedupe = claims.iter().filter(|claimed| **claimed).count() == 1
-            && claims.contains(&false)
-            && queued_claims.iter().filter(|claimed| **claimed).count() == 1
-            && queued_claims.contains(&false);
-        let in_flight_rejection = events
-            .iter()
-            .filter(|event| {
-                event
-                    .observed
-                    .get("lease_busy")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                    && event.observed.get("runtime_process_wake").is_some()
-                    && event
-                        .observed
-                        .pointer("/runtime_queued_work/enqueued")
-                        .and_then(Value::as_bool)
-                        == Some(false)
-            })
-            .count()
-            > 0
-            && claims.contains(&false);
-        strict_claim_dedupe || in_flight_rejection
-    })
-}
-
-pub(super) fn process_wake_source_key(event: &DeliveredBoundary) -> Option<String> {
-    if let Some(source_key) = event
-        .observed
-        .pointer("/runtime_queued_work/source_key")
-        .and_then(Value::as_str)
-    {
-        return Some(source_key.to_string());
-    }
-    let process_id = event
-        .observed
-        .pointer("/runtime_process_wake/process_id")
-        .and_then(Value::as_str)?;
-    let sequence = event
-        .observed
-        .pointer("/runtime_process_wake/sequence")
-        .and_then(Value::as_u64)?;
-    Some(lash_core::facade_support::process_wake_source_key(
-        &ProcessId::from(process_id),
-        sequence,
-    ))
+    durable_effect_replay_semantics(events, summary)
 }
 
 pub(super) fn durable_effect_replay_semantics(
@@ -931,43 +715,7 @@ pub(super) fn durable_effect_replay_semantics(
         .durable_effects
         .iter()
         .any(|effect| effect.execution_count == 1 && effect.replay_count > 0)
-        && {
-            let mut by_key: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
-            for event in events
-                .iter()
-                .filter(|event| event.kind == BoundaryKind::DurableEffect)
-            {
-                let Some(key) = event.observed.get("durable_key").and_then(Value::as_str) else {
-                    continue;
-                };
-                by_key.entry(key.to_string()).or_default().push(event);
-            }
-            by_key.values().any(|events| {
-                let first = events.iter().any(|event| {
-                    event.observed.get("replayed").and_then(Value::as_bool) == Some(false)
-                        && event
-                            .observed
-                            .pointer("/runtime_effect/local_executor_called")
-                            .and_then(Value::as_bool)
-                            == Some(true)
-                });
-                let replay = events.iter().any(|event| {
-                    event.observed.get("replayed").and_then(Value::as_bool) == Some(true)
-                        && event
-                            .observed
-                            .pointer("/runtime_effect/local_executor_called")
-                            .and_then(Value::as_bool)
-                            == Some(false)
-                        && event
-                            .observed
-                            .get("execution_count")
-                            .and_then(Value::as_u64)
-                            == Some(1)
-                        && event.observed.get("replay_count").and_then(Value::as_u64) == Some(1)
-                });
-                first && replay
-            })
-        }
+        && events.iter().any(durable_redrive_served)
 }
 
 pub(super) fn protocol_terminal_state_semantics(
@@ -1011,31 +759,6 @@ pub(super) fn provider_turns_after_queue(summary: &AbstractWorldSummary) -> bool
         .sessions
         .iter()
         .any(|session| session.queued_ingress_count > 0 && session.provider_turns.len() >= 2)
-}
-
-pub(super) fn process_wake_runtime_dto_observed(events: &[DeliveredBoundary]) -> bool {
-    events.iter().any(|event| {
-        event.kind == BoundaryKind::ProcessWake
-            && event.observed.get("runtime_process_wake").is_some()
-            && event
-                .observed
-                .pointer("/runtime_process_wake/event_invocation/subject/process_id")
-                .and_then(Value::as_str)
-                .is_some()
-    })
-}
-
-pub(super) fn worker_runtime_lease_dto_observed(events: &[DeliveredBoundary]) -> bool {
-    events.iter().any(|event| {
-        event.kind == BoundaryKind::Worker
-            && event.observed.get("runtime_active_lease").is_some()
-            && event.observed.get("runtime_stale_completion").is_some()
-            && event
-                .observed
-                .get("stale_completion_rejected")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-    })
 }
 
 pub(super) fn durable_runtime_effect_observed(events: &[DeliveredBoundary]) -> bool {
@@ -1301,32 +1024,10 @@ pub fn replay_determinism(
     expected: &AbstractWorldSummary,
     actual: &AbstractWorldSummary,
 ) -> OracleVerdict {
-    // Fencing tokens are monotonic backend implementation details, not semantic
-    // output. A durable backend may consume an extra token while preserving the
-    // same ownership transitions and stale-writer rejection. Keep the raw values
-    // in artifacts for diagnosis, but compare the behavior they protect.
-    let workers_match = expected.workers.len() == actual.workers.len()
-        && expected
-            .workers
-            .iter()
-            .zip(&actual.workers)
-            .all(|(expected, actual)| {
-                expected.worker_alias == actual.worker_alias
-                    && expected.session_alias == actual.session_alias
-                    && expected.active_incarnation_id == actual.active_incarnation_id
-                    && expected.lease_owner_changes == actual.lease_owner_changes
-                    && expected.stale_completion_rejections == actual.stale_completion_rejections
-                    && expected.process_stale_completion_rejected
-                        == actual.process_stale_completion_rejected
-                    && expected.process_stale_output_absent == actual.process_stale_output_absent
-                    && expected.process_terminal_writer == actual.process_terminal_writer
-                    && expected.process_terminal_event_count == actual.process_terminal_event_count
-            });
     let semantic_match = expected.session_count == actual.session_count
         && expected.total_events == actual.total_events
         && expected.sessions == actual.sessions
-        && expected.durable_effects == actual.durable_effects
-        && workers_match;
+        && expected.durable_effects == actual.durable_effects;
     if semantic_match {
         OracleVerdict::passed(
             REPLAY_DETERMINISM_ORACLE,

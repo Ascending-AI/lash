@@ -8,13 +8,7 @@ pub struct ScenarioContractSpec {
     pub oracle_id: &'static str,
 }
 
-const RUNTIME_REQUIRED_EVIDENCE: &[&str] = &[
-    "queued_ingress",
-    "cancellation",
-    "process_wake",
-    "worker_stale_completion",
-    "lease_time",
-];
+const RUNTIME_REQUIRED_EVIDENCE: &[&str] = &["queued_ingress", "cancellation"];
 
 pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
@@ -65,22 +59,6 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
         oracle_id: "sim.oracle.scenario.runtime-contract.v1",
     },
-    ScenarioContractSpec {
-        suite: "runtime",
-        test_name: "runtime_scenario_commits_after_advisory_session_lease_release",
-        owned_invariant: "A released advisory lease permits a current-head commit while the head CAS rejects stale state.",
-        semantic_oracle: "runtime.advisory_lease_head_cas",
-        required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
-        oracle_id: "sim.oracle.scenario.runtime-contract.v1",
-    },
-    ScenarioContractSpec {
-        suite: "runtime",
-        test_name: "runtime_scenario_waits_for_stale_session_lease_ttl",
-        owned_invariant: "An unexpired stale holder stays busy; TTL expiry advances the fence and the successor stays protected.",
-        semantic_oracle: "runtime.stale_lease_ttl",
-        required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
-        oracle_id: "sim.oracle.scenario.runtime-contract.v1",
-    },
 ];
 
 #[cfg(test)]
@@ -91,7 +69,7 @@ mod tests {
 
     #[test]
     fn runtime_scenario_contract_metadata_is_unique_and_complete() {
-        assert_eq!(RUNTIME_SCENARIO_CONTRACTS.len(), 8);
+        assert_eq!(RUNTIME_SCENARIO_CONTRACTS.len(), 6);
         let mut names = BTreeSet::new();
         for contract in RUNTIME_SCENARIO_CONTRACTS {
             assert_eq!(contract.suite, "runtime");

@@ -12,15 +12,17 @@ pub(super) struct GeneratedRuntimeWorld {
     clock: Arc<SimClock>,
     sessions: BTreeMap<String, GeneratedRuntimeSession>,
     queued_inputs: BTreeMap<String, String>,
-    lease_ticks: BTreeMap<String, Vec<u64>>,
     backend_faults: GeneratedBackendFaultHarness,
     provider_mutations: SimProviderMutationHarness,
     trigger_harness: SimTriggerHarness,
-    /// The world's backend with its session factory under the commit
+    /// The engine every turn of the world runs in: lash-restate on the
+    /// in-process Restate server double under the workload's seed.
+    engine: crate::backend::SimEngine,
+    /// The engine's backend with its session factory under the commit
     /// observer; every runtime core of the world runs on it.
-    backend: Arc<dyn lash::Backend>,
-    /// The backend factory underneath the commit observer, for reading the
-    /// in-process lane back through a fresh handle once the run is over.
+    backend: Arc<crate::backend::DecoratedBackend>,
+    /// The engine's own session factory, underneath the commit observer, for
+    /// reading the world back through a fresh handle once the run is over.
     reopen_factory: Arc<dyn SessionStoreFactory>,
     durable_writes: CheckpointWriteCollector,
     runtime_boundaries: RuntimeBoundaryHarness,
@@ -115,49 +117,44 @@ struct ActiveProviderTurn {
 const SCHEDULE_TICK_MS: u64 = 40_000;
 
 impl GeneratedRuntimeWorld {
-    pub(super) async fn new() -> Result<Self, FixedScriptRunnerError> {
-        // The in-process reference / generated SEARCH lane keeps full preserved
-        // cross-session concurrency (serialize_provider_turns = false).
-        let clock = SimClock::new();
-        Ok(Self::with_backend(
-            crate::backend::sim_memory_backend(clock.clone()).await?,
-            RuntimeEffectReplayStore::Memory,
+    /// The generated SEARCH lane's world: full preserved cross-session
+    /// concurrency, on a server double whose attempts run concurrently.
+    pub(super) async fn new(seed: u64) -> Result<Self, FixedScriptRunnerError> {
+        Ok(Self::over_engine(
+            crate::backend::SimEngine::concurrent(seed).await?,
             false,
-            clock,
         ))
     }
 
-    /// Build the generated runtime world over an explicit backend (one
-    /// backend + durable-effect replay store). The reference in-process run
-    /// and the cross-backend SQLite re-run drive the SAME workload through the
-    /// SAME scheduler-driven, concurrency-faithful driver, differing ONLY in
-    /// this backend. That makes the cross-backend comparison genuinely
-    /// apples-to-apples: any divergence is a real store divergence, not an
-    /// artifact of a separate, fixed-order, provider-event-gated re-drive.
-    pub(super) fn with_backend(
-        backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
-        effect_replay_store: RuntimeEffectReplayStore,
-        serialize_provider_turns: bool,
-        clock: Arc<SimClock>,
-    ) -> Self {
+    /// The SERIAL lane's world: one live provider turn at a time, on a
+    /// server double that runs one attempt at a time, so one seed grants the
+    /// turn in one order.
+    pub(super) async fn serial(seed: u64) -> Result<Self, FixedScriptRunnerError> {
+        Ok(Self::over_engine(
+            crate::backend::SimEngine::new(seed).await?,
+            true,
+        ))
+    }
+
+    fn over_engine(engine: crate::backend::SimEngine, serialize_provider_turns: bool) -> Self {
+        let clock = SimClock::new();
         let durable_writes = CheckpointWriteCollector::default();
-        let reopen_factory = backend.session_store_factory();
-        let backend: Arc<dyn lash::Backend> = Arc::new(
-            crate::backend::DecoratedBackend::over(backend).observing(durable_writes.clone()),
+        let reopen_factory = lash::Backend::session_store_factory(engine.backend().as_ref());
+        let backend = Arc::new(
+            crate::backend::DecoratedBackend::over_engine(&engine)
+                .observing(durable_writes.clone()),
         );
         Self {
-            clock: Arc::clone(&clock),
+            clock,
             sessions: BTreeMap::new(),
             queued_inputs: BTreeMap::new(),
-            lease_ticks: BTreeMap::new(),
             backend_faults: GeneratedBackendFaultHarness::default(),
             provider_mutations: SimProviderMutationHarness::default(),
-            trigger_harness: SimTriggerHarness::over(backend.trigger_store()),
-            runtime_boundaries: RuntimeBoundaryHarness::new(
-                backend.session_store_factory(),
-                effect_replay_store,
-                clock,
-            ),
+            trigger_harness: SimTriggerHarness::over(lash::Backend::trigger_store(
+                backend.as_ref(),
+            )),
+            runtime_boundaries: RuntimeBoundaryHarness::new(engine.clone()),
+            engine,
             backend,
             reopen_factory,
             durable_writes,
@@ -167,6 +164,11 @@ impl GeneratedRuntimeWorld {
             finished_suspends: Vec::new(),
             serialize_provider_turns,
         }
+    }
+
+    /// The server double the world's turns run on.
+    pub(super) fn engine(&self) -> &crate::backend::SimEngine {
+        &self.engine
     }
 
     pub(super) fn checkpoint_write_events(&self) -> Vec<CheckpointWriteEvent> {
@@ -183,8 +185,7 @@ impl GeneratedRuntimeWorld {
 
     /// Emitted, committed and reopened content for every runtime and suspend
     /// session. Runtime sessions are read back through `reopen`; suspend
-    /// sessions own an in-memory store and are read back through a fresh
-    /// handle on it.
+    /// sessions through the engine's own session factory.
     pub(super) async fn content_evidence(
         &self,
         reopen: &dyn SessionStoreFactory,
@@ -221,19 +222,10 @@ impl GeneratedRuntimeWorld {
     }
 
     pub(super) async fn advance_time_for_boundary(&self, event: &BoundaryEvent) {
-        let schedule_time = if event.kind == BoundaryKind::LeaseTime {
-            event
-                .payload
-                .get("tick")
-                .and_then(Value::as_u64)
-                .unwrap_or(event.at)
-        } else {
-            event.at
-        };
         let schedule_time = if event.kind == BoundaryKind::ProviderEvent {
             self.clock.logical_ms().saturating_add(SCHEDULE_TICK_MS)
         } else {
-            schedule_time
+            event.at
         };
         self.clock.advance_to(schedule_time).await;
     }
@@ -268,17 +260,11 @@ impl GeneratedRuntimeWorld {
             BoundaryKind::Trigger => self.trigger_harness.deliver(event).await,
             BoundaryKind::BackendFailure => self.backend_faults.inject(event).await,
             BoundaryKind::ProviderMutation => self.provider_mutations.reject(event).await,
-            BoundaryKind::DurableEffect
-            | BoundaryKind::ProcessWake
-            | BoundaryKind::ProcessLifecycle
-            | BoundaryKind::Worker
-            | BoundaryKind::Tool
-            | BoundaryKind::ExecCode => self
+            BoundaryKind::DurableEffect | BoundaryKind::Tool | BoundaryKind::ExecCode => self
                 .runtime_boundaries
                 .deliver(event)
                 .await
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string())),
-            BoundaryKind::LeaseTime => self.advance_lease_time(event).await,
         }
     }
 
@@ -308,7 +294,7 @@ impl GeneratedRuntimeWorld {
         let provider_schedule = ScriptedTransportSchedule::new();
         let (core, transport, provider_kind) = runtime_core_for_scripts(
             scripts,
-            Arc::clone(&self.backend),
+            Arc::clone(&self.backend) as Arc<dyn lash::Backend>,
             Some(provider_schedule.clone()),
             // The generated harness owns provider execution through explicit
             // `Provider` boundaries. Each modeled success turn gets one scripted
@@ -481,12 +467,13 @@ impl GeneratedRuntimeWorld {
         completion_event.at = final_ready_at;
         set_runtime_completion_ready_at(&mut completion_event, final_ready_at);
 
+        let engine = self.engine.clone();
         let session = runtime_session.session.clone();
         let transport = Arc::clone(&runtime_session.transport);
         let provider_kind = runtime_session.provider_kind.clone();
         let task_event = event.clone();
         let mut handle = tokio::spawn(async move {
-            run_provider_turn_task(session, transport, provider_kind, task_event).await
+            run_provider_turn_task(engine, session, transport, provider_kind, task_event).await
         });
         tokio::select! {
             ready = async {
@@ -914,45 +901,6 @@ impl GeneratedRuntimeWorld {
         }))
     }
 
-    async fn advance_lease_time(
-        &mut self,
-        event: &BoundaryEvent,
-    ) -> Result<Value, FixedScriptRunnerError> {
-        let tick = event
-            .payload
-            .get("tick")
-            .and_then(Value::as_u64)
-            .unwrap_or(event.at);
-        let ticks = self
-            .lease_ticks
-            .entry(event.actor_alias.clone())
-            .or_default();
-        let monotonic = ticks
-            .last()
-            .copied()
-            .is_none_or(|previous| previous <= tick);
-        ticks.push(tick);
-        // Ground the lease-time tick in a real session-execution-lease fencing
-        // token from the store. This token (not the generator-fed `tick`) is
-        // what the lease-time-monotonic oracle now asserts; the field is
-        // normalized away on cross-backend replay because the abstract model
-        // store cannot reproduce a real lease fence.
-        let lease_fencing_token = self
-            .runtime_boundaries
-            .lease_probe_fencing_token(&event.actor_alias)
-            .await
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        Ok(json!({
-            "session": event.actor_alias,
-            "lease_time_tick": tick,
-            "monotonic": monotonic,
-            "runtime_lease_probe": {
-                "session_execution_lease_fencing_token": lease_fencing_token,
-                "real_lease_store": true,
-            },
-        }))
-    }
-
     /// The turn calls a sim tool that registers its await key and returns
     /// `ToolOutcome::pending`, so the turn future parks mid-flight and cannot finish until the
     /// scheduler later delivers the matching completion boundary.
@@ -1004,16 +952,11 @@ impl GeneratedRuntimeWorld {
         let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(
             suspend_scripts.clone(),
         )?);
-        let suspend_backend = crate::backend::sim_memory_backend(self.clock.clone()).await?;
-        let suspend_store_factory: Arc<dyn SessionStoreFactory> =
-            suspend_backend.session_store_factory();
+        let suspend_store_factory = Arc::clone(&self.reopen_factory);
         let (provider_handle, model, _provider_kind) =
             runtime_provider_components(OPENAI_COMPATIBLE, &transport)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let backend = Arc::new(
-            crate::backend::DecoratedBackend::over(suspend_backend)
-                .observing(self.durable_writes.clone()),
-        );
+        let backend = Arc::clone(&self.backend) as Arc<dyn lash::Backend>;
         let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -1031,16 +974,23 @@ impl GeneratedRuntimeWorld {
             .open()
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        let turn_engine = self.engine.clone();
         let turn_session = session.clone();
-        let turn_events = Arc::clone(&events);
-        let suspend_label = suspend_kind_label.to_string();
+        let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
+        let prompt = format!("await {suspend_kind_label} completion");
+        let turn_id = format!("{session_alias}:suspend-turn");
         let handle = tokio::spawn(async move {
-            turn_session
-                .turn(lash::TurnInput::text(format!(
-                    "await {suspend_label} completion"
-                )))
-                .stream_to(turn_events.as_ref())
-                .await
+            turn_engine
+                .run_turn(
+                    &turn_session,
+                    turn_id,
+                    turn_events,
+                    Arc::new(move |session: &lash::LashSession| {
+                        Ok(session.turn(lash::TurnInput::text(prompt.clone())))
+                    }),
+                )
+                .await?
+                .map(|output| output.result)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
         });
         let resolution_at = SUSPEND_RESOLUTION_BASE_AT + self.suspends_spawned;
@@ -1326,6 +1276,7 @@ fn set_runtime_completion_ready_at(event: &mut BoundaryEvent, ready_at: u64) {
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
 async fn run_provider_turn_task(
+    engine: crate::backend::SimEngine,
     session: lash::LashSession,
     transport: Arc<ScriptedLlmHttpTransport>,
     provider_kind: String,
@@ -1341,14 +1292,10 @@ async fn run_provider_turn_task(
         .get("turn_index")
         .and_then(Value::as_u64)
         .unwrap_or(1) as usize;
-    let output = session
-        .turn(lash::TurnInput::text(format!(
-            "Run generated provider turn {}.",
-            event.boundary_id
-        )))
-        .turn_id(event.boundary_id.clone())
-        .run()
-        .await
+    let prompt = format!("Run generated provider turn {}.", event.boundary_id);
+    let output = engine
+        .run_text_turn(&session, event.boundary_id.clone(), prompt)
+        .await?
         .map_err(|err| {
             FixedScriptRunnerError::Runtime(format!(
                 "runtime turn `{}` error: {err}",

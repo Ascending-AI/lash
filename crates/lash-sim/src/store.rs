@@ -1,11 +1,10 @@
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::StoreError;
 use serde_json::{Value, json};
 
-use crate::runtime_boundaries::EFFECT_SCOPE_ID;
+use crate::runtime_boundaries::durable_effect_scope;
 use crate::runtime_contracts::{
     RuntimeAgentFrameInvariantFacts, RuntimeFinalValueInvariantFacts, RuntimeGraphInvariantFacts,
     RuntimeTurnObservation, RuntimeUsageInvariantFacts, RuntimeUsageTotals, runtime_turn_contract,
@@ -15,7 +14,7 @@ use crate::scheduler::{
 };
 use crate::trace::{
     AbstractWorldSummary, DurableEffectAbstractSummary, ProviderTurnSummary,
-    SessionAbstractSummary, WorkerAbstractSummary, value_digest,
+    SessionAbstractSummary, value_digest,
 };
 
 mod boundary;
@@ -84,14 +83,10 @@ struct ModelPendingInput {
 pub struct ModelStore {
     sessions: BTreeMap<String, ModelSession>,
     durable_effects: BTreeMap<String, ModelDurableEffect>,
-    workers: BTreeMap<String, ModelWorker>,
-    #[allow(clippy::struct_field_names)]
-    durable_projection_entries: BTreeMap<String, ModelDurableProjectionEntry>,
     backend_attempts_by_operation: BTreeMap<String, usize>,
     tool_completions: BTreeMap<String, usize>,
     exec_executions: BTreeMap<String, usize>,
     rejected_provider_mutations: BTreeSet<String>,
-    delivered_process_wake_ids: BTreeSet<String>,
     queued_input_boundaries: BTreeMap<String, ModelPendingInput>,
     pending_turn_input_seq_by_session: BTreeMap<String, u64>,
     total_events: usize,
@@ -267,29 +262,6 @@ impl ModelStore {
                     ModelDurableEffect::from_observed(key, observed),
                 );
             }
-            BoundaryKind::Worker => {
-                let worker_alias = observed
-                    .get("worker_alias")
-                    .and_then(Value::as_str)
-                    .unwrap_or(&event.actor_alias)
-                    .to_string();
-                self.workers.insert(
-                    worker_alias.clone(),
-                    ModelWorker::from_observed(worker_alias, observed),
-                );
-            }
-            BoundaryKind::ProcessWake => {
-                let session = self.ensure_session(boundary_session_alias(event));
-                session.process_wake_count += 1;
-            }
-            BoundaryKind::ProcessLifecycle => {
-                // The disposition/evidence verdicts live in the boundary's real
-                // observed (`runtime_process_lifecycle`, read by the lifecycle
-                // oracles); the abstract model tracks only the presence count so
-                // the cross-backend summary stays reproducible.
-                let session = self.ensure_session(boundary_session_alias(event));
-                session.process_lifecycle_count += 1;
-            }
             BoundaryKind::Observer => {
                 let session = self.ensure_session(event.actor_alias.clone());
                 let turn_index = observed
@@ -331,15 +303,6 @@ impl ModelStore {
                 let session = self.ensure_session(event.actor_alias.clone());
                 session.provider_mutation_count += 1;
             }
-            BoundaryKind::LeaseTime => {
-                let session = self.ensure_session(event.actor_alias.clone());
-                let tick = event
-                    .payload
-                    .get("tick")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(event.at);
-                session.lease_time_ticks.push(tick);
-            }
         }
     }
 
@@ -354,17 +317,11 @@ impl ModelStore {
             .values()
             .map(ModelDurableEffect::summary)
             .collect::<Vec<_>>();
-        let workers = self
-            .workers
-            .values()
-            .map(ModelWorker::summary)
-            .collect::<Vec<_>>();
         AbstractWorldSummary::with_digest(
             self.sessions.len(),
             self.total_events,
             sessions,
             durable_effects,
-            workers,
         )
     }
 
@@ -622,7 +579,7 @@ impl ModelStore {
                     assistant_output_text: text.clone(),
                     semantic_channel_observed: false,
                 };
-                json!({
+                let mut observed = json!({
                     "session": event.actor_alias,
                     "runtime_session_id": event.actor_alias,
                     "turn_index": turn_index,
@@ -651,7 +608,19 @@ impl ModelStore {
                     },
                     "runtime_final_value_facts": final_value_facts,
                     "runtime_contract": runtime_contract,
-                })
+                });
+                // A fixture that strips the runtime session attribution from a
+                // provider completion strips it from the model's projection too.
+                if event
+                    .payload
+                    .get("omit_runtime_session_id")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    && let Some(object) = observed.as_object_mut()
+                {
+                    object.remove("runtime_session_id");
+                }
+                observed
             }
             BoundaryKind::ProviderEvent => json!({
                 "session": event.actor_alias,
@@ -727,7 +696,7 @@ impl ModelStore {
                     "tool_call_id": event.boundary_id,
                     "execution_count": *count,
                     "runtime_effect": {
-                        "controller": "sqlite_runtime_effect_controller",
+                        "controller": "restate_runtime_effect_controller",
                         "kind": "tool_attempt",
                         "local_executor_called": true,
                     },
@@ -790,7 +759,7 @@ impl ModelStore {
                     "exit_code": exit_code,
                     "execution_count": *count,
                     "runtime_effect": {
-                        "controller": "sqlite_runtime_effect_controller",
+                        "controller": "restate_runtime_effect_controller",
                         "kind": "exec_code",
                         "local_executor_called": true,
                     },
@@ -809,157 +778,7 @@ impl ModelStore {
                     .get("result")
                     .cloned()
                     .unwrap_or_else(|| json!({"completed": true}));
-                self.project_durable_effect(event, durable_key, result)
-            }
-            BoundaryKind::Worker => {
-                // Worker lease fencing (incarnation change, monotonic fencing
-                // token, stale-completion rejection, and second-owner work
-                // continuation) is produced by the REAL session-execution lease
-                // store in `runtime_boundaries::run_worker_stale_completion`, and
-                // is NOT abstractly derivable from the boundary stream. The model
-                // carries the REAL reclaim/fence facts, threaded from the
-                // recorded observation via `apply_observed_boundary` (see
-                // `replay_trace`); cross-store reproduction is re-verified by the
-                // SQLite/Postgres backend replays, which re-run the real lease
-                // store. This abstract projection therefore reports identity only
-                // and deliberately fabricates NO fencing, so no path can make the
-                // worker oracle pass without the real store actually fencing.
-                json!({
-                    "worker_alias": event.actor_alias,
-                    "session": boundary_session_alias(event),
-                })
-            }
-            BoundaryKind::ProcessWake => {
-                let session = boundary_session_alias(event);
-                let process_id = event
-                    .payload
-                    .get("process_id")
-                    .and_then(Value::as_str)
-                    .map_or_else(
-                        || format!("sim-process-{}", event.boundary_id.replace(':', "-")),
-                        ToString::to_string,
-                    );
-                let sequence = event
-                    .payload
-                    .get("sequence")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(1);
-                let process_incarnation = event
-                    .payload
-                    .get("incarnation")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(1);
-                let replay_key = event
-                    .payload
-                    .get("replay_key")
-                    .and_then(Value::as_str)
-                    .map_or_else(
-                        || {
-                            lash_core::facade_support::process_wake_source_key(
-                                &ProcessId::from(process_id.clone()),
-                                sequence,
-                            )
-                        },
-                        ToString::to_string,
-                    )
-                    .to_string();
-                let wake = lash_core::facade_support::process_wake_delivery(
-                    lash_core::facade_support::ProcessWakeDeliveryRequest {
-                        target_session_id: SessionId::from(session.clone()),
-                        process_id: ProcessId::from(process_id.clone()),
-                        process_incarnation:
-                            lash_core::ProcessIncarnation::from_registration_sequence(
-                                process_incarnation,
-                            ),
-                        sequence,
-                        event_type: "process.wake".to_string(),
-                        event_invocation: lash_core::RuntimeInvocation {
-                            attribution: lash_core::RuntimeAttribution::for_session(
-                                session.clone(),
-                            ),
-                            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
-                                process_id: ProcessId::from(process_id.clone()),
-                                sequence,
-                                event_type: "process.wake".to_string(),
-                            },
-                            caused_by: None,
-                            replay: Some(lash_core::runtime::RuntimeReplay {
-                                key: replay_key,
-                                attribution: None,
-                            }),
-                        },
-                        process_caused_by: None,
-                        authority: lash_core::QueuedWorkAuthority::default(),
-                        wake: lash_core::facade_support::ProcessWake {
-                            input: format!("wake for {session}"),
-                        },
-                        occurred_at_ms: event.at,
-                    },
-                )
-                .expect("sim process wake delivery request is deterministic and valid");
-                let wake_id = wake.wake_id.clone();
-                let claimed_once = self.delivered_process_wake_ids.insert(
-                    lash_core::facade_support::process_wake_source_key(
-                        &wake.process_id,
-                        wake.sequence,
-                    ),
-                );
-                let source_key = lash_core::facade_support::process_wake_source_key(
-                    &wake.process_id,
-                    wake.sequence,
-                );
-                let mut observed = json!({
-                    "process_wake": true,
-                    "process_id": process_id,
-                    "sequence": sequence,
-                    "wake_id": wake_id,
-                    "claimed_once": claimed_once,
-                    "runtime_process_wake": wake,
-                    "runtime_queued_work": {
-                        "source_key": source_key,
-                        "work_class": "TurnWork",
-                        "enqueued": claimed_once,
-                        "claimed": claimed_once,
-                        "claimed_batch_count": usize::from(claimed_once),
-                        "claim_fencing_token": claimed_once.then_some(1_u64),
-                        "batch_id_present": claimed_once,
-                        "claim_id_present": claimed_once,
-                        "runtime_turn_id": claimed_once
-                            .then(|| format!("wake-turn:{}", event.boundary_id)),
-                    },
-                });
-                // A redelivery is refused at the receiver floor the first
-                // delivery's settlement raised (FIG-3545), as the stores report.
-                if !claimed_once {
-                    observed["runtime_queued_work"]["receiver_floor_refused"] = json!(true);
-                    observed["runtime_queued_work"]["receiver_allocation_floor"] = json!(sequence);
-                }
-                if !event
-                    .payload
-                    .get("omit_join_session")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    observed
-                        .as_object_mut()
-                        .expect("process wake observed object")
-                        .insert("session".to_string(), Value::String(session));
-                }
-                observed
-            }
-            BoundaryKind::ProcessLifecycle => {
-                // Identity only: the disposition-driven recovery verdicts are
-                // produced by the REAL `DurableProcessWorker` sweep in
-                // `runtime_boundaries::run_process_lifecycle` and are not
-                // re-derivable from the boundary stream. The model carries the
-                // recorded real facts (threaded via `apply_observed_boundary` on
-                // replay, like `Worker`), and `runtime_process_lifecycle` is
-                // normalized away for cross-backend equality — so no path can make
-                // a lifecycle oracle pass without the real sweep producing them.
-                json!({
-                    "session": boundary_session_alias(event),
-                    "process_lifecycle": true,
-                })
+                Self::project_durable_effect(event, durable_key, result)
             }
             BoundaryKind::Observer => {
                 let turn_index = self
@@ -1086,29 +905,6 @@ impl ModelStore {
                     "oracle": event.payload.get("oracle").cloned().unwrap_or(Value::Null),
                 })
             }
-            BoundaryKind::LeaseTime => {
-                let tick = event
-                    .payload
-                    .get("tick")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(event.at);
-                let previous_tick = self
-                    .sessions
-                    .get(&event.actor_alias)
-                    .and_then(|session| session.lease_time_ticks.last().copied());
-                json!({
-                    "session": event.actor_alias,
-                    "lease_time_tick": tick,
-                    "monotonic": previous_tick.is_none_or(|previous| previous <= tick),
-                    "runtime_lease_probe": {
-                        "session_execution_lease_fencing_token": self
-                            .sessions
-                            .get(&event.actor_alias)
-                            .map_or(1, |session| session.lease_time_ticks.len() as u64 + 1),
-                        "real_lease_store": true,
-                    },
-                })
-            }
         }
     }
 
@@ -1119,22 +915,18 @@ impl ModelStore {
             .or_insert_with(|| ModelSession::new(alias))
     }
 
-    /// COVERAGE-ONLY abstract model projection.
+    /// COVERAGE-ONLY abstract model projection of a durable effect under
+    /// crash and redrive: executed once, and the redrive served the recorded
+    /// result.
     ///
-    /// This projection makes generated model states comparable; its synthetic
-    /// `execution_count` is not evidence for the `durable_effect_exactly_once`
-    /// runtime oracle. That oracle consumes the real replay controller's local
-    /// execution count from `runtime_boundaries`.
+    /// This projection makes generated model states comparable; it is not
+    /// evidence for the `durable_effect_exactly_once` runtime oracle, which
+    /// reads what the engine did in `runtime_boundaries`.
     #[expect(
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    fn project_durable_effect(
-        &mut self,
-        event: &BoundaryEvent,
-        durable_key: String,
-        result: Value,
-    ) -> Value {
+    fn project_durable_effect(event: &BoundaryEvent, durable_key: String, result: Value) -> Value {
         let effect_id = event
             .payload
             .get("runtime_effect")
@@ -1145,7 +937,7 @@ impl ModelStore {
         let envelope = lash_core::RuntimeEffectEnvelope::new(
             lash_core::RuntimeEffectInvocation::new(
                 lash_core::EffectAddress::new(
-                    lash_core::ExecutionScope::runtime_operation(EFFECT_SCOPE_ID),
+                    durable_effect_scope(&event.actor_alias, &durable_key),
                     durable_key.clone(),
                 )
                 .expect("abstract durable effect carries an admitted effect scope"),
@@ -1186,47 +978,23 @@ impl ModelStore {
                     ),
                 },
             ))]);
-        let (result_digest, projected_result, execution_count, replay_count, replayed) =
-            if let Some(entry) = self.durable_projection_entries.get_mut(&durable_key) {
-                entry.replay_count += 1;
-                (
-                    entry.result_digest.clone(),
-                    entry.result.clone(),
-                    entry.execution_count,
-                    entry.replay_count,
-                    true,
-                )
-            } else {
-                let entry = ModelDurableProjectionEntry {
-                    result_digest: value_digest(&result),
-                    result: result.clone(),
-                    execution_count: 1,
-                    replay_count: 0,
-                };
-                let result = (
-                    entry.result_digest.clone(),
-                    entry.result.clone(),
-                    entry.execution_count,
-                    entry.replay_count,
-                    false,
-                );
-                self.durable_projection_entries
-                    .insert(durable_key.clone(), entry);
-                result
-            };
+        let result_digest = value_digest(&result);
         json!({
             "durable_key": durable_key,
             "result_digest": result_digest,
-            "execution_count": execution_count,
-            "replay_count": replay_count,
-            "replayed": replayed,
+            "redrive_result_digest": result_digest,
+            "redrive_served_recorded_result": true,
+            "execution_count": 1,
+            "replay_count": 1,
+            "replayed": true,
             "runtime_effect": {
                 "kind": "tool_attempt",
                 "effect_id": effect_id,
-                "replay_key": durable_key,
+                "replay_key": envelope.invocation.replay_key(),
                 "envelope_hash": envelope_hash,
-                "controller": "sqlite_runtime_effect_controller",
-                "local_executor_called": !replayed,
+                "controller": "restate_runtime_effect_controller",
+                "local_executor_called": true,
+                "redrive_local_executor_called": false,
             },
             "runtime_effect_outcome": {
                 "type": "tool_attempt",
@@ -1236,7 +1004,7 @@ impl ModelStore {
                         "call_id": effect_id,
                         "tool": "sim_opaque_effect",
                         "args": null,
-                        "output": lash_core::ToolCallOutput::success(projected_result),
+                        "output": lash_core::ToolCallOutput::success(result),
                         "duration_ms": 0,
                     },
                     "intents": recorded_intents,
@@ -1244,14 +1012,6 @@ impl ModelStore {
             },
         })
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ModelDurableProjectionEntry {
-    result_digest: String,
-    result: Value,
-    execution_count: usize,
-    replay_count: usize,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1271,10 +1031,7 @@ struct ModelSession {
     trigger_count: usize,
     backend_failure_count: usize,
     provider_mutation_count: usize,
-    process_wake_count: usize,
-    process_lifecycle_count: usize,
     durable_effect_keys: Vec<String>,
-    lease_time_ticks: Vec<u64>,
     checkpoint_commit_count: usize,
     checkpoint_component_stored_count: usize,
     checkpoint_component_ref_count: usize,
@@ -1299,10 +1056,7 @@ impl ModelSession {
             trigger_count: 0,
             backend_failure_count: 0,
             provider_mutation_count: 0,
-            process_wake_count: 0,
-            process_lifecycle_count: 0,
             durable_effect_keys: Vec::new(),
-            lease_time_ticks: Vec::new(),
             checkpoint_commit_count: 0,
             checkpoint_component_stored_count: 0,
             checkpoint_component_ref_count: 0,
@@ -1325,10 +1079,7 @@ impl ModelSession {
             trigger_count: self.trigger_count,
             backend_failure_count: self.backend_failure_count,
             provider_mutation_count: self.provider_mutation_count,
-            process_wake_count: self.process_wake_count,
-            process_lifecycle_count: self.process_lifecycle_count,
             durable_effect_keys: self.durable_effect_keys.clone(),
-            lease_time_ticks: self.lease_time_ticks.clone(),
             checkpoint_commit_count: self.checkpoint_commit_count,
             checkpoint_component_stored_count: self.checkpoint_component_stored_count,
             checkpoint_component_ref_count: self.checkpoint_component_ref_count,
@@ -1371,87 +1122,6 @@ impl ModelDurableEffect {
             execution_count: self.execution_count,
             replay_count: self.replay_count,
             result_digest: self.result_digest.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ModelWorker {
-    worker_alias: String,
-    session_alias: String,
-    active_incarnation_id: String,
-    active_fencing_token: u64,
-    lease_owner_changes: usize,
-    stale_completion_rejections: usize,
-    process_stale_completion_rejected: bool,
-    process_stale_output_absent: bool,
-    process_terminal_writer: String,
-    process_terminal_event_count: usize,
-}
-
-impl ModelWorker {
-    fn from_observed(worker_alias: String, observed: &Value) -> Self {
-        Self {
-            worker_alias,
-            session_alias: observed
-                .get("session")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            active_incarnation_id: observed
-                .get("active_owner")
-                .and_then(|owner| owner.get("incarnation_id"))
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            active_fencing_token: observed
-                .get("active_fencing_token")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-            lease_owner_changes: usize::from(
-                observed
-                    .get("lease_owner_changed")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-            ),
-            stale_completion_rejections: usize::from(
-                observed
-                    .get("stale_completion_rejected")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-            ),
-            process_stale_completion_rejected: observed
-                .get("process_stale_completion_rejected")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            process_stale_output_absent: observed
-                .get("process_stale_output_absent")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            process_terminal_writer: observed
-                .get("process_terminal_writer")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            process_terminal_event_count: observed
-                .get("process_terminal_event_count")
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as usize,
-        }
-    }
-
-    fn summary(&self) -> WorkerAbstractSummary {
-        WorkerAbstractSummary {
-            worker_alias: self.worker_alias.clone(),
-            session_alias: self.session_alias.clone(),
-            active_incarnation_id: self.active_incarnation_id.clone(),
-            active_fencing_token: self.active_fencing_token,
-            lease_owner_changes: self.lease_owner_changes,
-            stale_completion_rejections: self.stale_completion_rejections,
-            process_stale_completion_rejected: self.process_stale_completion_rejected,
-            process_stale_output_absent: self.process_stale_output_absent,
-            process_terminal_writer: self.process_terminal_writer.clone(),
-            process_terminal_event_count: self.process_terminal_event_count,
         }
     }
 }

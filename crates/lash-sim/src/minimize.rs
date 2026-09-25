@@ -154,7 +154,7 @@ pub struct FailingTraceMutation {
     #[serde(default)]
     pub contract_execution_field: Option<ContractExecutionFieldMutation>,
     #[serde(default)]
-    pub omit_process_wake_join_session: bool,
+    pub omit_provider_runtime_session: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -736,42 +736,32 @@ fn apply_fixture_mutation(
     if let Some(mutation) = mutation.contract_execution_field.as_ref() {
         apply_contract_execution_field_mutation(trace, mutation)?;
     }
-    if mutation.omit_process_wake_join_session {
+    if mutation.omit_provider_runtime_session {
         let mut removed = 0usize;
         for event in trace
             .events
             .iter_mut()
-            .filter(|event| event.kind == BoundaryKind::ProcessWake)
+            .filter(|event| event.kind == BoundaryKind::Provider)
         {
-            event
-                .payload
-                .as_object_mut()
-                .ok_or_else(|| {
-                    MinimizeError::Fixture(
-                        "process wake fixture target had non-object payload".to_string(),
-                    )
-                })?
-                .insert(
-                    "omit_join_session".to_string(),
-                    serde_json::Value::Bool(true),
-                );
-            if event
-                .observed
-                .as_object_mut()
-                .ok_or_else(|| {
-                    MinimizeError::Fixture(
-                        "process wake fixture target had non-object observed payload".to_string(),
-                    )
-                })?
-                .remove("session")
-                .is_some()
-            {
+            let (Some(payload), Some(observed)) = (
+                event.payload.as_object_mut(),
+                event.observed.as_object_mut(),
+            ) else {
+                return Err(MinimizeError::Fixture(
+                    "provider fixture target had a non-object payload".to_string(),
+                ));
+            };
+            payload.insert(
+                "omit_runtime_session_id".to_string(),
+                serde_json::Value::Bool(true),
+            );
+            if observed.remove("runtime_session_id").is_some() {
                 removed += 1;
             }
         }
         if removed == 0 {
             return Err(MinimizeError::Fixture(
-                "fixture removed no process wake join sessions".to_string(),
+                "fixture removed no provider runtime session attribution".to_string(),
             ));
         }
     }
@@ -1188,7 +1178,7 @@ mod tests {
             Vec::new(),
             target.clone(),
             vec![target],
-            AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new(), Vec::new()),
+            AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new()),
         );
         let tmp = tempfile::tempdir().expect("tempdir");
 
@@ -1314,7 +1304,7 @@ mod tests {
     #[tokio::test]
     async fn minimizer_preserves_agent_mini_oracle_fixture_reason() {
         let fixture: FailingTraceFixture = serde_json::from_str(include_str!(
-            "../failure-fixtures/agent-parallel-join-missing-wake-session.json"
+            "../failure-fixtures/agent-parallel-join-missing-provider-session.json"
         ))
         .expect("fixture");
         let workload = generate_workload(fixture.seed, &fixture.profile, fixture.max_boundaries)
@@ -1423,14 +1413,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn minimizer_preserves_worker_failover_stale_rejection_fixture_reason() {
-        assert_named_contract_fixture(include_str!(
-            "../failure-fixtures/worker-failover-stale-rejection-missing.json"
-        ))
-        .await;
-    }
-
-    #[tokio::test]
     async fn minimizer_preserves_backend_retry_runtime_completion_fixture_reason() {
         assert_named_contract_fixture(include_str!(
             "../failure-fixtures/backend-retry-runtime-completion-missing.json"
@@ -1450,14 +1432,6 @@ mod tests {
     async fn minimizer_preserves_trigger_wakeup_operational_fixture_reason() {
         assert_named_contract_fixture(include_str!(
             "../failure-fixtures/trigger-wakeup-operational-missing.json"
-        ))
-        .await;
-    }
-
-    #[tokio::test]
-    async fn minimizer_preserves_process_wake_operational_fixture_reason() {
-        assert_named_contract_fixture(include_str!(
-            "../failure-fixtures/process-wake-operational-missing.json"
         ))
         .await;
     }

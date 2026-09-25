@@ -138,12 +138,100 @@ pub(super) async fn drive_generated_workload(
     Ok((events, final_summary))
 }
 
+/// One run of a workload in the SERIAL lane: one live provider turn at a
+/// time, on a server double that runs one attempt at a time.
+#[derive(Debug)]
+pub(super) struct SerialLaneRun {
+    pub(super) delivered: Vec<(String, BoundaryKind)>,
+    pub(super) summary: AbstractWorldSummary,
+    /// Every grant of the server's turn, in order.
+    pub(super) schedule_trace: Vec<(String, u32)>,
+    /// Turns the server moved on a stall rather than a sequenced hand-off.
+    pub(super) stall_preemptions: u64,
+}
+
+/// Run `workload` in the serial lane on its own current-thread runtime, the
+/// one runtime shape on which one seed grants the server's turn in one order.
+pub(super) fn run_serial_lane(
+    workload: GeneratedWorkload,
+) -> Result<SerialLaneRun, FixedScriptRunnerError> {
+    let label = format!("serial-lane-seed-{:016x}", workload.seed);
+    run_on_sim_harness_stack(label, SIM_HARNESS_STACK_LIMIT_BYTES, move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(FixedScriptRunnerError::Io)?;
+        runtime.block_on(async move {
+            let mut world = GeneratedRuntimeWorld::serial(workload.seed).await?;
+            let (events, summary) = drive_generated_workload(&mut world, &workload).await?;
+            let server = world.engine().restate().server();
+            Ok(SerialLaneRun {
+                delivered: events
+                    .iter()
+                    .map(|event| (event.boundary_id.clone(), event.kind))
+                    .collect(),
+                summary,
+                schedule_trace: server.schedule_trace(),
+                stall_preemptions: server.stats().stall_preemptions,
+            })
+        })
+    })
+}
+
+pub const SERIAL_ENGINE_DETERMINISM_ORACLE: &str = "sim.oracle.serial-engine-determinism.v1";
+
+/// The serial lane is deterministic across runs of one seed: the same
+/// delivered boundaries and the same final abstract outcome. The server's
+/// grant order and stall count are recorded as evidence: a turn waiting on a
+/// scripted provider gate is not blocked on the server, so an outside request
+/// from a task lash runs beside its handlers can still land on a stall. The
+/// lane tightens to grant-order equality and zero stalls once those tasks are
+/// server-visible (FIG-3751).
+pub(super) fn serial_engine_determinism(
+    seed: u64,
+    first: &SerialLaneRun,
+    second: &SerialLaneRun,
+) -> OracleVerdict {
+    let failure = if first.delivered != second.delivered {
+        Some("the two runs delivered different boundary sequences".to_string())
+    } else if !replay_determinism(&first.summary, &second.summary).is_passed() {
+        Some(format!(
+            "the two runs reached different outcomes: {} then {}",
+            first.summary.digest, second.summary.digest
+        ))
+    } else {
+        None
+    };
+    match failure {
+        Some(reason) => OracleVerdict::failed(
+            SERIAL_ENGINE_DETERMINISM_ORACLE,
+            format!("seed {seed:#018x}: {reason}"),
+        ),
+        None => OracleVerdict::passed(
+            SERIAL_ENGINE_DETERMINISM_ORACLE,
+            format!(
+                "seed {seed:#018x}: two serial runs delivered {} boundaries and reached one outcome; the server granted the turn {} then {} times, with {} then {} stall preemption(s), and the grant orders {}",
+                first.delivered.len(),
+                first.schedule_trace.len(),
+                second.schedule_trace.len(),
+                first.stall_preemptions,
+                second.stall_preemptions,
+                if first.schedule_trace == second.schedule_trace {
+                    "matched"
+                } else {
+                    "differed"
+                }
+            ),
+        ),
+    }
+}
+
 pub(super) async fn run_generated_workload(
     workload: GeneratedWorkload,
     script_bundle_hash: &str,
     shard_label: &str,
 ) -> Result<SimulationTrace, FixedScriptRunnerError> {
-    let mut world = GeneratedRuntimeWorld::new().await?;
+    let mut world = GeneratedRuntimeWorld::new(workload.seed).await?;
     // Declared before the run so oracles can prove an observation class is
     // absent rather than passing vacuously over an empty set.
     let expectations = workload.expectations();

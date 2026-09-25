@@ -120,328 +120,23 @@ fn live_provider_failure_coverage_requires_multiple_kinds_and_positions() {
 }
 
 #[test]
-fn worker_stale_completion_oracle_requires_real_fencing() {
-    // Negative: the real store did NOT fence (no incarnation change, no stale
-    // rejection, fence not advanced) -> the oracle must FAIL. With the
-    // fabrication deleted, this is the ONLY way the summary can look.
-    let not_fenced = AbstractWorldSummary::with_digest(
-        1,
-        1,
-        vec![],
-        vec![],
-        vec![WorkerAbstractSummary {
-            worker_alias: "worker-001".to_string(),
-            session_alias: "session-001".to_string(),
-            active_incarnation_id: String::new(),
-            active_fencing_token: 1,
-            lease_owner_changes: 0,
-            stale_completion_rejections: 0,
-            process_stale_completion_rejected: false,
-            process_stale_output_absent: false,
-            process_terminal_writer: String::new(),
-            process_terminal_event_count: 0,
-        }],
-    );
-    assert!(!worker_stale_completion_rejected(&not_fenced).is_passed());
-
-    // Positive: the real store fenced (incarnation change, stale rejection,
-    // monotonic fence advance) -> the oracle passes.
-    let fenced = AbstractWorldSummary::with_digest(
-        1,
-        1,
-        vec![],
-        vec![],
-        vec![WorkerAbstractSummary {
-            worker_alias: "worker-001".to_string(),
-            session_alias: "session-001".to_string(),
-            active_incarnation_id: "worker-001:incarnation-002".to_string(),
-            active_fencing_token: 2,
-            lease_owner_changes: 1,
-            stale_completion_rejections: 1,
-            process_stale_completion_rejected: true,
-            process_stale_output_absent: true,
-            process_terminal_writer: "successor".to_string(),
-            process_terminal_event_count: 1,
-        }],
-    );
-    assert!(worker_stale_completion_rejected(&fenced).is_passed());
-
-    let mut stale_output_present = fenced.clone();
-    stale_output_present.workers[0].process_stale_output_absent = false;
-    assert!(
-        !worker_stale_completion_rejected(&stale_output_present).is_passed(),
-        "the oracle must reject a trace where stale semantic output persisted"
-    );
-    let mut duplicate_terminal = fenced.clone();
-    duplicate_terminal.workers[0].process_terminal_event_count = 2;
-    assert!(
-        !worker_stale_completion_rejected(&duplicate_terminal).is_passed(),
-        "the oracle must reject duplicate successor terminals"
-    );
-    let mut stale_writer_won = fenced;
-    stale_writer_won.workers[0].process_terminal_writer = "stale".to_string();
-    assert!(
-        !worker_stale_completion_rejected(&stale_writer_won).is_passed(),
-        "the oracle must inspect the semantic terminal writer"
-    );
-}
-
-#[test]
-fn deliberate_expiry_oracles_remain_failure_capable() {
-    let lease_event = |sequence, token| {
-        delivered_with_payload(
-            sequence,
-            &format!("session-001:lease-time:{sequence:03}"),
-            "session-001",
-            BoundaryKind::LeaseTime,
-            json!({"tick": sequence * 30_000}),
-            json!({
-                "runtime_lease_probe": {
-                    "session_execution_lease_fencing_token": token,
-                    "real_lease_store": true,
-                }
-            }),
-        )
-    };
-    let two_lease_boundaries = WorkloadExpectations::new(vec!["session-001".to_string()], 0, 0, 2);
-    assert!(
-        lease_time_monotonic(
-            &[lease_event(0, 1), lease_event(1, 2)],
-            &two_lease_boundaries
-        )
-        .is_passed()
-    );
-    assert!(
-        !lease_time_monotonic(
-            &[lease_event(0, 1), lease_event(1, 1)],
-            &two_lease_boundaries
-        )
-        .is_passed(),
-        "lease-time-monotonic must fire when a real store reissues a fence"
-    );
-
-    let worker_event = delivered_with_payload(
-        0,
-        "worker-001:worker:001",
-        "worker-001",
-        BoundaryKind::Worker,
-        json!({"session": "session-001"}),
-        json!({
-            "stale_completion_rejected": true,
-            "runtime_active_lease": {"fencing_token": 2},
-            "runtime_stale_completion": {"fencing_token": 1},
-        }),
-    );
-    let fenced = AbstractWorldSummary::with_digest(
-        1,
-        1,
-        vec![],
-        vec![],
-        vec![WorkerAbstractSummary {
-            worker_alias: "worker-001".to_string(),
-            session_alias: "session-001".to_string(),
-            active_incarnation_id: "worker-001:incarnation-002".to_string(),
-            active_fencing_token: 2,
-            lease_owner_changes: 1,
-            stale_completion_rejections: 1,
-            process_stale_completion_rejected: true,
-            process_stale_output_absent: true,
-            process_terminal_writer: "successor".to_string(),
-            process_terminal_event_count: 1,
-        }],
-    );
-    assert!(
-        mini_runtime_stale_lease_commit_rejected(std::slice::from_ref(&worker_event), &fenced)
-            .is_passed()
-    );
-
-    let mut unfenced = worker_event;
-    unfenced.observed["stale_completion_rejected"] = json!(false);
-    assert!(
-        !mini_runtime_stale_lease_commit_rejected(&[unfenced], &fenced).is_passed(),
-        "stale-lease-commit-rejected must fire when the stale writer is not rejected"
-    );
-}
-
-#[test]
-fn replay_determinism_ignores_only_opaque_fence_values() {
-    let summary = |fence, stale_rejections| {
+fn replay_determinism_compares_durable_effect_outcomes() {
+    let summary = |execution_count| {
         AbstractWorldSummary::with_digest(
             1,
             1,
             vec![],
-            vec![],
-            vec![WorkerAbstractSummary {
-                worker_alias: "worker-001".to_string(),
-                session_alias: "session-001".to_string(),
-                active_incarnation_id: "worker-001:incarnation-002".to_string(),
-                active_fencing_token: fence,
-                lease_owner_changes: 1,
-                stale_completion_rejections: stale_rejections,
-                process_stale_completion_rejected: true,
-                process_stale_output_absent: true,
-                process_terminal_writer: "successor".to_string(),
-                process_terminal_event_count: 1,
+            vec![DurableEffectAbstractSummary {
+                durable_key: "sleep/session-001/001".to_string(),
+                execution_count,
+                replay_count: 1,
+                result_digest: "digest".to_string(),
             }],
         )
     };
 
-    assert!(replay_determinism(&summary(12, 1), &summary(13, 1)).is_passed());
-    assert!(!replay_determinism(&summary(12, 1), &summary(13, 0)).is_passed());
-
-    let expected = summary(12, 1);
-    let mut mutated = summary(13, 1);
-    mutated.workers[0].process_stale_completion_rejected = false;
-    assert!(!replay_determinism(&expected, &mutated).is_passed());
-    let mut mutated = summary(13, 1);
-    mutated.workers[0].process_stale_output_absent = false;
-    assert!(!replay_determinism(&expected, &mutated).is_passed());
-    let mut mutated = summary(13, 1);
-    mutated.workers[0].process_terminal_writer = "stale".to_string();
-    assert!(!replay_determinism(&expected, &mutated).is_passed());
-    let mut mutated = summary(13, 1);
-    mutated.workers[0].process_terminal_event_count = 2;
-    assert!(!replay_determinism(&expected, &mutated).is_passed());
-}
-
-#[test]
-fn worker_failover_continuation_oracle_requires_successor_commit() {
-    let worker_event = |work: serde_json::Value| {
-        delivered_with_payload(
-            0,
-            "worker-001:worker:001",
-            "worker-001",
-            BoundaryKind::Worker,
-            json!({ "session": "session-001" }),
-            json!({
-                "expired_owner_commit_rejected": true,
-                "runtime_worker_store": {
-                    "takeover_after_ttl_expiry": true,
-                    "worker_owned_work": work,
-                    "process_completion": {
-                        "stale_completion_rejected": true,
-                        "stale_output_absent": true,
-                        "terminal_writer": "successor",
-                        "terminal_event_count": 1,
-                    }
-                }
-            }),
-        )
-    };
-    let full = json!({
-        "first_owner_claimed_work": true,
-        "second_owner_resumed_work": true,
-        "second_owner_outranks_first": true,
-        "stale_work_completion_rejected": true,
-    });
-
-    // Positive: a successor reclaimed and continued the work.
-    assert!(worker_failover_continues_work(&[worker_event(full.clone())]).is_passed());
-
-    // Negative: no worker boundary at all.
-    assert!(!worker_failover_continues_work(&[]).is_passed());
-
-    // Negative: the successor did not resume the dead owner's work.
-    let mut not_resumed = full.clone();
-    not_resumed["second_owner_resumed_work"] = json!(false);
-    assert!(!worker_failover_continues_work(&[worker_event(not_resumed)]).is_passed());
-
-    // Negative: the dead owner's stale completion was NOT rejected.
-    let mut stale_not_rejected = full.clone();
-    stale_not_rejected["stale_work_completion_rejected"] = json!(false);
-    assert!(!worker_failover_continues_work(&[worker_event(stale_not_rejected)]).is_passed());
-
-    // Negative: the successor did not outrank the first owner's fence.
-    let mut not_outranked = full;
-    not_outranked["second_owner_outranks_first"] = json!(false);
-    assert!(!worker_failover_continues_work(&[worker_event(not_outranked)]).is_passed());
-}
-
-#[test]
-fn process_lifecycle_recovery_oracles_verify_disposition_and_evidence() {
-    let lifecycle = |processes: serde_json::Value| {
-        delivered_with_payload(
-            0,
-            "session-001:process-lifecycle:001",
-            "session-001",
-            BoundaryKind::ProcessLifecycle,
-            json!({ "session": "session-001" }),
-            json!({
-                "runtime_process_lifecycle": {
-                    "sweep_driven": true,
-                    "processes": processes,
-                }
-            }),
-        )
-    };
-    // The correct disposition-driven recovery outcome.
-    let ob_waiting = json!({
-        "process_id": "ob-crashed", "disposition": "owner_bound", "started": true,
-        "terminal_status": "running", "reran": false,
-        "lease_lapsed": false, "abandon_requested": false,
-    });
-    let rerun = json!({
-        "process_id": "rerun-crashed", "disposition": "rerunnable", "started": true,
-        "terminal_status": "failed", "reran": true,
-        "lease_lapsed": true, "abandon_requested": false,
-    });
-    let ob_reconciled = json!({
-        "process_id": "ob-abandon-req", "disposition": "owner_bound", "started": true,
-        "terminal_status": "abandoned", "reran": false, "abandon_writer": "reconciled_request",
-        "abandon_evidence_owner": "sim-silent-owner",
-        "lease_lapsed": true, "abandon_requested": true,
-    });
-    let full = vec![lifecycle(json!([ob_waiting, rerun, ob_reconciled]))];
-    assert!(process_never_double_started(&full).is_passed());
-    assert!(abandoned_requires_evidence(&full).is_passed());
-    assert!(started_owner_bound_recovery_is_safe(&full));
-    // Vacuous absence tolerates the new terminal.
-    assert!(started_owner_bound_recovery_is_safe(&[]));
-
-    // Negative: a started OwnerBound row reached a run terminal (double-start).
-    let double_started = json!({
-        "process_id": "ob-crashed", "disposition": "owner_bound", "started": true,
-        "terminal_status": "failed", "reran": true,
-    });
-    let events = vec![lifecycle(json!([double_started, rerun.clone()]))];
-    assert!(
-        !process_never_double_started(&events).is_passed(),
-        "a re-run started OwnerBound row must fail the double-start oracle"
-    );
-    assert!(!started_owner_bound_recovery_is_safe(&events));
-
-    // Negative: no Rerunnable sibling re-run — refuses to pass on presence
-    // alone.
-    let events = vec![lifecycle(json!([ob_waiting.clone()]))];
-    assert!(
-        !process_never_double_started(&events).is_passed(),
-        "an OwnerBound-only outcome without a re-run contrast must not pass vacuously"
-    );
-
-    // Negative: no lifecycle boundary at all — nothing recovered to verify.
-    assert!(!process_never_double_started(&[]).is_passed());
-    assert!(!abandoned_requires_evidence(&[]).is_passed());
-
-    // Negative: a reconciled request whose lease had not lapsed.
-    let mut reconciled_live = ob_reconciled.clone();
-    reconciled_live["lease_lapsed"] = json!(false);
-    let events = vec![lifecycle(json!([reconciled_live, rerun.clone()]))];
-    assert!(
-        !abandoned_requires_evidence(&events).is_passed(),
-        "a reconciled request with a live lease must fail the evidence oracle"
-    );
-
-    // Negative: an Abandoned terminal with no writer — elapsed time alone.
-    let no_writer = json!({
-        "process_id": "ob-x", "disposition": "owner_bound", "started": true,
-        "terminal_status": "abandoned", "reran": false,
-        "lease_lapsed": true, "abandon_requested": false,
-    });
-    let events = vec![lifecycle(json!([no_writer]))];
-    assert!(
-        !abandoned_requires_evidence(&events).is_passed(),
-        "an Abandoned terminal with no writer is elapsed-time-alone and must fail"
-    );
+    assert!(replay_determinism(&summary(1), &summary(1)).is_passed());
+    assert!(!replay_determinism(&summary(1), &summary(2)).is_passed());
 }
 
 #[test]
@@ -561,17 +256,13 @@ fn boundary_kind_name_matches_serde_serialization() {
         BoundaryKind::Tool,
         BoundaryKind::ExecCode,
         BoundaryKind::DurableEffect,
-        BoundaryKind::ProcessWake,
-        BoundaryKind::ProcessLifecycle,
-        BoundaryKind::Worker,
         BoundaryKind::Observer,
         BoundaryKind::Cancellation,
         BoundaryKind::Trigger,
         BoundaryKind::BackendFailure,
         BoundaryKind::ProviderMutation,
-        BoundaryKind::LeaseTime,
     ];
-    assert_eq!(all_kinds.len(), 16, "must test all sixteen boundary kinds");
+    assert_eq!(all_kinds.len(), 12, "must test all twelve boundary kinds");
     for kind in all_kinds {
         let serialized = serde_json::to_string(&kind).expect("serialization failed");
         let expected_name = serialized.trim_matches('"');
@@ -589,9 +280,9 @@ fn boundary_kind_name_matches_serde_serialization() {
 }
 
 #[test]
-fn scheduler_owned_runtime_completion_oracle_rejects_missing_evidence_for_process_wake_and_observer()
+fn scheduler_owned_runtime_completion_oracle_rejects_missing_evidence_for_durable_effect_and_observer()
  {
-    for kind in [BoundaryKind::ProcessWake, BoundaryKind::Observer] {
+    for kind in [BoundaryKind::DurableEffect, BoundaryKind::Observer] {
         let verdict = scheduler_owned_runtime_completions(
             &[delivered_with_payload(
                 0,
@@ -617,7 +308,7 @@ fn scheduler_owned_runtime_completion_oracle_rejects_missing_evidence_for_proces
 }
 
 #[test]
-fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present() {
+fn scheduler_owned_runtime_completion_oracle_passes_with_all_eight_kinds_present() {
     let events = vec![
         delivered_with_payload(
             0,
@@ -673,22 +364,6 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001",
             BoundaryKind::DurableEffect,
             json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 6)}),
-            json!({}),
-        ),
-        delivered_with_payload(
-            7,
-            "worker-001:worker:001",
-            "worker-001",
-            BoundaryKind::Worker,
-            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 7)}),
-            json!({}),
-        ),
-        delivered_with_payload(
-            8,
-            "session-001:process-wake:001",
-            "session-001",
-            BoundaryKind::ProcessWake,
-            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 8)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -953,74 +628,85 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
 }
 
 #[test]
-fn agent_mini_oracle_rejects_process_wake_without_join_session() {
-    let summary = AbstractWorldSummary::with_digest(2, 2, Vec::new(), Vec::new(), Vec::new());
-    let events = vec![
+fn agent_mini_oracle_rejects_provider_completions_without_runtime_sessions() {
+    let summary = AbstractWorldSummary::with_digest(2, 2, Vec::new(), Vec::new());
+    let provider = |sequence, session: &str, observed: serde_json::Value| {
         delivered_with_payload(
+            sequence,
+            &format!("{session}:provider:001"),
+            session,
+            BoundaryKind::Provider,
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, sequence as u64)}),
+            observed,
+        )
+    };
+    let joined = [
+        provider(
             0,
-            "session-001:process-wake:001",
             "session-001",
-            BoundaryKind::ProcessWake,
-            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 0)}),
-            json!({
-                "process_wake": true,
-                "runtime_process_wake": {
-                    "event_invocation": {
-                        "subject": {
-                            "process_id": "process-001"
-                        }
-                    }
-                }
-            }),
+            json!({"runtime_session_id": "session-001"}),
         ),
-        delivered_with_payload(
+        provider(
             1,
-            "worker-001:stale-completion",
-            "worker-001",
-            BoundaryKind::Worker,
-            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 1)}),
-            json!({"session": "session-001"}),
+            "session-002",
+            json!({"runtime_session_id": "session-002"}),
         ),
     ];
+    assert_eq!(
+        mini_agent_parallel_spawn_join(&joined, &summary).status,
+        crate::trace::OracleStatus::Passed
+    );
 
-    let verdict = mini_agent_parallel_spawn_join(&events, &summary);
-
+    let unattributed = [
+        provider(0, "session-001", json!({})),
+        provider(1, "session-002", json!({})),
+    ];
+    let verdict = mini_agent_parallel_spawn_join(&unattributed, &summary);
     assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
     assert_eq!(verdict.oracle_id, SCENARIO_MINI_AGENT_PARALLEL_JOIN_ORACLE);
     assert!(
         verdict
             .message
-            .contains("did not record deterministic process/worker ordering")
+            .contains("did not record provider completions across runtime sessions")
+    );
+
+    let one_session = [
+        provider(
+            0,
+            "session-001",
+            json!({"runtime_session_id": "session-001"}),
+        ),
+        provider(
+            1,
+            "session-001",
+            json!({"runtime_session_id": "session-001"}),
+        ),
+    ];
+    assert_eq!(
+        mini_agent_parallel_spawn_join(&one_session, &summary).status,
+        crate::trace::OracleStatus::Failed
     );
 }
 
 #[test]
 fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
-    let summary = AbstractWorldSummary::with_digest(2, 3, Vec::new(), Vec::new(), Vec::new());
+    let served = json!({
+        "replayed": true,
+        "redrive_served_recorded_result": true,
+        "execution_count": 1,
+        "replay_count": 1,
+        "runtime_effect": {
+            "local_executor_called": true,
+            "redrive_local_executor_called": false,
+        },
+    });
     let durable = delivered_with_payload(
         0,
-        "session-001:durable:001:replay",
+        "session-001:durable:001",
         "session-001",
         BoundaryKind::DurableEffect,
         json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 0)}),
-        json!({"replayed": true, "runtime_effect": {}}),
-    );
-    let process_wake = delivered_with_payload(
-        1,
-        "session-001:process-wake:001",
-        "session-001",
-        BoundaryKind::ProcessWake,
-        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 1)}),
-        json!({
-            "session": "session-001",
-            "runtime_process_wake": {
-                "event_invocation": {
-                    "subject": {
-                        "process_id": "process-001"
-                    }
-                }
-            }
-        }),
+        served.clone(),
     );
     let observer = delivered_with_payload(
         2,
@@ -1030,20 +716,13 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
         json!({}),
         json!({"reconnected": true}),
     );
+    let mut re_executed = served.clone();
+    re_executed["execution_count"] = json!(2);
+    re_executed["runtime_effect"]["redrive_local_executor_called"] = json!(true);
 
     for (name, events) in [
-        (
-            "missing durable",
-            vec![process_wake.clone(), observer.clone()],
-        ),
-        (
-            "missing process wake",
-            vec![durable.clone(), observer.clone()],
-        ),
-        (
-            "missing observer",
-            vec![durable.clone(), process_wake.clone()],
-        ),
+        ("missing durable", vec![observer.clone()]),
+        ("missing observer", vec![durable.clone()]),
         (
             "wrong durable kind",
             vec![
@@ -1053,24 +732,22 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
                     "session-001",
                     BoundaryKind::Tool,
                     json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ToolReturn, 0)}),
-                    json!({"replayed": true, "runtime_effect": {}}),
+                    served.clone(),
                 ),
-                process_wake.clone(),
                 observer.clone(),
             ],
         ),
         (
-            "durable not replayed",
+            "redrive re-executed the effect",
             vec![
                 delivered_with_payload(
                     0,
-                    "session-001:durable:001:first",
+                    "session-001:durable:001",
                     "session-001",
                     BoundaryKind::DurableEffect,
                     json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 0)}),
-                    json!({"replayed": false, "runtime_effect": {}}),
+                    re_executed,
                 ),
-                process_wake.clone(),
                 observer.clone(),
             ],
         ),
@@ -1079,84 +756,8 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
         assert_eq!(verdict.status, crate::trace::OracleStatus::Failed, "{name}");
         assert_eq!(verdict.oracle_id, SCENARIO_MINI_AGENT_DURABLE_INPUT_ORACLE);
     }
-    let verdict = mini_agent_durable_input_resolution(&[durable, process_wake, observer]);
+    let verdict = mini_agent_durable_input_resolution(&[durable, observer]);
     assert_eq!(verdict.status, crate::trace::OracleStatus::Passed);
-
-    let parallel = mini_agent_parallel_spawn_join(
-        &[
-            delivered_with_payload(
-                3,
-                "session-001:process-wake:002",
-                "session-001",
-                BoundaryKind::ProcessWake,
-                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 3)}),
-                json!({"session": "session-001"}),
-            ),
-            delivered_with_payload(
-                4,
-                "worker-001:lease:002",
-                "worker-001",
-                BoundaryKind::Worker,
-                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 4)}),
-                json!({"session": "session-001"}),
-            ),
-        ],
-        &summary,
-    );
-    assert_eq!(
-        parallel.status,
-        crate::trace::OracleStatus::Passed,
-        "non-empty process wake session should satisfy join evidence"
-    );
-
-    let reversed = mini_agent_parallel_spawn_join(
-        &[
-            delivered_with_payload(
-                6,
-                "session-001:process-wake:003",
-                "session-001",
-                BoundaryKind::ProcessWake,
-                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 6)}),
-                json!({"session": "session-001"}),
-            ),
-            delivered_with_payload(
-                5,
-                "worker-001:lease:003",
-                "worker-001",
-                BoundaryKind::Worker,
-                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 5)}),
-                json!({"session": "session-001"}),
-            ),
-        ],
-        &summary,
-    );
-    assert_eq!(reversed.status, crate::trace::OracleStatus::Failed);
-
-    let duplicate_sequence = mini_agent_parallel_spawn_join(
-        &[
-            delivered_with_payload(
-                7,
-                "session-001:process-wake:004",
-                "session-001",
-                BoundaryKind::ProcessWake,
-                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 7)}),
-                json!({"session": "session-001"}),
-            ),
-            delivered_with_payload(
-                7,
-                "worker-001:lease:004",
-                "worker-001",
-                BoundaryKind::Worker,
-                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 7)}),
-                json!({"session": "session-001"}),
-            ),
-        ],
-        &summary,
-    );
-    assert_eq!(
-        duplicate_sequence.status,
-        crate::trace::OracleStatus::Failed
-    );
 }
 
 #[test]

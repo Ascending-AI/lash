@@ -188,25 +188,6 @@ fn boundary_entry(boundary: &DeliveredBoundary, turn_changed: bool) -> Entry {
                 entry = entry.attr(Attr::text("key", key));
             }
         }
-        BoundaryKind::LeaseTime => {
-            if let Some(tick) = boundary
-                .observed
-                .get("lease_time_tick")
-                .and_then(serde_json::Value::as_u64)
-            {
-                entry = entry.attr(Attr::int("tick", tick));
-            }
-        }
-        BoundaryKind::ProcessWake => {
-            if let Some(reason) = observed_str(boundary, "discard_reason") {
-                entry = entry.attr(Attr::token("discard", reason));
-            }
-        }
-        BoundaryKind::ProcessLifecycle => {
-            if let Some(outcome) = observed_str(boundary, "outcome") {
-                entry = entry.attr(Attr::token("outcome", outcome));
-            }
-        }
         BoundaryKind::Observer => {
             if let Some(visibility) = observed_str(boundary, "visibility") {
                 entry = entry.attr(Attr::token("visibility", visibility));
@@ -270,13 +251,9 @@ fn boundary_kind(kind: BoundaryKind) -> Kind {
         BoundaryKind::Tool => Kind::Tool,
         BoundaryKind::ExecCode => Kind::Exec,
         BoundaryKind::DurableEffect => Kind::Effect,
-        BoundaryKind::ProcessWake => Kind::Wake,
-        BoundaryKind::ProcessLifecycle => Kind::Outcome,
-        BoundaryKind::Worker => Kind::Worker,
         BoundaryKind::Observer => Kind::Observe,
         BoundaryKind::Cancellation => Kind::Cancel,
         BoundaryKind::BackendFailure | BoundaryKind::ProviderMutation => Kind::Fault,
-        BoundaryKind::LeaseTime => Kind::Lease,
     }
 }
 
@@ -353,7 +330,7 @@ fn trace_with_events(
         writes,
         crate::trace::OracleVerdict::passed("sim.oracle.generated-workload.v1", "passed"),
         Vec::new(),
-        crate::trace::AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new(), Vec::new()),
+        crate::trace::AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new()),
     )
 }
 
@@ -447,6 +424,60 @@ mod tests {
     use super::*;
     use crate::store::{CheckpointWriteCollector, ObservedSessionStoreFactory};
     use crate::trace::{AbstractWorldSummary, OracleVerdict};
+
+    async fn collect_process_events(
+        registry: &dyn lash_core::ProcessRegistry,
+        process_id: &ProcessId,
+    ) -> Result<Vec<lash_core::ProcessEvent>, lash_core::PluginError> {
+        let limit = std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN);
+        let process_ref = registry.resolve_process_ref(process_id).await?;
+        let mut after_sequence = 0;
+        let mut events = Vec::new();
+        loop {
+            let outcome = registry
+                .event_page_ref(
+                    &process_ref,
+                    after_sequence,
+                    limit,
+                    lash_core::ProcessEventQueryMode::Full,
+                )
+                .await?;
+            let page = match outcome {
+                lash_core::ProcessEventReadOutcome::Retained(page) => page,
+                lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                    lash_core::ProcessEventHistoryRetention::Pruned {
+                        terminal_label,
+                        pruned_at_ms,
+                    },
+                ) => {
+                    return Err(lash_core::PluginError::ProcessNoLongerRetained {
+                        terminal_label,
+                        pruned_at_ms,
+                    });
+                }
+                lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                    lash_core::ProcessEventHistoryRetention::Retired {
+                        requested_incarnation,
+                        current_incarnation,
+                    },
+                ) => {
+                    return Err(lash_core::PluginError::ProcessIncarnationSuperseded {
+                        process_id: process_id.clone(),
+                        requested_incarnation,
+                        current_incarnation,
+                    });
+                }
+            };
+            let lash_core::ProcessEventPageEvents::Full(page_events) = page.events else {
+                unreachable!("full process event query returned a lite page");
+            };
+            events.extend(page_events);
+            after_sequence = match page.more {
+                lash_core::ProcessEventPageMore::Complete => return Ok(events),
+                lash_core::ProcessEventPageMore::More { after_sequence } => after_sequence,
+            };
+        }
+    }
 
     #[tokio::test]
     async fn transcript_discriminates_missing_checkpoint_component_bodies() {
@@ -552,15 +583,13 @@ mod tests {
             "retargeted",
             "a retarget must settle its stale wake delivery as retargeted"
         );
-        let retarget_event = crate::runtime_boundaries::collect_process_events(
-            registry.as_ref(),
-            &ProcessId::from(process_id),
-        )
-        .await
-        .expect("read process audit events")
-        .into_iter()
-        .find(|event| event.event_type == "process.subscription_retargeted")
-        .expect("retarget audit event");
+        let retarget_event =
+            collect_process_events(registry.as_ref(), &ProcessId::from(process_id))
+                .await
+                .expect("read process audit events")
+                .into_iter()
+                .find(|event| event.event_type == "process.subscription_retargeted")
+                .expect("retarget audit event");
         assert_eq!(retarget_event.event_type, "process.subscription_retargeted");
 
         let terminal = registry
@@ -683,7 +712,7 @@ mod tests {
             vec![write],
             OracleVerdict::passed("sim.oracle.generated-workload.v1", "passed"),
             Vec::new(),
-            AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new(), Vec::new()),
+            AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new()),
         )
     }
 }

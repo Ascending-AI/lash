@@ -15,7 +15,7 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         test_name: "agent_scenario_started_process_labeled_tool_call",
         owned_invariant: "Started Lashlang process calling an app tool with process graph completion.",
         semantic_oracle: "agent.started_process_tool_call_graph",
-        required_sim_evidence: &["process_wake", "tool_result", "provider_turn"],
+        required_sim_evidence: &["tool_result", "provider_turn"],
         oracle_id: "sim.oracle.scenario.agent-contract.v1",
     },
     ScenarioContractSpec {
@@ -23,7 +23,7 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         test_name: "agent_scenario_process_durable_input_request_tool",
         owned_invariant: "Live durable input suspension, external resolution, process event, and final value.",
         semantic_oracle: "agent.durable_input_suspension_resolution",
-        required_sim_evidence: &["durable_effect", "process_wake", "observer_reconnect"],
+        required_sim_evidence: &["durable_effect", "observer_reconnect"],
         oracle_id: "sim.oracle.scenario.agent-contract.v1",
     },
     ScenarioContractSpec {
@@ -31,7 +31,7 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         test_name: "agent_scenario_started_process_labeled_subagent_spawn",
         owned_invariant: "Started process spawns a subagent and records child session execution graphs.",
         semantic_oracle: "agent.started_process_subagent_spawn",
-        required_sim_evidence: &["process_wake", "multi_session"],
+        required_sim_evidence: &["multi_session"],
         oracle_id: "sim.oracle.scenario.agent-contract.v1",
     },
     ScenarioContractSpec {
@@ -39,7 +39,7 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         test_name: "agent_scenario_nested_process_start_await",
         owned_invariant: "Nested process start/await produces deterministic process ids and graph lineage.",
         semantic_oracle: "agent.nested_process_start_await",
-        required_sim_evidence: &["process_wake", "multi_session"],
+        required_sim_evidence: &["multi_session"],
         oracle_id: "sim.oracle.scenario.agent-contract.v1",
     },
     ScenarioContractSpec {
@@ -47,7 +47,7 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         test_name: "agent_scenario_session_turn_process_child",
         owned_invariant: "Host session-turn process API creates and awaits a child session turn.",
         semantic_oracle: "agent.session_turn_process_child",
-        required_sim_evidence: &["process_wake", "provider_turn", "multi_session"],
+        required_sim_evidence: &["provider_turn", "multi_session"],
         oracle_id: "sim.oracle.scenario.agent-contract.v1",
     },
     ScenarioContractSpec {
@@ -55,11 +55,7 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         test_name: "agent_scenario_failed_child_preserves_failure_graph",
         owned_invariant: "Child failure path preserves failure graph and avoids provider-exhaustion false failures.",
         semantic_oracle: "agent.failed_child_preserves_failure_graph",
-        required_sim_evidence: &[
-            "worker_stale_completion",
-            "backend_failure",
-            "multi_session",
-        ],
+        required_sim_evidence: &["backend_failure", "multi_session"],
         oracle_id: "sim.oracle.scenario.agent-contract.v1",
     },
     ScenarioContractSpec {
@@ -67,7 +63,7 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         test_name: "agent_scenario_parallel_spawn_and_join",
         owned_invariant: "Parallel process starts join deterministically with unique process ids.",
         semantic_oracle: "agent.parallel_spawn_and_join",
-        required_sim_evidence: &["process_wake", "worker_stale_completion", "multi_session"],
+        required_sim_evidence: &["multi_session"],
         oracle_id: "sim.oracle.scenario.agent-contract.v1",
     },
     ScenarioContractSpec {

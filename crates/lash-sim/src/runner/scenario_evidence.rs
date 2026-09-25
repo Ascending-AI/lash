@@ -1,6 +1,5 @@
 use super::*;
 use crate::scheduler::QueuedIngressMode;
-use lash_sansio::ProcessId;
 
 pub(super) fn trace_has_queued_cancel_race(lines: &[&TraceEventLine]) -> bool {
     lines
@@ -69,177 +68,27 @@ pub(super) fn trace_has_trigger_wakeup_route(lines: &[&TraceEventLine]) -> bool 
         })
 }
 
-pub(super) fn trace_has_duplicate_process_wake_idempotency(lines: &[&TraceEventLine]) -> bool {
-    let mut by_source_key: BTreeMap<String, Vec<&TraceEventLine>> = BTreeMap::new();
-    for line in lines
-        .iter()
-        .filter(|line| line.event.kind == BoundaryKind::ProcessWake)
-    {
-        let Some(source_key) = process_wake_source_key(line) else {
-            continue;
-        };
-        by_source_key.entry(source_key).or_default().push(*line);
-    }
-    by_source_key.values().any(|events| {
-        let strict_claim_dedupe = events.len() >= 2
-            && events
-                .iter()
-                .filter(|line| {
-                    line.event
-                        .observed
-                        .get("claimed_once")
-                        .and_then(Value::as_bool)
-                        == Some(true)
-                        && line
-                            .event
-                            .observed
-                            .pointer("/runtime_queued_work/claimed")
-                            .and_then(Value::as_bool)
-                            == Some(true)
-                })
-                .count()
-                == 1
-            && events.iter().any(|line| {
-                line.event
-                    .observed
-                    .get("claimed_once")
-                    .and_then(Value::as_bool)
-                    == Some(false)
-            })
-            && events.iter().all(|line| {
-                line.event.observed.get("runtime_process_wake").is_some()
-                    && line.event.observed.get("runtime_queued_work").is_some()
-            });
-        let in_flight_rejection = events.len() >= 2
-            && events.iter().any(|line| {
-                line.event
-                    .observed
-                    .get("lease_busy")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                    && line
-                        .event
-                        .observed
-                        .pointer("/runtime_queued_work/enqueued")
-                        .and_then(Value::as_bool)
-                        == Some(false)
-                    && line.event.observed.get("runtime_process_wake").is_some()
-                    && line.event.observed.get("runtime_queued_work").is_some()
-            });
-        strict_claim_dedupe || in_flight_rejection
-    })
-}
-
-fn process_wake_source_key(line: &TraceEventLine) -> Option<String> {
-    if let Some(source_key) = line
-        .event
-        .observed
-        .pointer("/runtime_queued_work/source_key")
-        .and_then(Value::as_str)
-    {
-        return Some(source_key.to_string());
-    }
-    let process_id = line
-        .event
-        .observed
-        .pointer("/runtime_process_wake/process_id")
-        .and_then(Value::as_str)?;
-    let sequence = line
-        .event
-        .observed
-        .pointer("/runtime_process_wake/sequence")
-        .and_then(Value::as_u64)?;
-    Some(lash_core::facade_support::process_wake_source_key(
-        &ProcessId::from(process_id),
-        sequence,
-    ))
-}
-
-pub(super) fn trace_has_worker_stale_completion(lines: &[&TraceEventLine]) -> bool {
-    lines
-        .iter()
-        .filter(|line| line.event.kind == BoundaryKind::Worker)
-        .any(|line| {
-            line.event
+pub(super) fn trace_has_durable_effect_replay(lines: &[&TraceEventLine]) -> bool {
+    lines.iter().any(|line| {
+        line.event.kind == BoundaryKind::DurableEffect
+            && line
+                .event
                 .observed
-                .get("stale_completion_rejected")
+                .pointer("/runtime_effect/local_executor_called")
                 .and_then(Value::as_bool)
                 == Some(true)
-                && line
-                    .event
-                    .observed
-                    .get("process_stale_completion_rejected")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line
-                    .event
-                    .observed
-                    .get("process_stale_output_absent")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line
-                    .event
-                    .observed
-                    .get("process_terminal_writer")
-                    .and_then(Value::as_str)
-                    == Some("successor")
-                && line
-                    .event
-                    .observed
-                    .get("process_terminal_event_count")
-                    .and_then(Value::as_u64)
-                    == Some(1)
-                && line.event.observed.get("runtime_active_lease").is_some()
-                && line
-                    .event
-                    .observed
-                    .get("runtime_stale_completion")
-                    .is_some()
-        })
-}
-
-pub(super) fn trace_has_durable_effect_replay(lines: &[&TraceEventLine]) -> bool {
-    let mut by_key: BTreeMap<String, Vec<&TraceEventLine>> = BTreeMap::new();
-    for line in lines
-        .iter()
-        .filter(|line| line.event.kind == BoundaryKind::DurableEffect)
-    {
-        let Some(key) = line
-            .event
-            .observed
-            .get("durable_key")
-            .and_then(Value::as_str)
-        else {
-            continue;
-        };
-        by_key.entry(key.to_string()).or_default().push(*line);
-    }
-    by_key.values().any(|events| {
-        let first = events.iter().any(|line| {
-            line.event.observed.get("replayed").and_then(Value::as_bool) == Some(false)
-                && line
-                    .event
-                    .observed
-                    .pointer("/runtime_effect/local_executor_called")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-        });
-        let replay = events.iter().any(|line| {
-            line.event.observed.get("replayed").and_then(Value::as_bool) == Some(true)
-                && line
-                    .event
-                    .observed
-                    .pointer("/runtime_effect/local_executor_called")
-                    .and_then(Value::as_bool)
-                    == Some(false)
-                && line
-                    .event
-                    .observed
-                    .get("execution_count")
-                    .and_then(Value::as_u64)
-                    == Some(1)
-        });
-        first && replay
+            && line
+                .event
+                .observed
+                .pointer("/runtime_effect/redrive_local_executor_called")
+                .and_then(Value::as_bool)
+                == Some(false)
+            && line
+                .event
+                .observed
+                .get("redrive_served_recorded_result")
+                .and_then(Value::as_bool)
+                == Some(true)
     })
 }
 
@@ -471,8 +320,6 @@ fn operational_cases_for_evidence(evidence: &str) -> &'static [&'static str] {
             "duplicate-replayed-inputs",
         ],
         "cancellation" => &["cancellation"],
-        "process_wake" => &["triggers-wakeups", "process-wake", "duplicate-delivery"],
-        "worker_stale_completion" => &["worker-failover", "lease-fencing", "stale-completion"],
         "provider_turn" => &["provider-runtime-turn", "scripted-provider-transport"],
         "provider_event" => &["provider-runtime-turn", "scheduler-owned-provider-events"],
         "tool_result" => &["tool-boundary", "tool-loop"],
@@ -489,7 +336,6 @@ fn operational_cases_for_evidence(evidence: &str) -> &'static [&'static str] {
         "backend_failure" => &["backend-retry", "persistence-fault"],
         "observer_reconnect" => &["observer-reconnect"],
         "observer_convergence" => &["observer-convergence"],
-        "lease_time" => &["lease-fencing", "scheduler-time"],
         "multi_session" => &["multi-session"],
         "runtime_session_graph" => &["runtime-session-graph"],
         _ => &[],
@@ -506,9 +352,6 @@ fn operational_cases_for_semantic(semantic_oracle: &str) -> &'static [&'static s
         "runtime.queued_work_keeps_pending_input" | "runtime.queued_turn_input_completion" => {
             &["queueing-inputs", "active-turn-input-queueing"]
         }
-        "runtime.advisory_lease_head_cas" | "runtime.stale_lease_ttl" => {
-            &["lease-fencing", "worker-failover", "stale-completion"]
-        }
         "standard.provider_error_without_checkpoint" => &["provider-failure", "retry-exhaustion"],
         "standard.empty_response_finishes" => &["successful-empty-completion"],
         "standard.streamed_text_finalizes_once" => &["duplicate-free-stream-finalization"],
@@ -523,10 +366,8 @@ fn operational_cases_for_semantic(semantic_oracle: &str) -> &'static [&'static s
             &["provider-failure", "repair-loop"]
         }
         semantic if semantic.starts_with("rlm.") => &["rlm-protocol-transition"],
-        "agent.durable_input_suspension_resolution" => {
-            &["durable-effect", "process-wake", "observer-reconnect"]
-        }
-        semantic if semantic.starts_with("agent.") => &["agent-process-graph", "worker-failover"],
+        "agent.durable_input_suspension_resolution" => &["durable-effect", "observer-reconnect"],
+        semantic if semantic.starts_with("agent.") => &["agent-process-graph"],
         _ => &[],
     }
 }
@@ -631,9 +472,6 @@ fn scenario_evidence_boundary_kind(evidence: &str) -> &'static str {
     match evidence {
         "queued_ingress" => "queued_ingress",
         "cancellation" => "cancellation",
-        "process_wake" => "process_wake",
-        "worker_stale_completion" => "worker",
-        "lease_time" => "lease_time",
         "provider_turn" => "provider",
         "provider_event" => "provider_event",
         "tool_result" => "tool",
@@ -655,13 +493,6 @@ fn scenario_evidence_assertion(evidence: &str) -> &'static str {
     match evidence {
         "queued_ingress" => "queued input has stable source key and remains explicit work",
         "cancellation" => "cancellation targets an existing generated boundary",
-        "process_wake" => {
-            "process wake crosses runtime queued-work with structural process/event source identity"
-        }
-        "worker_stale_completion" => {
-            "worker failover advances lease fencing and rejects stale completion"
-        }
-        "lease_time" => "lease ticks remain monotonic under scheduler delivery",
         "provider_turn" => {
             "provider completion is delivered through scripted provider runtime path"
         }
@@ -732,9 +563,6 @@ fn scenario_negative_fixture_for_contract(
     if has("provider_mutation") {
         return scenario_negative_fixture("provider_mutation_runtime_completion_missing");
     }
-    if has("worker_stale_completion") {
-        return scenario_negative_fixture("worker_failover_stale_rejection_missing");
-    }
     if has("cancellation") {
         return scenario_negative_fixture("operational_coverage_missing_cancellation");
     }
@@ -744,12 +572,6 @@ fn scenario_negative_fixture_for_contract(
     if has("trigger") {
         return scenario_negative_fixture("trigger_wakeup_operational_missing");
     }
-    if has("process_wake") {
-        if contract.suite == "agent" {
-            return scenario_negative_fixture("agent_parallel_join_missing_wake_session");
-        }
-        return scenario_negative_fixture("process_wake_operational_missing");
-    }
     if has("exec_code") || contract.suite == "rlm" {
         return scenario_negative_fixture("rlm_lashlang_cell_missing_continuation");
     }
@@ -757,7 +579,7 @@ fn scenario_negative_fixture_for_contract(
         return scenario_negative_fixture("standard_provider_error_missing_parser_matrix");
     }
     if contract.suite == "agent" {
-        return scenario_negative_fixture("agent_parallel_join_missing_wake_session");
+        return scenario_negative_fixture("agent_parallel_join_missing_provider_session");
     }
     scenario_negative_fixture("scheduler_owned_provider_completion_missing_evidence")
 }
@@ -781,12 +603,6 @@ fn scenario_negative_fixture(fixture_id: &str) -> ScenarioNegativeFixture {
             fixture_path: "crates/lash-sim/failure-fixtures/trigger-wakeup-operational-missing.json",
             expected_oracle_id: "sim.oracle.state-machine-semantic-invariants.v1",
             expected_reason_contains: "trigger wakeup routes",
-        },
-        "process_wake_operational_missing" => ScenarioNegativeFixture {
-            fixture_id: "process-wake-operational-missing",
-            fixture_path: "crates/lash-sim/failure-fixtures/process-wake-operational-missing.json",
-            expected_oracle_id: "sim.oracle.state-machine-semantic-invariants.v1",
-            expected_reason_contains: "duplicate delivery/replay semantics",
         },
         "standard_provider_error_missing_parser_matrix" => ScenarioNegativeFixture {
             fixture_id: "standard-provider-error-missing-parser-matrix",
@@ -818,11 +634,11 @@ fn scenario_negative_fixture(fixture_id: &str) -> ScenarioNegativeFixture {
             expected_oracle_id: "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_empty_turn_options_use_natural_default",
             expected_reason_contains: "fixed-source replay validation",
         },
-        "agent_parallel_join_missing_wake_session" => ScenarioNegativeFixture {
-            fixture_id: "agent-parallel-join-missing-wake-session",
-            fixture_path: "crates/lash-sim/failure-fixtures/agent-parallel-join-missing-wake-session.json",
+        "agent_parallel_join_missing_provider_session" => ScenarioNegativeFixture {
+            fixture_id: "agent-parallel-join-missing-provider-session",
+            fixture_path: "crates/lash-sim/failure-fixtures/agent-parallel-join-missing-provider-session.json",
             expected_oracle_id: "sim.oracle.scenario-mini.agent.parallel-spawn-join-determinism.v1",
-            expected_reason_contains: "did not record deterministic process/worker ordering",
+            expected_reason_contains: "did not record provider completions across runtime sessions",
         },
         "agent_tuple_json_array_shape_broken" => ScenarioNegativeFixture {
             fixture_id: "agent-tuple-json-array-shape-broken",
@@ -835,12 +651,6 @@ fn scenario_negative_fixture(fixture_id: &str) -> ScenarioNegativeFixture {
             fixture_path: "crates/lash-sim/failure-fixtures/provider-mutation-runtime-completion-missing.json",
             expected_oracle_id: "sim.oracle.scheduler-owned-runtime-completions.v1",
             expected_reason_contains: "for ProviderMutation",
-        },
-        "worker_failover_stale_rejection_missing" => ScenarioNegativeFixture {
-            fixture_id: "worker-failover-stale-rejection-missing",
-            fixture_path: "crates/lash-sim/failure-fixtures/worker-failover-stale-rejection-missing.json",
-            expected_oracle_id: "sim.oracle.scheduler-owned-runtime-completions.v1",
-            expected_reason_contains: "for Worker",
         },
         "backend_retry_runtime_completion_missing" => ScenarioNegativeFixture {
             fixture_id: "backend-retry-runtime-completion-missing",
@@ -985,15 +795,12 @@ fn select_scenario_contract_fact_trace(
 
 fn semantic_scenario_evidence(semantic_oracle: &str) -> Vec<&'static str> {
     match semantic_oracle {
-        "runtime.advisory_lease_head_cas" | "runtime.stale_lease_ttl" => {
-            vec!["worker_stale_completion"]
-        }
         "runtime.checkpoint_redrive_cancel" => vec!["queued_ingress", "cancellation"],
         "runtime.queued_work_keeps_pending_input" | "runtime.queued_turn_input_completion" => {
             vec!["queued_ingress", "provider_turn"]
         }
-        "runtime.command_only_queue_drain" => vec!["queued_ingress", "lease_time"],
-        "runtime.command_before_turn_work" => vec!["trigger", "queued_ingress", "lease_time"],
+        "runtime.command_only_queue_drain" => vec!["queued_ingress"],
+        "runtime.command_before_turn_work" => vec!["trigger", "queued_ingress"],
         "runtime.observation_replay_preserves_input" => vec!["observer_reconnect"],
         _ => Vec::new(),
     }
@@ -1025,7 +832,6 @@ fn select_event_lines_for_evidence<'a>(
             })
             .take(2)
             .collect(),
-        "process_wake" => select_process_wake_evidence(event_lines),
         "durable_effect" => select_durable_effect_evidence(event_lines),
         _ => event_lines
             .iter()
@@ -1060,62 +866,18 @@ fn select_queued_turn_followup_provider_evidence(
     Vec::new()
 }
 
-fn select_process_wake_evidence(event_lines: &[TraceEventLine]) -> Vec<&TraceEventLine> {
-    let mut by_source_key = BTreeMap::<String, Vec<&TraceEventLine>>::new();
-    for line in event_lines
-        .iter()
-        .filter(|line| event_satisfies_scenario_evidence(&line.event, "process_wake"))
-    {
-        let Some(source_key) = process_wake_source_key(line) else {
-            continue;
-        };
-        by_source_key.entry(source_key).or_default().push(line);
-    }
-    if let Some((_source_key, events)) = by_source_key
-        .iter()
-        .find(|(_source_key, events)| events.len() >= 2)
-    {
-        return events.iter().copied().take(2).collect();
-    }
-    event_lines
-        .iter()
-        .filter(|line| event_satisfies_scenario_evidence(&line.event, "process_wake"))
-        .take(2)
-        .collect()
-}
-
 fn select_durable_effect_evidence(event_lines: &[TraceEventLine]) -> Vec<&TraceEventLine> {
-    let mut by_durable_key = BTreeMap::<String, Vec<&TraceEventLine>>::new();
-    for line in event_lines
-        .iter()
-        .filter(|line| event_satisfies_scenario_evidence(&line.event, "durable_effect"))
-    {
-        let Some(durable_key) = line
-            .event
-            .observed
-            .get("durable_key")
-            .and_then(Value::as_str)
-        else {
-            continue;
-        };
-        by_durable_key
-            .entry(durable_key.to_string())
-            .or_default()
-            .push(line);
-    }
-    if let Some((_durable_key, events)) = by_durable_key.iter().find(|(_durable_key, events)| {
-        events
-            .iter()
-            .any(|line| line.event.observed.get("replayed").and_then(Value::as_bool) == Some(false))
-            && events.iter().any(|line| {
-                line.event.observed.get("replayed").and_then(Value::as_bool) == Some(true)
-            })
-    }) {
-        return events.iter().copied().take(2).collect();
-    }
     event_lines
         .iter()
-        .filter(|line| event_satisfies_scenario_evidence(&line.event, "durable_effect"))
+        .filter(|line| {
+            event_satisfies_scenario_evidence(&line.event, "durable_effect")
+                && line
+                    .event
+                    .observed
+                    .get("redrive_served_recorded_result")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+        })
         .take(2)
         .collect()
 }
@@ -1141,39 +903,6 @@ fn event_satisfies_scenario_evidence(
                     .and_then(Value::as_str)
                     .is_some()
         }
-        "process_wake" => {
-            event.kind == BoundaryKind::ProcessWake
-                && event.observed.get("runtime_process_wake").is_some()
-        }
-        "worker_stale_completion" => {
-            event.kind == BoundaryKind::Worker
-                && event
-                    .observed
-                    .get("stale_completion_rejected")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                && event
-                    .observed
-                    .get("process_stale_completion_rejected")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && event
-                    .observed
-                    .get("process_stale_output_absent")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && event
-                    .observed
-                    .get("process_terminal_writer")
-                    .and_then(Value::as_str)
-                    == Some("successor")
-                && event
-                    .observed
-                    .get("process_terminal_event_count")
-                    .and_then(Value::as_u64)
-                    == Some(1)
-        }
-        "lease_time" => event.kind == BoundaryKind::LeaseTime,
         "provider_turn" => event.kind == BoundaryKind::Provider,
         "provider_event" => {
             event.kind == BoundaryKind::ProviderEvent

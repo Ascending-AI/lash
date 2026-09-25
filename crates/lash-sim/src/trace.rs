@@ -59,14 +59,7 @@ pub struct SessionAbstractSummary {
     pub trigger_count: usize,
     pub backend_failure_count: usize,
     pub provider_mutation_count: usize,
-    pub process_wake_count: usize,
-    // Defaulted and omitted when zero so traces recorded before the
-    // process-lifecycle boundary (which have no recovery scenario, count 0) keep
-    // their exact recorded summary digest.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub process_lifecycle_count: usize,
     pub durable_effect_keys: Vec<String>,
-    pub lease_time_ticks: Vec<u64>,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub checkpoint_commit_count: usize,
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -91,28 +84,6 @@ pub struct DurableEffectAbstractSummary {
     pub execution_count: usize,
     pub replay_count: usize,
     pub result_digest: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct WorkerAbstractSummary {
-    pub worker_alias: String,
-    pub session_alias: String,
-    pub active_incarnation_id: String,
-    pub active_fencing_token: u64,
-    pub lease_owner_changes: usize,
-    pub stale_completion_rejections: usize,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub process_stale_completion_rejected: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub process_stale_output_absent: bool,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub process_terminal_writer: String,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub process_terminal_event_count: usize,
-}
-
-fn is_false(value: &bool) -> bool {
-    !*value
 }
 
 pub const WORKLOAD_EXPECTATIONS_SCHEMA: &str = "lash.sim.workload-expectations.v1";
@@ -153,8 +124,6 @@ pub struct WorkloadExpectations {
     pub provider_turn_count: usize,
     /// Provider-mutation boundaries whose mutation is a transport/HTTP class.
     pub transport_mutation_count: usize,
-    /// Lease-time boundaries the workload planned.
-    pub lease_time_boundary_count: usize,
     /// Scheduler-owned runtime completions the workload planned per boundary
     /// kind. A declared count is a lower bound, not an exact count: the
     /// delivered trace may contain world-scheduled completions the plan did not
@@ -171,14 +140,12 @@ impl WorkloadExpectations {
         sessions: Vec<String>,
         provider_turn_count: usize,
         transport_mutation_count: usize,
-        lease_time_boundary_count: usize,
     ) -> Self {
         Self {
             schema: WORKLOAD_EXPECTATIONS_SCHEMA.to_string(),
             sessions,
             provider_turn_count,
             transport_mutation_count,
-            lease_time_boundary_count,
             completion_counts: BTreeMap::new(),
         }
     }
@@ -225,7 +192,6 @@ pub struct AbstractWorldSummary {
     pub total_events: usize,
     pub sessions: Vec<SessionAbstractSummary>,
     pub durable_effects: Vec<DurableEffectAbstractSummary>,
-    pub workers: Vec<WorkerAbstractSummary>,
     pub digest: String,
 }
 
@@ -235,21 +201,13 @@ impl AbstractWorldSummary {
         total_events: usize,
         sessions: Vec<SessionAbstractSummary>,
         durable_effects: Vec<DurableEffectAbstractSummary>,
-        workers: Vec<WorkerAbstractSummary>,
     ) -> Self {
-        let digest = summary_digest(
-            session_count,
-            total_events,
-            &sessions,
-            &durable_effects,
-            &workers,
-        );
+        let digest = summary_digest(session_count, total_events, &sessions, &durable_effects);
         Self {
             session_count,
             total_events,
             sessions,
             durable_effects,
-            workers,
             digest,
         }
     }
@@ -284,12 +242,9 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.replay-determinism.v1"
         | "sim.oracle.scheduler-controlled-delivery.v1"
         | "sim.oracle.scheduler-owned-runtime-completions.v1"
-        | "sim.oracle.provider-turn-interleaving-depth.v1"
-        | "sim.oracle.sqlite-model-replay.v1"
-        | "sim.oracle.postgres-model-replay.v1" => Some(ModelProperty),
+        | "sim.oracle.provider-turn-interleaving-depth.v1" => Some(ModelProperty),
         id if scenario_oracle_partition(id).is_some() => Some(ModelProperty),
         "runtime.turn_contract"
-        | "sim.oracle.abandoned-requires-evidence.v1"
         | "sim.oracle.backend-failure-observed.v1"
         | "sim.oracle.cancellation-observed.v1"
         | "sim.oracle.durable-content.v1"
@@ -305,17 +260,11 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.healthy-long-turn-liveness.v1"
         | "sim.oracle.independent-checkpoint-state.v1"
         | "sim.oracle.ingress-session-opened.v1"
-        | "sim.oracle.lease-time-monotonic.v1"
         | "sim.oracle.live-provider-failure-coverage.v1"
         | "sim.oracle.live-provider-failure-terminalizes.v1"
         | "sim.oracle.logical-turn-claim-exactly-once.v1"
         | "sim.oracle.observer-reconnect.v1"
         | "sim.oracle.pending-tool-completion-through-turn.v1"
-        | "sim.oracle.postgres-boundary-replay.v1"
-        | "sim.oracle.postgres-checkpoint-replay.v1"
-        | "sim.oracle.process-never-double-started.v1"
-        | "sim.oracle.process-wake-at-most-once-runtime-turn.v1"
-        | "sim.oracle.process-wake-observed.v1"
         | "sim.oracle.provider-mutation-rejected.v1"
         | "sim.oracle.provider-transport-mutation-classified.v1"
         | "sim.oracle.queued-ingress-observed.v1"
@@ -325,6 +274,7 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.runtime-single-active-agent-frame.v1"
         | "sim.oracle.runtime-usage-conservation.v1"
         | "sim.oracle.runtime-usage-monotonic.v1"
+        | "sim.oracle.serial-engine-determinism.v1"
         | "sim.oracle.postgres-abort-after-begin.v1"
         | "sim.oracle.postgres-abort-before-commit.v1"
         | "sim.oracle.postgres-commit-io.v1"
@@ -340,8 +290,6 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.slow-alive-no-partial-write.v1"
         | "sim.oracle.sqlite-abort-after-begin.v1"
         | "sim.oracle.sqlite-abort-before-commit.v1"
-        | "sim.oracle.sqlite-boundary-replay.v1"
-        | "sim.oracle.sqlite-checkpoint-replay.v1"
         | "sim.oracle.sqlite-commit-io.v1"
         | "sim.oracle.sqlite-fault-harness.v1"
         | "sim.oracle.sqlite-fault-no-duplicate-effect.v1"
@@ -351,9 +299,7 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.sqlite-reopen-mid-sequence.v1"
         | "sim.oracle.sqlite-reopen-preserves-committed-work.v1"
         | "sim.oracle.tool-boundary-observed.v1"
-        | "sim.oracle.trigger-delivery-observed.v1"
-        | "sim.oracle.worker-failover-continues-work.v1"
-        | "sim.oracle.worker-stale-completion-rejected.v1" => Some(RealObservation),
+        | "sim.oracle.trigger-delivery-observed.v1" => Some(RealObservation),
         _ => None,
     }
 }
@@ -505,12 +451,8 @@ mod observation_class_tests {
             Some(OracleObservationClass::ModelProperty)
         );
         assert_eq!(
-            oracle_observation_class("sim.oracle.sqlite-model-replay.v1"),
-            Some(OracleObservationClass::ModelProperty)
-        );
-        assert_eq!(
-            oracle_observation_class("sim.oracle.postgres-model-replay.v1"),
-            Some(OracleObservationClass::ModelProperty)
+            oracle_observation_class("sim.oracle.serial-engine-determinism.v1"),
+            Some(OracleObservationClass::RealObservation)
         );
         assert_eq!(
             oracle_observation_class("sim.oracle.brand-new-oracle-nobody-classified.v1"),
@@ -782,14 +724,12 @@ pub fn summary_digest(
     total_events: usize,
     sessions: &[SessionAbstractSummary],
     durable_effects: &[DurableEffectAbstractSummary],
-    workers: &[WorkerAbstractSummary],
 ) -> String {
     let value = serde_json::json!({
         "session_count": session_count,
         "total_events": total_events,
         "sessions": sessions,
         "durable_effects": durable_effects,
-        "workers": workers,
     });
     hex_digest(&sha256(value.to_string().as_bytes()))
 }

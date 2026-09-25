@@ -165,7 +165,9 @@ mod tests {
     #[tokio::test]
     async fn durable_content_law_bites_on_real_run_evidence() {
         let workload = generate_workload(5, "fast-random", 96).expect("workload");
-        let mut world = GeneratedRuntimeWorld::new().await.expect("world");
+        let mut world = GeneratedRuntimeWorld::new(workload.seed)
+            .await
+            .expect("world");
         drive_generated_workload(&mut world, &workload)
             .await
             .expect("drive");

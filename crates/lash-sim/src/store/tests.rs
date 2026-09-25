@@ -79,65 +79,14 @@ fn model_store_projects_semantic_boundary_summaries() {
         "session-001",
         BoundaryKind::DurableEffect,
         3,
-        "durable.sleep.complete",
+        "durable.sleep.crash-redrive",
         json!({"durable_key": "sleep/session-001", "result": {"done": true}}),
     ));
-    store.apply_boundary(&BoundaryEvent::new(
-        "effect-1-replay",
-        "session-001",
-        BoundaryKind::DurableEffect,
-        4,
-        "durable.sleep.replay",
-        json!({"durable_key": "sleep/session-001", "result": {"done": false}}),
-    ));
-    // Worker fencing is NOT abstractly projected (the abstract arm reports
-    // identity only); the model reads the REAL reclaim/fence facts produced by
-    // the live lease store, threaded in via `apply_observed_boundary`.
-    store.apply_observed_boundary(
-        &BoundaryEvent::new(
-            "worker-1",
-            "worker-001",
-            BoundaryKind::Worker,
-            5,
-            "worker.stale-completion-rejected",
-            json!({"session": "session-001"}),
-        ),
-        &json!({
-            "worker_alias": "worker-001",
-            "session": "session-001",
-            "active_owner": { "incarnation_id": "worker-001:incarnation-002" },
-            "active_fencing_token": 2,
-            "lease_owner_changed": true,
-            "stale_completion_rejected": true,
-        }),
-    );
 
     let summary = store.summary();
     assert_eq!(summary.sessions[0].observer_turn_indices, vec![1]);
     assert_eq!(summary.durable_effects[0].execution_count, 1);
     assert_eq!(summary.durable_effects[0].replay_count, 1);
-    assert_eq!(summary.workers[0].stale_completion_rejections, 1);
-    assert_eq!(summary.workers[0].lease_owner_changes, 1);
-    assert_eq!(summary.workers[0].active_fencing_token, 2);
-}
-
-#[test]
-fn abstract_worker_projection_fabricates_no_fencing() {
-    // The abstract worker projection must NOT fabricate fencing: if the real
-    // lease facts are never threaded in, the worker summary shows no fence
-    // change and the worker oracle cannot pass.
-    let mut store = ModelStore::default();
-    let observed = store.project_boundary_observation(&BoundaryEvent::new(
-        "worker-1",
-        "worker-001",
-        BoundaryKind::Worker,
-        0,
-        "worker.stale-completion-rejected",
-        json!({"session": "session-001"}),
-    ));
-    assert!(observed.get("stale_completion_rejected").is_none());
-    assert!(observed.get("lease_owner_changed").is_none());
-    assert!(observed.get("active_fencing_token").is_none());
 }
 
 #[test]
