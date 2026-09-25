@@ -47,6 +47,7 @@ pub async fn queued_run_cold_process_driver(
         configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
         expected_head_revision: 0,
         initial_turn_index: 1,
+        generation: None,
     };
     if action == "queued_recover" {
         let witness: Witness = serde_json::from_slice(&std::fs::read(marker).unwrap()).unwrap();
@@ -133,6 +134,7 @@ pub async fn queued_run_cold_process_driver(
                         request: QueuedRunRequest::Automatic,
                         configuration: resumed.configuration.clone(),
                         initial_turn_index: 3,
+                        generation: None,
                     },
                 )
                 .await
@@ -268,6 +270,7 @@ pub async fn queued_run_cold_process_driver(
                             configuration: admission.configuration.clone(),
                             expected_head_revision: 0,
                             initial_turn_index: 1,
+                            generation: None,
                         },
                     )
                     .await

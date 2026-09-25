@@ -40,6 +40,7 @@ pub async fn session_store_factory_discovers_empty_pending_queued_run(
                 configuration: crate::RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await
@@ -147,6 +148,7 @@ pub async fn session_store_factory_retains_assigned_input_tombstone(
                 configuration: crate::RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await

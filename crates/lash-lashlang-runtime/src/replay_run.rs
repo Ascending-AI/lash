@@ -65,6 +65,37 @@ pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 /// it runs. Process bodies journal no binding set and stay on the key grammar.
 pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 6;
 
+/// The executable generation code cells run under (FIG-3571): what a turn's
+/// admission records, and what a redrive must match before its first effect.
+///
+/// Its preimage is every contract that decides how a cell compiles and what
+/// its journal holds: the semantic-hash and bytecode generations the cell
+/// compiles under, the instruction accounting its cancel checkpoints are
+/// placed by, and the cell journal grammar its nested effects and binding set
+/// are keyed by. A change to any of them moves the generation, so a turn a
+/// previous build admitted parks rather than replaying a journal this build
+/// would read differently.
+#[expect(
+    clippy::expect_used,
+    reason = "the preimage is a tuple of string and integer constants serialized straight to in-memory bytes"
+)]
+pub fn lashlang_cell_generation() -> lash_core::ExecutableGeneration {
+    let preimage = serde_json::to_vec(&(
+        lashlang::LASHLANG_SEMANTIC_HASH_VERSION,
+        lashlang::BYTECODE_FORMAT_VERSION,
+        lashlang::INSTRUCTION_ACCOUNTING_VERSION,
+        LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
+    ))
+    .expect("the cell generation preimage should serialize");
+    lash_core::ExecutableGeneration::new(format!(
+        "blake3:{}",
+        lash_sansio::core_support::blake3_domain_hash_hex(
+            "lash-lashlang-cell-generation/v1",
+            preimage,
+        )
+    ))
+}
+
 // The instruction accounting is part of the cell journal grammar: moving it
 // moves this grammar with it.
 const _: () = assert!(

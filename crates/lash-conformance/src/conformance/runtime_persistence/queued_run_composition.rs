@@ -48,6 +48,7 @@ async fn assert_composition(store: Arc<dyn RuntimePersistence>, session: &str, a
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await

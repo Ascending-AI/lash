@@ -1181,15 +1181,6 @@ pub enum RuntimeEffectOutcome {
     },
     SyncExecutionEnvironment {
         result: Result<Option<ExecutionEnvironmentSync>, String>,
-        /// The replay-key grammar the code executor journals this
-        /// iteration's cells' nested effects under (FIG-3586). A cell
-        /// re-executed on replay runs only under the grammar its iteration's
-        /// journaled sync names; a record without it — `None`, and every
-        /// record written before the field existed — was written by a build
-        /// whose cells keyed their effects under a retired grammar, so its
-        /// cells are refused rather than re-issued live.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cell_replay_grammar: Option<u32>,
         /// The tool surface the sync built: every tool of the catalog the
         /// iteration's calls resolve against, as its definition. The drive
         /// installs it as the catalog, on the live pass and on every replay,
@@ -1348,13 +1339,11 @@ async fn durable_attachment_source(
     Ok(source)
 }
 
-/// A journaled execution-environment sync as served: its result, the cell
-/// replay-key grammar its record names (FIG-3586), and the tool surface it
-/// recorded (FIG-3672).
+/// A journaled execution-environment sync as served: its result and the tool
+/// surface it recorded (FIG-3672).
 #[derive(Debug)]
 pub struct ServedExecutionEnvironmentSync {
     pub result: Result<Option<ExecutionEnvironmentSync>, String>,
-    pub cell_replay_grammar: Option<u32>,
     pub tool_surface: Vec<crate::ToolDefinition>,
 }
 
@@ -1564,18 +1553,16 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    /// The sync's result and the cell replay-key grammar its record names.
+    /// The sync's result and the tool surface its record names.
     pub fn into_sync_execution_environment(
         self,
     ) -> Result<ServedExecutionEnvironmentSync, RuntimeEffectControllerError> {
         match self {
             Self::SyncExecutionEnvironment {
                 result,
-                cell_replay_grammar,
                 tool_surface,
             } => Ok(ServedExecutionEnvironmentSync {
                 result,
-                cell_replay_grammar,
                 tool_surface,
             }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
@@ -1832,53 +1819,5 @@ mod rejection_tests {
                 "runtime_effect_tool_attempt_index",
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod cell_replay_grammar_tests {
-    use super::*;
-
-    /// T11 (FIG-3586): a sync outcome journaled before the grammar stamp
-    /// existed serves no grammar, which a code executor refuses; a stamped one
-    /// round-trips.
-    #[test]
-    fn a_sync_journaled_before_the_stamp_serves_no_grammar() {
-        let stamped = RuntimeEffectOutcome::SyncExecutionEnvironment {
-            result: Ok(None),
-            cell_replay_grammar: Some(2),
-            tool_surface: Vec::new(),
-        };
-        let mut wire = serde_json::to_value(&stamped).expect("encode the stamped sync");
-        let decoded: RuntimeEffectOutcome =
-            serde_json::from_value(wire.clone()).expect("decode the stamped sync");
-        assert_eq!(
-            decoded
-                .into_sync_execution_environment()
-                .expect("a sync outcome")
-                .cell_replay_grammar,
-            Some(2)
-        );
-
-        let shown = wire.to_string();
-        let outcome = wire
-            .as_object_mut()
-            .unwrap_or_else(|| panic!("a sync outcome is an object: {shown}"));
-        let removed = outcome.remove("cell_replay_grammar").is_some()
-            || outcome
-                .values_mut()
-                .filter_map(serde_json::Value::as_object_mut)
-                .any(|fields| fields.remove("cell_replay_grammar").is_some());
-        assert!(removed, "the stamp is on the wire: {shown}");
-        let legacy: RuntimeEffectOutcome =
-            serde_json::from_value(wire).expect("a pre-stamp sync still decodes");
-        assert_eq!(
-            legacy
-                .into_sync_execution_environment()
-                .expect("a sync outcome")
-                .cell_replay_grammar,
-            None,
-            "a pre-stamp sync names no grammar"
-        );
     }
 }

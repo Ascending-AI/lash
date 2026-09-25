@@ -65,7 +65,6 @@ fn synced_environment() -> RuntimeEffectOutcome {
             tool_specs: Arc::new(Vec::new()),
             projector_turn_inputs: None,
         })),
-        cell_replay_grammar: None,
         tool_surface: Vec::new(),
     }
 }
@@ -310,7 +309,6 @@ async fn a_deterministic_environment_sync_refusal_is_the_steps_recorded_outcome(
         Arc::new(|_| {
             Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
                 result: Err("fig3726: the catalog refused the sync".to_string()),
-                cell_replay_grammar: None,
                 tool_surface: Vec::new(),
             })
         }),

@@ -81,7 +81,7 @@ const POST_FLOOR_INDEXES: [&str; 0] = [];
 /// predates the floor, so its post-floor columns drop by name — the typed
 /// parent payload component 109 installed (FIG-3418), and the columns later
 /// components added to pre-floor tables.
-const POST_FLOOR_COLUMNS: [(&str, &str); 11] = [
+const POST_FLOOR_COLUMNS: [(&str, &str); 12] = [
     ("lash_pending_turn_inputs", "submitted_ingress_json"),
     ("lash_pending_turn_inputs", "claim_bound_turn_id"),
     ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
@@ -93,6 +93,7 @@ const POST_FLOOR_COLUMNS: [(&str, &str); 11] = [
     ("lash_session_meta", "drive_epoch"),
     ("lash_session_meta", "drive_admission_id"),
     ("lash_session_meta", "admission_base_checkpoint_ref"),
+    ("lash_turn_parks", "park_executable_generation"),
 ];
 /// The named constraints absent from component 101 on tables that survive the
 /// table drops: none.

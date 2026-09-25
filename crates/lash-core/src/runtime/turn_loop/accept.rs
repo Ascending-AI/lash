@@ -382,6 +382,7 @@ impl LashRuntime {
                         base: admission_head,
                         // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                         turn_index: self.state.turn_index + 1,
+                        generation: super::generation_fence::current(self),
                         max_inputs: self
                             .host
                             .core
@@ -409,12 +410,14 @@ impl LashRuntime {
                 claim,
                 base,
                 turn_index,
+                generation,
             }) => {
                 if let Err(error) = self
                     .adopt_admitted_turn(
                         &store,
                         &base,
                         turn_index,
+                        generation.as_ref(),
                         &trace_turn_id,
                         &accepted.input_id,
                     )
@@ -587,9 +590,11 @@ impl LashRuntime {
         store: &Arc<dyn crate::store::RuntimePersistence>,
         base: &crate::store::SessionHeadRef,
         turn_index: u64,
+        generation: Option<&crate::ExecutableGeneration>,
         turn_id: &TurnId,
         accepted_input_id: &crate::InputId,
     ) -> Result<(), RuntimeError> {
+        super::generation_fence::admit(self, generation)?;
         let turn_index = usize::try_from(turn_index).map_err(|_| {
             RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,

@@ -25,7 +25,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 132
+version 133
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -214,14 +214,6 @@ table lash_process_park_events
     shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
     shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
     shape /oneOf/tag:type=string:%22effect_replay_divergence%22/type object
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/branch schema
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-values ["key_format_cutover"]
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/type string
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/required/message field
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/required/type field
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/type object
     shape /oneOf/tag:type=string:%22replay_divergence%22/branch schema
     shape /oneOf/tag:type=string:%22replay_divergence%22/properties/message/type string
     shape /oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-types string
@@ -230,6 +222,15 @@ table lash_process_park_events
     shape /oneOf/tag:type=string:%22replay_divergence%22/required/message field
     shape /oneOf/tag:type=string:%22replay_divergence%22/required/type field
     shape /oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /oneOf/tag:type=string:%22retired_generation%22/branch schema
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/generation/type null|string
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-values ["retired_generation"]
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22retired_generation%22/required/message field
+    shape /oneOf/tag:type=string:%22retired_generation%22/required/type field
+    shape /oneOf/tag:type=string:%22retired_generation%22/type object
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/branch schema
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/format "uint32"
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/minimum 0.0
@@ -3005,14 +3006,6 @@ table lash_turn_park_events
     shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
     shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
     shape /oneOf/tag:type=string:%22effect_replay_divergence%22/type object
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/branch schema
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-values ["key_format_cutover"]
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/type string
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/required/message field
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/required/type field
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/type object
     shape /oneOf/tag:type=string:%22replay_divergence%22/branch schema
     shape /oneOf/tag:type=string:%22replay_divergence%22/properties/message/type string
     shape /oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-types string
@@ -3021,6 +3014,15 @@ table lash_turn_park_events
     shape /oneOf/tag:type=string:%22replay_divergence%22/required/message field
     shape /oneOf/tag:type=string:%22replay_divergence%22/required/type field
     shape /oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /oneOf/tag:type=string:%22retired_generation%22/branch schema
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/generation/type null|string
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-values ["retired_generation"]
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22retired_generation%22/required/message field
+    shape /oneOf/tag:type=string:%22retired_generation%22/required/type field
+    shape /oneOf/tag:type=string:%22retired_generation%22/type object
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/branch schema
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/format "uint32"
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/minimum 0.0
@@ -3044,6 +3046,7 @@ table lash_turn_park_events
 table lash_turn_parks
   column attempts bigint not-null
   column last_refused_ms bigint not-null
+  column park_executable_generation text nullable
   column park_id bigint not-null
   column reason_code text not-null
   column reason_json text not-null
@@ -3066,14 +3069,6 @@ table lash_turn_parks
     shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
     shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
     shape /oneOf/tag:type=string:%22effect_replay_divergence%22/type object
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/branch schema
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-values ["key_format_cutover"]
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/type string
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/required/message field
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/required/type field
-    shape /oneOf/tag:type=string:%22key_format_cutover%22/type object
     shape /oneOf/tag:type=string:%22replay_divergence%22/branch schema
     shape /oneOf/tag:type=string:%22replay_divergence%22/properties/message/type string
     shape /oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-types string
@@ -3082,6 +3077,15 @@ table lash_turn_parks
     shape /oneOf/tag:type=string:%22replay_divergence%22/required/message field
     shape /oneOf/tag:type=string:%22replay_divergence%22/required/type field
     shape /oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /oneOf/tag:type=string:%22retired_generation%22/branch schema
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/generation/type null|string
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-values ["retired_generation"]
+    shape /oneOf/tag:type=string:%22retired_generation%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22retired_generation%22/required/message field
+    shape /oneOf/tag:type=string:%22retired_generation%22/required/type field
+    shape /oneOf/tag:type=string:%22retired_generation%22/type object
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/branch schema
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/format "uint32"
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/minimum 0.0
@@ -3116,14 +3120,6 @@ table lash_turn_parks
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/type object
-    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/branch schema
-    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
-    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
-    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-values ["key_format_cutover"]
-    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/type string
-    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/message field
-    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/type field
-    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/type object
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/branch schema
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/message/type string
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-types string
@@ -3132,6 +3128,15 @@ table lash_turn_parks
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/message field
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/type field
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/branch schema
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/generation/type null|string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/message/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-types string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-values ["retired_generation"]
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/required/message field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/required/type field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/type object
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/branch schema
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/format "uint32"
     shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/minimum 0.0
@@ -3167,14 +3172,6 @@ table lash_turn_parks
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/type object
-    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/branch schema
-    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
-    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
-    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-values ["key_format_cutover"]
-    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/type string
-    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/message field
-    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/type field
-    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/type object
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/branch schema
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/message/type string
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-types string
@@ -3183,6 +3180,15 @@ table lash_turn_parks
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/message field
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/type field
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/branch schema
+    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/generation/type null|string
+    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/message/type string
+    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-types string
+    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-values ["retired_generation"]
+    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/type string
+    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/required/message field
+    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/required/type field
+    shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/type object
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/branch schema
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/format "uint32"
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/minimum 0.0
@@ -3218,14 +3224,6 @@ table lash_turn_parks
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/type object
-    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/branch schema
-    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
-    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
-    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-values ["key_format_cutover"]
-    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/type string
-    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/message field
-    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/type field
-    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/type object
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/branch schema
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/message/type string
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-types string
@@ -3234,6 +3232,15 @@ table lash_turn_parks
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/message field
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/type field
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/branch schema
+    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/generation/type null|string
+    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/message/type string
+    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-values ["retired_generation"]
+    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/type string
+    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/required/message field
+    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/required/type field
+    shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22retired_generation%22/type object
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/branch schema
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/format "uint32"
     shape /persisted-by/sqlite/turn_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/minimum 0.0
@@ -3269,14 +3276,6 @@ table lash_turn_parks
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/type object
-    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/branch schema
-    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
-    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
-    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-values ["key_format_cutover"]
-    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/type string
-    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/message field
-    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/type field
-    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/type object
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22replay_divergence%22/branch schema
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/message/type string
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-types string
@@ -3285,6 +3284,15 @@ table lash_turn_parks
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/message field
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/type field
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22retired_generation%22/branch schema
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/generation/type null|string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/message/type string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-types string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/enum-values ["retired_generation"]
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22retired_generation%22/properties/type/type string
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22retired_generation%22/required/message field
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22retired_generation%22/required/type field
+    shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22retired_generation%22/type object
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/branch schema
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/format "uint32"
     shape /persisted-by/sqlite/turn_parks.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/minimum 0.0

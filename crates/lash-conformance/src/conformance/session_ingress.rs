@@ -402,6 +402,7 @@ impl Turns {
                         .config,
                     expected_head_revision: self.state.head_revision,
                     initial_turn_index: 1,
+                    generation: None,
                 },
             )
             .await

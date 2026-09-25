@@ -26,6 +26,7 @@ pub async fn queued_run_checkpoint_assignment_survives_lane_rotation(
         configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
         expected_head_revision: 0,
         initial_turn_index: 1,
+        generation: None,
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())
@@ -332,6 +333,7 @@ pub async fn queued_run_resume_retakes_its_open_checkpoint_assignments(
         configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
         expected_head_revision: 0,
         initial_turn_index: 1,
+        generation: None,
     };
     let admission = store
         .begin_or_resume_queued_run(&lease.authority(), request.clone())

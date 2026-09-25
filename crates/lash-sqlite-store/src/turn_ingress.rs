@@ -49,7 +49,10 @@ pub(crate) use turn_cancel::{
     ClosureAuthorizationSqliteStatements, RetiredScopeSqliteStatements,
     ToolIntentSubmissionSqliteStatements,
 };
-pub(crate) use turn_parks::{TurnParkClockSqliteStatements, TurnParkSqliteStatements};
+pub(crate) use turn_parks::{
+    TurnParkClockSqliteStatements, TurnParkSqliteStatements,
+    count_retired_parks_by_executable_generation,
+};
 
 /// The `pending_turn_inputs.state` partitions this family's statements name.
 ///

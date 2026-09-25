@@ -29,6 +29,11 @@ pub struct DeploymentDrainStatus {
     /// the minimum `since_ms` over parked turns and parked processes. `None`
     /// when nothing is parked.
     pub oldest_parked_since_ms: Option<u64>,
+    /// Parked turns admitted under an executable generation this build
+    /// retired, per that generation (FIG-3571): what an old-build drain of
+    /// each generation still has to redrive.
+    pub retired_by_executable_generation:
+        std::collections::BTreeMap<lash_core::ExecutableGeneration, usize>,
     /// Host-clock epoch milliseconds at which this read completed.
     pub checked_at: u64,
 }
@@ -49,13 +54,15 @@ impl DeploymentDrainStatus {
 impl serde::Serialize for DeploymentDrainStatus {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         #[derive(serde::Serialize)]
-        struct Wire {
+        struct Wire<'a> {
             accepting_new_work: bool,
             remaining_invocations: usize,
             in_flight_turns: usize,
             parked_turns: usize,
             parked_processes: usize,
             oldest_parked_since_ms: Option<u64>,
+            retired_by_executable_generation:
+                &'a std::collections::BTreeMap<lash_core::ExecutableGeneration, usize>,
             checked_at: u64,
             drained: bool,
         }
@@ -66,6 +73,7 @@ impl serde::Serialize for DeploymentDrainStatus {
             parked_turns: self.parked_turns,
             parked_processes: self.parked_processes,
             oldest_parked_since_ms: self.oldest_parked_since_ms,
+            retired_by_executable_generation: &self.retired_by_executable_generation,
             checked_at: self.checked_at,
             drained: self.drained(),
         }

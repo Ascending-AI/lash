@@ -171,7 +171,7 @@ pub async fn parked_turns_list_by_since_with_filters_and_keyset_pages(
     let empty_reason = factory
         .list_turn_parks(&crate::store::TurnParkQuery {
             reasons: Some(BTreeSet::from([
-                crate::store::ParkReasonCode::KeyFormatCutover,
+                crate::store::ParkReasonCode::RetiredGeneration,
             ])),
             ..query.clone()
         })
@@ -313,7 +313,8 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
         .record_turn_park(&park_write(
             &session_id,
             "turn-b",
-            crate::store::ParkReason::KeyFormatCutover {
+            crate::store::ParkReason::RetiredGeneration {
+                generation: Some(crate::ExecutableGeneration::new("blake3:old")),
                 message: "cut over".to_string(),
             },
             300,
@@ -358,7 +359,7 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
         matches!(
             &page.events[2].kind,
             crate::store::ParkEventKind::Parked { reason } if reason.code()
-                == crate::store::ParkReasonCode::KeyFormatCutover
+                == crate::store::ParkReasonCode::RetiredGeneration
         ),
         "the new park opens with its reason: {:?}",
         page.events[2]
@@ -576,6 +577,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
                 configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
                 expected_head_revision: 0,
                 initial_turn_index: 1,
+                generation: None,
             },
         )
         .await

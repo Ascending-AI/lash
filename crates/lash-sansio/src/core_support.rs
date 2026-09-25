@@ -33,6 +33,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-history-node/v3",
     "lash-intent/v2",
     "lash-lifted-process-name/v2",
+    "lash-lashlang-cell-generation/v1",
     "lash-lashlang-content/v2",
     "lash-lashlang-execution-site/v2",
     "lash-lashlang-program/v2",

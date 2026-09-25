@@ -117,10 +117,19 @@ pub enum ParkReason {
         /// The refusal message.
         message: String,
     },
-    /// A code cell's journal was written under a replay-key grammar this
-    /// build does not mint.
-    KeyFormatCutover {
-        /// The refusal message.
+    /// The turn was admitted under another executable generation than the
+    /// one this build runs (FIG-3571): its cells would compile, key or meter
+    /// differently from the journal's, so its redrive was refused before any
+    /// effect, and it holds its claims until a build of its own generation
+    /// redrives it, an operator forks it onto the new generation, or cancels
+    /// it. The generation is carried (and projected onto the store's
+    /// `park_executable_generation` column) so drain status counts parks per generation.
+    RetiredGeneration {
+        /// The generation the turn's admission recorded; `None` for an
+        /// admission a build without the stamp journaled.
+        generation: Option<crate::executable_generation::ExecutableGeneration>,
+        /// The refusal message, naming the recorded and the current
+        /// generation.
         message: String,
     },
     /// A code cell needed a host tool binding its journal names, and the live
@@ -165,8 +174,8 @@ pub enum ParkReason {
 pub enum ParkReasonCode {
     /// See [`ParkReason::ReplayDivergence`].
     ReplayDivergence,
-    /// See [`ParkReason::KeyFormatCutover`].
-    KeyFormatCutover,
+    /// See [`ParkReason::RetiredGeneration`].
+    RetiredGeneration,
     /// See [`ParkReason::BindingDrift`].
     BindingDrift,
     /// See [`ParkReason::EffectReplayDivergence`].
@@ -180,7 +189,7 @@ impl ParkReasonCode {
     /// included — so a cleared reason drops to 0 instead of going stale.
     pub const ALL: &[Self] = &[
         Self::ReplayDivergence,
-        Self::KeyFormatCutover,
+        Self::RetiredGeneration,
         Self::BindingDrift,
         Self::EffectReplayDivergence,
         Self::SessionStateGenerationRefused,
@@ -192,7 +201,7 @@ impl ParkReasonCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ReplayDivergence => "replay_divergence",
-            Self::KeyFormatCutover => "key_format_cutover",
+            Self::RetiredGeneration => "retired_generation",
             Self::BindingDrift => "binding_drift",
             Self::EffectReplayDivergence => "effect_replay_divergence",
             Self::SessionStateGenerationRefused => "session_state_generation_refused",
@@ -204,7 +213,7 @@ impl ParkReasonCode {
     pub fn from_code(code: &str) -> Option<Self> {
         match code {
             "replay_divergence" => Some(Self::ReplayDivergence),
-            "key_format_cutover" => Some(Self::KeyFormatCutover),
+            "retired_generation" => Some(Self::RetiredGeneration),
             "binding_drift" => Some(Self::BindingDrift),
             "effect_replay_divergence" => Some(Self::EffectReplayDivergence),
             "session_state_generation_refused" => Some(Self::SessionStateGenerationRefused),
@@ -232,6 +241,39 @@ impl ParkReason {
         }
     }
 
+    /// The park of a turn redriven under another executable generation than
+    /// its admission recorded ([`ParkReason::RetiredGeneration`]).
+    #[must_use]
+    pub fn retired_generation(
+        refusal: crate::executable_generation::ExecutableGenerationRefusal,
+    ) -> Self {
+        use crate::executable_generation::ExecutableGenerationRefusal as Refusal;
+        let found = Refusal::spell(refusal.found.as_ref());
+        let current = Refusal::spell(refusal.current.as_ref());
+        Self::RetiredGeneration {
+            message: format!(
+                "the turn was admitted under executable generation {found}, and this build runs \
+                 {current}: its redrive was refused before any effect; redrive it under a build \
+                 of generation {found}, fork it onto this generation, or cancel it"
+            ),
+            generation: refusal.found,
+        }
+    }
+
+    /// The retired generation this park counts under, when it is a
+    /// [`RetiredGeneration`](Self::RetiredGeneration) park that names one:
+    /// what the store projects onto its `park_executable_generation` column.
+    #[must_use]
+    pub fn retired_executable_generation_key(&self) -> Option<&str> {
+        match self {
+            Self::RetiredGeneration {
+                generation: Some(generation),
+                ..
+            } => Some(generation.as_str()),
+            _ => None,
+        }
+    }
+
     /// The park reason `error` carries, when it is a refusal that parks the
     /// turn ([`RuntimeErrorCode::parks_turn`]).
     #[must_use]
@@ -241,9 +283,14 @@ impl ParkReason {
             RuntimeErrorCode::LashlangCellReplayDivergence => {
                 Some(Self::ReplayDivergence { message })
             }
-            RuntimeErrorCode::LashlangCellReplayKeyFormatCutover => {
-                Some(Self::KeyFormatCutover { message })
-            }
+            RuntimeErrorCode::RetiredGeneration => Some(Self::retired_generation(
+                error.executable_generation_refusal().cloned().unwrap_or(
+                    crate::executable_generation::ExecutableGenerationRefusal {
+                        found: None,
+                        current: None,
+                    },
+                ),
+            )),
             RuntimeErrorCode::LashlangCellBindingDrift => Some(Self::BindingDrift { message }),
             RuntimeErrorCode::EffectReplayDivergence
             | RuntimeErrorCode::SqliteEffectReplayHashConflict => {
@@ -265,7 +312,7 @@ impl ParkReason {
     pub fn code(&self) -> ParkReasonCode {
         match self {
             Self::ReplayDivergence { .. } => ParkReasonCode::ReplayDivergence,
-            Self::KeyFormatCutover { .. } => ParkReasonCode::KeyFormatCutover,
+            Self::RetiredGeneration { .. } => ParkReasonCode::RetiredGeneration,
             Self::BindingDrift { .. } => ParkReasonCode::BindingDrift,
             Self::EffectReplayDivergence { .. } => ParkReasonCode::EffectReplayDivergence,
             Self::SessionStateGenerationRefused { .. } => {
@@ -289,7 +336,7 @@ impl ParkReason {
     pub fn message(&self) -> &str {
         match self {
             Self::ReplayDivergence { message }
-            | Self::KeyFormatCutover { message }
+            | Self::RetiredGeneration { message, .. }
             | Self::BindingDrift { message }
             | Self::EffectReplayDivergence { message, .. }
             | Self::SessionStateGenerationRefused { message, .. } => message,
@@ -601,6 +648,12 @@ pub struct ParkSummary {
     pub by_reason: BTreeMap<ParkReasonCode, usize>,
     /// The oldest live park's `since_ms`, `None` when nothing is parked.
     pub oldest_since_ms: Option<u64>,
+    /// Live [`RetiredGeneration`](ParkReason::RetiredGeneration) parks per
+    /// the executable generation their admission recorded (FIG-3571), read off
+    /// the store's projected `park_executable_generation` column.
+    #[serde(default)]
+    pub retired_by_executable_generation:
+        BTreeMap<crate::executable_generation::ExecutableGeneration, usize>,
 }
 
 impl ParkSummary {
@@ -690,6 +743,13 @@ pub struct UnsettledTurnCounts {
     pub oldest_parked_since_ms: Option<u64>,
     /// Live parks per reason code; codes with no park are absent.
     pub parked_by_reason: BTreeMap<ParkReasonCode, usize>,
+    /// Live [`RetiredGeneration`](ParkReason::RetiredGeneration) parks per
+    /// the generation their admission recorded (FIG-3571): what an old-build
+    /// drain of each retired generation still has to redrive. A park whose
+    /// admission recorded no generation is counted under
+    /// [`parked_by_reason`](Self::parked_by_reason) only.
+    pub retired_by_executable_generation:
+        BTreeMap<crate::executable_generation::ExecutableGeneration, usize>,
 }
 
 #[cfg(test)]

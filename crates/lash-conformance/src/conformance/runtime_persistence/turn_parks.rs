@@ -89,7 +89,8 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
 
     // Parking the same turn again keeps the park's identity and first-park
     // time, counts the refusal, and updates the reason.
-    let cutover = crate::store::ParkReason::KeyFormatCutover {
+    let cutover = crate::store::ParkReason::RetiredGeneration {
+        generation: Some(crate::ExecutableGeneration::new("blake3:old")),
         message: "grammar none".to_string(),
     };
     let reparked = store

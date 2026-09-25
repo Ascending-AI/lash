@@ -673,17 +673,12 @@ impl RuntimeTurnDriver<'_> {
         })
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "foreground code execution carries explicit turn and replay context"
-    )]
     pub(in crate::runtime) async fn run_exec_code(
         &self,
         language: String,
         code: &str,
         messages: crate::MessageSequence,
         protocol_iteration: usize,
-        cell_replay_grammar: Option<u32>,
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,
     ) -> Result<
@@ -691,13 +686,6 @@ impl RuntimeTurnDriver<'_> {
         crate::RuntimeEffectControllerError,
     > {
         let code_executor = self.session.plugins().code_executor();
-        // A code executor that keys its cells' nested effects by a versioned
-        // replay-key grammar runs a cell only under the grammar its
-        // iteration's journaled sync names (FIG-3586): the refusal is the
-        // executor's, before the cell runs.
-        if let Some(executor) = &code_executor {
-            executor.admit_replay_key_grammar(cell_replay_grammar)?;
-        }
         let (session_event_tx, mut session_event_rx) = mpsc::channel::<SessionStreamEvent>(100);
         let (turn_event_tx, mut turn_event_rx) = mpsc::channel::<TurnActivity>(100);
         let relay_tx = event_tx.clone();

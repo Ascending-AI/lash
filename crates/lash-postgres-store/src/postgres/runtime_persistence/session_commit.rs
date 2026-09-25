@@ -1129,6 +1129,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 .bind(reason_code)
                 .bind(&reason_json)
                 .bind(at_ms)
+                .bind(park.reason.retired_executable_generation_key())
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -1196,6 +1197,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .bind(at_ms)
             .bind(at_ms)
             .bind(1_i64)
+            .bind(park.reason.retired_executable_generation_key())
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;

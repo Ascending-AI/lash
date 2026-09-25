@@ -2500,6 +2500,11 @@ async fn execute_drive(
                                 checkpoint: None,
                             },
                             turn_index: live_generation + 1,
+                            // Likewise the generation: a replay keeps the one
+                            // the first execution admitted under (FIG-3571).
+                            generation: Some(lash_core::ExecutableGeneration::new(format!(
+                                "blake3:live-{live_generation}"
+                            ))),
                         },
                     })
                 }
@@ -2534,11 +2539,13 @@ async fn accepted_turn_input_drive_replays_the_journaled_claim() {
             claim: first,
             base: first_base,
             turn_index: first_turn_index,
+            generation: first_generation,
         },
         lash_core::AcceptedTurnInputDrive::Claimed {
             claim: replayed,
             base: replayed_base,
             turn_index: replayed_turn_index,
+            generation: replayed_generation,
         },
     ) = (first, replayed)
     else {
@@ -2549,6 +2556,11 @@ async fn accepted_turn_input_drive_replays_the_journaled_claim() {
     assert_eq!(replayed_base, first_base);
     assert_eq!(replayed_base.revision, 3);
     assert_eq!((first_turn_index, replayed_turn_index), (4, 4));
+    assert_eq!(replayed_generation, first_generation);
+    assert_eq!(
+        replayed_generation,
+        Some(lash_core::ExecutableGeneration::new("blake3:live-3"))
+    );
     assert_eq!(replayed.session_lease_generation, 3);
     assert_eq!(replayed.lease_token, first.lease_token);
     assert_eq!(replayed.inputs[0].input_id, first.inputs[0].input_id);

@@ -60,7 +60,11 @@ use serde::{Deserialize, Serialize};
 /// `lash:{replay_key}:frontier` before it acts, recording the start's process
 /// id, so a drifted binding's recorded start or sleep is served and only one
 /// at the live frontier refuses (FIG-3779).
-pub const EFFECT_JOURNAL_VERSION: u32 = 9;
+/// 10: a direct turn's journaled admission (`ClaimAcceptedTurnInput`) records
+/// the executable generation it runs under, and an execution-environment sync
+/// no longer journals a cell replay-key grammar (FIG-3571): the turn's one
+/// generation is checked at its admission.
+pub const EFFECT_JOURNAL_VERSION: u32 = 10;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

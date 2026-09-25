@@ -352,10 +352,13 @@ CREATE TABLE IF NOT EXISTS turn_parks (
     reason_json TEXT NOT NULL,
     since_ms INTEGER NOT NULL,
     last_refused_ms INTEGER NOT NULL,
-    attempts INTEGER NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1)
+    attempts INTEGER NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1),
+    park_executable_generation TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_turn_parks_since
     ON turn_parks(since_ms, session_id);
+CREATE INDEX IF NOT EXISTS idx_turn_parks_executable_generation
+    ON turn_parks(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS turn_park_clock (
     singleton           INTEGER PRIMARY KEY CONSTRAINT ck_turn_park_clock_singleton CHECK (singleton = 1),
@@ -919,7 +922,15 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `postgres_await_event_*` and `postgres_effect_journal_retirement` codes
 /// leave the durable runtime-error vocabulary. No relation changes; a pre-92
 /// database is rejected at open and recreated; it is not migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 92;
+/// Bumped to 93 for FIG-3571: a turn's admission records the executable
+/// generation it runs under (`queued_runs.admission_json` gains `generation`),
+/// a redrive under another one parks with the `retired_generation` reason
+/// (replacing `key_format_cutover`, and the durable `RuntimeErrorCode`
+/// `lashlang_cell_replay_key_format_cutover` becomes `retired_generation`),
+/// and `turn_parks` gains the projected, indexed `park_executable_generation` column the
+/// drain counts retired parks by. A pre-93 database is rejected at open and
+/// recreated; it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 93;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
