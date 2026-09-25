@@ -264,34 +264,70 @@ fn the_abort_corpus_survives_without_the_preflight() {
 fn fuzzed_sources_survive_without_the_preflight() {
     const CHILD_ENV: &str = "LASH_TS_NO_PREFLIGHT_FUZZ_CHILD";
     const SOURCES: u64 = 24;
+    const BATCHES: u64 = 8;
+    /// Children in flight at once. The per-source bounds below make each
+    /// parse's peak small and predictable, so a bounded child count — not the
+    /// batches' wall-clock interleaving — is what keeps the whole test well
+    /// under a gigabyte on a shared executor.
+    const BATCHES_IN_FLIGHT: usize = 4;
+    /// The deepest nesting charge a fuzz source may carry. One unit is one
+    /// level of recursive-descent work — the axis the stack reservation is
+    /// priced in — so bounding it bounds both the stack a parse touches and
+    /// the allocations quadratic in depth (SWC's duplicate-label check is the
+    /// observed gigabyte-scale one). Sources deeper than this are the abort
+    /// corpus's job; at ~22 KiB of stack per level, a source inside the bound
+    /// costs tens of megabytes at worst.
+    const MAX_FUZZ_NESTING_CHARGE: usize = 1024;
+    /// The longest source a batch keeps, however small its charge: the charge
+    /// model is the same approximation the preflight enforced, with the same
+    /// blind spots this file exists to probe, so the byte cap stays
+    /// underneath it as an arithmetic bound for any shape the model
+    /// under-charges. At 4 KiB even a source charged at zero yet recursive
+    /// end to end stays under ~100 MiB of parser stack.
+    const MAX_FUZZ_SOURCE_BYTES: usize = 4 * 1024;
+
     if let Some(batch) = std::env::var_os(CHILD_ENV) {
         let batch: u64 = batch.to_string_lossy().parse().expect("batch");
+        let mut parsed = 0u64;
+        let mut over_budget = 0u64;
         for step in 0..SOURCES {
-            let source = fuzz_source(batch * SOURCES + step, 6_000);
-            if source.len() > lash_typescript::MAX_SOURCE_BYTES {
+            let mut source = fuzz_source(batch * SOURCES + step, 6_000);
+            truncate_source(&mut source, MAX_FUZZ_SOURCE_BYTES);
+            if lash_typescript::measure_source_nesting_charge(&source) > MAX_FUZZ_NESTING_CHARGE {
+                over_budget += 1;
                 continue;
             }
+            // The assertion is that this returns at all.
             let _ = lash_typescript::parse_without_nesting_preflight(&source);
+            parsed += 1;
         }
+        eprintln!("fuzz batch {batch}: {parsed} parsed, {over_budget} over budget");
         return;
     }
 
-    let children = (0..8)
-        .map(|batch| {
-            let child =
-                std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args([
-                        "no_abort_guarantee::fuzzed_sources_survive_without_the_preflight",
-                        "--exact",
-                        "--nocapture",
-                    ])
-                    .env(CHILD_ENV, batch.to_string())
-                    .stdout(std::process::Stdio::null())
-                    .spawn()
-                    .expect("fuzz child starts");
-            (batch, child)
-        })
-        .collect::<Vec<_>>();
+    let mut children: std::collections::VecDeque<(u64, std::process::Child)> =
+        std::collections::VecDeque::new();
+    for batch in 0..BATCHES {
+        if children.len() == BATCHES_IN_FLIGHT {
+            let (done, mut child) = children.pop_front().expect("a child in flight");
+            let status = child.wait().expect("fuzz child finishes");
+            assert!(
+                status.success(),
+                "fuzz batch {done} did not survive without the preflight: {status}"
+            );
+        }
+        let child = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "no_abort_guarantee::fuzzed_sources_survive_without_the_preflight",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, batch.to_string())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("fuzz child starts");
+        children.push_back((batch, child));
+    }
     for (batch, mut child) in children {
         let status = child.wait().expect("fuzz child finishes");
         assert!(
@@ -433,6 +469,18 @@ fn fuzz_source(seed: u64, tokens: usize) -> String {
         source.push_str(&chosen[prng.below(chosen.len())]);
     }
     source
+}
+
+/// Cut `source` to at most `cap` bytes, on a char boundary.
+fn truncate_source(source: &mut String, cap: usize) {
+    if source.len() <= cap {
+        return;
+    }
+    let mut end = cap;
+    while !source.is_char_boundary(end) {
+        end -= 1;
+    }
+    source.truncate(end);
 }
 
 /// When the host cannot give the parser its reservation, that is a resource
