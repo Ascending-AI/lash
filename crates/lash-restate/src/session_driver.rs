@@ -44,6 +44,16 @@
 //! journals lead with. A request built for another generation decodes and
 //! is refused, terminally and before the handler journals anything, so a
 //! journal written under one generation is never replayed against another.
+//!
+//! **Drain generation (ADR 0106 §1, FIG-3795).** Each handler's first
+//! journaled command is the generation sentinel, a step named
+//! `lash.build.generation` that records the executing build's drain
+//! generation `G`. A replay that reads back another `G` (the code behind a
+//! pinned deployment changed) parks its attempt, typed with the recorded `G`,
+//! before any other command. A `LashTurn` request carries the `G` of the drive
+//! that admitted the root (`sender_generation`), so a root the latest build
+//! cannot run can be routed back to its writer's generation. The step's name
+//! and output are frozen; what `G` is comes from the build (FIG-3795 A).
 
 use std::sync::{Arc, Mutex, Weak};
 
@@ -52,7 +62,9 @@ use lash_core::engine::{
     DriveRequestId, DriveStop, RootOutcome, drive_admission_scope, drive_root_scope,
 };
 use lash_core::{SessionDriver, SessionId, SessionWorkEngine};
-use restate_sdk::context::{ContextClient, ObjectContext, WorkflowContext};
+use restate_sdk::context::{
+    ContextClient, ContextSideEffects, ObjectContext, RunFuture as _, WorkflowContext,
+};
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
@@ -97,9 +109,55 @@ pub struct RestateTurnDriveRequest {
     /// [`LASH_SESSION_DRIVE_VERSION`] of the drive that admitted the root.
     #[serde(default = "unstamped_drive_version")]
     pub drive_version: u32,
+    /// The drain generation of the build whose drive admitted the root: the
+    /// generation a root the latest build refuses is routed back to
+    /// (ADR 0106 §1). Unstamped, it is empty.
+    #[serde(default = "unstamped_generation")]
+    pub sender_generation: BuildGeneration,
     /// The recorded admission the root runs under. The root replays from its
     /// recorded base, never from the live head.
     pub admitted: Admitted,
+}
+
+/// The generation an unstamped `LashTurn` request was sent from: none.
+fn unstamped_generation() -> BuildGeneration {
+    BuildGeneration::new("")
+}
+
+/// The frozen name of the generation sentinel step, the first command every
+/// session-driver journal records. Its name and its output (the executing
+/// build's [`BuildGeneration`] as a JSON string) never change.
+const GENERATION_SENTINEL: &str = "lash.build.generation";
+
+/// The drain generation of the build executing these handlers.
+///
+/// The sentinel records it and the scheduler stamps it. Deriving it from the
+/// build's durable formats is FIG-3795 A, which replaces this body; the
+/// sentinel's journal shape does not depend on the value.
+fn executing_generation() -> BuildGeneration {
+    build_generation()
+}
+
+/// The generation sentinel's verdict. Each handler records the executing
+/// build's generation as its journal's first command
+/// ([`GENERATION_SENTINEL`]); a replay that reads back another generation
+/// parks its attempt, typed with the recorded generation, before any other
+/// command, and keeps its journal for a build of that generation.
+fn check_generation(
+    service: LashService,
+    recorded: &BuildGeneration,
+    executing: &BuildGeneration,
+) -> Result<(), HandlerError> {
+    if recorded == executing {
+        return Ok(());
+    }
+    Err(parked_turn_failure(format!(
+        "RetiredGeneration: {} journal was recorded under generation `{}`; this build is \
+         generation `{}` and parks it for a build of the recorded generation",
+        service.name(),
+        recorded.as_str(),
+        executing.as_str()
+    )))
 }
 
 /// The build generation every drive request of this build is pinned to.
@@ -229,7 +287,7 @@ impl RestateSessionWork {
             request: DriveRequest {
                 session: session.clone(),
                 request: request.clone(),
-                build_generation: build_generation(),
+                build_generation: executing_generation(),
             },
         };
         self.ingress
@@ -257,7 +315,7 @@ impl RestateSessionWork {
             request: DriveRequest {
                 session: session.clone(),
                 request: request.clone(),
-                build_generation: build_generation(),
+                build_generation: executing_generation(),
             },
         };
         self.ingress
@@ -440,6 +498,15 @@ async fn drive_session_journal(
         ))
         .into());
     }
+    let Json(recorded) = ctx
+        .run(|| async { Ok(Json(executing_generation())) })
+        .name(GENERATION_SENTINEL)
+        .await?;
+    check_generation(
+        LashService::SessionDriver,
+        &recorded,
+        &executing_generation(),
+    )?;
     let driver = slot.driver_for(LashService::SessionDriver.name())?;
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone());
     let admission_scope = drive_admission_scope(&request.session, &request.request);
@@ -461,6 +528,7 @@ async fn drive_session_journal(
                     .workflow_client::<LashTurnClient>(key)
                     .run(Json(RestateTurnDriveRequest {
                         drive_version: LASH_SESSION_DRIVE_VERSION,
+                        sender_generation: executing_generation(),
                         admitted,
                     }))
                     .call()
@@ -500,6 +568,11 @@ async fn run_root_journal(
         ))
         .into());
     }
+    let Json(recorded) = ctx
+        .run(|| async { Ok(Json(executing_generation())) })
+        .name(GENERATION_SENTINEL)
+        .await?;
+    check_generation(LashService::TurnDriver, &recorded, &executing_generation())?;
     let driver = slot.driver_for(LashService::TurnDriver.name())?;
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone());
     let scoped = controller
@@ -542,5 +615,26 @@ mod tests {
         let unstamped: RestateSessionDriveRequest =
             serde_json::from_value(stamped).expect("an unstamped request decodes");
         assert_eq!(unstamped.drive_version, 0);
+    }
+
+    #[test]
+    fn the_sentinel_admits_only_its_own_generation() {
+        let own = executing_generation();
+        assert!(check_generation(LashService::TurnDriver, &own, &own).is_ok());
+        let other = BuildGeneration::new("an-older-build");
+        let refusal = check_generation(LashService::TurnDriver, &other, &own)
+            .expect_err("another generation parks");
+        let message = format!("{refusal:?}");
+        assert!(message.contains("RetiredGeneration"), "{message}");
+        assert!(message.contains("an-older-build"), "{message}");
+    }
+
+    #[test]
+    fn the_sentinel_step_is_frozen() {
+        assert_eq!(GENERATION_SENTINEL, "lash.build.generation");
+        assert_eq!(
+            serde_json::to_string(&BuildGeneration::new("g")).expect("encode"),
+            "\"g\""
+        );
     }
 }

@@ -84,7 +84,7 @@ symbols = ["ADMIT_STEP", "START_STEP", "AdmissionVerdict", "StartOutcome"]
 [[surface]]
 constant = "LASH_SESSION_DRIVE_VERSION"
 constant_path = "crates/lash-restate/src/session_driver.rs"
-description = "leading journaled commands of the Restate session driver: LashSession's admission steps and LashTurn calls, and LashTurn's seal (the input stamp of both handlers' requests)"
+description = "leading journaled commands of the Restate session driver: both handlers' generation sentinel, LashSession's admission steps and LashTurn calls, and LashTurn's seal (the input stamp of both handlers' requests)"
 manifest = "RestateSessionDrive"
 
 # ADR 0105 section 12 (FIG-3600 S5). Both handlers' requests carry the
@@ -92,7 +92,9 @@ manifest = "RestateSessionDrive"
 # refuses any other generation, terminally, before it journals anything. Any
 # change to the request shapes, the handlers' leading commands or their order,
 # or the keys they address bumps this constant. The kernel's recorded bodies
-# are guarded by EFFECT_JOURNAL_VERSION.
+# are guarded by EFFECT_JOURNAL_VERSION. The generation sentinel's name and
+# output are guarded; the drain generation's value is not (FIG-3795 A derives
+# it, and the sentinel's journal shape does not depend on it).
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lash-restate/src/session_driver.rs"]
@@ -104,7 +106,8 @@ paths = ["crates/lash-restate/src/session_driver.rs"]
 symbols = [
   "DRIVE_HANDLER",
   "unstamped_drive_version",
-  "build_generation",
+  "unstamped_generation",
+  "GENERATION_SENTINEL",
   "turn_workflow_key",
   "drive_session_journal",
   "run_root_journal",
