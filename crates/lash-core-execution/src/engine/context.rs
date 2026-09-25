@@ -6,7 +6,6 @@ use std::pin::Pin;
 use futures_util::future::FusedFuture;
 use serde::{Deserialize, Serialize};
 
-use super::contracts::{ChangeId, VersionRange};
 use crate::{SessionStreamEvent, TurnActivityId, TurnEvent};
 
 /// What an engine supplies to drive code, implemented once per engine.
@@ -25,10 +24,6 @@ pub trait EngineContext {
     /// Deterministic time: recorded on first execution and returned unchanged
     /// on replay. Every deadline a command carries is taken from here.
     fn now_ms(&self) -> Self::Op<'_, EpochMs>;
-
-    /// A neutral version decision (ADR 0105 §7): a fresh execution records
-    /// `supported.max()`, and a replay returns the recorded value.
-    fn version(&self, change: &'static ChangeId, supported: VersionRange) -> Self::Op<'_, u32>;
 
     /// Synchronous. It never wakes the drive, is keyed by replay key, and is
     /// suppressed or deduplicated on replay.
