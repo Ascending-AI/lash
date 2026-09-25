@@ -1813,7 +1813,7 @@ def normalize_rust_derive_lists(text: str) -> str:
 
 
 RUST_DECLARATION = re.compile(
-    r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
+    r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?(?:async[ \t]+)?"
     r"(?:const|static|fn|struct|enum|type)[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 RUST_SERDE_SHAPE = re.compile(
