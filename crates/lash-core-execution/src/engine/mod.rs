@@ -64,7 +64,7 @@ pub use contracts::{
 };
 pub use control::{
     EngineAck, EngineRefusal, NoEngineControl, NoScopeClose, RootRef, ScopeCloseSink,
-    SessionControlEngine,
+    SessionControlEngine, begin_session_close_replay_key,
 };
 pub use drive::{
     DriveAbort, DriveLoop, DriveOutcome, DriveStop, RootOutcome, admission_body,
