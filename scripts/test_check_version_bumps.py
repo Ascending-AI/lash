@@ -235,6 +235,35 @@ pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
 ];
 """
 
+# A lowering change re-keys what unchanged source means without touching any
+# item a symbol-named guard projects, so the real surface whole-file-guards
+# the TypeScript lowerer and the structural roles it marks. The fixture keeps
+# the same two legs: a directory glob and one file beside it.
+LOWERING_CONFIG = """
+[[surface]]
+constant = "LASHLANG_SEMANTIC_HASH_VERSION"
+constant_path = "src/identity.rs"
+version_regex = '\\bLASHLANG_SEMANTIC_HASH_VERSION\\b\\s*:\\s*&str\\s*=\\s*"lashlang-semantic-v([0-9]+)"'
+description = "fixture lowerer and structural-role surface"
+
+[[surface.guard]]
+kind = "file"
+paths = ["src/lower/**", "src/ast_roles.rs"]
+must_cover = ["impl Lowerer", "CollectionTransformParts"]
+"""
+
+LOWERING_SOURCE = """
+impl Lowerer {
+    fn reference(&mut self, member: &Expr) -> LashExpr {
+        LashExpr::Read(member)
+    }
+}
+"""
+
+AST_ROLES_SOURCE = """
+pub struct CollectionTransformParts;
+"""
+
 BYTECODE_CONFIG = """
 [[surface]]
 constant = "BYTECODE_FORMAT_VERSION"
@@ -1316,6 +1345,90 @@ class VersionBumpFixtureTest(unittest.TestCase):
                 mutated = REGISTRY_SOURCE.replace(before, after)
                 self.assertNotEqual(mutated, REGISTRY_SOURCE)
                 fixture.write_file("src/builtins.rs", mutated)
+                head = fixture.commit(f"change {name} without bump")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(len(result.failures), 1)
+                self.assertEqual(
+                    result.failures[0].surface.constant,
+                    "LASHLANG_SEMANTIC_HASH_VERSION",
+                )
+                self.assertEqual(result.failures[0].base_version, 15)
+                self.assertEqual(result.failures[0].head_version, 15)
+
+    def test_the_semantic_hash_surface_guards_the_typescript_lowering(self) -> None:
+        """The lowerer and the role table sit inside the surface's whole-file guard.
+
+        A lowering change moves every module-ref preimage while touching no
+        named item, so only a `file` guard over `crates/lash-typescript/src/
+        lower/**` and `crates/lashlang/src/ast_roles.rs` sees it. The guard's
+        markers are also checked against the real matched files, so a marker
+        that names nothing the guard covers fails here.
+        """
+        semantic = next(
+            surface
+            for surface in MODULE.load_config(REAL_CONFIG)
+            if surface.constant == "LASHLANG_SEMANTIC_HASH_VERSION"
+        )
+        guard = next(
+            guard for guard in semantic.guards if guard.kind == "file"
+        )
+        self.assertIn("crates/lash-typescript/src/lower/**", guard.paths)
+        self.assertIn("crates/lashlang/src/ast_roles.rs", guard.paths)
+
+        view = MODULE.RepositoryView(MODULE.ROOT)
+        matched = view.matching_paths("HEAD", guard.paths)
+        self.assertIn("crates/lash-typescript/src/lower/mod.rs", matched)
+        self.assertIn("crates/lashlang/src/ast_roles.rs", matched)
+        contents = [
+            view.content("HEAD", path) or "" for path in matched
+        ]
+        for marker in guard.must_cover:
+            self.assertTrue(
+                any(marker in content for content in contents),
+                f"no guarded file carries {marker!r}",
+            )
+
+    def test_a_lowering_or_role_change_demands_a_semantic_hash_bump(self) -> None:
+        mutations = {
+            "lowered shape": (
+                "src/lower/calls.rs",
+                "LashExpr::Read(member)",
+                "LashExpr::Convert(member)",
+            ),
+            "a new lowering file": (
+                "src/lower/nested/added.rs",
+                None,
+                "impl Lowerer {\n    fn added(&self) {}\n}\n",
+            ),
+            "role recognition": (
+                "src/ast_roles.rs",
+                "CollectionTransformParts;",
+                "CollectionTransformParts { guarded: bool }",
+            ),
+        }
+        for name, (path, before, after) in mutations.items():
+            with self.subTest(name=name):
+                fixture = FixtureRepository(LOWERING_CONFIG)
+                self.addCleanup(fixture.close)
+                fixture.write_file(
+                    "src/identity.rs",
+                    "pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "
+                    '"lashlang-semantic-v15";\n',
+                )
+                fixture.write_file("src/lower/calls.rs", LOWERING_SOURCE)
+                fixture.write_file("src/ast_roles.rs", AST_ROLES_SOURCE)
+                base = fixture.commit("base")
+                if before is None:
+                    fixture.write_file(path, after)
+                else:
+                    fixture.write_file(
+                        path,
+                        (LOWERING_SOURCE if "lower" in path else AST_ROLES_SOURCE)
+                        .replace(before, after),
+                    )
                 head = fixture.commit(f"change {name} without bump")
 
                 result = self.check(fixture, base, head)

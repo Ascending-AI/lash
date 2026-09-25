@@ -2098,6 +2098,21 @@ kind = "rust_items"
 paths = ["crates/lashlang/src/builtins.rs"]
 symbols = ["SOURCE_BUILTINS", "TYPESCRIPT_BUILTINS", "Builtin", "Arity"]
 
+# The item guards above project how an artifact is encoded; they say nothing
+# about what a front end chooses to encode. The TypeScript lowerer decides
+# that: a lowering change re-keys what unchanged source means -- and so the
+# module-ref preimage -- while touching no item any symbol-named guard
+# projects, which is how FIG-3728/FIG-3745 first landed without the bump.
+# `ast_roles.rs` sits beside it because the structural roles the lowerer marks
+# a program with are part of what the IR means, not only how it serializes.
+# Both legs are whole-file on purpose: a lowering edit with no vocabulary,
+# shape or writer change still fires, and a provably comment-only move takes
+# the checker's ordinary justify path.
+[[surface.guard]]
+kind = "file"
+paths = ["crates/lash-typescript/src/lower/**", "crates/lashlang/src/ast_roles.rs"]
+must_cover = ["impl Lowerer", "CollectionTransformParts"]
+
 [[surface]]
 constant = "NATIVE_DRIVER_STATE_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/native/state.rs"
