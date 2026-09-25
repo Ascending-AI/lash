@@ -3,8 +3,11 @@
 //! A root resolves its config once, as a recorded step at the top of the
 //! logical-turn funnel: after the boundary's command drain and the root's
 //! claim, before the first physical turn's first effect. Its first execution
-//! reads the whole config from the durable head (D3 Q2); every replay decodes
-//! that record instead. So a config change that lands after the root started
+//! records the whole config (D3 Q2) the root is about to run under: the
+//! resident config, which is the durable head's, adopted head-authoritatively
+//! under the root's lease one step earlier (the claim's refresh for an input
+//! root, the drain's commit for a queued one). Every replay decodes that
+//! record instead of reading any live config. So a config change that lands after the root started
 //! never reaches the root, a redrive of a committed root replays under the
 //! model, prompt and options it ran under, and an input sent after a config
 //! command runs under the new config. Every physical turn of the root reuses
@@ -17,8 +20,6 @@
 //! its engine's retry budget parks it (D3 Q3). A config command that changes
 //! the route is validated when it is sent and when it is applied, and is
 //! refused typed if no provider serves it.
-
-use std::sync::Arc;
 
 use crate::provider::{ConfigRefusalCode, RuntimeProviderResolver};
 use crate::runtime::LashRuntime;
@@ -54,13 +55,8 @@ impl LashRuntime {
             format!("{root}.turn-config"),
         );
         let runner = ResolveTurnConfigRunner {
-            store: self
-                .session
-                .as_ref()
-                .and_then(|session| session.history_store()),
             root: root.clone(),
-            head_revision: self.state.head_revision,
-            resident: crate::store::persisted_session_config_from_state(&self.state),
+            config: crate::store::persisted_session_config_from_state(&self.state),
         };
         let config = controller
             .execute_effect(
@@ -78,8 +74,8 @@ impl LashRuntime {
     }
 
     /// Adopt `root`'s recorded config on resident state: a no-op on the first
-    /// execution, which read it from the head the resident state carries, and
-    /// the correction a replay needs when the live config moved since.
+    /// execution, which recorded the resident config, and the correction a
+    /// replay needs when the live config moved since.
     fn apply_turn_config(&mut self, root: &TurnId, config: &PersistedSessionConfig) {
         crate::runtime::state::adopt_session_config(&mut self.state, config);
         tracing::info!(
@@ -102,10 +98,45 @@ impl LashRuntime {
         let crate::SessionCommand::ApplyConfigPatch { patch } = command else {
             return Ok(());
         };
-        if patch.provider_id.is_none() && patch.model.is_none() {
-            return Ok(());
+        match self.patch_route_refusal(patch, self.state.effective_policy()) {
+            Some(refusal) => Err(refusal),
+            None => Ok(()),
         }
-        let policy = self.state.effective_policy();
+    }
+
+    /// Whether the drain refuses `patch` at apply (D3 §3.3): its route,
+    /// judged over the running `policy`, is one no provider of this host
+    /// serves any more. A refused patch changes nothing. The typed `Refused`
+    /// settlement and its refused window arrive with the ingress drain
+    /// (FIG-3541, S8); the command lane before it settles the command
+    /// completed.
+    pub(in crate::runtime) fn refuses_route_at_apply(
+        &self,
+        patch: &crate::runtime::ApplyConfigPatch,
+        policy: &crate::SessionPolicy,
+    ) -> bool {
+        let Some(refusal) = self.patch_route_refusal(patch, policy) else {
+            return false;
+        };
+        tracing::warn!(
+            session_id = %self.state.session_id,
+            code = %refusal.code.as_str(),
+            error = %refusal.message,
+            "config command refused at apply"
+        );
+        true
+    }
+
+    /// The refusal of `patch`'s route over `policy`, when it changes the
+    /// route and no provider of this host serves the result.
+    fn patch_route_refusal(
+        &self,
+        patch: &crate::runtime::ApplyConfigPatch,
+        policy: &crate::SessionPolicy,
+    ) -> Option<RuntimeError> {
+        if patch.provider_id.is_none() && patch.model.is_none() {
+            return None;
+        }
         let provider_id = patch
             .provider_id
             .as_deref()
@@ -116,7 +147,8 @@ impl LashRuntime {
             provider_id,
             model,
         )
-        .map_err(|code| route_refusal(code, provider_id, model))
+        .err()
+        .map(|code| route_refusal(code, provider_id, model))
     }
 }
 
@@ -167,20 +199,12 @@ pub(crate) fn provider_binding_unavailable(error: SessionError) -> RuntimeError 
     )
 }
 
-/// The first execution of one `ResolveTurnConfig` step.
-///
-/// Everything it needs is captured at the funnel; none of it enters the
-/// envelope, which names only the root.
+/// The first execution of one `ResolveTurnConfig` step: it records the
+/// config captured at the funnel. None of it enters the envelope, which names
+/// only the root.
 struct ResolveTurnConfigRunner {
-    store: Option<Arc<dyn crate::store::RuntimePersistence>>,
     root: TurnId,
-    /// The head revision of the resident state the root runs on: its
-    /// admitted base for an input root, the post-drain head for a queued one.
-    head_revision: u64,
-    /// The resident config, recorded when the session has no durable head:
-    /// a session that never committed runs under the config it was built
-    /// with.
-    resident: PersistedSessionConfig,
+    config: PersistedSessionConfig,
 }
 
 #[async_trait::async_trait]
@@ -207,43 +231,8 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
                 ),
             ));
         }
-        let config = self.resolve().await?;
         Ok(RuntimeEffectOutcome::ResolveTurnConfig {
-            config: Box::new(config),
+            config: Box::new(self.config),
         })
-    }
-}
-
-impl ResolveTurnConfigRunner {
-    /// The durable head's config, when the head is the one the root runs
-    /// on. A store that did not answer, or a head that moved under the
-    /// root, is this attempt's fault, never the step's record: the engine
-    /// runs the step again.
-    async fn resolve(self) -> Result<PersistedSessionConfig, RuntimeEffectControllerError> {
-        let Some(store) = self.store else {
-            return Ok(self.resident);
-        };
-        let head = store.load_session_head_meta().await.map_err(|error| {
-            let mut fault = RuntimeEffectControllerError::from(
-                crate::runtime::runtime_error_from_store_commit(error),
-            );
-            fault.message = format!("turn-config head read: {}", fault.message);
-            fault.retryable_uncommitted_derivation()
-        })?;
-        let Some(head) = head else {
-            return Ok(self.resident);
-        };
-        if head.head_revision != self.head_revision {
-            return Err(RuntimeEffectControllerError::new(
-                RuntimeErrorCode::SessionHeadRefresh,
-                format!(
-                    "root `{}` runs on head revision {} but the durable head is at {}; its \
-                     config is read again once the resident head is current",
-                    self.root, self.head_revision, head.head_revision
-                ),
-            )
-            .retryable_uncommitted_derivation());
-        }
-        Ok(head.config)
     }
 }

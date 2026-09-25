@@ -1633,8 +1633,7 @@ impl RuntimeEffectControllerError {
 
     /// Only the host derivations — the assistant-response hooks, the
     /// execution-environment sync and the execution-environment load — and a
-    /// drive's admission, seal and turn-config resolution, whose store faults
-    /// are the attempt's (FIG-3600),
+    /// drive's admission and seal, whose store faults are the attempt's (FIG-3600),
     /// can consume derivation retry authority, and any step whose cancellation
     /// watch was lost ([`Self::turn_cancel_watch_lost`]): that fault is about
     /// the attempt, never the step.
@@ -1646,7 +1645,6 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::LoadExecutionEnv
                 | RuntimeEffectKind::AdmitDrive
                 | RuntimeEffectKind::SealDriveAdmission
-                | RuntimeEffectKind::ResolveTurnConfig
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
         {
             self.journal_disposition

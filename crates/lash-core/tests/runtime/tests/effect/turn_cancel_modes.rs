@@ -40,6 +40,10 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
             .collect::<Vec<_>>(),
         vec![
             (
+                RuntimeEffectKind::ResolveTurnConfig,
+                "turn-config:llm-cancel-boundary".to_string()
+            ),
+            (
                 RuntimeEffectKind::PeekAwaitEvent,
                 "turn_cancel.start_gate".to_string()
             ),
