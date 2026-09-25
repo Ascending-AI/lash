@@ -257,6 +257,7 @@ typescript	non-null-assertion
 typescript	object-string-coercion
 typescript	private-names-outside-classes
 typescript	Promise.race
+typescript	regexp-nesting
 typescript	regexp-pattern-argument
 typescript	reserved-identifiers
 typescript	satisfies

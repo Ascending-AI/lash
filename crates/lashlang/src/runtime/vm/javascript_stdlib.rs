@@ -915,7 +915,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         match values {
             [Value::String(method), value] if method.as_str() == "Lash.RequireCallable" => {
                 let callable = matches!(value, Value::Ref(id)
-                    if matches!(self.heap.get(*id)?, HeapObject::Closure { .. }));
+                    if self.heap.get(*id)?.is_function());
                 if !callable {
                     return Err(RuntimeError::type_error(format!(
                         "{} is not a function",
@@ -1013,11 +1013,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
-    /// `IsCallable`, ECMA-262 7.2.3: in the value model only a heap closure is
-    /// callable.
+    /// `IsCallable`, ECMA-262 7.2.3: in the value model a heap closure or a
+    /// built-in method read as a value is callable.
     fn javascript_is_callable(&self, value: &Value) -> Result<bool, RuntimeError> {
         Ok(match value {
-            Value::Ref(id) => matches!(self.heap.get(*id)?, HeapObject::Closure { .. }),
+            Value::Ref(id) => self.heap.get(*id)?.is_function(),
             _ => false,
         })
     }

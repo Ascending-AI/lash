@@ -210,9 +210,16 @@ fn a_method_the_receiver_lacks_fails_the_call() {
         "const o = { a: 1 }; const p: any = o; finish(p.missing());",
     ] {
         let error = execute(source).expect_err(source);
-        assert!(
-            matches!(error, RuntimeError::NonFunctionCall { .. }),
-            "{source}: {error}"
+        let RuntimeError::UncaughtException { value } = &error else {
+            panic!("{source}: expected an uncaught guest error, got {error:?}");
+        };
+        let Value::Record(record) = value else {
+            panic!("{source}: expected an error object, got {value:?}");
+        };
+        assert_eq!(
+            record.get("name"),
+            Some(&Value::String("TypeError".into())),
+            "{source}: {error:?}"
         );
     }
 }

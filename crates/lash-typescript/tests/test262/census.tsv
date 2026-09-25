@@ -258,6 +258,7 @@ typescript	non-null-assertion	accepted	-	-
 typescript	object-string-coercion	rejected	TS_OBJECT_STRING_COERCION	const s = '' + { a: 1 };
 typescript	private-names-outside-classes	rejected	TS_PRIVATE_NAME_UNSUPPORTED	function f(o: any) { return #x in o; }
 typescript	Promise.race	accepted	-	-
+typescript	regexp-nesting	rejected	TS_REGEX_PATTERN_NESTING_LIMIT	const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;
 typescript	regexp-pattern-argument	rejected	TS_NEW_UNSUPPORTED	const r = new RegExp(null);
 typescript	reserved-identifiers	rejected	TS_RESERVED_IDENTIFIER	const __typescript_x = 1;
 typescript	satisfies	accepted	-	-

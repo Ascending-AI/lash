@@ -241,7 +241,7 @@ fn shadowed_module_root_names_the_shadowing_binding() {
     // objects (see receivers.rs).
     for ordinary_source in [
         "const s = 'a,b'; s.anchor('x');",
-        "function f(items) { return items.copyWithin(0, 1); }",
+        "function f(items) { return items.getDay(0); }",
     ] {
         let ordinary = lash_typescript::link(ordinary_source, &environment)
             .expect_err("an ordinary local should keep the method diagnostic");
