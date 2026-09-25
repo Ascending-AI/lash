@@ -562,11 +562,15 @@ pub async fn settle_started_process_engine_artifacts(
 pub trait ProcessEngine: Send + Sync {
     fn kind(&self) -> &'static str;
 
-    /// The replay-key grammar this engine journals its bodies' nested effects
-    /// under (FIG-3586). The worker stamps it onto an incarnation's start
-    /// record once, and the engine refuses an incarnation whose record names
-    /// another grammar. `None` for an engine that keys nothing by grammar.
-    fn replay_key_grammar(&self) -> Option<u32> {
+    /// The executable generation a run of `payload` would run as (FIG-3571):
+    /// the value the incarnation's start record carries and every later
+    /// attempt and segment must match before its first step. `None` for an
+    /// engine whose runs carry no generation, or for a payload the engine
+    /// refuses anyway.
+    fn program_identity(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Option<crate::ExecutableGeneration> {
         None
     }
 

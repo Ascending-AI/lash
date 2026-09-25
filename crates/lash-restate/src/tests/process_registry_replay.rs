@@ -766,7 +766,10 @@ pub(super) struct RecordingRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for RecordingRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -814,7 +817,10 @@ pub(super) struct OpaqueFailureThenSuccessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for DivergenceThenSuccessRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -846,7 +852,10 @@ impl RestateProcessRunner for DivergenceThenSuccessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -870,7 +879,10 @@ impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for TerminalFailureRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -892,7 +904,10 @@ impl RestateProcessRunner for TerminalFailureRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for AlreadyStartedRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -1045,7 +1060,10 @@ impl HttpTransport for BlockingCancelSignalTransport {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for CancellationAwareRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -1072,7 +1090,10 @@ impl RestateProcessRunner for CancellationAwareRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for SegmentedRecordingRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 

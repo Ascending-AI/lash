@@ -202,6 +202,12 @@ pub(crate) async fn save_process_tx(
                 .as_deref()
                 .map(|park| park.reason.code().as_str()),
         )
+        .bind(
+            record
+                .park
+                .as_deref()
+                .and_then(|park| park.reason.retired_executable_generation_key()),
+        )
         .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;

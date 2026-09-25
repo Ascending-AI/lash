@@ -897,13 +897,14 @@ where
         // nothing branches around the runner on a non-journaled read.
         let selector = Arc::clone(&self.segment_effect_budget);
         let registration = input.registration.clone();
+        let current_generation = self.runner.executable_generation(&input.registration);
         let (started, handover_digest_recorded, policy, writer) = match admit_segment(
             &ctx,
             &self.registry,
             &self.continuations,
             &process_id,
             input.segment_ordinal,
-            self.runner.replay_key_grammar(&input.registration),
+            current_generation.clone(),
             move || selector(&registration),
         )
         .await?
@@ -987,6 +988,20 @@ where
                     .await;
             }
         };
+        // The generation fence (FIG-3571), segment 0 included: the start
+        // journaled the stamp the incarnation's record names, and a runner
+        // whose engine runs another generation parks the process before the
+        // segment's controller or runner exists, exactly as a diverged journal
+        // parks it.
+        if let Err(refusal) =
+            lash_core::ExecutableGenerationRefusal::check(started.generation(), current_generation)
+        {
+            let refused =
+                PluginError::Runtime(lash_core::RuntimeError::retired_process_generation(refusal));
+            self.park_diverged_process(&process_id, &refused, &started)
+                .await;
+            return Err(crate::parked_turn_failure(refused));
+        }
         // The handover a later segment resumes from is immutable per ordinal:
         // read it once after admission, hold it to the digest the verdict
         // recorded, and journal it. A redrive replays the runner from the

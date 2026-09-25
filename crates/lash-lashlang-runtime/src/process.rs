@@ -247,32 +247,40 @@ fn decode_lashlang_segment_state(
     })
 }
 
-/// The durable program identity a Lashlang process resumes against.
+/// The executable generation a Lashlang process runs as (FIG-3571).
 ///
-/// Public because a readability preflight has no other way to ask the bytecode
-/// question. The identity is a hash whose preimage includes
-/// [`lashlang::BYTECODE_FORMAT_VERSION`], so nothing stored says "this was
-/// compiled by version N": the only check available is to recompute the
-/// identity this build would mint for the same inputs and compare it against
-/// the one the process recorded. That is why the format manifest classifies
-/// bytecode as identity-only rather than comparable.
+/// Its preimage is the process body's [`lashlang::ExecutableIdentity`] (the
+/// module, the exported process, and the semantic-hash, bytecode,
+/// instruction-accounting and node-id contracts the body compiles and reports
+/// under) plus what this tier adds on top: the segment-state generation a
+/// parked body resumes from, the replay-key grammar its journal is keyed by,
+/// the host requirements it was admitted against and the process name. Nothing
+/// stored says "this was written by version N": a run compares the generation
+/// its start record names against the one this build mints for the same
+/// payload, which is a pure function computed before the artifact is loaded.
+///
+/// Public because a readability preflight has no other way to ask the
+/// question.
 #[expect(
     clippy::expect_used,
     reason = "the identity is a tuple of strings and integer constants serialized straight to in-memory bytes"
 )]
 pub fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
-    let identity = serde_json::to_vec(&(
-        "lashlang-bytecode",
-        lashlang::BYTECODE_FORMAT_VERSION,
+    let executable = lashlang::ExecutableIdentity::of(
         &input.module_ref,
-        &input.process_ref,
+        lashlang::Entry::Process(&input.process_ref),
+    );
+    let identity = serde_json::to_vec(&(
+        executable.as_str(),
+        LASHLANG_SEGMENT_STATE_VERSION,
+        crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
         &input.host_requirements_ref,
         &input.process_name,
     ))
     .expect("lashlang program identity should serialize");
     format!(
         "blake3:{}",
-        lash_sansio::core_support::blake3_domain_hash_hex("lash-lashlang-program/v2", identity,)
+        lash_sansio::core_support::blake3_domain_hash_hex("lash-lashlang-program/v3", identity,)
     )
 }
 
@@ -352,10 +360,13 @@ pub async fn run_lashlang_process(
             .into());
         }
     };
-    // The generation fence, before anything else of the run: a parked segment
-    // written by another program identity or another segment-state generation
-    // ends the process with the shared resume refusal, naming what it found,
-    // exactly as a retired module artifact does below (FIG-3571, FIG-3588).
+    // The handover's integrity, before anything else of the run: the worker
+    // already parked an incarnation its start stamped under another
+    // executable generation (FIG-3571), so a handover naming another program
+    // identity or segment-state generation than the stamp is a handover this
+    // incarnation never wrote. It ends the process with the shared resume
+    // refusal, naming what it found, exactly as a retired module artifact
+    // does below (FIG-3588).
     let resume_owner = context
         .execution_context()
         .execution_write_authority
@@ -490,34 +501,6 @@ pub async fn run_lashlang_process(
             }
         }
     };
-    // The start record names the grammar this incarnation's journal was
-    // written under (FIG-3586); one begun under another grammar — or before
-    // the stamp existed — is refused before its body runs, since its keys are
-    // ones this build cannot reach.
-    match context.processes().record().await {
-        Ok(record) => {
-            let started_under = record
-                .as_ref()
-                .and_then(|record| record.first_started.as_deref())
-                .and_then(|started| started.replay_grammar);
-            if started_under != Some(crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION) {
-                return Ok(process_lashlang_failure(
-                    LashlangProcessFailureCode::ReplayKeyFormatCutover,
-                    format!(
-                        "lashlang process refused at the replay-key grammar cutover: its start \
-                         record names grammar {} and this build mints grammar {}, so its \
-                         journal cannot be replayed by this build and nothing ran",
-                        started_under
-                            .map_or_else(|| "none".to_string(), |grammar| grammar.to_string()),
-                        crate::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
-                    ),
-                    None,
-                )
-                .into());
-            }
-        }
-        Err(error) => return Err(lash_core::ProcessInfraError::new(error)),
-    }
     let process_id = context.registration().id.clone();
     // The opener, not the name: a process re-registered under the same name is
     // a different opener and must never mint identities the predecessor used

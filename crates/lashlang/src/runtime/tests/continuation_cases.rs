@@ -77,7 +77,7 @@ pub(super) fn continuation_test_vm<'a>(
         &ProjectedBindings::new(),
         Vec::new(),
     );
-    Vm::new(&program.chunk, slots, host, None, ExecutionMode::Foreground)
+    Vm::new(program, slots, host, None, ExecutionMode::Foreground)
 }
 
 pub(super) async fn uninterrupted_continuation_result(
@@ -450,6 +450,7 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
         pending_tools: Default::default(),
         execution_nonce: 0,
         format_version: VM_CONTINUATION_FORMAT_VERSION,
+        executable: program.executable.clone(),
         reference_semantics: false,
         instruction_pointer: 0,
         active_function: None,
@@ -542,13 +543,7 @@ fn continuation_carries_a_projected_binding_slot_by_identity() {
         Vec::new(),
     );
     let host = Host;
-    let mut vm = Vm::new(
-        &program.chunk,
-        slots,
-        &host,
-        None,
-        ExecutionMode::Foreground,
-    );
+    let mut vm = Vm::new(&program, slots, &host, None, ExecutionMode::Foreground);
 
     let continuation = vm.suspend().expect("a projected slot must be capturable");
     let wire = serde_json::to_value(&continuation).expect("continuation should serialize");
@@ -588,13 +583,7 @@ async fn resumed_projected_slot_still_refuses_assignment() {
         Vec::new(),
     );
     let host = Host;
-    let mut vm = Vm::new(
-        &program.chunk,
-        slots,
-        &host,
-        None,
-        ExecutionMode::Foreground,
-    );
+    let mut vm = Vm::new(&program, slots, &host, None, ExecutionMode::Foreground);
 
     let continuation = vm.suspend().expect("a projected slot must be capturable");
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
@@ -716,7 +705,7 @@ async fn requested_boundary_mid_run_leaves_the_vm_runnable() {
         Vec::new(),
     );
     let host = Host;
-    let mut vm = Vm::new(&program.chunk, slots, &host, None, ExecutionMode::Process);
+    let mut vm = Vm::new(&program, slots, &host, None, ExecutionMode::Process);
 
     assert_eq!(
         vm.run_process_until_effect()
@@ -1054,13 +1043,7 @@ async fn suspend_collects_live_heap_before_park_or_keep_running_diverge() {
         &ProjectedBindings::new(),
         Vec::new(),
     );
-    let mut vm = Vm::new(
-        &program.chunk,
-        slots,
-        &host,
-        None,
-        ExecutionMode::Foreground,
-    );
+    let mut vm = Vm::new(&program, slots, &host, None, ExecutionMode::Foreground);
     vm.suspend_after_effects(1);
     assert_eq!(
         vm.run_for_mode().await.expect("run to effect boundary"),
@@ -1363,4 +1346,48 @@ fn heap_meters_continue_after_restore_in_a_new_os_process() {
     assert_eq!(next[0], old_allocations);
     assert_eq!(next[1], old_live);
     assert!(next[2] > old_allocations);
+}
+
+/// FIG-3571: a continuation resumes only the executable that parked it. The
+/// same instruction stream compiled as another module's entry — or as this
+/// entry under another build's contracts — is another executable, and its
+/// resume is refused typed before a single instruction runs.
+#[tokio::test(flavor = "current_thread")]
+async fn a_continuation_resumes_only_the_executable_that_parked_it() {
+    let linked = crate::LinkedModule::link(three_echo_chain(), runtime_test_environment())
+        .expect("the chain links");
+    let parked_by = crate::testing::harness::compile_linked_main(&linked);
+    assert_eq!(
+        parked_by.executable_identity(),
+        &crate::ExecutableIdentity::of(linked.artifact.module_ref(), crate::Entry::Main),
+    );
+    let mut other = parked_by.clone();
+    other.executable = crate::ExecutableIdentity::of(
+        &crate::ModuleRef::new(&crate::ContentHash::new("another-module")),
+        crate::Entry::Main,
+    );
+    let continuation = suspend_after_instruction_budget(&parked_by, 3).await;
+    assert_eq!(&continuation.executable, parked_by.executable_identity());
+    let bytes = serde_json::to_vec(&continuation).expect("continuation serializes");
+
+    let restored: VmContinuation = serde_json::from_slice(&bytes).expect("decodes");
+    let refused = match Vm::resume_from(restored, &other, &Host) {
+        Ok(_) => panic!("a continuation must not resume another executable"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        refused,
+        ContinuationError::ExecutableMismatch {
+            expected: other.executable_identity().clone(),
+            found: parked_by.executable_identity().clone(),
+        }
+    );
+
+    let restored: VmContinuation = serde_json::from_slice(&bytes).expect("decodes");
+    let mut resumed =
+        Vm::resume_from(restored, &parked_by, &Host).expect("the parking executable resumes");
+    assert_eq!(
+        resumed.run_for_mode().await.expect("resumed VM finishes"),
+        uninterrupted_continuation_result(&parked_by).await
+    );
 }

@@ -22,7 +22,10 @@ struct DivergingRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for DivergingRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -221,4 +224,193 @@ pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restor
         ],
         "the park closes once, when the process completes"
     );
+}
+
+/// Runs as whatever generation the build it stands for runs, and counts its
+/// runs. Its first run fails retryably, so the invocation is still in flight
+/// over the journal its start acknowledged when the next build retries it.
+struct GenerationRunner {
+    generation: std::sync::Mutex<Option<lash_core::ExecutableGeneration>>,
+    runs: AtomicUsize,
+}
+
+impl GenerationRunner {
+    fn become_build(&self, generation: Option<&str>) {
+        *self.generation.lock().expect("generation lock") =
+            generation.map(lash_core::ExecutableGeneration::new);
+    }
+}
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for GenerationRunner {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
+        self.generation.lock().expect("generation lock").clone()
+    }
+
+    async fn run_process_segment(
+        &self,
+        _started: &SegmentStarted,
+        _registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(PluginError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::StoreCommitContended,
+                "the first attempt is interrupted",
+            )));
+        }
+        Ok(process_success(serde_json::json!({ "rerun": "completed" })).into())
+    }
+}
+
+/// L6 on Restate (FIG-3571): segment 0's journaled start carries the
+/// executable generation the admitting build stamped. An in-flight invocation
+/// retried by a build that runs another generation — its start stamped under
+/// an older one, under none, or the build naming none — parks the process
+/// `RetiredGeneration` before the runner is entered, naming what the start
+/// recorded, and the drain counts it under that generation. The retry a build
+/// of the recorded generation runs completes the process and closes the park.
+#[tokio::test]
+pub(super) async fn a_segment_retried_under_another_generation_parks_before_its_runner() {
+    for (case, admitted, retried) in [
+        (
+            "foreign",
+            Some("blake3:admitting-build"),
+            Some("blake3:new-build"),
+        ),
+        ("stampless", None, Some("blake3:new-build")),
+        ("unnamed", Some("blake3:admitting-build"), None),
+    ] {
+        let process_id = ProcessId::from(format!("l6-generation-{case}"));
+        let stores = memory_process_stores().await;
+        let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
+        let registration = rerunnable_registration(process_id.as_str());
+        registry
+            .register_process(registration.clone())
+            .await
+            .expect("register the process");
+        let runner = Arc::new(GenerationRunner {
+            generation: std::sync::Mutex::new(None),
+            runs: AtomicUsize::new(0),
+        });
+        runner.become_build(admitted);
+        let endpoint = Endpoint::builder()
+            .bind(
+                LashProcessWorkflowImpl::new_for_test(
+                    Arc::clone(&runner),
+                    Arc::clone(&registry),
+                    Arc::clone(&stores.continuations),
+                )
+                .serve(),
+            )
+            .build();
+        let input = run_input(&registration);
+
+        let first =
+            invoke_process_workflow_endpoint(&endpoint, "run", process_id.as_str(), &input, true)
+                .await
+                .unwrap_or_default();
+        assert!(
+            restate_error_message(&first).is_some(),
+            "{case}: the interrupted attempt fails retryably: {first:?}"
+        );
+        assert_eq!(runner.runs.load(Ordering::SeqCst), 1, "{case}");
+        let stamped = registry
+            .get_process(&process_id)
+            .await
+            .expect("read the started process")
+            .expect("retained")
+            .first_started
+            .as_deref()
+            .and_then(|started| started.generation.clone());
+        let admitted_generation = admitted.map(lash_core::ExecutableGeneration::new);
+        assert_eq!(
+            stamped, admitted_generation,
+            "{case}: the start is stamped once"
+        );
+
+        // A new build retries the invocation over its acknowledged journal.
+        runner.become_build(retried);
+        let journaled = restate_recorded_commands(&first).map_or(0, |commands| commands.len());
+        let retry = || {
+            encode_journal_retry(process_id.as_str(), &input, &first, journaled)
+                .expect("encode Restate's retry")
+        };
+        let refused = invoke_process_workflow_body(&endpoint, "run", retry(), true)
+            .await
+            .unwrap_or_default();
+        assert!(
+            restate_error_message(&refused).is_some()
+                && restate_output_failure_message(&refused).is_none(),
+            "{case}: the retired retry fails retryably, never terminally: {refused:?}"
+        );
+        assert_eq!(
+            runner.runs.load(Ordering::SeqCst),
+            1,
+            "{case}: the retired retry never enters the runner"
+        );
+        let parked = registry
+            .get_process(&process_id)
+            .await
+            .expect("read the parked process")
+            .expect("retained");
+        assert!(!parked.is_terminal(), "{case}: a park is non-terminal");
+        assert_eq!(parked.outcome, None, "{case}");
+        let park = parked.park.as_deref().cloned().expect("parked");
+        assert_eq!(
+            park.reason,
+            lash_core::store::ParkReason::retired_process_generation(
+                lash_core::ExecutableGenerationRefusal {
+                    found: admitted_generation.clone(),
+                    current: retried.map(lash_core::ExecutableGeneration::new),
+                }
+            ),
+            "{case}: the park names the generation the start recorded"
+        );
+        assert_eq!(park.attempts, 1, "{case}");
+        let summary = registry
+            .summarize_parked_processes()
+            .await
+            .expect("summarize parked processes");
+        assert_eq!(
+            summary.retired_by_executable_generation,
+            admitted_generation
+                .iter()
+                .map(|generation| (generation.clone(), 1))
+                .collect(),
+            "{case}: the drain counts the park under the recorded generation"
+        );
+
+        // The build of the recorded generation retries and completes it.
+        runner.become_build(admitted);
+        let restored = invoke_process_workflow_body(&endpoint, "run", retry(), true)
+            .await
+            .expect("the restored retry completes");
+        assert!(
+            restate_error_message(&restored).is_none(),
+            "{case}: the restored retry completes: {restored:?}"
+        );
+        let completed = registry
+            .get_process(&process_id)
+            .await
+            .expect("read the completed process")
+            .expect("retained");
+        assert_eq!(
+            completed.status,
+            lash_core::ProcessStatus::Completed,
+            "{case}"
+        );
+        assert_eq!(completed.park, None, "{case}: completion ends the park");
+        assert_eq!(
+            process_feed(&registry, &process_id).await.len(),
+            2,
+            "{case}: the park opened once and closed once"
+        );
+    }
 }

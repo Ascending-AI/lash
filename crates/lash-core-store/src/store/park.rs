@@ -247,16 +247,27 @@ impl ParkReason {
     pub fn retired_generation(
         refusal: crate::executable_generation::ExecutableGenerationRefusal,
     ) -> Self {
-        use crate::executable_generation::ExecutableGenerationRefusal as Refusal;
-        let found = Refusal::spell(refusal.found.as_ref());
-        let current = Refusal::spell(refusal.current.as_ref());
+        Self::of_retired_generation(&RuntimeError::retired_generation(refusal))
+    }
+
+    /// The park of a process incarnation redriven under another executable
+    /// generation than its start recorded ([`ParkReason::RetiredGeneration`]).
+    #[must_use]
+    pub fn retired_process_generation(
+        refusal: crate::executable_generation::ExecutableGenerationRefusal,
+    ) -> Self {
+        Self::of_retired_generation(&RuntimeError::retired_process_generation(refusal))
+    }
+
+    /// The park a [`RuntimeErrorCode::RetiredGeneration`] refusal carries: the
+    /// refusal's message, and the generation its admission recorded. An error
+    /// read back from storage no longer carries the generation.
+    fn of_retired_generation(error: &RuntimeError) -> Self {
         Self::RetiredGeneration {
-            message: format!(
-                "the turn was admitted under executable generation {found}, and this build runs \
-                 {current}: its redrive was refused before any effect; redrive it under a build \
-                 of generation {found}, fork it onto this generation, or cancel it"
-            ),
-            generation: refusal.found,
+            generation: error
+                .executable_generation_refusal()
+                .and_then(|refusal| refusal.found.clone()),
+            message: error.message.clone(),
         }
     }
 
@@ -283,14 +294,7 @@ impl ParkReason {
             RuntimeErrorCode::LashlangCellReplayDivergence => {
                 Some(Self::ReplayDivergence { message })
             }
-            RuntimeErrorCode::RetiredGeneration => Some(Self::retired_generation(
-                error.executable_generation_refusal().cloned().unwrap_or(
-                    crate::executable_generation::ExecutableGenerationRefusal {
-                        found: None,
-                        current: None,
-                    },
-                ),
-            )),
+            RuntimeErrorCode::RetiredGeneration => Some(Self::of_retired_generation(error)),
             RuntimeErrorCode::LashlangCellBindingDrift => Some(Self::BindingDrift { message }),
             RuntimeErrorCode::EffectReplayDivergence
             | RuntimeErrorCode::SqliteEffectReplayHashConflict => {

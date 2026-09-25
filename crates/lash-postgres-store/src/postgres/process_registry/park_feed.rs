@@ -164,6 +164,23 @@ pub(super) async fn summarize_parked_processes(
                 .map_or(oldest, |current| current.min(oldest)),
         );
     }
+    let rows = sqlx::query(
+        process_sql()
+            .process
+            .count_retired_parks_by_executable_generation
+            .sql(),
+    )
+    .fetch_all(&registry.pool)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    for row in rows {
+        let generation: String = row.get(0);
+        let count: i64 = row.get(1);
+        summary.retired_by_executable_generation.insert(
+            lash_core_execution::ExecutableGeneration::new(generation),
+            usize::try_from(count).unwrap_or(usize::MAX),
+        );
+    }
     Ok(summary)
 }
 

@@ -1337,15 +1337,36 @@ impl RuntimeError {
     /// generations.
     #[must_use]
     pub fn retired_generation(refusal: ExecutableGenerationRefusal) -> Self {
-        let mut error = Self::new(
-            RuntimeErrorCode::RetiredGeneration,
+        let found = ExecutableGenerationRefusal::spell(refusal.found.as_ref());
+        let current = ExecutableGenerationRefusal::spell(refusal.current.as_ref());
+        Self::refused_generation(
+            refusal,
             format!(
-                "the turn was admitted under executable generation {} and this build runs {}: \
-                 its redrive was refused before any effect",
-                ExecutableGenerationRefusal::spell(refusal.found.as_ref()),
-                ExecutableGenerationRefusal::spell(refusal.current.as_ref()),
+                "the turn was admitted under executable generation {found}, and this build runs \
+                 {current}: its redrive was refused before any effect; redrive it under a build \
+                 of generation {found}, fork it onto this generation, or cancel it"
             ),
-        );
+        )
+    }
+
+    /// The typed refusal of a process incarnation started under another
+    /// executable generation than the one its engine runs now (FIG-3571):
+    /// the process parks on it before its first step.
+    pub fn retired_process_generation(refusal: ExecutableGenerationRefusal) -> Self {
+        let found = ExecutableGenerationRefusal::spell(refusal.found.as_ref());
+        let current = ExecutableGenerationRefusal::spell(refusal.current.as_ref());
+        Self::refused_generation(
+            refusal,
+            format!(
+                "the process was started under executable generation {found}, and its engine \
+                 runs {current} in this build: its redrive was refused before any effect; \
+                 redrive it under a build of generation {found}, or cancel it"
+            ),
+        )
+    }
+
+    fn refused_generation(refusal: ExecutableGenerationRefusal, message: String) -> Self {
+        let mut error = Self::new(RuntimeErrorCode::RetiredGeneration, message);
         error.executable_generation_refusal = Some(Box::new(refusal));
         error
     }

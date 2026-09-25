@@ -100,6 +100,7 @@ async fn a_non_monotonic_handler_stack_is_refused() {
         pending_tools: Default::default(),
         execution_nonce: 0,
         format_version: VM_CONTINUATION_FORMAT_VERSION,
+        executable: crate::ExecutableIdentity::unlinked(),
         reference_semantics: false,
         instruction_pointer: throw_ip,
         active_function: Some(0),

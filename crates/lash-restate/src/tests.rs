@@ -896,7 +896,10 @@ fn scoped_runtime_invocation(
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig779SuspendingProcessRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -957,7 +960,10 @@ struct Fig788TerminalRedriveRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig788TerminalRedriveRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -998,7 +1004,10 @@ struct Fig788SegmentBoundaryRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig788SegmentBoundaryRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -1026,7 +1035,10 @@ struct Fig788OrdinalOneTerminalRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig788OrdinalOneTerminalRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -1056,7 +1068,10 @@ struct Fig811EffectfulOrdinalOneTerminalRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 

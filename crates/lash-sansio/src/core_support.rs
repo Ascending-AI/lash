@@ -36,7 +36,9 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-lashlang-cell-generation/v1",
     "lash-lashlang-content/v2",
     "lash-lashlang-execution-site/v2",
+    "lash-lashlang-executable/v1",
     "lash-lashlang-program/v2",
+    "lash-lashlang-program/v3",
     "lash-model-facing-composition/v2",
     "lash-model-facing-composition/v3",
     "lash-openai-responses-request/v2",
@@ -409,6 +411,9 @@ mod blake3_domain_tests {
         "lash-runtime-usage-payload/v3",
         "lash-tool-intent-payload/v2",
         "lash-lashlang-execution-site/v2",
+        // FIG-3571: the program generation also names the executable, segment
+        // state and replay-key grammar, under v3.
+        "lash-lashlang-program/v2",
         // FIG-3420: the filesystem spill path is deleted; retained output is a
         // journaled session attachment, so the spill domain is permanently
         // retired rather than reused.

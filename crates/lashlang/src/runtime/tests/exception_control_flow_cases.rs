@@ -470,13 +470,7 @@ async fn suspension_inside_a_finally_entered_by_break_resumes_to_the_break() {
             &ProjectedBindings::new(),
             Vec::new(),
         );
-        let mut vm = Vm::new(
-            &program.chunk,
-            slots,
-            &host,
-            None,
-            ExecutionMode::Foreground,
-        );
+        let mut vm = Vm::new(&program, slots, &host, None, ExecutionMode::Foreground);
         vm.suspend_after_effects(1);
         assert_eq!(
             vm.run_for_mode().await.expect("cleanup effect suspends"),
@@ -587,13 +581,7 @@ async fn a_cleanup_only_scope_keeps_the_failing_expression_span() {
         &ProjectedBindings::new(),
         Vec::new(),
     );
-    let mut vm = Vm::new(
-        &program.chunk,
-        slots,
-        &host,
-        None,
-        ExecutionMode::Foreground,
-    );
+    let mut vm = Vm::new(&program, slots, &host, None, ExecutionMode::Foreground);
     let failure = vm
         .run_traced_for_mode()
         .await
@@ -625,13 +613,7 @@ async fn a_suspended_cleanup_chain_resumes_with_the_original_error() {
         &ProjectedBindings::new(),
         Vec::new(),
     );
-    let mut vm = Vm::new(
-        &program.chunk,
-        slots,
-        &host,
-        None,
-        ExecutionMode::Foreground,
-    );
+    let mut vm = Vm::new(&program, slots, &host, None, ExecutionMode::Foreground);
     vm.suspend_after_effects(1);
     assert_eq!(
         vm.run_for_mode()
@@ -679,7 +661,7 @@ async fn control_flow_terminal_cleanups(terminal: Expr) -> (String, usize) {
         &ProjectedBindings::new(),
         Vec::new(),
     );
-    let mut vm = Vm::new(&compiled.chunk, slots, &host, None, ExecutionMode::Process);
+    let mut vm = Vm::new(&compiled, slots, &host, None, ExecutionMode::Process);
     let outcome = format!("{:?}", vm.run_for_mode().await);
     let cleanups = host.operations.lock_recover().len();
     (outcome, cleanups)

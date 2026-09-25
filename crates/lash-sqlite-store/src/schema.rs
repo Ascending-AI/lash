@@ -952,6 +952,7 @@ CREATE TABLE IF NOT EXISTS processes (
     cancel_requested_at_ms INTEGER,
     parked_since_ms       INTEGER,
     parked_reason_code    TEXT,
+    park_executable_generation TEXT,
     record_json           TEXT NOT NULL,
     UNIQUE(process_id, incarnation),
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
@@ -1012,6 +1013,10 @@ CREATE INDEX IF NOT EXISTS idx_processes_parent_end_pending
 CREATE INDEX IF NOT EXISTS idx_processes_parked
     ON processes(parked_since_ms, process_id)
     WHERE parked_since_ms IS NOT NULL;
+-- The retired generation a `retired_generation` park names (FIG-3571): the
+-- drain counts retired process parks per executable generation off it.
+CREATE INDEX IF NOT EXISTS idx_processes_park_executable_generation
+    ON processes(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS process_park_clock (
     singleton           INTEGER PRIMARY KEY CONSTRAINT ck_process_park_clock_singleton CHECK (singleton = 1),

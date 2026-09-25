@@ -21,6 +21,8 @@ pub use compiler::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
 };
 mod entry_points;
+mod executable_identity;
+pub use executable_identity::ExecutableIdentity;
 mod error;
 pub use error::{EcmaErrorClass, ErrorTaxonomy, FormatError, RuntimeError};
 mod format;
@@ -215,6 +217,10 @@ pub fn cancel_checkpoint_reached(instructions: u64) -> u64 {
 pub struct CompiledProgram {
     pub(crate) chunk: Chunk,
     pub(crate) compile_stats: CompileStats,
+    /// What this program is: the entry point of the module artifact it was
+    /// compiled from, under this build's contracts. A continuation it parks
+    /// carries it, and only a program of the same identity resumes one.
+    pub(crate) executable: ExecutableIdentity,
 }
 
 impl std::fmt::Debug for CompiledProgram {
@@ -229,6 +235,11 @@ impl std::fmt::Debug for CompiledProgram {
 impl CompiledProgram {
     pub fn compile_stats(&self) -> &CompileStats {
         &self.compile_stats
+    }
+
+    /// The executable identity this program was compiled as.
+    pub fn executable_identity(&self) -> &ExecutableIdentity {
+        &self.executable
     }
 }
 

@@ -13,16 +13,15 @@ pub struct ProcessStarted {
     #[serde(default = "first_process_attempt")]
     pub attempt: u32,
     pub started_at_ms: u64,
-    /// The replay-key grammar the engine journaled this incarnation under
-    /// (FIG-3586), stamped by the worker on the incarnation's first attempt
-    /// and copied onto every later one. An engine that keys its journal by a
-    /// versioned grammar refuses to run an incarnation whose start record
-    /// names another grammar, or none: that incarnation began under a build
-    /// whose keys this one cannot reach, and running its body would re-issue
-    /// its effects live. `None` on a record written before the stamp existed,
-    /// and for engines that key nothing by grammar.
+    /// The executable generation this incarnation runs as (FIG-3571): its
+    /// engine's program identity, stamped once at the first claim and copied
+    /// onto every later attempt, never derived or defaulted on recovery. An
+    /// attempt or segment whose engine names another generation, or a record
+    /// with no stamp, parks `RetiredGeneration` before its first step: the
+    /// incarnation began under an executable this build no longer runs.
+    /// `None` for an engine whose runs carry no generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replay_grammar: Option<u32>,
+    pub generation: Option<crate::ExecutableGeneration>,
 }
 
 const fn first_process_attempt() -> u32 {
@@ -139,7 +138,7 @@ impl ProcessExecutionWriteAuthority {
                 fencing_token: 0,
                 attempt: *attempt,
                 started_at_ms: 0,
-                replay_grammar: None,
+                generation: None,
             }),
             Self::Invocation { attempt: None, .. } => None,
         }

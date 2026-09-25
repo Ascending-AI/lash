@@ -288,7 +288,7 @@ pub(super) async fn contract(
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: started.created_at_ms,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await

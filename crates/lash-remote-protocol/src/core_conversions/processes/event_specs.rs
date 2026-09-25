@@ -252,14 +252,14 @@ impl TryFrom<lash_core::ProcessStarted> for RemoteProcessStarted {
             fencing_token,
             attempt,
             started_at_ms,
-            replay_grammar,
+            generation,
         } = value;
         Ok(Self {
             owner: owner.into(),
             fencing_token,
             attempt,
             started_at_ms,
-            replay_grammar,
+            generation: generation.map(|generation| generation.as_str().to_owned()),
         })
     }
 }
@@ -273,14 +273,14 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
             fencing_token,
             attempt,
             started_at_ms,
-            replay_grammar,
+            generation,
         } = value;
         Ok(Self {
             owner: owner.into(),
             fencing_token,
             attempt,
             started_at_ms,
-            replay_grammar,
+            generation: generation.map(lash_core::ExecutableGeneration::new),
         })
     }
 }

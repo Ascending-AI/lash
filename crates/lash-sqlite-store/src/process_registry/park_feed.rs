@@ -233,6 +233,26 @@ pub(super) async fn summarize_parked_processes(
                             .map_or(oldest, |current| current.min(oldest)),
                     );
                 }
+                let mut statement = conn
+                    .prepare(
+                        process_sql()
+                            .process
+                            .count_retired_parks_by_executable_generation
+                            .sql(),
+                    )
+                    .map_err(process_sqlite_error)?;
+                let rows = statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    })
+                    .map_err(process_sqlite_error)?;
+                for row in rows {
+                    let (generation, count) = row.map_err(process_sqlite_error)?;
+                    summary.retired_by_executable_generation.insert(
+                        lash_core_execution::ExecutableGeneration::new(generation),
+                        usize::try_from(count).unwrap_or(usize::MAX),
+                    );
+                }
                 Ok(summary)
             })())
         })

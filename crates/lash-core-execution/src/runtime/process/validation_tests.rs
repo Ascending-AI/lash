@@ -836,7 +836,7 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 2,
-                replay_grammar: None,
+                generation: None,
             },
             false,
         ),

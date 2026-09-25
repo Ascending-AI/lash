@@ -482,6 +482,7 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     cancel_requested_at_ms BIGINT,
     parked_since_ms BIGINT,
     parked_reason_code TEXT,
+    park_executable_generation TEXT,
     record_json TEXT NOT NULL,
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
@@ -535,6 +536,10 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_parent_end_pending
 CREATE INDEX IF NOT EXISTS idx_lash_processes_parked
     ON lash_processes(parked_since_ms, process_id)
     WHERE parked_since_ms IS NOT NULL;
+-- The retired generation a `retired_generation` park names (FIG-3571): the
+-- drain counts retired process parks per executable generation off it.
+CREATE INDEX IF NOT EXISTS idx_lash_processes_park_executable_generation
+    ON lash_processes(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS lash_process_park_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,

@@ -82,9 +82,9 @@ pub use runtime::{
     CANCEL_CHECKPOINT_INTERVAL_CAP, CompileStats, CompiledLinkedProgram, CompiledProcessCache,
     CompiledProcessCacheKey, CompiledProgram, CompiledProgramCacheStats, ContinuationError,
     DurableBaseline, DurableFragment, DurableParts, EcmaErrorClass, Entry, ErrorTaxonomy,
-    ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
-    ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError, GlobalPatch,
-    GlobalPatchOutcome, HeapId, INSTRUCTION_ACCOUNTING_VERSION, ImageValue,
+    ExecutableIdentity, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
+    ExecutionHostError, ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError,
+    GlobalPatch, GlobalPatchOutcome, HeapId, INSTRUCTION_ACCOUNTING_VERSION, ImageValue,
     LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
     LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
     LASH_TYPE_KEY, LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError,
@@ -175,7 +175,11 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// intrinsics make, read and write, and the continuation's heap-object wire
 /// carries a `cell` kind and the `NotABindingCell` error. A v28 stream is
 /// refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 29;
+/// v30 (FIG-3571): a compiled program carries the executable identity of the
+/// entry it was compiled as, and the continuation it parks names that
+/// identity; resume refuses any other program. A v29 continuation names no
+/// executable and is refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 30;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

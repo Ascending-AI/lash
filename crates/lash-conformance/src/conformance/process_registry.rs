@@ -1120,7 +1120,7 @@ async fn refolded_process_record_matches_stored_projection(
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: base.created_at_ms,
-                replay_grammar: None,
+                generation: None,
             },
         )
         .await
@@ -1345,7 +1345,7 @@ pub async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>)
         fencing_token: first_lease.fencing_token,
         attempt: 1,
         started_at_ms: first_lease.claimed_at_epoch_ms,
-        replay_grammar: None,
+        generation: None,
     };
     assert!(matches!(
         registry
@@ -1378,7 +1378,7 @@ pub async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>)
                 fencing_token: next_lease.fencing_token,
                 attempt: 2,
                 started_at_ms: next_lease.claimed_at_epoch_ms,
-                replay_grammar: None,
+                generation: None,
             },
             &crate::ProcessExecutionWriteAuthority::lease(next_lease.clone()),
         )

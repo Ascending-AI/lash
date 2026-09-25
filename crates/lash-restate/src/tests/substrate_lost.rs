@@ -134,7 +134,10 @@ struct EffectRunner {
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for EffectRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 
@@ -583,10 +586,17 @@ pub(super) async fn an_admitted_lashlang_process_runs_its_body_and_is_running() 
         .as_deref()
         .cloned()
         .expect("admission recorded the start");
+    let lash_core::ProcessInput::Engine { payload, .. } = registration.input.as_ref() else {
+        panic!("the fixture registers a lashlang engine process");
+    };
     assert_eq!(
-        started.replay_grammar,
-        Some(lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION),
-        "the admitted start record names the grammar the lashlang engine journals under"
+        started.generation,
+        Some(
+            lash_lashlang_runtime::LashlangProcessInput::from_payload(payload.clone())
+                .expect("the fixture's payload is a lashlang process input")
+                .executable_generation()
+        ),
+        "the admitted start record names the generation the lashlang engine runs it as"
     );
     assert!(
         record.outcome.is_none(),
@@ -738,7 +748,10 @@ struct BoundaryRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for BoundaryRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 

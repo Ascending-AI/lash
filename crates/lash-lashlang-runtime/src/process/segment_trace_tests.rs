@@ -723,6 +723,10 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     // versions added, to reach the bytecode identity fence.
     fixture["segment_state"]["vm"]["format_version"] =
         serde_json::json!(lashlang::VM_CONTINUATION_FORMAT_VERSION);
+    // The predecessor names no executable; the current envelope binds its
+    // continuation to one (FIG-3571). Only its shape matters here: the fence
+    // under test is the program generation above.
+    fixture["segment_state"]["vm"]["executable"] = serde_json::json!(current);
     // The predecessor parked under size schedule 2; the current envelope
     // prices heap objects under schedule 3 (FIG-3655 closure metadata).
     fixture["segment_state"]["vm"]["heap"]["size_schedule_version"] =

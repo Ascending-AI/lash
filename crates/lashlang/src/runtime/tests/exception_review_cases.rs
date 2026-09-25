@@ -251,7 +251,7 @@ async fn suspension_inside_a_catch_body_is_byte_identical_under_gc_stress() {
             &ProjectedBindings::new(),
             Vec::new(),
         );
-        let mut vm = Vm::new(&program.chunk, slots, host, None, ExecutionMode::Foreground);
+        let mut vm = Vm::new(program, slots, host, None, ExecutionMode::Foreground);
         vm.suspend_after_effects(1);
         assert_eq!(
             vm.run_for_mode().await.expect("the catch effect suspends"),
@@ -321,13 +321,7 @@ async fn a_cleanup_chain_is_exactly_once_across_a_process_boundary() {
             &ProjectedBindings::new(),
             Vec::new(),
         );
-        let mut vm = Vm::new(
-            &program.chunk,
-            slots,
-            &first,
-            None,
-            ExecutionMode::Foreground,
-        );
+        let mut vm = Vm::new(&program, slots, &first, None, ExecutionMode::Foreground);
         vm.suspend_after_effects(1);
         assert_eq!(
             vm.run_for_mode().await.expect("the first leg suspends"),

@@ -10,7 +10,10 @@ struct BoundaryPolicyProbeRunner;
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for BoundaryPolicyProbeRunner {
-    fn replay_key_grammar(&self, _registration: &ProcessRegistration) -> Option<u32> {
+    fn executable_generation(
+        &self,
+        _registration: &ProcessRegistration,
+    ) -> Option<lash_core::ExecutableGeneration> {
         None
     }
 

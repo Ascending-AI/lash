@@ -38,14 +38,6 @@ pub(super) fn admit(
     runtime: &LashRuntime,
     recorded: Option<&crate::ExecutableGeneration>,
 ) -> Result<(), RuntimeError> {
-    let current = current(runtime);
-    if recorded == current.as_ref() {
-        return Ok(());
-    }
-    Err(RuntimeError::retired_generation(
-        crate::ExecutableGenerationRefusal {
-            found: recorded.cloned(),
-            current,
-        },
-    ))
+    crate::ExecutableGenerationRefusal::check(recorded, current(runtime))
+        .map_err(RuntimeError::retired_generation)
 }
