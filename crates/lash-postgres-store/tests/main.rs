@@ -27,6 +27,8 @@ mod pre_submission_digest_cutover;
 mod process_prune_reclaim;
 #[path = "refcount_benchmark.rs"]
 mod refcount_benchmark;
+#[path = "registration_fence.rs"]
+mod registration_fence;
 #[path = "release_stamp.rs"]
 mod release_stamp;
 #[path = "session_execution_lease_renewal.rs"]
