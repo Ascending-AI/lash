@@ -17,6 +17,9 @@ only writes under the run's namespace, so an orchestrating call that journaled
 no nested effect redrives by serving its presentation.
 Amended 2026-09-25 (FIG-3725): a group tool child judges its own tool where it
 runs; see [Group tool children](#amendment-fig-3725-group-tool-children).
+Amended 2026-09-25 (FIG-3779): on Restate a drifted binding's recorded process
+start and sleep are served, answered at a frontier marker each journals first;
+only one at the live frontier refuses.
 
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
@@ -368,12 +371,32 @@ for the effect is the frontier the same way. Nothing may be journaled after
 such an orphaned run in the same attempt: the next replay would await it
 while commands remain (`JOURNAL_MISMATCH`); the refusal stops the run, no seal
 follows a nested error, and the park is written through the session store.
-Restate's served-only effects that act outside a `ctx.run` closure — process
-commands, which reach Restate through their own journaled commands (a
-drifted orchestrating binding's process start, for one), and timers — cannot
-tell a recorded outcome from a live one before they act, so they refuse up
-front: such a command parks even when its process command or sleep was
-recorded, and never starts a process or journals a sleep. A process command
+Restate's process starts and timers act outside a `ctx.run` closure, through
+journaled commands of their own (a registry write and a workflow send, a
+sleep), so each journals a frontier marker first (FIG-3779): a `ctx.run` at
+`lash:{replay_key}:frontier`, on every start and every sleep whether or not it
+is served only, since drift is judged against the live registry and the
+journal must not depend on it. A start's marker records its idempotency key,
+the process id its registration is idempotent under and its workflow send is
+keyed by. A served-only start or sleep whose marker's closure runs is at the
+live frontier: it refuses with the drift having acted on nothing, so a drifted
+orchestrating binding (`agents.spawn`, for one) never starts a process live
+and a served-only command journals no sleep. One whose marker is served was
+issued before and replays — a start only when the registry already holds the
+row its marker names: its idempotent re-registration and the workflow send
+keyed by the process id are the recorded start. A marker served with no row
+was recorded by an attempt that died before registering, so the start refuses
+and records nothing. A sleep whose attempt died between its marker and its
+timer journals that timer on the redrive; a sleep acts on nothing outside the
+journal, and the drifted command's next dispatching effect still answers at
+its own frontier. Every other served-only process command (a cancel, a
+signal, a listing) still refuses up front, and the await of a process
+dispatches nothing, like any wait on an external completion. The
+`served_process_start_tests!` laws cut a cell's `agents.spawn` on the Restate
+server double at each point of its start — once the child runs, before the
+marker, between the marker and the registration, between the registration and
+the send — and redrive it under a drifted binding: a recorded start completes
+the turn, and one needed live parks with no process started. A process command
 reaches the engine served only on every route — including the one that
 proxies it through an effect task to the raw controller, which Restate's
 owned turn and group-child controllers take; before FIG-3725 that route lost
@@ -394,9 +417,6 @@ Limitations, deferred:
   such a call diverges instead of replaying.
 - An orchestrating tool the registry no longer holds cannot re-run its body,
   so a call on it parks even when its nested effects all settled.
-- On Restate, a drifted command whose effects include a process command or a
-  timer parks even when those were recorded (they refuse up front, above).
-  FIG-3779 carries the frontier-marker design that would serve them.
 
 **Cell journal grammar 3.** `LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION` (3) is the
 replay-key grammar plus the binding set, and is what the sync's

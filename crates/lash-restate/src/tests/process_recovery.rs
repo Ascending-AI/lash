@@ -634,7 +634,6 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
     ));
     let context = Arc::new(ReplayableRecordingContext::default());
     context.park_sleeps();
-    context.crash_after_next_run_commit();
     let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
         process_id,
         "sleep-cancel-post-wake-effect-invocation",
@@ -667,6 +666,9 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
     };
 
     context.await_sleep_started().await;
+    // Armed once the sleep is parked: the sleep's own frontier marker
+    // (FIG-3779) is a run commit too, and the crash belongs after the wake.
+    context.crash_after_next_run_commit();
     context.release_sleep();
     context.await_run_committed().await;
 

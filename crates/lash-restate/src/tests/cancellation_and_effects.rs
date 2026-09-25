@@ -557,7 +557,11 @@ pub(super) async fn restate_controller_routes_sleep_only_through_timer() {
 
     assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
     assert_eq!(context.sleeps.lock_recover().as_slice(), &[42]);
-    assert!(context.runs.lock_recover().is_empty());
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        &["lash:session:turn:1:0:sleep:sleep:frontier".to_string()],
+        "the only run a sleep journals is its frontier marker (FIG-3779)"
+    );
 }
 
 #[tokio::test]

@@ -1267,23 +1267,64 @@ pub(super) fn fig1631_registered_gate() -> serde_json::Value {
         .expect("serialize registered gate")
 }
 
+/// A turn-scoped sleep walked to the point where its gate is live and its
+/// timer is journaled: the frontier marker the sleep journals first
+/// (FIG-3779), the parked timer leg, and the gate's registration call.
+pub(super) struct Fig1631ParkedSleepGate {
+    pub(super) marker: Vec<u8>,
+    pub(super) parked: Vec<u8>,
+    pub(super) calls: Vec<endpoint_protocol::RestateCallFrame>,
+}
+
+impl Fig1631ParkedSleepGate {
+    /// `body` with the sleep's frontier marker spliced in front of it.
+    pub(super) fn replay(&self, body: bytes::Bytes) -> bytes::Bytes {
+        endpoint_protocol::with_leading_runs(&body, &self.marker)
+            .expect("splice the sleep's frontier marker")
+    }
+}
+
 /// Walk a turn-scoped sleep to the point where its gate is live and its timer
 /// is journaled.
 ///
-/// The two stages are the deployed journal shape and the reason the gate is
-/// ordered the way it is: the first attempt parks on `register_awakeable`, so
-/// no timer is ever journaled until the session is known to be live. Only once
-/// that registration completes does the timer become a command.
+/// The stages are the deployed journal shape and the reason the gate is
+/// ordered the way it is: the sleep first journals its frontier marker
+/// (FIG-3779); then the attempt parks on `register_awakeable`, so no timer is
+/// ever journaled until the session is known to be live. Only once that
+/// registration completes does the timer become a command.
 pub(super) async fn fig1631_parked_sleep_gate(
     endpoint: &Endpoint,
     workflow_key: &str,
-) -> (Vec<u8>, Vec<endpoint_protocol::RestateCallFrame>) {
-    let registering = invoke_endpoint(
+) -> Fig1631ParkedSleepGate {
+    let marker = invoke_endpoint(
         endpoint,
         "Fig1631SleepGate",
         "run",
         workflow_key,
         &fig1631_sleep_gate_input(),
+    )
+    .await
+    .expect("capture the sleep's frontier marker");
+    assert_eq!(
+        restate_message_types(&marker).expect("decode marker frames"),
+        vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE,
+        ],
+        "a sleep journals its frontier marker before anything else"
+    );
+    let marker = marker.to_vec();
+    let registering = invoke_endpoint_body(
+        endpoint,
+        "Fig1631SleepGate",
+        "run",
+        endpoint_protocol::admitted_invocation_body(
+            workflow_key,
+            &fig1631_sleep_gate_input(),
+            &marker,
+        )
+        .expect("splice the frontier marker"),
     )
     .await
     .expect("capture the gate registration");
@@ -1312,9 +1353,14 @@ pub(super) async fn fig1631_parked_sleep_gate(
         None,
     )
     .expect("splice the completed gate registration");
-    let parked = invoke_endpoint_body(endpoint, "Fig1631SleepGate", "run", replay)
-        .await
-        .expect("park on the gate's timer");
+    let parked = invoke_endpoint_body(
+        endpoint,
+        "Fig1631SleepGate",
+        "run",
+        endpoint_protocol::with_leading_runs(&replay, &marker).expect("splice the marker"),
+    )
+    .await
+    .expect("park on the gate's timer");
     assert_eq!(
         restate_message_types(&parked).expect("decode parked timer frames"),
         vec![
@@ -1323,7 +1369,11 @@ pub(super) async fn fig1631_parked_sleep_gate(
         ],
         "a registered gate journals its timer next and parks on it"
     );
-    (parked.to_vec(), calls)
+    Fig1631ParkedSleepGate {
+        marker,
+        parked: parked.to_vec(),
+        calls,
+    }
 }
 
 /// The gate's journal positions are the contract: a fresh handler incarnation
@@ -1333,15 +1383,18 @@ pub(super) async fn fig1631_parked_sleep_gate(
 pub(super) async fn fig1631_sleep_gate_redrives_from_its_journal_positions() {
     let endpoint = fig1631_sleep_gate_endpoint();
     let workflow_key = "fig1631-sleep-gate-redrive";
-    let (parked, calls) = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let gate = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let calls = &gate.calls;
+    let parked = &gate.parked;
 
     let replay = encode_completed_gate_sleep_replay(
         workflow_key,
         &fig1631_sleep_gate_input(),
-        &parked,
+        parked,
         &[(calls[0].clone(), Some(fig1631_registered_gate()))],
     )
     .expect("splice the parked gate journal with a fired timer");
+    let replay = gate.replay(replay);
     let redriven = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
         "Fig1631SleepGate",
@@ -1369,7 +1422,8 @@ pub(super) async fn fig1631_sleep_gate_redrives_from_its_journal_positions() {
 pub(super) async fn fig1631_session_revoked_mid_sleep_unwinds_as_a_deleted_session() {
     let endpoint = fig1631_sleep_gate_endpoint();
     let workflow_key = "fig1631-sleep-gate-revoked-mid-sleep"; // gitleaks:allow -- synthetic workflow/turn identity fixture
-    let (_parked, calls) = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let gate = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let calls = &gate.calls;
 
     let replay = encode_call_replay(
         workflow_key,
@@ -1382,6 +1436,7 @@ pub(super) async fn fig1631_session_revoked_mid_sleep_unwinds_as_a_deleted_sessi
         )),
     )
     .expect("splice a revocation that fires after the gate registered");
+    let replay = gate.replay(replay);
     let revoked = invoke_endpoint_body(&endpoint, "Fig1631SleepGate", "run", replay)
         .await
         .expect("revocation must resolve the parked sleep");
@@ -1414,6 +1469,9 @@ pub(super) async fn fig1631_session_revoked_before_sleep_registers_never_journal
     assert_eq!(
         restate_message_types(&revoked).expect("decode revoked-registration frames"),
         vec![
+            // The sleep's frontier marker (FIG-3779), acknowledged.
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE,
             RESTATE_END_MESSAGE_TYPE,
@@ -1432,15 +1490,18 @@ pub(super) async fn fig1631_session_revoked_before_sleep_registers_never_journal
 pub(super) async fn fig1631_sleep_completion_retires_its_gate_entry() {
     let endpoint = fig1631_sleep_gate_endpoint();
     let workflow_key = "fig1631-sleep-gate-completion-retires"; // gitleaks:allow -- synthetic workflow/turn identity fixture
-    let (parked, calls) = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let gate = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let calls = &gate.calls;
+    let parked = &gate.parked;
 
     let replay = encode_completed_gate_sleep_replay(
         workflow_key,
         &fig1631_sleep_gate_input(),
-        &parked,
+        parked,
         &[(calls[0].clone(), Some(fig1631_registered_gate()))],
     )
     .expect("splice a fired timer over the parked gate");
+    let replay = gate.replay(replay);
     let completed = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
         "Fig1631SleepGate",
@@ -1468,7 +1529,8 @@ pub(super) async fn fig1631_sleep_completion_retires_its_gate_entry() {
 pub(super) async fn fig1631_turn_cancelled_sleep_leaves_gate_retirement_to_the_index() {
     let endpoint = fig1631_sleep_gate_endpoint();
     let workflow_key = "fig1631-sleep-gate-cancel-retires"; // gitleaks:allow -- synthetic workflow/turn identity fixture
-    let (_parked, calls) = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let gate = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
+    let calls = &gate.calls;
 
     let replay = encode_call_replay(
         workflow_key,
@@ -1481,6 +1543,7 @@ pub(super) async fn fig1631_turn_cancelled_sleep_leaves_gate_retirement_to_the_i
         )),
     )
     .expect("splice a turn cancellation over the parked gate");
+    let replay = gate.replay(replay);
     let cancelled = invoke_endpoint_body(&endpoint, "Fig1631SleepGate", "run", replay)
         .await
         .expect("turn cancellation must resolve the parked sleep");

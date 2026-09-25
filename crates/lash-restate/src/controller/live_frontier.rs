@@ -1,4 +1,4 @@
-//! Restate's answer to the served-only contract (FIG-3719).
+//! Restate's answer to the served-only contract (FIG-3719, FIG-3779).
 //!
 //! A served-only effect belongs to a replayed command whose tool binding
 //! drifted: it may be served its recorded result, never run live. Restate
@@ -9,40 +9,143 @@
 //! proposes no result, the journal records nothing for it, and the effect
 //! refuses with its drift.
 //!
-//! Only effects that run inside a `ctx.run` closure answer here. A process
-//! command or a timer acts through its own journaled commands before any
-//! closure could tell, so the controller refuses a served-only one up front.
+//! A process start and a timer act through journaled commands of their own —
+//! a registry write and a workflow send, a sleep — before any closure of
+//! theirs could tell. So each journals a frontier marker first: a `ctx.run`
+//! at `lash:{replay_key}:frontier`, unconditionally, whether or not the
+//! effect is served only, since whether it is depends on the live registry
+//! and the journal must not. A served-only start or sleep whose marker's
+//! closure runs is at the live frontier and refuses having acted on nothing;
+//! one whose marker is served was issued before, and replays. A served start
+//! goes on only when the registry already holds the row its marker names
+//! (FIG-3779 option 3): a marker recorded by an attempt that died before
+//! registering is not a recorded start, so it refuses and records nothing.
+//!
+//! Every other process command still refuses up front when served only.
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-use lash_core::{RuntimeEffectControllerError, ServedOnly};
+use lash_core::{
+    ProcessId, ProcessRegistry, RuntimeEffectControllerError, RuntimeEffectInvocation,
+    RuntimeErrorCode, ServedOnly,
+};
 use lash_sansio::sync::MutexExt as _;
+use restate_sdk::serde::Json;
+
+use super::context::RestateControllerContext;
+use super::effect_journal::{FrontierMark, frontier_entry, recorded_frontier_mark};
 
 /// Refuses a served-only effect (FIG-3719) that acts outside a `ctx.run`
-/// closure — a process command, which reaches Restate through its own
-/// journaled commands, or a timer — before it acts: such an effect cannot tell
-/// a recorded outcome from a live one, so the command parks. A drifted
-/// orchestrating binding never starts its process, and a served-only command
-/// journals no sleep.
+/// closure and has no frontier marker — every process command but a start,
+/// which reaches Restate through its own journaled commands — before it acts:
+/// such an effect cannot tell a recorded outcome from a live one, so the
+/// command parks. A start and a timer answer at their frontier marker
+/// instead ([`pass_process_start_frontier`], [`pass_sleep_frontier`]).
 pub(super) fn refuse_outside_a_run(
     execution: &super::RestateEffectExecution,
     local_executor: &lash_core::RuntimeEffectLocalExecutor<'_>,
 ) -> Result<(), RuntimeEffectControllerError> {
+    let marked = match execution {
+        super::RestateEffectExecution::DirectProcess { command, .. } => {
+            matches!(command.as_ref(), lash_core::ProcessCommand::Start { .. })
+        }
+        super::RestateEffectExecution::DurableProcessCommand { .. } => false,
+        _ => true,
+    };
     match local_executor.served_only() {
-        Some(served_only)
-            if matches!(
-                execution,
-                super::RestateEffectExecution::DirectProcess { .. }
-                    | super::RestateEffectExecution::DurableProcessCommand { .. }
-                    | super::RestateEffectExecution::Timer { .. }
-            ) =>
-        {
+        Some(served_only) if !marked => Err(served_only.refuse()),
+        _ => Ok(()),
+    }
+}
+
+/// Journals a process start's frontier marker, recording the start's
+/// idempotency key, and answers whether the start may act.
+///
+/// Every start passes it: one that is not served only goes on whether its
+/// marker ran or was served. A served-only start whose marker's closure runs
+/// is at the live frontier and refuses. One whose marker is served goes on
+/// only when `registry` already holds `process_id`'s row — the start was
+/// registered before the attempt that issued it died, so the idempotent
+/// re-registration and the workflow send keyed by the process id are that
+/// start, not a new one. With no row the attempt died between its marker and
+/// its registration: nothing was started, so the start refuses with the
+/// drift and records nothing.
+pub(super) async fn pass_process_start_frontier<'ctx, C>(
+    context: &C,
+    invocation: &RuntimeEffectInvocation,
+    process_id: &ProcessId,
+    served_only: Option<&ServedOnly>,
+    registry: &dyn ProcessRegistry,
+) -> Result<(), RuntimeEffectControllerError>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+{
+    let mark = FrontierMark::ProcessStart {
+        process_id: process_id.clone(),
+    };
+    pass_frontier(context, invocation, mark, served_only).await?;
+    match served_only {
+        Some(served_only) if registry.get_process(process_id).await?.is_none() => {
             Err(served_only.refuse())
         }
         _ => Ok(()),
     }
+}
+
+/// Journals a timer's frontier marker: a served-only sleep whose marker's
+/// closure runs refuses before it journals its sleep, and one whose marker is
+/// served replays its sleep.
+///
+/// A sleep acts on nothing outside the journal, so a marker recorded by an
+/// attempt that died before journaling its sleep lets that sleep be journaled
+/// on the redrive; the next dispatching effect of the drifted command still
+/// answers at its own frontier.
+pub(super) async fn pass_sleep_frontier<'ctx, C>(
+    context: &C,
+    invocation: &RuntimeEffectInvocation,
+    served_only: Option<&ServedOnly>,
+) -> Result<(), RuntimeEffectControllerError>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+{
+    pass_frontier(context, invocation, FrontierMark::Sleep, served_only).await
+}
+
+/// Journals `mark` at `lash:{replay_key}:frontier`. A served-only effect's
+/// marker whose closure runs is the live frontier: the run proposes nothing
+/// and the effect refuses. Otherwise the recorded mark must be `mark`.
+async fn pass_frontier<'ctx, C>(
+    context: &C,
+    invocation: &RuntimeEffectInvocation,
+    mark: FrontierMark,
+    served_only: Option<&ServedOnly>,
+) -> Result<(), RuntimeEffectControllerError>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+{
+    let name = format!("{}:frontier", super::restate_effect_name(invocation));
+    let entry = frontier_entry(&mark)?;
+    let live = served_only.cloned().map(LiveFrontier::new);
+    let closure_live = live.clone();
+    let run = context.run_json_send::<serde_json::Value, _>(name.clone(), None, async move {
+        if let Some(live) = &closure_live {
+            return live.reached().await;
+        }
+        entry
+    });
+    let journaled = match live {
+        None => run.await,
+        Some(live) => live.serve(run).await?,
+    };
+    let Json(recorded) = journaled.map_err(|terminal| {
+        RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RestateEffectController,
+            format!("Restate frontier marker `{name}` failed: {terminal}"),
+        )
+    })?;
+    recorded_frontier_mark(&name, recorded, &mark)
 }
 
 /// The signal a served-only run's closure raises when Restate runs it live,

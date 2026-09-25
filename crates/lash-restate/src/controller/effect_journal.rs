@@ -7,7 +7,8 @@
 //!
 //! The entry's bytes are the closure of [`RecordedRuntimeEffect`]: the
 //! canonical runtime-effect envelope, the effect's outcome and the error it may
-//! carry, plus the fixed-size give-up entry. A build that changes any of those
+//! carry, plus the fixed-size give-up entry — and the frontier marker a process
+//! start or a timer journals before it acts. A build that changes any of those
 //! bytes, or the position of a recorded effect in the journal, bumps
 //! [`EFFECT_JOURNAL_VERSION`]. A journal written under another generation is
 //! then refused before its first recorded effect replays; it is never migrated
@@ -55,7 +56,11 @@ use serde::{Deserialize, Serialize};
 /// cancel it owes the process as a step before it asks the process workflow
 /// to cancel, so a replay after the process ended issues the same cancel call
 /// instead of re-asking the store (FIG-3752).
-pub const EFFECT_JOURNAL_VERSION: u32 = 8;
+/// 9: every process start and every timer journals a frontier marker at
+/// `lash:{replay_key}:frontier` before it acts, recording the start's process
+/// id, so a drifted binding's recorded start or sleep is served and only one
+/// at the live frontier refuses (FIG-3779).
+pub const EFFECT_JOURNAL_VERSION: u32 = 9;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";
@@ -185,7 +190,28 @@ pub(super) fn retired_generation_refusal(
     reconstructed: &CanonicalRuntimeEffectEnvelope,
     retired: &RetiredEntry,
 ) -> RuntimeEffectControllerError {
-    let found = retired.found().map_or_else(
+    generation_refusal(
+        effect,
+        retired.found(),
+        serde_json::from_str::<serde_json::Value>(reconstructed.json())
+            .ok()
+            .and_then(|envelope| {
+                envelope
+                    .pointer("/command/type")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            }),
+    )
+}
+
+/// The typed refusal of a journal entry stamped with `found` — another
+/// effect-journal generation, or none — for an effect of `effect_kind`.
+fn generation_refusal(
+    effect: &str,
+    found: Option<&serde_json::Value>,
+    effect_kind: Option<String>,
+) -> RuntimeEffectControllerError {
+    let found = found.map_or_else(
         || "no effect-journal generation (it predates the stamp)".to_string(),
         |found| format!("effect-journal generation {found}"),
     );
@@ -200,16 +226,84 @@ pub(super) fn retired_generation_refusal(
     error.summary = Some(Box::new(RuntimeEffectReplayMismatchReport {
         divergent_path_count: 1,
         first_divergent_paths: vec![EFFECT_JOURNAL_VERSION_FIELD.to_string()],
-        effect_kind: serde_json::from_str::<serde_json::Value>(reconstructed.json())
-            .ok()
-            .and_then(|envelope| {
-                envelope
-                    .pointer("/command/type")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string)
-            }),
+        effect_kind,
     }));
     error
+}
+
+/// What a frontier marker records (FIG-3779): the effect whose live frontier
+/// its `lash:{replay_key}:frontier` step marks, ahead of an effect that acts
+/// outside a `ctx.run` closure.
+///
+/// A process start records its idempotency key — the process id its
+/// registration is idempotent under and its workflow send is keyed by — so a
+/// served marker names the row an earlier attempt may have registered. A
+/// timer records only that it is a sleep.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "frontier", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum FrontierMark {
+    ProcessStart { process_id: lash_core::ProcessId },
+    Sleep,
+}
+
+impl FrontierMark {
+    fn effect_kind(&self) -> &'static str {
+        match self {
+            Self::ProcessStart { .. } => "process",
+            Self::Sleep => "sleep",
+        }
+    }
+}
+
+/// The exact value a frontier marker journals: `mark`, stamped with this
+/// build's effect-journal generation.
+pub(super) fn frontier_entry(
+    mark: &FrontierMark,
+) -> Result<serde_json::Value, RuntimeEffectControllerError> {
+    serde_json::to_value(stamped(mark)).map_err(|error| {
+        RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RecordEncodingFailed,
+            format!("failed to encode the frontier mark {mark:?}: {error}"),
+        )
+    })
+}
+
+/// The mark a frontier marker's journaled `entry` records, checked against
+/// the `expected` one this attempt would have journaled.
+///
+/// An entry another generation stamped is refused by generation, before its
+/// body decodes, as a recorded effect's is. An entry that records another
+/// effect — a start of another process at this key, or another kind — is the
+/// replay's divergence, and parks the same way.
+pub(super) fn recorded_frontier_mark(
+    effect: &str,
+    mut entry: serde_json::Value,
+    expected: &FrontierMark,
+) -> Result<(), RuntimeEffectControllerError> {
+    if entry
+        .get(EFFECT_JOURNAL_VERSION_FIELD)
+        .and_then(serde_json::Value::as_u64)
+        != Some(u64::from(EFFECT_JOURNAL_VERSION))
+    {
+        return Err(generation_refusal(
+            effect,
+            entry.get(EFFECT_JOURNAL_VERSION_FIELD),
+            Some(expected.effect_kind().to_string()),
+        ));
+    }
+    if let Some(object) = entry.as_object_mut() {
+        object.remove(EFFECT_JOURNAL_VERSION_FIELD);
+    }
+    match serde_json::from_value::<FrontierMark>(entry) {
+        Ok(recorded) if &recorded == expected => Ok(()),
+        recorded => Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::EffectReplayDivergence,
+            format!(
+                "frontier marker `{effect}` records {recorded:?}, where this replay marks \
+                 {expected:?}"
+            ),
+        )),
+    }
 }
 
 #[cfg(test)]

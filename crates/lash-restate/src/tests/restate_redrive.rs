@@ -747,7 +747,29 @@ pub(super) async fn park_process_on_its_timer(
         &admission,
     )
     .expect("splice the admission");
-    let parked = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", admitted)
+    let marker = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", admitted)
+        .await
+        .expect("admitted process attempt should journal its sleep's frontier marker");
+    assert_eq!(
+        restate_message_types(&marker).expect("decode marker frames"),
+        vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
+        "the sleep journals its frontier marker before its timer (FIG-3779)"
+    );
+    let mut journal = admission;
+    journal.extend_from_slice(&recording);
+    journal.extend_from_slice(&marker);
+    let marked = encode_recorded_commands_replay(
+        process_id.as_str(),
+        input,
+        &[&journal],
+        process_journal_completion(false),
+    )
+    .expect("splice the acknowledged marker");
+    let parked = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", marked)
         .await
         .expect("admitted process attempt should park on its timer");
     assert_eq!(
@@ -759,8 +781,6 @@ pub(super) async fn park_process_on_its_timer(
         ],
         "the process timer races its segment's cancel promise (FIG-3673)"
     );
-    let mut journal = admission;
-    journal.extend_from_slice(&recording);
     journal.extend_from_slice(&parked);
     journal
 }
@@ -1561,6 +1581,9 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
         restate_message_types(&suspended).expect("decode trigger suspension"),
         vec![
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            // The start's frontier marker (FIG-3779), acknowledged.
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             0x040E,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
@@ -1741,9 +1764,14 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
         restate_message_types(&suspended).expect("decode multi-subscription suspension"),
         vec![
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            // Each start journals its frontier marker first (FIG-3779).
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             0x040E,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             0x040E,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,

@@ -38,7 +38,9 @@ mod trigger_context;
 
 /// A recording or fault layer over any effect host (FIG-3580).
 pub use crate::runtime::effect::{EffectLayer, LayeredEffectHost};
-pub use crate::runtime::process::{ProcessRegistryFaults, WorklistPagePause, WorklistPageRead};
+pub use crate::runtime::process::{
+    ProcessRegistryFaults, RegistrationHoldPoint, WorklistPagePause, WorklistPageRead,
+};
 pub use execution_context_builder::*;
 pub use tool_fixtures::{FIXTURE_ECHO_TOOL, FixtureTools, fixture_echo_definition};
 pub use trigger_context::*;
