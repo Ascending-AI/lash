@@ -77,7 +77,13 @@ def exec_sizes() -> dict[str, dict[str, dict[str, int]]]:
     text = (ROOT / "tools/bazel/exec_sizes.bzl").read_text(encoding="utf-8")
     return {
         name: ast.literal_eval(re.search(rf"{name} = (\{{.*?\n\}})", text, re.S).group(1))
-        for name in ("COMPILE_REQUESTS", "TEST_RUN_REQUESTS", "BATCH_BUDGETS")
+        for name in (
+            "COMPILE_REQUESTS",
+            "TEST_RUN_REQUESTS",
+            "BATCH_BUDGETS",
+            "DEFAULT_TEST_RUN",
+            "DEFAULT_BATCH_BUDGET",
+        )
     }
 
 
@@ -95,7 +101,12 @@ def properties_of(block: str) -> dict[str, str]:
         .items()
     }
     if len(arguments) == 3:
-        run = tables["TEST_RUN_REQUESTS"][arguments[2]]
+        run = tables["TEST_RUN_REQUESTS"].get(
+            arguments[2],
+            tables["TEST_RUN_REQUESTS"].get(
+                arguments[2].split("__fv_", 1)[0], tables["DEFAULT_TEST_RUN"]
+            ),
+        )
         properties["test.cpu_count"] = str(run["cpu_count"])
         properties["test.memory_kb"] = str(run["memory_kb"])
     return properties
@@ -565,6 +576,77 @@ class TestRunRequestTest(unittest.TestCase):
                     self.assertFalse(
                         [key for key in properties_of(block) if key.startswith("test.")]
                     )
+
+
+class ExecSizesFallbackTest(unittest.TestCase):
+    """A label `exec_sizes.bzl` predates resolves the default, not a failure.
+
+    Two PRs that each add a target merge into BUILD files whose labels the
+    checked-in table does not carry; the lookups fall back so main's
+    analysis survives the window, and `--check` -- which regenerates and
+    byte-compares every generated file -- is what catches the drift in CI.
+    """
+
+    def test_a_missing_run_label_resolves_the_unmeasured_default(self) -> None:
+        tables = exec_sizes()
+        self.assertEqual(tables["DEFAULT_TEST_RUN"], generator.UNMEASURED_TEST_RUN)
+        label = "//no/such:never_generated__test"
+        self.assertNotIn(label, tables["TEST_RUN_REQUESTS"])
+        properties = properties_of(
+            "lash_rust_unit_test(\n"
+            '    exec_properties = sized_exec_properties("no-such-package", '
+            f'"no_such_crate", {json.dumps(label)}),\n'
+            ")"
+        )
+        self.assertEqual(
+            properties,
+            {
+                "test.cpu_count": str(generator.UNMEASURED_TEST_RUN["cpu_count"]),
+                "test.memory_kb": str(generator.UNMEASURED_TEST_RUN["memory_kb"]),
+            },
+        )
+
+    def test_a_missing_variant_label_inherits_its_base_row(self) -> None:
+        # The generator resolves a `__fv_` variant through its base label;
+        # the fallback keeps that rule for a variant the table predates.
+        tables = exec_sizes()
+        base = next(
+            label for label in tables["TEST_RUN_REQUESTS"] if "__fv_" not in label
+        )
+        row = tables["TEST_RUN_REQUESTS"][base]
+        variant = f"{base}__fv_deadbeef"
+        self.assertNotIn(variant, tables["TEST_RUN_REQUESTS"])
+        properties = properties_of(
+            "lash_rust_feature_test(\n"
+            '    exec_properties = sized_exec_properties("pkg", "crate", '
+            f"{json.dumps(variant)}),\n"
+            ")"
+        )
+        self.assertEqual(properties["test.cpu_count"], str(row["cpu_count"]))
+        self.assertEqual(properties["test.memory_kb"], str(row["memory_kb"]))
+
+    def test_a_missing_batch_label_reserves_the_unmeasured_batch_default(self) -> None:
+        # The generator's default for an unmeasured batch: its largest
+        # BATCH_JOBS members side by side, each at the unmeasured request.
+        self.assertEqual(
+            exec_sizes()["DEFAULT_BATCH_BUDGET"],
+            {
+                field: generator.BATCH_JOBS * generator.UNMEASURED_TEST_RUN[field]
+                for field in ("cpu_count", "memory_kb")
+            },
+        )
+
+    def test_the_emitted_lookups_fall_back_instead_of_indexing(self) -> None:
+        bzl = (ROOT / "tools/bazel/exec_sizes.bzl").read_text(encoding="utf-8")
+        self.assertNotIn("TEST_RUN_REQUESTS[test_label]", bzl)
+        self.assertNotIn("BATCH_BUDGETS[batch_label]", bzl)
+        self.assertIn("TEST_RUN_REQUESTS.get(", bzl)
+        self.assertIn("BATCH_BUDGETS.get(batch_label, DEFAULT_BATCH_BUDGET)", bzl)
+
+    def test_check_still_fails_on_a_stale_table(self) -> None:
+        path = ROOT / "tools/bazel/exec_sizes.bzl"
+        self.assertEqual(generator.check({path: "# not the generated content\n"}), 1)
+        self.assertEqual(generator.check({path: path.read_text(encoding="utf-8")}), 0)
 
 
 class BatchBudgetTest(unittest.TestCase):

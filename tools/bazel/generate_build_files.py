@@ -269,7 +269,17 @@ def exec_sizes_bzl() -> str:
     <package>, <crate>[, <test label>])` and every `lash_batch_test`'s
     `budget = test_batch_budget(<label>)`; re-measuring the pool rewrites
     this file alone, so sizing drift never rewrites a crate's own file.
+
+    A label this file predates resolves to the default sizing rather than
+    failing analysis: two PRs that each add a target otherwise break main's
+    analysis when they merge close together. The default only bridges the
+    merge window -- regeneration rewrites this file, so `--check` still
+    fails on the stale table.
     """
+    unmeasured_batch = {
+        field: BATCH_JOBS * UNMEASURED_TEST_RUN[field]
+        for field in ("cpu_count", "memory_kb")
+    }
     lines = [
         GENERATED_HEADER,
         '"""\n',
@@ -279,7 +289,22 @@ def exec_sizes_bzl() -> str:
         "Generated BUILD files name these lookups instead of the numbers so\n",
         "a sizing change -- including a concurrently merged PR's -- never\n",
         "rewrites a crate's own file.\n",
+        "\n",
+        "A label these tables predate -- a test or batch merged after this\n",
+        "file was generated -- resolves to the default sizing below instead\n",
+        "of failing analysis; `generate_build_files.py --check` still fails\n",
+        "on the stale table, so CI catches the drift.\n",
         '"""\n\n',
+        "DEFAULT_TEST_RUN = {\n",
+        f'    "cpu_count": {UNMEASURED_TEST_RUN["cpu_count"]},\n',
+        f'    "memory_kb": {UNMEASURED_TEST_RUN["memory_kb"]},\n',
+        "}\n\n",
+        "# The generator's default for an unmeasured batch: its largest\n",
+        "# BATCH_JOBS members side by side, each unmeasured.\n",
+        "DEFAULT_BATCH_BUDGET = {\n",
+        f'    "cpu_count": {unmeasured_batch["cpu_count"]},\n',
+        f'    "memory_kb": {unmeasured_batch["memory_kb"]},\n',
+        "}\n\n",
         "COMPILE_REQUESTS = {\n",
         "".join(
             f"    {quote(key)}: {{"
@@ -318,13 +343,16 @@ def exec_sizes_bzl() -> str:
         "        ).items()\n",
         "    }\n",
         "    if test_label != None:\n",
-        "        run = TEST_RUN_REQUESTS[test_label]\n",
+        "        run = TEST_RUN_REQUESTS.get(\n",
+        "            test_label,\n",
+        '            TEST_RUN_REQUESTS.get(test_label.split("__fv_", 1)[0], DEFAULT_TEST_RUN),\n',
+        "        )\n",
         '        properties["test.cpu_count"] = str(run["cpu_count"])\n',
         '        properties["test.memory_kb"] = str(run["memory_kb"])\n',
         "    return properties\n\n",
         "def test_batch_budget(batch_label):\n",
         '    """The batch\'s summed member reservation; `lash_batch_test` splits it."""\n',
-        "    return BATCH_BUDGETS[batch_label]\n",
+        "    return BATCH_BUDGETS.get(batch_label, DEFAULT_BATCH_BUDGET)\n",
     ]
     return "".join(lines)
 

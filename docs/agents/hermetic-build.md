@@ -183,7 +183,10 @@ Compile and test-run requests are separate. Generated BUILD files name the
 lookup, not the row: `tools/bazel/exec_sizes.bzl` carries the resolved
 `COMPILE_REQUESTS`, `TEST_RUN_REQUESTS`, and `BATCH_BUDGETS` tables, so a
 re-measurement rewrites that one file instead of every target's BUILD. A
-target's plain `exec_properties`
+label the table predates -- a test or batch merged after it was generated --
+resolves the default sizing rather than failing analysis;
+`generate_build_files.py --check` still fails on the stale table, so CI
+catches the drift. A target's plain `exec_properties`
 size its compile actions (Rustc, RustcMetadata, Rustdoc, Clippy) from the table in
 `tools/bazel/action-sizes.json`, which `tools/bazel/action_sizes_from_log.py`
 rebuilds from the pool's usage logs for Lash packages only; an unmeasured

@@ -6,7 +6,24 @@ requests keyed by target label, batch reservations by batch label.
 Generated BUILD files name these lookups instead of the numbers so
 a sizing change -- including a concurrently merged PR's -- never
 rewrites a crate's own file.
+
+A label these tables predate -- a test or batch merged after this
+file was generated -- resolves to the default sizing below instead
+of failing analysis; `generate_build_files.py --check` still fails
+on the stale table, so CI catches the drift.
 """
+
+DEFAULT_TEST_RUN = {
+    "cpu_count": 2,
+    "memory_kb": 1048576,
+}
+
+# The generator's default for an unmeasured batch: its largest
+# BATCH_JOBS members side by side, each unmeasured.
+DEFAULT_BATCH_BUDGET = {
+    "cpu_count": 4,
+    "memory_kb": 2097152,
+}
 
 COMPILE_REQUESTS = {
     "agent-service/agent_service": {"cpu_count": 2, "memory_kb": 3145728},
@@ -585,11 +602,14 @@ def sized_exec_properties(package_name, crate_name, test_label = None):
         ).items()
     }
     if test_label != None:
-        run = TEST_RUN_REQUESTS[test_label]
+        run = TEST_RUN_REQUESTS.get(
+            test_label,
+            TEST_RUN_REQUESTS.get(test_label.split("__fv_", 1)[0], DEFAULT_TEST_RUN),
+        )
         properties["test.cpu_count"] = str(run["cpu_count"])
         properties["test.memory_kb"] = str(run["memory_kb"])
     return properties
 
 def test_batch_budget(batch_label):
     """The batch's summed member reservation; `lash_batch_test` splits it."""
-    return BATCH_BUDGETS[batch_label]
+    return BATCH_BUDGETS.get(batch_label, DEFAULT_BATCH_BUDGET)
