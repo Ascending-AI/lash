@@ -7,18 +7,18 @@
 
 use std::sync::Arc;
 
-use lash_core::SessionStoreFactory as _;
-
 use super::*;
 
 lash_conformance::cancelled_turn_withheld_input_tests!({
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("open the withheld-input store set");
+    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open the withheld-input store set"),
+    );
     let host: Arc<dyn EffectHost> = Arc::new(RestateRuntimeEffectController::new_for_test(
         Arc::new(RecordingContext::default()),
     ));
-    let backend = lash_conformance::backend_over(&stores, host);
+    let backend = lash_conformance::backend_over(Arc::clone(&stores), host);
     let store = stores
         .session_store_factory()
         .create_store(&lash_core::SessionStoreCreateRequest {

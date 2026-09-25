@@ -11,13 +11,14 @@ use super::*;
 
 lash_conformance::session_failure_evidence_tests!({
     let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
-    let stores =
+    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory_with_clock(Arc::clone(&clock) as Arc<dyn Clock>)
             .await
-            .expect("open the failure-evidence store set");
+            .expect("open the failure-evidence store set"),
+    );
     let host: Arc<dyn EffectHost> = Arc::new(RestateRuntimeEffectController::new_for_test(
         Arc::new(RecordingContext::default()),
     ));
-    let backend = lash_conformance::backend_over(&stores, host);
+    let backend = lash_conformance::backend_over(Arc::clone(&stores), host);
     (stores, backend, move || clock.advance(1))
 });
