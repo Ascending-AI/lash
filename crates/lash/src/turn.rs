@@ -1270,10 +1270,32 @@ pub struct TurnReport {
         skip_serializing_if = "lash_core::TurnCancelInputOutcome::is_empty"
     )]
     pub cancel_input_outcome: lash_core::TurnCancelInputOutcome,
+    /// Where this report was assembled: from the turn as it ran in this
+    /// process, or rebuilt from the session's durable state after it ran
+    /// elsewhere.
+    #[serde(default)]
+    pub source: ReportSource,
+}
+
+/// Where a [`TurnReport`] came from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportSource {
+    /// Assembled from the turn as it ran in this process: every field is the
+    /// turn's own account.
+    #[default]
+    Live,
+    /// Rebuilt from the session's durable state because the turn ran in
+    /// another process (or its live report was no longer held): the outcome,
+    /// the session state after it and the acceptance are the store's; the
+    /// per-turn ledgers (usage, calls, tool records, execution metrics) are
+    /// empty here and are read from the session's usage report and
+    /// observation instead.
+    Durable,
 }
 
 impl TurnReport {
-    fn from_assembled(turn: lash_core::facade_support::AssembledTurn) -> Self {
+    pub(crate) fn from_assembled(turn: lash_core::facade_support::AssembledTurn) -> Self {
         // Keep this exhaustive so adding a core turn-result field forces the
         // facade projection to be reviewed alongside the remote projection.
         let lash_core::facade_support::AssembledTurn {
@@ -1303,7 +1325,17 @@ impl TurnReport {
             errors,
             acceptance: turn_input_acceptance,
             cancel_input_outcome: turn_cancel_input_outcome,
+            source: ReportSource::Live,
         }
+    }
+
+    /// The four-way status of the settled turn this report describes:
+    /// [`Answered`](crate::TurnStatus::Answered),
+    /// [`Failed`](crate::TurnStatus::Failed) or
+    /// [`Cancelled`](crate::TurnStatus::Cancelled). A report exists only for
+    /// a settled turn, so it is never [`Parked`](crate::TurnStatus::Parked).
+    pub fn status(&self) -> crate::TurnStatus {
+        crate::send::status_of_outcome(&self.outcome)
     }
 
     /// Durable cancellation evidence, present exactly when this turn was
@@ -1402,6 +1434,11 @@ pub struct TurnOutput {
 }
 
 impl TurnOutput {
+    /// See [`TurnReport::status`].
+    pub fn status(&self) -> crate::TurnStatus {
+        self.result.status()
+    }
+
     pub fn assistant_message(&self) -> Option<&str> {
         self.result.assistant_message()
     }

@@ -37,6 +37,48 @@ impl RlmTurnBuilderExt for TurnBuilder {
     }
 }
 
+/// The RLM termination setters on a [`send`](crate::LashSession::send): the
+/// same names and signatures as [`RlmTurnBuilderExt`], so a turn chain keeps
+/// its text when it moves onto `send()`.
+#[cfg(feature = "rlm")]
+pub trait RlmSendBuilderExt: Sized {
+    /// Requires the RLM turn to finish through the finish tool.
+    fn require_finish(self) -> Result<Self>;
+    /// Requires the RLM finish tool to produce a value matching the schema.
+    fn require_finish_schema(self, schema: serde_json::Value) -> Result<Self>;
+    /// Allows an RLM turn to return prose or invoke the finish tool.
+    fn allow_prose_or_finish(self) -> Result<Self>;
+}
+
+#[cfg(feature = "rlm")]
+impl RlmSendBuilderExt for crate::SendBuilder {
+    fn require_finish(mut self) -> Result<Self> {
+        self.protocol_turn_options = Some(rlm_termination_options(
+            self.protocol_turn_options.as_ref(),
+            lash_rlm_types::RlmTermination::FinishRequired { schema: None },
+        )?);
+        Ok(self)
+    }
+
+    fn require_finish_schema(mut self, schema: serde_json::Value) -> Result<Self> {
+        self.protocol_turn_options = Some(rlm_termination_options(
+            self.protocol_turn_options.as_ref(),
+            lash_rlm_types::RlmTermination::FinishRequired {
+                schema: Some(schema),
+            },
+        )?);
+        Ok(self)
+    }
+
+    fn allow_prose_or_finish(mut self) -> Result<Self> {
+        self.protocol_turn_options = Some(rlm_termination_options(
+            self.protocol_turn_options.as_ref(),
+            lash_rlm_types::RlmTermination::Natural,
+        )?);
+        Ok(self)
+    }
+}
+
 /// Reads the durable RLM facts a session actually recorded (ADR 0066).
 ///
 /// Every field is `Option`-shaped: `None` is "this session has stated nothing",
@@ -241,15 +283,24 @@ fn rlm_termination(
     mut builder: TurnBuilder,
     termination: lash_rlm_types::RlmTermination,
 ) -> Result<TurnBuilder> {
+    builder.protocol_turn_options = Some(rlm_termination_options(
+        builder.protocol_turn_options.as_ref(),
+        termination,
+    )?);
+    Ok(builder)
+}
+
+/// `current` with its RLM termination overridden by `termination`.
+#[cfg(feature = "rlm")]
+fn rlm_termination_options(
+    current: Option<&ProtocolTurnOptions>,
+    termination: lash_rlm_types::RlmTermination,
+) -> Result<ProtocolTurnOptions> {
     let override_options = ProtocolTurnOptions::typed(lash_rlm_types::RlmTurnOptions {
         termination: Some(termination),
         final_answer_format: None,
     })?;
-    let options = builder
-        .protocol_turn_options
-        .as_ref()
+    Ok(current
         .map(|current| current.merged_with_override(&override_options))
-        .unwrap_or(override_options);
-    builder.protocol_turn_options = Some(options);
-    Ok(builder)
+        .unwrap_or(override_options))
 }

@@ -60,6 +60,7 @@ pub mod scenario_contracts;
 pub mod sync {
     pub use lash_core::sync::*;
 }
+mod send;
 mod session;
 mod session_binding;
 mod session_lease;
@@ -78,15 +79,19 @@ pub use crate::admin::{
 };
 pub use crate::core::{DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteReport};
 pub use crate::durable_session::{DurableSession, EnqueueTurnBuilder};
-pub use crate::error::{EmbedError, Result, SelectedQueuedWorkDrainRefusalCause};
+pub use crate::error::{EmbedError, Result, SelectedQueuedWorkDrainRefusalCause, SendError};
 pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
+pub use crate::send::{
+    CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RootHandle, SendBuilder, SendHandle,
+    SendOutcome, TurnEvents, TurnStatus,
+};
 pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::queued_drain::{EmptyQueuedDrainReason, QueuedTurnDrain};
 pub use crate::turn::{
-    QueuedTurnBuilder, SelectedQueuedTurnBuilder, TurnActivityFanout, TurnBuilder, TurnOutput,
-    TurnReport, TurnStream, message_role, message_text,
+    QueuedTurnBuilder, ReportSource, SelectedQueuedTurnBuilder, TurnActivityFanout, TurnBuilder,
+    TurnOutput, TurnReport, TurnStream, message_role, message_text,
 };
 /// The one substrate a [`LashCore`] takes every persistence port and its
 /// effect host from (ADR 0102). [`LashCore::builder`] requires one:
@@ -143,14 +148,14 @@ pub mod prelude {
         DurableSession, EmbedError, EnqueueTurnBuilder, InputItem, LashCore, LashCoreBuilder,
         LashSession, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget,
         ObservableSession, ParkedSession, PendingTurnInputCancelOutcome, PluginBinding,
-        PluginOperations, PluginStack, PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder,
-        SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
-        SessionCreateRequest, SessionDeleteReport, SessionListFilter, SessionRelationKind,
-        SessionSpec, SessionStartPoint, SessionSummary, SessionTriggerAdmin, ToolAdmin,
-        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
-        TurnBuilder, TurnCause, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
-        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStop, TurnStream,
-        message_role, message_text,
+        PluginOperations, PluginStack, PromptLayerSink, QueuedTurnBuilder, Result, SendBuilder,
+        SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
+        SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest, SessionDeleteReport,
+        SessionListFilter, SessionRelationKind, SessionSpec, SessionStartPoint, SessionSummary,
+        SessionTriggerAdmin, ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId,
+        TurnActivitySink, TurnBudget, TurnBuilder, TurnCause, TurnEvent, TurnExecutionMetrics,
+        TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport,
+        TurnStatus, TurnStop, TurnStream, message_role, message_text,
     };
 }
 

@@ -29,6 +29,7 @@ use crate::{PluginError, ProcessAwaitOutput, SessionId};
 ///
 /// The engine runs the kernel's drive through the [`SessionDriver`] the core
 /// installs; it never decides what a drive admits.
+#[async_trait::async_trait]
 pub trait SessionWorkEngine: Send + Sync {
     /// Ask the engine to drive `session` for `request`. Returns once the ask
     /// is handed to the engine, not once the drive ran.
@@ -39,6 +40,41 @@ pub trait SessionWorkEngine: Send + Sync {
     /// candidate and uses whatever comes back (the precedent is
     /// [`EffectHost::install_tool_child_host`](crate::EffectHost::install_tool_child_host)).
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver>;
+
+    /// Wait until a drive of `session` that began after `request` was
+    /// scheduled has stopped, and answer how it stopped.
+    ///
+    /// Idempotent, and it never drives twice for one request id: an ask the
+    /// engine lost is re-issued under the same id. This is a **wake
+    /// barrier**, not the resolution of anything the request followed: a
+    /// drive may stop before an input's root settled (another driver holds
+    /// it, or the root parked), so a caller reads the outcome from the store
+    /// and uses this only to learn that a drive ran, or that the engine
+    /// refused one.
+    ///
+    /// The default is an engine that runs no drives: it refuses with
+    /// [`SessionWorkUnavailable`](crate::RuntimeErrorCode::SessionWorkUnavailable).
+    async fn await_drive(
+        &self,
+        session: &SessionId,
+        request: &crate::engine::DriveRequestId,
+    ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
+        Err(session_work_unavailable(session, request))
+    }
+}
+
+/// The refusal of an engine that runs no drives, asked to wait for one.
+fn session_work_unavailable(
+    session: &SessionId,
+    request: &crate::engine::DriveRequestId,
+) -> crate::engine::DriveAbort {
+    crate::engine::DriveAbort::Refused(crate::RuntimeError::new(
+        crate::RuntimeErrorCode::SessionWorkUnavailable,
+        format!(
+            "drive `{}` of session `{session}` cannot be awaited: this deployment runs no session work",
+            request.as_str()
+        ),
+    ))
 }
 
 /// The kernel's drive of one session, as the core installs it on its

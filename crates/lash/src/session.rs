@@ -822,6 +822,35 @@ impl LashSession {
         }
     }
 
+    /// Accept `input` durably and ask the engine to drive the session: the
+    /// one way a turn starts (FIG-3600).
+    ///
+    /// Awaiting the builder commits the acceptance and yields a
+    /// [`SendHandle`](crate::SendHandle); `send(input).output().await` is the
+    /// one-call form. The turn runs on the session's engine, not in the
+    /// caller's future: dropping the handle stops nothing.
+    pub fn send(&self, input: TurnInput) -> crate::SendBuilder {
+        crate::SendBuilder::new(crate::send::SendTarget::Live(self.clone()), input)
+    }
+
+    /// Re-attach to an input accepted earlier: after a restart, or from
+    /// another handle. Never commits anything.
+    pub fn attach(&self, input_id: lash_core::InputId) -> crate::SendHandle {
+        crate::send::attach(crate::send::SendTarget::Live(self.clone()), input_id)
+    }
+
+    /// Re-await a logical root: after a park verb, or by the host id a send
+    /// named.
+    pub fn root(&self, root: impl Into<TurnId>) -> crate::RootHandle {
+        crate::send::root(crate::send::SendTarget::Live(self.clone()), root.into())
+    }
+
+    /// Withdraw a queued input, or cooperatively cancel a running root
+    /// (ADR 0039).
+    pub fn cancel(&self, target: crate::CancelTarget) -> crate::CancelBuilder {
+        crate::CancelBuilder::new(crate::send::SendTarget::Live(self.clone()), target)
+    }
+
     pub fn queued_turn(&self) -> QueuedTurnBuilder {
         QueuedTurnBuilder {
             runtime: self.runtime.clone(),

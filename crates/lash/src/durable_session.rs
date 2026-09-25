@@ -206,6 +206,13 @@ impl DurableSession {
         }
     }
 
+    /// Accept `input` durably and ask the engine to drive the session; the
+    /// same acceptance as [`LashSession::send`](crate::LashSession::send), with
+    /// no resident runtime to refresh when the handle answers.
+    pub fn send(&self, input: TurnInput) -> crate::SendBuilder {
+        crate::SendBuilder::new(crate::send::SendTarget::Durable(self.clone()), input)
+    }
+
     /// A held input remains present with the exact expiry of the matching live
     /// session-execution lease. That status does not prove the holder is alive;
     /// resubmitting while it is held creates another admission unless the host

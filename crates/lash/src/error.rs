@@ -146,6 +146,59 @@ pub enum EmbedError {
     DecodeProtocolTurnOptions(#[from] lash_core::ProtocolTurnOptionsError),
     #[error("runtime control unavailable: {0}")]
     Control(#[from] lash_core::facade_support::PluginOperationInvokeError),
+    /// A [`send`](crate::LashSession::send) or one of its handles could not
+    /// answer (FIG-3600).
+    #[error("send: {0}")]
+    Send(#[from] SendError),
+}
+
+/// Why a [`send`](crate::LashSession::send), or a handle it returned, did not
+/// answer with an outcome.
+///
+/// A committed turn that stopped (a provider error, max turns, a tool
+/// failure) is not an error: it answers `Ok` with a
+/// [`Failed`](crate::TurnStatus::Failed) status. A drive the engine refused
+/// before the input settled surfaces as [`EmbedError::Runtime`] with the code
+/// the refusal carried.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum SendError {
+    /// The core runs no session work on its backend, and cannot drive the
+    /// session in the caller's task either, so an accepted input would never
+    /// run. Nothing was accepted.
+    #[error("the core runs no session work on this backend")]
+    NoSessionWork,
+    /// The input carries process-local turn context (a protocol extension,
+    /// live plugin inputs, a per-turn provider or prompt) that cannot cross
+    /// durable acceptance. Nothing was accepted. Session configuration is the
+    /// durable home of a prompt or a model.
+    #[error("{what} is process-local and cannot cross durable acceptance")]
+    LiveTurnContext {
+        /// What the input carried.
+        what: &'static str,
+    },
+    /// [`output`](crate::SendHandle::output) was asked for the settled turn of
+    /// an input that has none: its root parked, or the input was withdrawn
+    /// before it ran. [`outcome`](crate::SendHandle::outcome) answers these
+    /// without an error.
+    #[error("input `{input_id}` has no settled turn: {status:?}")]
+    NotSettled {
+        /// The input the handle follows.
+        input_id: lash_core::InputId,
+        /// What the input's root answered instead.
+        status: crate::TurnStatus,
+    },
+    /// The input was applied and its drive stopped, but no terminal for its
+    /// root could be read within the handle's poll ceiling.
+    #[error("input `{input_id}` settled but its terminal is unreadable")]
+    Unresolved {
+        /// The input the handle follows.
+        input_id: lash_core::InputId,
+    },
+    /// The handle's live activity subscription fell outside the bounded
+    /// replay window. The outcome is still readable from the store.
+    #[error("observation gap: {0:?}")]
+    ObservationGap(lash_core::facade_support::LiveReplayGap),
 }
 
 impl EmbedError {
@@ -287,7 +340,8 @@ impl EmbedError {
             | Self::RemoteProtocol(_)
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
-            | Self::Control(_) => false,
+            | Self::Control(_)
+            | Self::Send(_) => false,
         }
     }
 
@@ -332,7 +386,8 @@ impl EmbedError {
             | Self::ProcessExecutionConcurrency(_)
             | Self::QueuedWorkExecutionConcurrency(_)
             | Self::UnknownSession { .. }
-            | Self::StaticTurnStreamRequiresStaticEffectHost => true,
+            | Self::StaticTurnStreamRequiresStaticEffectHost
+            | Self::Send(SendError::NoSessionWork | SendError::LiveTurnContext { .. }) => true,
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),
             Self::Plugin(err) => err.is_terminal(),
@@ -360,7 +415,8 @@ impl EmbedError {
             | Self::DecodeProtocolTurnOptions(_)
             | Self::Control(_)
             | Self::NativeSubstrateConfig(_)
-            | Self::Session(_) => false,
+            | Self::Session(_)
+            | Self::Send(_) => false,
         }
     }
 }

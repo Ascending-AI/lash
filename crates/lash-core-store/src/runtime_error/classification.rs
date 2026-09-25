@@ -94,6 +94,8 @@ impl RuntimeErrorCode {
             Self::TurnInputSettlementSuperseded => Retryable,
             // the drive is journaled, so re-running the same turn cedes the same way.
             Self::AcceptedTurnInputCeded => Terminal,
+            // the deployment runs no session work; the identical wait is refused identically.
+            Self::SessionWorkUnavailable => Terminal,
             // the open declared it runs no turn; the same open refuses identically.
             Self::TurnExecutionRequiresReconciledToolSurface => Terminal,
             // transactional write authority was contended; the identical commit is safe to retry.
