@@ -14,6 +14,7 @@
 use super::artifact_store::artifact_namespace_kind;
 use super::*;
 use crate::session_sql::session_sql;
+use crate::session_store_factory::retained_artifact_refs;
 use lash_sansio::SessionId;
 
 /// One GC root class. The variant *is* the label choice: a pointer-table row

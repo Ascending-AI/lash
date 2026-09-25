@@ -39,6 +39,7 @@ tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+# Kernel tests whose effects need an engine run on the Restate server double
 # Self dev-dependency so `testing` is on for every test build of this crate:
 # a bare `cargo test -p lash-internal-provider-google` runs the conformance law instead of
 # quietly compiling it out (FIG-1266).

@@ -41,13 +41,15 @@
 //! say what it cannot order.
 
 mod backend;
+mod open_handler;
 pub mod protocol;
 pub mod server;
 
 pub use backend::{
     BackendError, HandlerAttempt, RestateTestBackend, SESSION_DRIVER_SERVICE, TURN_DRIVER_SERVICE,
-    backend, backend_with_build, backend_with_segment_budget,
+    backend, backend_with, backend_with_build, backend_with_segment_budget,
 };
+pub use open_handler::OpenHandler;
 pub use protocol::ProtocolVersion;
 pub use server::{
     AttemptDispatch, CrashListener, CrashPoint, CrashRule, DeploymentHooks, DeploymentId,

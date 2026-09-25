@@ -407,6 +407,12 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
             .map(|store| self.wrap(store)))
     }
 
+    // The unbound open forwards the same way; its store binds on its first
+    // admitted session, and the wrapper still observes its commits.
+    async fn open_unbound_store(&self) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        Ok(self.wrap(self.inner.open_unbound_store().await?))
+    }
+
     async fn read_session(
         &self,
         session_id: &SessionId,

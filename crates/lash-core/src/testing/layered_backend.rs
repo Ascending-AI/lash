@@ -192,6 +192,105 @@ impl LayeredBackend {
     }
 }
 
+/// One store set with some of its ports decorated, for a test that layers
+/// the stores BEFORE an engine is built over them: an engine's own services
+/// then run over the decorated ports too, where a [`LayeredBackend`] over a
+/// built engine decorates only the ports read through the backend.
+#[derive(Clone)]
+pub struct LayeredStores(LayeredStoreSet);
+
+impl LayeredStores {
+    /// `inner`, undecorated.
+    pub fn over(inner: Arc<dyn StoreSet>) -> Self {
+        Self(LayeredStoreSet {
+            binding: inner.binding_identity().clone(),
+            clock: inner.clock(),
+            session_store_factory: inner.session_store_factory(),
+            process_registry: inner.process_registry(),
+            trigger_store: inner.trigger_store(),
+            process_definitions: inner.process_definition_registry(),
+            process_env_store: inner.process_env_store(),
+            attachment_store: inner.attachment_store(),
+            module_artifacts: inner.module_artifacts(),
+            inner,
+        })
+    }
+
+    /// Stamp and sleep on `clock` in place of the inner store set's clock.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.0.clock = clock;
+        self
+    }
+
+    /// Replace the session-store factory with `layer` over it.
+    pub fn map_session_store_factory(
+        mut self,
+        layer: impl FnOnce(Arc<dyn SessionStoreFactory>) -> Arc<dyn SessionStoreFactory>,
+    ) -> Self {
+        self.0.session_store_factory = layer(self.0.session_store_factory);
+        self
+    }
+
+    /// Replace the process registry with `layer` over it.
+    pub fn map_process_registry(
+        mut self,
+        layer: impl FnOnce(Arc<dyn ProcessRegistry>) -> Arc<dyn ProcessRegistry>,
+    ) -> Self {
+        self.0.process_registry = layer(self.0.process_registry);
+        self
+    }
+
+    /// Replace the trigger store with `layer` over it.
+    pub fn map_trigger_store(
+        mut self,
+        layer: impl FnOnce(Arc<dyn TriggerStore>) -> Arc<dyn TriggerStore>,
+    ) -> Self {
+        self.0.trigger_store = layer(self.0.trigger_store);
+        self
+    }
+
+    /// Replace the process-definition registry with `layer` over it.
+    pub fn map_process_definition_registry(
+        mut self,
+        layer: impl FnOnce(Arc<dyn ProcessDefinitionRegistry>) -> Arc<dyn ProcessDefinitionRegistry>,
+    ) -> Self {
+        self.0.process_definitions = layer(self.0.process_definitions);
+        self
+    }
+
+    /// Replace the process-execution-environment store with `layer` over it.
+    pub fn map_process_env_store(
+        mut self,
+        layer: impl FnOnce(Arc<dyn ProcessExecutionEnvStore>) -> Arc<dyn ProcessExecutionEnvStore>,
+    ) -> Self {
+        self.0.process_env_store = layer(self.0.process_env_store);
+        self
+    }
+
+    /// Replace the attachment store with `layer` over it.
+    pub fn map_attachment_store(
+        mut self,
+        layer: impl FnOnce(Arc<dyn AttachmentStore>) -> Arc<dyn AttachmentStore>,
+    ) -> Self {
+        self.0.attachment_store = layer(self.0.attachment_store);
+        self
+    }
+
+    /// Replace the module-artifact store with `layer` over it.
+    pub fn map_module_artifacts(
+        mut self,
+        layer: impl FnOnce(Arc<dyn ModuleArtifactStore>) -> Arc<dyn ModuleArtifactStore>,
+    ) -> Self {
+        self.0.module_artifacts = layer(self.0.module_artifacts);
+        self
+    }
+
+    /// The decorated store set.
+    pub fn into_store_set(self) -> Arc<dyn StoreSet> {
+        Arc::new(self.0)
+    }
+}
+
 struct LayeredEngine {
     stores: Arc<LayeredStoreSet>,
     effect_host: Arc<dyn EffectHost>,
@@ -224,6 +323,7 @@ impl EffectEngine for LayeredEngine {
     }
 }
 
+#[derive(Clone)]
 struct LayeredStoreSet {
     inner: Arc<dyn StoreSet>,
     binding: StoreBindingId,

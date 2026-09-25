@@ -30,17 +30,27 @@ where
         &'run self,
         admitted: lash_core::AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        if matches!(admitted.scope(), ExecutionScope::Process { .. }) {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::ExecutionScopeAdmissionRefused,
-                format!(
-                    "a process segment's effects are admitted only by its committed start \
-                     marker; use process_segment_controller, not a bare {:?}",
-                    admitted.scope()
-                ),
-            ));
-        }
+        refuse_bare_process_scope(&admitted)?;
         self.recording_controller(admitted)
+    }
+
+    /// [`scoped_effect_controller`](Self::scoped_effect_controller) for a
+    /// controller its caller owns: the view keeps the controller alive
+    /// instead of borrowing it, so it lives as long as the context does.
+    pub fn into_scoped_effect_controller(
+        self: Arc<Self>,
+        admitted: lash_core::AdmittedScope,
+    ) -> Result<ScopedEffectController<'ctx>, RuntimeError> {
+        refuse_bare_process_scope(&admitted)?;
+        admitted.scope().validate()?;
+        ScopedEffectController::owned(
+            Arc::new(scope_recording::ScopeRecordingController {
+                inner: scope_recording::HandlerController::Owned(self),
+                admitted: admitted.clone(),
+                binding: None,
+            }),
+            admitted,
+        )
     }
 
     /// The controller for one admitted process segment (FIG-3588).
@@ -73,7 +83,7 @@ where
         admitted.scope().validate()?;
         ScopedEffectController::owned(
             Arc::new(scope_recording::ScopeRecordingController {
-                inner: self,
+                inner: scope_recording::HandlerController::Borrowed(self),
                 admitted: admitted.clone(),
                 binding: None,
             }),
@@ -96,11 +106,27 @@ where
         admitted.scope().validate()?;
         ScopedEffectController::owned(
             Arc::new(scope_recording::ScopeRecordingController {
-                inner: self,
+                inner: scope_recording::HandlerController::Borrowed(self),
                 admitted: admitted.clone(),
                 binding: Some(binding),
             }),
             admitted,
         )
     }
+}
+
+/// A process segment's effects are admitted only by its committed start
+/// marker (FIG-3588), never by a bare process scope.
+fn refuse_bare_process_scope(admitted: &lash_core::AdmittedScope) -> Result<(), RuntimeError> {
+    if matches!(admitted.scope(), ExecutionScope::Process { .. }) {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+            format!(
+                "a process segment's effects are admitted only by its committed start \
+                 marker; use process_segment_controller, not a bare {:?}",
+                admitted.scope()
+            ),
+        ));
+    }
+    Ok(())
 }

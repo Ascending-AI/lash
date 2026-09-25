@@ -43,8 +43,10 @@ mod runtime {
         pub(crate) use tokio::sync::mpsc;
 
         pub(crate) use crate::runtime_support::{
-            memory_backend, memory_backend_with_clock, reopened_backend, sqlite_memory_backend,
-            unbound_recording_store, unbound_recording_store_with_clock, unbound_store,
+            double_unbound_recording_store, double_unbound_store, kernel_double, memory_backend,
+            memory_backend_with_clock, memory_store_backend, memory_store_set, reopened_backend,
+            sqlite_memory_backend, unbound_recording_store, unbound_recording_store_with_clock,
+            unbound_store,
         };
         pub(crate) use lash_core::llm::transport::LlmTransportError;
         pub(crate) use lash_core::llm::types::{LlmProviderTraceEvent, LlmUsage};

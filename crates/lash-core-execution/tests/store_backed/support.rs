@@ -29,6 +29,47 @@ pub async fn memory_backend() -> SqliteBackend {
     backend
 }
 
+/// A fresh Restate server double under `seed` with `config`: lash-restate's
+/// engine over a SQLite memory store set, the twin of [`memory_backend`] for a
+/// kernel test whose effects run on an engine. Hold the double to the end of
+/// the test and never build a core over the handle itself (FIG-3723); a turn
+/// runs on `double.open_handler(scope)`'s scoped controller. Under
+/// `Scheduling::Serial`, a scripted provider that waits on the test holds
+/// `double.server().outside_gates().enter()` across the wait.
+pub async fn kernel_double(
+    seed: u64,
+    config: lash_restate_test::ServerConfig,
+) -> lash_restate_test::RestateTestBackend {
+    lash_restate_test::backend(seed, config)
+        .await
+        .expect("build the Restate server double")
+}
+
+std::thread_local! {
+    /// The store sets the running test opened, held as its backends are.
+    static TEST_STORE_SETS: std::cell::RefCell<Vec<std::sync::Arc<lash_sqlite_store::SqliteStoreSet>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A fresh SQLite memory store set, storage only (no engine), held for the
+/// rest of the running test: the twin of [`memory_backend`] for a test that reaches
+/// only store ports.
+pub async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
+    let stores = std::sync::Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open a SQLite memory store set"),
+    );
+    TEST_STORE_SETS.with(|held| held.borrow_mut().push(std::sync::Arc::clone(&stores)));
+    stores
+}
+
+/// [`memory_store_set`] as a backend whose effect host is the recording
+/// double: for a test that needs a `Backend` value but runs no effect.
+pub async fn memory_store_backend() -> lash_core_execution::Backend {
+    lash_conformance::recording_backend_over(memory_store_set().await)
+}
+
 /// Waits until the wall clock has passed `epoch_ms`, so a cutoff one
 /// millisecond past a row's stamp is already in the past for the store.
 pub async fn after_millisecond_tick(epoch_ms: u64) {

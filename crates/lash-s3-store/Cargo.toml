@@ -31,6 +31,7 @@ object_store = { workspace = true, default-features = false, features = ["aws"] 
 url = "2"
 
 [dev-dependencies]
+# Kernel tests whose effects need an engine run on the Restate server double
 lash-conformance.workspace = true
 lash-core = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }

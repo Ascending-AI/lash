@@ -508,6 +508,12 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         Ok(store.map(|store| self.wrap(session_id, store) as Arc<dyn RuntimePersistence>))
     }
 
+    // The unbound store has no session id to key a `RuntimePerfStore` under;
+    // it binds on its first admitted session.
+    async fn open_unbound_store(&self) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        self.inner.open_unbound_store().await
+    }
+
     async fn read_session(
         &self,
         session_id: &SessionId,

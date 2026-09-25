@@ -47,6 +47,7 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# Kernel tests whose effects need an engine run on the Restate server double
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-execution = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }

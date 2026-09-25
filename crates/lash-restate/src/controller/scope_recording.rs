@@ -23,7 +23,7 @@ use crate::durable_wait::durable_wait_index_key_for_scope;
 /// records executing effects and opened groups of a non-session scope in the
 /// scope's `LashDurableWaitIndex` object so its quiescence proof counts them.
 pub(super) struct ScopeRecordingController<'run, 'ctx, C> {
-    pub(super) inner: &'run RestateRuntimeEffectController<'ctx, C>,
+    pub(super) inner: HandlerController<'run, 'ctx, C>,
     /// The admitted scope this controller serves: the claim address its
     /// effects fence on and, for a process, the incarnation it runs under.
     pub(super) admitted: lash_core::AdmittedScope,
@@ -32,6 +32,34 @@ pub(super) struct ScopeRecordingController<'run, 'ctx, C> {
     /// [`RestateRuntimeEffectController::scoped_effect_controller_for_group_child`]
     /// (FIG-3470). `None` for an unbound scope controller.
     pub(super) binding: Option<lash_core::GroupChildBinding>,
+}
+
+/// The handler controller a scope view forwards to: borrowed from the
+/// handler that built it, or owned by the view's holder when nothing outlives
+/// the view to lend it from.
+pub(super) enum HandlerController<'run, 'ctx, C> {
+    Borrowed(&'run RestateRuntimeEffectController<'ctx, C>),
+    Owned(Arc<RestateRuntimeEffectController<'ctx, C>>),
+}
+
+impl<'ctx, C> Clone for HandlerController<'_, 'ctx, C> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Borrowed(controller) => Self::Borrowed(controller),
+            Self::Owned(controller) => Self::Owned(Arc::clone(controller)),
+        }
+    }
+}
+
+impl<'ctx, C> std::ops::Deref for HandlerController<'_, 'ctx, C> {
+    type Target = RestateRuntimeEffectController<'ctx, C>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Borrowed(controller) => controller,
+            Self::Owned(controller) => controller,
+        }
+    }
 }
 
 impl<'run, 'ctx, C> ScopeRecordingController<'run, 'ctx, C>
@@ -82,7 +110,7 @@ where
             .clone()
             .filter(|binding| binding.child.execution_scope == *admitted.scope());
         Arc::new(ScopeRecordingController {
-            inner: self.inner,
+            inner: self.inner.clone(),
             admitted,
             binding,
         })
