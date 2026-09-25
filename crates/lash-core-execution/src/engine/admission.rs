@@ -225,6 +225,11 @@ pub struct Admitted {
     request: DriveRequestId,
     admission: AdmissionId,
     observed_epoch: u64,
+    /// The head the root was admitted on. A replay rebuilds the root's input
+    /// state from it, never from the live head (FIG-3682).
+    base: crate::store::SessionHeadRef,
+    /// The root's turn index, fixed at admission.
+    turn_index: u64,
 }
 
 impl Admitted {
@@ -248,6 +253,17 @@ impl Admitted {
     /// The drive epoch admission read; the seal advances it by one.
     pub fn observed_epoch(&self) -> u64 {
         self.observed_epoch
+    }
+
+    /// The head the root was admitted on.
+    pub fn base(&self) -> &crate::store::SessionHeadRef {
+        &self.base
+    }
+
+    /// The root's turn index, fixed at admission and identical on every
+    /// replay.
+    pub fn turn_index(&self) -> u64 {
+        self.turn_index
     }
 }
 

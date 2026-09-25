@@ -36,6 +36,8 @@ timeout_seconds = 240
 redelivery_laws = [
   # The turn crashes after its tool calls settle; Restate redelivers it.
   "tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes",
+  # The turn crashes after its commit; Restate redelivers it (FIG-3682).
+  "tests::conformance_and_poison::a_turn_redriven_after_its_commit_replays_at_its_admitted_head",
   # A child whose process-env read faults fails retryably; Restate runs it
   # again once the store answers.
   "tests::conformance_and_poison::a_process_env_store_fault_is_never_the_childs_recorded_outcome",
@@ -54,9 +56,10 @@ redelivery_laws = [
 report_only = "tool-result durations reach journaled identities (FIG-3672); see scripts/restate-suites.toml"
 
 [suites.effect-group.replay.divergent]
-# The replayed redrive computes a different turn index than the attempt that
-# journaled it: `turn:1:0:llm_call:1` recorded, `turn:2:0:llm_call:1` replayed.
-"tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes" = "journal mismatch: the replayed turn derives turn index 2 where the journal recorded 1 (FIG-3682)"
+# The turn's opener is suspended at every await on this leg, and a tool child
+# runs only against its opener's live in-process registration, so the tool
+# children never run and the turn waits on them for good.
+"tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes" = "a suspended turn strands its tool children: no executor routes them while the opener is suspended (FIG-3712)"
 # The presented tool result's effect hash covers the tool's measured
 # `command.duration_ms`, so a replay that re-measures it parks the turn
 # (`effect_replay_divergence ... divergent_paths=[command.duration_ms]`)

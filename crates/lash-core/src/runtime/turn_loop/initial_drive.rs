@@ -22,6 +22,11 @@ pub(super) struct AcceptedTurnInputDriveRunner {
     /// The runtime's turn-input claim bound
     /// ([`QueuedWorkBatchingConfig::max_turn_input_claim`](crate::QueuedWorkBatchingConfig::max_turn_input_claim)).
     pub(super) max_inputs: usize,
+    /// The resident head the turn is admitted on, as the accept phase
+    /// refreshed it under the lease. Its generation is read in the body.
+    pub(super) base: crate::store::SessionHeadRef,
+    /// The admitted turn's index: the next one after `base`.
+    pub(super) turn_index: usize,
     pub(super) trace: DriveTrace,
 }
 
@@ -122,9 +127,7 @@ impl AcceptedTurnInputDriveRunner {
                             .collect::<Vec<_>>(),
                     }),
                 );
-                return Ok(crate::AcceptedTurnInputDrive::Claimed {
-                    claim: Box::new(claim),
-                });
+                return self.admit(claim).await;
             }
             // A claim that reached rows but not this turn's own acceptance is
             // claim-pinning up to `max_inputs` rows this caller will never
@@ -189,9 +192,7 @@ impl AcceptedTurnInputDriveRunner {
                     if *turn_id == self.trace.turn_id =>
                 {
                     match self.reclaim_bound_drive().await? {
-                        Some(claim) => crate::AcceptedTurnInputDrive::Claimed {
-                            claim: Box::new(claim),
-                        },
+                        Some(claim) => self.admit(claim).await?,
                         None => crate::AcceptedTurnInputDrive::Refused {
                             refusal: crate::AcceptedTurnInputRefusal::HeldByLiveClaim,
                         },
@@ -207,6 +208,29 @@ impl AcceptedTurnInputDriveRunner {
             None => crate::AcceptedTurnInputDrive::Refused {
                 refusal: crate::AcceptedTurnInputRefusal::SettledOrRemoved,
             },
+        })
+    }
+
+    /// Admit the turn that drives `claim`: record the head it is admitted on
+    /// and its turn index with the claim, and have the store retain that head
+    /// until the session's next admission (FIG-3682).
+    ///
+    /// Both ride the journaled outcome, so a replay rebuilds the turn's input
+    /// state from the recorded head and addresses its effects under the
+    /// recorded index, even after the turn's own commit moved the live head.
+    async fn admit(
+        &self,
+        claim: crate::TurnInputClaim,
+    ) -> Result<crate::AcceptedTurnInputDrive, crate::StoreError> {
+        let base = crate::store::SessionHeadRef {
+            generation: self.store.read_session_state_version().await?,
+            ..self.base.clone()
+        };
+        self.store.retain_admission_base(&self.fence, &base).await?;
+        Ok(crate::AcceptedTurnInputDrive::Claimed {
+            claim: Box::new(claim),
+            base,
+            turn_index: self.turn_index as u64,
         })
     }
 

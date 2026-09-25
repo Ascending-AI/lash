@@ -21,6 +21,41 @@ pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
 }
 
 impl LashRuntime {
+    /// Bring the resident session up to the durable head under `lease`: reload
+    /// invalidated resident state, then the graph unless this lease already
+    /// holds it current.
+    pub(super) async fn refresh_resident_head_under_lease(
+        &mut self,
+        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+    ) -> Result<(), RuntimeError> {
+        self.reload_invalidated_resident_session_state_under_lease(session_execution_lease)
+            .await?;
+        let lease_continuity =
+            session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity);
+        let resident_graph_is_current = self
+            .resident_session
+            .graph_is_current_under(lease_continuity);
+        if !resident_graph_is_current {
+            self.refresh_session_graph_from_store()
+                .await
+                .map_err(session_head_refresh_error)?;
+        }
+        Ok(())
+    }
+
+    /// The physical turn's index: the one its admission recorded, else its
+    /// queued run's pinned position, else the resident head's next.
+    fn physical_turn_index(&self, admitted_turn_index: Option<usize>) -> usize {
+        admitted_turn_index.unwrap_or_else(|| {
+            // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+            self.queued_run
+                .as_ref()
+                .map_or(self.state.turn_index + 1, |run| {
+                    run.position.turn_index as usize
+                })
+        })
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "the trace turn id is bound before validation"
@@ -43,17 +78,13 @@ impl LashRuntime {
                     release_policy: session_execution_lease_release_policy,
                 },
         } = context;
-        self.reload_invalidated_resident_session_state_under_lease(session_execution_lease)
-            .await?;
-        let lease_continuity =
-            session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity);
-        let resident_graph_is_current = self
-            .resident_session
-            .graph_is_current_under(lease_continuity);
-        if !resident_graph_is_current {
-            self.refresh_session_graph_from_store()
-                .await
-                .map_err(session_head_refresh_error)?;
+        // A direct turn's admission already adopted the head it was admitted
+        // on and recorded its index (FIG-3682): re-reading the live head here
+        // would undo that on a replay after the turn's own commit.
+        let admitted_turn_index = self.admitted_turn_index.take();
+        if admitted_turn_index.is_none() {
+            self.refresh_resident_head_under_lease(session_execution_lease)
+                .await?;
         }
         // `load_session` refreshes the committed graph/head, checkpoint,
         // config, frames, and token ledger. It does not cover pending turn
@@ -135,13 +166,7 @@ impl LashRuntime {
                     TurnStop::InvalidInput,
                 )
                 .await;
-                // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                let turn_index = self
-                    .queued_run
-                    .as_ref()
-                    .map_or(self.state.turn_index + 1, |run| {
-                        run.position.turn_index as usize
-                    });
+                let turn_index = self.physical_turn_index(admitted_turn_index);
                 let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
                 let turn_control_binding =
                     turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller)
@@ -194,13 +219,7 @@ impl LashRuntime {
                 .await;
             }
         };
-        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-        let turn_index = self
-            .queued_run
-            .as_ref()
-            .map_or(self.state.turn_index + 1, |run| {
-                run.position.turn_index as usize
-            });
+        let turn_index = self.physical_turn_index(admitted_turn_index);
         let trace_turn_id = input
             .trace_turn_id
             .clone()

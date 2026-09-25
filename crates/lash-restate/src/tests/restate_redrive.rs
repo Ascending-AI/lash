@@ -2465,7 +2465,6 @@ fn drive_envelope() -> RuntimeEffectEnvelope {
         &durable_turn_scope("session", "turn"),
         &SessionId::from("session"),
         &lash_core::TurnId::from("turn"),
-        1,
     );
     RuntimeEffectEnvelope::new(
         lash_core::runtime::causal::turn_input_drive_effect_invocation(&acceptance),
@@ -2491,6 +2490,15 @@ async fn execute_drive(
                     Ok(RuntimeEffectOutcome::ClaimAcceptedTurnInput {
                         drive: lash_core::AcceptedTurnInputDrive::Claimed {
                             claim: Box::new(journaled_drive_claim(live_generation)),
+                            // What this execution would read from the live
+                            // head: a replay must not see it (FIG-3682).
+                            base: lash_core::store::SessionHeadRef {
+                                generation: 1,
+                                revision: live_generation,
+                                leaf: None,
+                                checkpoint: None,
+                            },
+                            turn_index: live_generation + 1,
                         },
                     })
                 }
@@ -2521,12 +2529,25 @@ async fn accepted_turn_input_drive_replays_the_journaled_claim() {
         "replay returns the journaled drive without claiming live rows"
     );
     let (
-        lash_core::AcceptedTurnInputDrive::Claimed { claim: first },
-        lash_core::AcceptedTurnInputDrive::Claimed { claim: replayed },
+        lash_core::AcceptedTurnInputDrive::Claimed {
+            claim: first,
+            base: first_base,
+            turn_index: first_turn_index,
+        },
+        lash_core::AcceptedTurnInputDrive::Claimed {
+            claim: replayed,
+            base: replayed_base,
+            turn_index: replayed_turn_index,
+        },
     ) = (first, replayed)
     else {
         panic!("both executions drive a claim");
     };
+    // The admission's base head and turn index are the first execution's,
+    // never re-read from the replaying execution's live head (FIG-3682).
+    assert_eq!(replayed_base, first_base);
+    assert_eq!(replayed_base.revision, 3);
+    assert_eq!((first_turn_index, replayed_turn_index), (4, 4));
     assert_eq!(replayed.session_lease_generation, 3);
     assert_eq!(replayed.lease_token, first.lease_token);
     assert_eq!(replayed.inputs[0].input_id, first.inputs[0].input_id);

@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// These declarations retain the component-128 endpoint: the five
+/// These declarations retain the component-129 endpoint: the five
 /// effect-replay constraints component 115 installed, the durable queued-run
 /// admission component 116 adds, the runtime-commit receipt version component
 /// 117 stamps, the NOT NULL `submitted_ingress_json` and
@@ -25,8 +25,10 @@ use super::*;
 /// `drive_admission_id` columns of `lash_session_meta`. Component 128
 /// (FIG-3659) reshapes `lash_turn_parks` into the enriched parked record and
 /// adds `lash_turn_park_clock` and `lash_turn_park_events`, and component
-/// 129 (FIG-3585) drops two runtime-error codes and moves no relation. No arm
-/// targets 128 or 129: the current build refuses every predecessor.
+/// 129 (FIG-3585) drops two runtime-error codes and moves no relation, and
+/// component 130 (FIG-3682) adds the `admission_base_checkpoint_ref` column
+/// of `lash_session_meta`. No arm targets 130: the current build refuses
+/// every predecessor.
 /// Source-shape
 /// declarations remain keyed to this build's catalog for precise older-store
 /// fixture construction.
@@ -85,7 +87,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         // The lists are keyed to the floor, not to one generation: a relation,
         // column, or constraint introduced after 105 belongs here too, so the
         // fixture rebuilds the published component-101 catalog by removing them.
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -112,6 +114,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: ARBITRATION_GUARDS,
         source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
@@ -132,7 +135,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -158,6 +161,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: ARBITRATION_GUARDS,
         source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
@@ -170,7 +174,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -196,6 +200,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: ARBITRATION_GUARDS,
         source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
@@ -207,7 +212,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // models, so a component-104 catalog lacks exactly those columns.
     SchemaMigration {
         from: 104,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -233,6 +238,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: ARBITRATION_GUARDS,
         source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
@@ -245,7 +251,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // parent payload, and the arbitration state alone.
     SchemaMigration {
         from: 105,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -269,6 +275,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: ARBITRATION_GUARDS,
         source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
@@ -283,7 +290,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // to its siblings.
     SchemaMigration {
         from: 106,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -307,6 +314,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_replay", "drain_input"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: ARBITRATION_GUARDS,
         source_missing_foreign_keys: &[REPLAY_GROUP_FOREIGN_KEY],
@@ -323,7 +331,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // 108 added no relational DDL of its own.
     SchemaMigration {
         from: 107,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -347,6 +355,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_group_child", "command_version"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: ARBITRATION_GUARDS,
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -359,7 +368,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // guards a component-107 catalog does against this build.
     SchemaMigration {
         from: 108,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -383,6 +392,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_group_child", "command_version"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: ARBITRATION_GUARDS,
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -405,7 +415,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // columns and guards plus the five effect-replay constraints.
     SchemaMigration {
         from: 109,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -428,6 +438,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_group_child", "command_version"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: ARBITRATION_GUARDS,
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -445,7 +456,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // All are refused at the queued-run cutover.
     SchemaMigration {
         from: 110,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -461,6 +472,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -470,7 +482,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 111,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -486,6 +498,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -495,7 +508,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 112,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -511,6 +524,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -520,7 +534,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 113,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -536,6 +550,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -548,7 +563,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // current component-117 cutover offers no executable migration.
     SchemaMigration {
         from: 114,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -564,6 +579,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -577,7 +593,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // foreign key ride the table drops, so only the relations are enumerated.
     SchemaMigration {
         from: 115,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -593,6 +609,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -611,7 +628,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 116,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -625,6 +642,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -637,7 +655,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // could be claiming.
     SchemaMigration {
         from: 117,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -651,6 +669,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -664,7 +683,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // claiming.
     SchemaMigration {
         from: 118,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -676,6 +695,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -688,7 +708,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // rewound stamp could be claiming.
     SchemaMigration {
         from: 119,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -700,6 +720,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -712,7 +733,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // a rewound stamp could be claiming.
     SchemaMigration {
         from: 120,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -723,6 +744,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_process_segment_handovers", "started_json"),
             ("lash_session_meta", "drive_epoch"),
             ("lash_session_meta", "drive_admission_id"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -737,7 +759,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 121,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -752,6 +774,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_turn_parks", "since_ms"),
             ("lash_turn_parks", "last_refused_ms"),
             ("lash_turn_parks", "attempts"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -764,7 +787,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 122,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -779,6 +802,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_turn_parks", "since_ms"),
             ("lash_turn_parks", "last_refused_ms"),
             ("lash_turn_parks", "attempts"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -792,7 +816,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // could be claiming.
     SchemaMigration {
         from: 123,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -806,6 +830,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_turn_parks", "since_ms"),
             ("lash_turn_parks", "last_refused_ms"),
             ("lash_turn_parks", "attempts"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -822,7 +847,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // claiming.
     SchemaMigration {
         from: 124,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -836,6 +861,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_turn_parks", "since_ms"),
             ("lash_turn_parks", "last_refused_ms"),
             ("lash_turn_parks", "attempts"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -845,7 +871,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 125,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -859,6 +885,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_turn_parks", "since_ms"),
             ("lash_turn_parks", "last_refused_ms"),
             ("lash_turn_parks", "attempts"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -872,7 +899,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // boundary that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 126,
-        to: 128,
+        to: 129,
         source_missing_tables: &[
             "lash_session_ingress",
             "lash_turn_park_clock",
@@ -886,6 +913,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_turn_parks", "since_ms"),
             ("lash_turn_parks", "last_refused_ms"),
             ("lash_turn_parks", "attempts"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
@@ -893,13 +921,13 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_constraints: &[],
         statements: &[],
     },
-    // The immediate predecessor of the retained endpoint 128. A
+    // A predecessor of the retained endpoint 129. A
     // component-127 catalog lacks the feed catalog component 128 (FIG-3659)
     // adds; component 129 is destructive, so the row is a refusal boundary
     // that introduces nothing a rewound stamp could be claiming.
     SchemaMigration {
         from: 127,
-        to: 128,
+        to: 129,
         source_missing_tables: &["lash_turn_park_clock", "lash_turn_park_events"],
         source_missing_columns: &[
             ("lash_turn_parks", "park_id"),
@@ -907,7 +935,24 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_turn_parks", "since_ms"),
             ("lash_turn_parks", "last_refused_ms"),
             ("lash_turn_parks", "attempts"),
+            ("lash_session_meta", "admission_base_checkpoint_ref"),
         ],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
+        introduced_relations: &[],
+        introduced_constraints: &[],
+        statements: &[],
+    },
+    // The immediate predecessor of the retained endpoint 129. Component 129
+    // (FIG-3585) moved no relation, so a component-128 catalog lacks only the
+    // admission-base column component 130 (FIG-3682) adds; component 130 is
+    // destructive, so the row is a refusal boundary that introduces nothing a
+    // rewound stamp could be claiming.
+    SchemaMigration {
+        from: 128,
+        to: 129,
+        source_missing_tables: &[],
+        source_missing_columns: &[("lash_session_meta", "admission_base_checkpoint_ref")],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
         introduced_relations: &[],

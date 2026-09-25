@@ -45,6 +45,8 @@ pub fn turn_effect_invocation(
 /// of the session and the execution scope alone — both of which a replaying
 /// engine reconstructs identically — so a redriven handler journals the same
 /// entry and re-derives the admission instead of admitting a second turn.
+/// Nor does it name a turn index: the drive that admits the turn fixes that,
+/// and anything read before it would come from the live head (FIG-3682).
 #[expect(
     clippy::expect_used,
     reason = "the caller's live effect controller admitted this scope"
@@ -53,7 +55,6 @@ pub fn turn_acceptance_effect_invocation(
     execution_scope: &ExecutionScope,
     session_id: &SessionId,
     turn_id: &TurnId,
-    turn_index: usize,
 ) -> RuntimeEffectInvocation {
     // A process-backed turn still has truthful session/turn attribution, but
     // its acceptance journal entry belongs to the admitted process scope.
@@ -64,7 +65,7 @@ pub fn turn_acceptance_effect_invocation(
     RuntimeEffectInvocation::new(
         EffectAddress::new(execution_scope.clone(), replay_key)
             .expect("turn acceptance uses the already admitted controller scope"),
-        RuntimeAttribution::for_turn(session_id, turn_id, turn_index, 0),
+        RuntimeAttribution::for_turn_admission(session_id, turn_id),
         format!("{turn_id}.accept"),
     )
 }
@@ -689,16 +690,17 @@ mod tests {
             "session:subagent:call:process:subagent:call:3:5:llm_call:7"
         );
 
-        let acceptance =
-            turn_acceptance_effect_invocation(&process_scope, &session_id, &turn_id, 3);
+        let acceptance = turn_acceptance_effect_invocation(&process_scope, &session_id, &turn_id);
         assert_eq!(acceptance.execution_scope(), &process_scope);
         assert_eq!(
             acceptance.attribution.session_id.as_ref(),
             Some(&session_id)
         );
         assert_eq!(acceptance.attribution.turn_id.as_ref(), Some(&turn_id));
-        assert_eq!(acceptance.attribution.turn_index, Some(3));
-        assert_eq!(acceptance.attribution.protocol_iteration, Some(0));
+        // The drive fixes the turn index; nothing before it names one
+        // (FIG-3682).
+        assert_eq!(acceptance.attribution.turn_index, None);
+        assert_eq!(acceptance.attribution.protocol_iteration, None);
         assert_eq!(
             acceptance.replay_key(),
             "session:subagent:call:process:subagent:call:accept_turn_input"
@@ -733,7 +735,7 @@ mod tests {
             EffectId(4),
             RuntimeEffectKind::Checkpoint,
         );
-        let acceptance = turn_acceptance_effect_invocation(&turn_scope, &session_id, &turn_id, 1);
+        let acceptance = turn_acceptance_effect_invocation(&turn_scope, &session_id, &turn_id);
 
         assert_eq!(effect.execution_scope(), &turn_scope);
         assert_eq!(acceptance.execution_scope(), &turn_scope);

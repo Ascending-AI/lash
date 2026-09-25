@@ -39,6 +39,7 @@ mod await_event_cold;
 mod backend;
 mod law_backend;
 pub(crate) use law_backend::{LawBackend, StoreLawBackend, law_session_store};
+mod admitted_head_redrive;
 mod cancelled_turn_withheld_input;
 mod cell_binding_drift;
 pub mod cold_process_turn_parent;
@@ -104,6 +105,7 @@ mod turn_park_feed;
 mod turn_runner;
 mod wake_delivery;
 
+pub use admitted_head_redrive::*;
 pub use artifact_store::*;
 pub use attachment_owner::*;
 pub use attachment_store::*;

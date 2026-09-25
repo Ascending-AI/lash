@@ -235,3 +235,24 @@ pub(crate) fn load_session_meta(
     tx.commit().map_err(sqlite_error)?;
     Ok(Some(meta))
 }
+
+/// Retain `checkpoint_ref` as the checkpoint session `session_id`'s latest
+/// turn was admitted on, replacing the previous admission's (FIG-3682).
+///
+/// A session with no metadata row yet has committed nothing, so its admission
+/// base names no checkpoint and there is nothing to retain.
+pub(crate) fn retain_admission_base_conn(
+    conn: &rusqlite::Connection,
+    session_id: &SessionId,
+    checkpoint_ref: Option<&lash_core_execution::store::BlobRef>,
+) -> Result<(), StoreError> {
+    conn.execute(
+        session_sql().meta.retain_admission_base.sql(),
+        rusqlite::params![
+            session_id.as_str(),
+            checkpoint_ref.map(|blob_ref| blob_ref.as_str())
+        ],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
+}

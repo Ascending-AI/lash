@@ -354,6 +354,13 @@ pub enum StoreError {
     InvalidGraphLeaf { leaf_node_id: Option<NodeId> },
     #[error("node `{node_id}` has no retained continuation anchor")]
     ForkPointNotRetained { node_id: NodeId },
+    /// A replay asked for the head its turn was admitted on, and the store no
+    /// longer holds that head's checkpoint or graph leaf (FIG-3682).
+    #[error(
+        "the session no longer retains the head at revision {revision} that its turn was \
+         admitted on"
+    )]
+    TurnBaseNotRetained { revision: u64 },
     #[error("fork target session `{session_id}` already exists")]
     ForkSessionAlreadyExists { session_id: SessionId },
     #[error(
@@ -809,6 +816,7 @@ impl StoreError {
             Self::GraphGenerationCollision { .. } => "GraphGenerationCollision",
             Self::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
             Self::ForkPointNotRetained { .. } => "ForkPointNotRetained",
+            Self::TurnBaseNotRetained { .. } => "TurnBaseNotRetained",
             Self::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",
             Self::InvalidGraphParent { .. } => "InvalidGraphParent",
             Self::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",

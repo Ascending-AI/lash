@@ -15,6 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::context::EpochMs;
+pub use crate::store::SessionHeadRef;
 use crate::store::{BlobRef, ParkReason, StoreError};
 use crate::{
     AttachmentId, BatchId, FrameNodeId, InputId, NodeId, PluginState, ProtocolTurnOptions,
@@ -94,14 +95,6 @@ impl TurnCommitId {
     pub fn ordinal(&self) -> u32 {
         self.ordinal
     }
-}
-
-/// The session head a commit expects: the state generation and the head
-/// revision.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SessionHeadRef {
-    pub generation: u32,
-    pub revision: u64,
 }
 
 /// The graph nodes one commit appends, with final ids.

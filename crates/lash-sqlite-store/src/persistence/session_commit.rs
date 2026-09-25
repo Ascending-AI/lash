@@ -85,56 +85,42 @@ impl SessionCommitStore for Store {
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
-        let Some(session_id) = self.resolve_session_id_for_read().await? else {
-            return Ok(None);
-        };
+        self.load_session_read(None).await
+    }
+
+    async fn load_session_at(
+        &self,
+        base: &lash_core_execution::store::SessionHeadRef,
+    ) -> Result<PersistedSessionRead, StoreError> {
+        self.load_session_read(Some(base.clone()))
+            .await?
+            .ok_or(StoreError::TurnBaseNotRetained {
+                revision: base.revision,
+            })
+    }
+
+    async fn retain_admission_base(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+        base: &lash_core_execution::store::SessionHeadRef,
+    ) -> Result<(), StoreError> {
+        let lease = lease.clone();
+        let checkpoint_ref = base.checkpoint.clone();
+        let now = self.clock.timestamp_ms();
         self.conn
-            .call(move |conn| {
-                let tx = conn.transaction()?;
-                let outcome: Result<Option<PersistedSessionRead>, StoreError> = (|| {
-                    read_session_state_version_conn(&tx, &session_id)?;
-                    let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id)? else {
-                        return Ok(None);
-                    };
-                    let graph = Self::load_active_path_session_graph_from_conn(
-                        &tx,
-                        &session_id,
-                        meta.leaf_node_id
-                            .clone()
-                            .map(lash_core_execution::NodeId::into_inner),
-                    )?;
-                    let checkpoint = match meta.checkpoint_ref.as_ref() {
-                        Some(blob_ref) => {
-                            Some(Self::get_checkpoint_conn(&tx, blob_ref)?.ok_or_else(|| {
-                                StoreError::CheckpointComponentMissing {
-                                    key: "manifest".to_string(),
-                                    blob_ref: blob_ref.clone(),
-                                }
-                            })?)
-                        }
-                        None => None,
-                    };
-                    Ok(Some(PersistedSessionRead {
-                        session_id: meta.session_id,
-                        head_revision: meta.head_revision,
-                        config: meta.config,
-                        current_frame_node_id: meta.current_frame_node_id,
-                        graph,
-                        checkpoint_ref: meta.checkpoint_ref,
-                        checkpoint,
-                        token_ledger:
-                            lash_core_execution::store::merge_token_ledger_entries_checked(
-                                Self::load_usage_deltas_conn(&tx, &session_id)?,
-                            )?,
-                        turn_failure_settlements: load_turn_failure_settlements_conn(
-                            &tx,
-                            &session_id,
-                        )?,
-                    }))
-                })(
-                );
-                tx.commit()?;
-                Ok(outcome)
+            .write_flow(move |tx| {
+                let outcome = (|| {
+                    ensure_session_execution_lease_conn(tx, &lease.session_id, &lease, now)?;
+                    crate::session_meta::retain_admission_base_conn(
+                        tx,
+                        &lease.session_id,
+                        checkpoint_ref.as_ref(),
+                    )
+                })();
+                Ok(match outcome {
+                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
+                })
             })
             .await
             .map_err(sqlite_error)?
@@ -1527,4 +1513,104 @@ fn insert_graph_nodes_one_at_a_time(
         })?;
     }
     Ok(())
+}
+
+impl Store {
+    /// The live session (`base: None`), or the session as it stood at the head
+    /// one of its turns was admitted on (FIG-3682).
+    ///
+    /// A base read takes the graph along the base leaf and the base
+    /// checkpoint, and the frame nearest the base leaf with that frame's
+    /// configuration when the live head has since moved to another frame. A
+    /// base checkpoint the store no longer holds is
+    /// [`StoreError::TurnBaseNotRetained`], never another head.
+    async fn load_session_read(
+        &self,
+        base: Option<lash_core_execution::store::SessionHeadRef>,
+    ) -> Result<Option<PersistedSessionRead>, StoreError> {
+        let Some(session_id) = self.resolve_session_id_for_read().await? else {
+            return Ok(None);
+        };
+        self.conn
+            .call(move |conn| {
+                let tx = conn.transaction()?;
+                let outcome: Result<Option<PersistedSessionRead>, StoreError> = (|| {
+                    read_session_state_version_conn(&tx, &session_id)?;
+                    let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id)? else {
+                        return Ok(None);
+                    };
+                    let (head_revision, leaf_node_id, checkpoint_ref) = match base.as_ref() {
+                        None => (
+                            meta.head_revision,
+                            meta.leaf_node_id.clone(),
+                            meta.checkpoint_ref.clone(),
+                        ),
+                        Some(base) => (base.revision, base.leaf.clone(), base.checkpoint.clone()),
+                    };
+                    let graph = Self::load_active_path_session_graph_from_conn(
+                        &tx,
+                        &session_id,
+                        leaf_node_id
+                            .clone()
+                            .map(lash_core_execution::NodeId::into_inner),
+                    )?;
+                    let checkpoint = match checkpoint_ref.as_ref() {
+                        Some(blob_ref) => Some(match Self::get_checkpoint_conn(&tx, blob_ref)? {
+                            Some(checkpoint) => checkpoint,
+                            None if base.is_some() => {
+                                return Err(StoreError::TurnBaseNotRetained {
+                                    revision: head_revision,
+                                });
+                            }
+                            None => {
+                                return Err(StoreError::CheckpointComponentMissing {
+                                    key: "manifest".to_string(),
+                                    blob_ref: blob_ref.clone(),
+                                });
+                            }
+                        }),
+                        None => None,
+                    };
+                    let (current_frame_node_id, config) = match leaf_node_id.as_ref() {
+                        Some(leaf)
+                            if base.is_some() && meta.leaf_node_id.as_ref() != Some(leaf) =>
+                        {
+                            let frame = super::nearest_frame_node_id_conn(&tx, leaf.as_str())?
+                                .and_then(|frame| {
+                                    lash_core_execution::FrameNodeId::new(frame).ok()
+                                });
+                            let frame_config = frame
+                                .as_ref()
+                                .filter(|frame| meta.current_frame_node_id.as_ref() != Some(*frame))
+                                .and_then(|frame| graph.find_node(frame.as_str()))
+                                .and_then(lash_core_execution::SessionNodeRecord::frame_config);
+                            (frame, frame_config.unwrap_or(meta.config))
+                        }
+                        _ => (meta.current_frame_node_id, meta.config),
+                    };
+                    Ok(Some(PersistedSessionRead {
+                        session_id: meta.session_id,
+                        head_revision,
+                        config,
+                        current_frame_node_id,
+                        graph,
+                        checkpoint_ref,
+                        checkpoint,
+                        token_ledger:
+                            lash_core_execution::store::merge_token_ledger_entries_checked(
+                                Self::load_usage_deltas_conn(&tx, &session_id)?,
+                            )?,
+                        turn_failure_settlements: load_turn_failure_settlements_conn(
+                            &tx,
+                            &session_id,
+                        )?,
+                    }))
+                })(
+                );
+                tx.commit()?;
+                Ok(outcome)
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
 }

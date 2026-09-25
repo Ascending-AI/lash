@@ -286,8 +286,6 @@ impl LashRuntime {
             scoped_effect_controller.execution_scope(),
             &self.state.session_id,
             &trace_turn_id,
-            // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-            self.state.turn_index + 1,
         );
         let accepted = scoped_effect_controller
             .execute_effect(
@@ -344,6 +342,27 @@ impl LashRuntime {
         // nothing `vacuum()` prunes can change what a replay drives (ADR 0069
         // §6). The commit then either settles those rows or finds the first
         // execution's receipt and replays it.
+        //
+        // The drive is also the turn's admission. Its first execution records
+        // the head the turn is admitted on and the turn's index, so the
+        // resident head is brought current under the lease first; a replay
+        // reads both from the journal instead (FIG-3682).
+        if let Err(error) = self
+            .refresh_resident_head_under_lease(session_execution_lease.as_ref())
+            .await
+        {
+            if let Some(lease) = session_execution_lease.as_ref() {
+                let _ = lease.release_if_live().await;
+            }
+            return Err(aborted(error));
+        }
+        let admission_head = crate::store::SessionHeadRef {
+            // Read by the drive body on its first execution.
+            generation: 0,
+            revision: self.state.head_revision,
+            leaf: self.state.session_graph.leaf_node_id.clone(),
+            checkpoint: self.state.checkpoint_ref.clone(),
+        };
         let drive_fence = session_execution_lease
             .as_ref()
             .map(SessionExecutionLeaseGuard::fence)
@@ -363,6 +382,9 @@ impl LashRuntime {
                         fence: drive_fence,
                         owner: self.runtime_lease_owner.clone(),
                         accepted: accepted.clone(),
+                        base: admission_head,
+                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                        turn_index: self.state.turn_index + 1,
                         max_inputs: self
                             .host
                             .core
@@ -386,7 +408,36 @@ impl LashRuntime {
             .and_then(crate::RuntimeEffectOutcome::into_accepted_turn_input_drive)
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error);
         let drive = match drive {
-            Ok(crate::AcceptedTurnInputDrive::Claimed { claim }) => *claim,
+            Ok(crate::AcceptedTurnInputDrive::Claimed {
+                claim,
+                base,
+                turn_index,
+            }) => {
+                if let Err(error) = self
+                    .adopt_admitted_turn(
+                        &store,
+                        &base,
+                        turn_index,
+                        &trace_turn_id,
+                        &accepted.input_id,
+                    )
+                    .await
+                {
+                    self.bind_drive_claim_after_abort(
+                        DriveClaimToBind::Claim(&claim),
+                        &accepted.input_id,
+                        &trace_turn_id,
+                    )
+                    .await;
+                    self.record_turn_park_after_abort(&error, &trace_turn_id)
+                        .await;
+                    if let Some(lease) = session_execution_lease.as_ref() {
+                        let _ = lease.release_if_live().await;
+                    }
+                    return Err(aborted(error));
+                }
+                *claim
+            }
             Ok(crate::AcceptedTurnInputDrive::Queued { ahead }) => {
                 // No turn runs: the accepted row waits in arrival order and
                 // the queued-work drain answers it. The call reports that as
@@ -491,6 +542,7 @@ impl LashRuntime {
         ))
         .await;
         self.journaled_drive_claims.remove(&drive_claim.claim_id);
+        self.admitted_turn_index = None;
         if result.is_err() {
             // The aborted turn keeps its claim and its `Err` names the input:
             // bind the claim to the turn before the lease is released, so no
@@ -515,6 +567,87 @@ impl LashRuntime {
         }
         run.acceptance = Some(acceptance);
         Ok(run)
+    }
+
+    /// Adopt the head a direct turn was admitted on and pin its recorded turn
+    /// index for the prepare phase (FIG-3682).
+    ///
+    /// The resident head is the live one, refreshed under the lease. When it
+    /// is still the admitted base, nothing is read. When it moved:
+    ///
+    /// * the turn's own commit moved it (a redrive after the commit): the
+    ///   turn is rebuilt from its base, so its replay issues the effects its
+    ///   journal holds and its commit replays the committed receipt;
+    /// * another driver answered the turn's rows while it was down: the turn
+    ///   cedes, exactly as its commit would;
+    /// * anything else moved it under the uncommitted turn: the turn parks as
+    ///   a replay divergence. It is never driven on a head it was not
+    ///   admitted on.
+    ///
+    /// A base the store no longer retains parks the turn too.
+    async fn adopt_admitted_turn(
+        &mut self,
+        store: &Arc<dyn crate::store::RuntimePersistence>,
+        base: &crate::store::SessionHeadRef,
+        turn_index: u64,
+        turn_id: &TurnId,
+        accepted_input_id: &crate::InputId,
+    ) -> Result<(), RuntimeError> {
+        let turn_index = usize::try_from(turn_index).map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "admitted turn index exceeds platform range",
+            )
+        })?;
+        let head_moved = self.state.head_revision != base.revision
+            || self.state.session_graph.leaf_node_id != base.leaf
+            || self.state.checkpoint_ref != base.checkpoint;
+        if head_moved
+            && !store
+                .committed_turn_exists(turn_id)
+                .await
+                .map_err(super::runtime_error_from_store_commit)?
+        {
+            let open = store
+                .list_pending_turn_inputs(&self.state.session_id)
+                .await
+                .map_err(super::runtime_error_from_store_commit)?;
+            if !open
+                .iter()
+                .any(|read| read.input.input_id == *accepted_input_id)
+            {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::AcceptedTurnInputCeded,
+                    format!(
+                        "accepted turn input `{accepted_input_id}` was answered by another \
+                         driver while turn `{turn_id}` was down, so this turn cedes and \
+                         commits nothing"
+                    ),
+                ));
+            }
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::EffectReplayDivergence,
+                format!(
+                    "the session head moved from revision {} to {} under turn `{turn_id}` \
+                     before it committed; the turn is not driven on a head it was not \
+                     admitted on",
+                    base.revision, self.state.head_revision
+                ),
+            ));
+        }
+        self.adopt_admission_base(base)
+            .await
+            .map_err(|error| match error {
+                SessionError::Store {
+                    source: source @ crate::StoreError::TurnBaseNotRetained { .. },
+                    ..
+                } => {
+                    RuntimeError::new(RuntimeErrorCode::EffectReplayDivergence, source.to_string())
+                }
+                error => session_head_refresh_error(error),
+            })?;
+        self.admitted_turn_index = Some(turn_index);
+        Ok(())
     }
 
     pub async fn run_turn_assembled(

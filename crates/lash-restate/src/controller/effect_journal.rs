@@ -41,7 +41,11 @@ use serde::{Deserialize, Serialize};
 /// a journal written under an earlier generation may hold such a fault as the
 /// step's recorded outcome, which replaying would surface forever, so those
 /// journals are refused rather than replayed.
-pub const EFFECT_JOURNAL_VERSION: u32 = 5;
+/// 6: a turn's admission records the head it was admitted on and its turn
+/// index in its journaled drive outcome, and the acceptance names no turn index
+/// read from the live head, so a replay after the turn's own commit rebuilds
+/// the turn from its recorded base (FIG-3682).
+pub const EFFECT_JOURNAL_VERSION: u32 = 6;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

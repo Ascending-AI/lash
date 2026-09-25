@@ -159,6 +159,9 @@ const PARK_FEED_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const NATIVE_CUT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-121-298e495cd/postgres-expected.json",
 ];
+const ADMISSION_BASE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-122-60e0e86b2/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -303,7 +306,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 129);
+    assert_eq!(PostgresStorage::schema_version(), 130);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -692,11 +695,12 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     sqlx::raw_sql(
         "ALTER TABLE lash_session_meta
              ADD COLUMN IF NOT EXISTS drive_epoch BIGINT NOT NULL DEFAULT 0,
-             ADD COLUMN IF NOT EXISTS drive_admission_id TEXT;",
+             ADD COLUMN IF NOT EXISTS drive_admission_id TEXT,
+             ADD COLUMN IF NOT EXISTS admission_base_checkpoint_ref TEXT;",
     )
     .execute(&pool)
     .await
-    .expect("add the drive epoch to the session metadata");
+    .expect("add the drive epoch and the admission base to the session metadata");
     // Component 128 (FIG-3659) reshapes the parked-turn row and adds the feed
     // clock and event tables. The refusal fixture's park row predates them,
     // so the park catalog is discarded and recreated from the authoritative
