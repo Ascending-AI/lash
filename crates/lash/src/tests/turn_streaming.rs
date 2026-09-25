@@ -1,6 +1,6 @@
 use super::*;
 #[cfg(feature = "rlm")]
-use crate::rlm::RlmTurnBuilderExt as _;
+use crate::rlm::{RlmSendBuilderExt as _, RlmTurnBuilderExt as _};
 use futures_util::StreamExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;

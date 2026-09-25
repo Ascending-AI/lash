@@ -96,8 +96,8 @@ async fn first_boot(root: std::path::PathBuf) -> ProcessId {
         .await
         .expect("open the session");
     let started = session
-        .turn(TurnInput::text("start the parked worker"))
-        .run()
+        .send(TurnInput::text("start the parked worker"))
+        .output()
         .await
         .expect("run the starting turn");
     let process_id = ProcessId::from(

@@ -479,8 +479,8 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     let events = Arc::new(RecordingEvents::default());
 
     let turn_output = session
-        .turn(TurnInput::text(case.root_prompt))
-        .stream_to(events.as_ref())
+        .send(TurnInput::text(case.root_prompt))
+        .output_into(events.as_ref())
         .await?;
     session.refresh_background_graph().await?;
     if !case.expects_refused_cell {
@@ -1194,8 +1194,8 @@ finish(await handle);"#,
         .open()
         .await?;
     let result = session
-        .turn(TurnInput::text("Enrich the email in a durable process."))
-        .run()
+        .send(TurnInput::text("Enrich the email in a durable process."))
+        .output()
         .await?;
     assert_eq!(
         result.final_value(),
@@ -1238,10 +1238,10 @@ finish(await handle);"#,
         .open()
         .await?;
     let result = session
-        .turn(TurnInput::text(
+        .send(TurnInput::text(
             "Retry the complete atomic tool attempt once.",
         ))
-        .run()
+        .output()
         .await?;
     assert_eq!(
         result.final_value(),

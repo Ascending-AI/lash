@@ -100,8 +100,8 @@ pub(super) async fn stream_returns_terminal_metadata_without_prose() -> Result<(
     let events = RecordingEvents::default();
 
     let result = session
-        .turn(TurnInput::text("stream"))
-        .stream_to(&events)
+        .send(TurnInput::text("stream"))
+        .output_into(&events)
         .await?;
 
     assert!(matches!(
@@ -139,8 +139,8 @@ pub(super) async fn stream_emits_chronological_tool_events_without_prose_polluti
     let events = RecordingEvents::default();
 
     let collected = session
-        .turn(TurnInput::text("use tool"))
-        .stream_to(&events)
+        .send(TurnInput::text("use tool"))
+        .output_into(&events)
         .await?;
 
     assert!(matches!(
@@ -237,8 +237,8 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
     let session = core.session("interleaved-standard-order").open().await?;
 
     let result = session
-        .turn(TurnInput::text("preserve every part"))
-        .run()
+        .send(TurnInput::text("preserve every part"))
+        .output()
         .await?;
 
     let read_view = result
@@ -382,8 +382,8 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
         let events = Arc::new(RecordingEvents::default());
 
         let result = session
-            .turn(TurnInput::text("say hi"))
-            .stream_to(events.as_ref())
+            .send(TurnInput::text("say hi"))
+            .output_into(events.as_ref())
             .await?;
 
         assert!(matches!(
@@ -466,7 +466,7 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
         let core = rlm_abort_drain_core(provider).await?;
         let session = core.session("rlm-abort-reset").open().await?;
 
-        let result = session.turn(TurnInput::text("finish")).run().await?;
+        let result = session.send(TurnInput::text("finish")).output().await?;
 
         assert_eq!(
             result.final_value(),
@@ -547,7 +547,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-abort-late-events").open().await?;
 
-        let result = session.turn(TurnInput::text("finish")).run().await?;
+        let result = session.send(TurnInput::text("finish")).output().await?;
 
         assert_eq!(result.result.usage.input_tokens, 17);
         assert_eq!(result.result.usage.output_tokens, 5);
@@ -765,7 +765,7 @@ pub(super) fn rlm_turn_without_interruption_or_usage_writes_no_ledger_row() -> R
             .into_handle();
         let core = rlm_abort_drain_core(provider).await?;
         let session = core.session("rlm-zero-usage").open().await?;
-        let result = session.turn(TurnInput::text("finish")).run().await?;
+        let result = session.send(TurnInput::text("finish")).output().await?;
         assert_eq!(result.final_value(), Some(&serde_json::json!("quiet")));
         let attempt = result
             .result
@@ -811,8 +811,8 @@ finish("done");"#,
     let events = Arc::new(RecordingEvents::default());
 
     let result = session
-        .turn(TurnInput::text("use tool"))
-        .stream_to(events.as_ref())
+        .send(TurnInput::text("use tool"))
+        .output_into(events.as_ref())
         .await?;
 
     assert!(matches!(
@@ -987,8 +987,8 @@ finish("recovered");"#,
         let session = core.session("rlm-recovered-tool-failure").open().await?;
 
         let result = session
-            .turn(TurnInput::text("recover the tool failure"))
-            .run()
+            .send(TurnInput::text("recover the tool failure"))
+            .output()
             .await?
             .result;
 
@@ -1029,8 +1029,8 @@ finish("done");"#,
     let events = Arc::new(RecordingEvents::default());
 
     let result = session
-        .turn(TurnInput::text("use tools"))
-        .stream_to(events.as_ref())
+        .send(TurnInput::text("use tools"))
+        .output_into(events.as_ref())
         .await?;
     assert!(matches!(
         result.outcome,
@@ -1102,7 +1102,7 @@ finish("done");"#,
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-tool-trace").open().await?;
 
-    let result = session.turn(TurnInput::text("use tool")).run().await?;
+    let result = session.send(TurnInput::text("use tool")).output().await?;
     assert!(matches!(
         result.result.outcome,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
@@ -1236,8 +1236,8 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
         let session = core.session("rlm-native-tool-contract").open().await?;
 
         let turn = session
-            .turn(TurnInput::text("trigger native provider tool call"))
-            .run()
+            .send(TurnInput::text("trigger native provider tool call"))
+            .output()
             .await?;
 
         assert_eq!(
@@ -1474,7 +1474,10 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
     let session = core.session("continue-as-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
-    let output = session.turn(TurnInput::text("switch frames")).run().await?;
+    let output = session
+        .send(TurnInput::text("switch frames"))
+        .output()
+        .await?;
     assert_eq!(
         output.final_value(),
         Some(&serde_json::json!("done after continue_as"))
@@ -1532,8 +1535,8 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
     let session = core.session(session_id).open().await?;
 
     let first = session
-        .turn(TurnInput::text("plain finish with nested append"))
-        .run()
+        .send(TurnInput::text("plain finish with nested append"))
+        .output()
         .await?;
     assert_eq!(
         first.final_value(),
@@ -1541,8 +1544,8 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
     );
     assert_eq!(append_count.load(Ordering::SeqCst), 1);
     let second = session
-        .turn(TurnInput::text("continue without another nested append"))
-        .run()
+        .send(TurnInput::text("continue without another nested append"))
+        .output()
         .await?;
     assert_eq!(
         second.final_value(),
@@ -1595,8 +1598,8 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
     let session = core.session(session_id).open().await?;
 
     let output = session
-        .turn(TurnInput::text("switch frames in process"))
-        .run()
+        .send(TurnInput::text("switch frames in process"))
+        .output()
         .await?;
 
     assert_eq!(append_count.load(Ordering::SeqCst), 1);
