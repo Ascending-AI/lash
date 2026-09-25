@@ -201,6 +201,10 @@ pub struct RestateSessionWork {
     slot: RestateSessionDriverSlot,
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the ingress client's RestateHttpError is unboxed across its public API"
+)]
 impl RestateSessionWork {
     pub(crate) fn new(ingress: RestateIngressClient, slot: RestateSessionDriverSlot) -> Self {
         Self { ingress, slot }

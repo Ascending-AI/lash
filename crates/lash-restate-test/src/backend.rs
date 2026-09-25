@@ -207,6 +207,10 @@ impl RestateTestBackend {
         );
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the ingress client's RestateHttpError is unboxed across its public API"
+    )]
     /// Attach to `request`'s drive of `session` on the engine and return how
     /// it ended. The drive is the one the request's schedule sent, or, when
     /// none was sent, one this call starts under the same idempotency key.
