@@ -579,6 +579,12 @@ impl lash_core_execution::Backend for SqliteBackend {
         SqliteBackend::attachment_store(self)
     }
 
+    /// The durable-core store that keeps the process execution environments
+    /// keeps the Lashlang module artifacts too.
+    fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
+        SqliteBackend::process_env_store(self)
+    }
+
     /// The runtime's in-process worker drives this backend's registry.
     fn process_work(&self) -> Option<lash_core_execution::ProcessWorkWiring> {
         None
@@ -623,20 +629,10 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
     fn attachment_store(&self) -> Arc<dyn lash_core_execution::AttachmentStore> {
         SqliteStoreSet::attachment_store(self)
     }
-}
 
-/// The durable-core store that keeps this backend's process execution
-/// environments keeps its Lashlang module artifacts too.
-#[cfg(feature = "lashlang")]
-impl lashlang::LashlangArtifactBackend for SqliteBackend {
-    fn lashlang_artifact_store(&self) -> Arc<dyn lashlang::LashlangArtifactStore> {
-        SqliteBackend::process_env_store(self)
-    }
-}
-
-#[cfg(feature = "lashlang")]
-impl lashlang::LashlangArtifactStoreSet for SqliteStoreSet {
-    fn lashlang_artifact_store(&self) -> Arc<dyn lashlang::LashlangArtifactStore> {
+    /// The durable-core store that keeps the process execution environments
+    /// keeps the Lashlang module artifacts too.
+    fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
         SqliteStoreSet::process_env_store(self)
     }
 }

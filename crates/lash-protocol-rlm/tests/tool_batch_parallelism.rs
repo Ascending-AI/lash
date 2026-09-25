@@ -34,7 +34,7 @@ use lash_core::EffectHost;
 /// wrongly either advertises an ability the engine does not offer or hides one
 /// it does.
 fn rlm_factory(
-    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+    backend: &dyn lash_core::Backend,
     process_lifecycle: bool,
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(
@@ -53,7 +53,7 @@ fn rlm_factory(
 
 /// The cell-bridge producer's factories: the RLM protocol and nothing else.
 fn cell_bridge_factories(
-    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+    backend: &dyn lash_core::Backend,
 ) -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
     vec![rlm_factory(backend, false)]
 }
@@ -64,7 +64,7 @@ fn cell_bridge_factories(
 /// process needs the plugin that supplies that surface; without it the cell
 /// dies on an unknown `processes` module long before any batch is issued.
 fn process_bridge_factories(
-    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+    backend: &dyn lash_core::Backend,
 ) -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
     vec![
         rlm_factory(backend, true),

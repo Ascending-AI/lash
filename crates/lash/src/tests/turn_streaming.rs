@@ -449,11 +449,9 @@ impl EffectRecorder {
         backend: Arc<lash_sqlite_store::SqliteBackend>,
     ) -> Arc<DecoratedBackend> {
         let layer = Arc::new(self.clone());
-        Arc::new(
-            DecoratedBackend::over_sqlite(backend).effect_host(move |inner| {
-                Arc::new(lash_core::testing::LayeredEffectHost::new(inner, layer))
-            }),
-        )
+        Arc::new(DecoratedBackend::over(backend).effect_host(move |inner| {
+            Arc::new(lash_core::testing::LayeredEffectHost::new(inner, layer))
+        }))
     }
 }
 

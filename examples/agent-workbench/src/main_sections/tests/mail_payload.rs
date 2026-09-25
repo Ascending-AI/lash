@@ -79,21 +79,23 @@ async fn inject_message_scopes_emission_to_requested_session() {
     };
     let linked =
         lash::rlm::LinkedModule::link(module, environment).expect("link mail-listener process");
-    let artifact_store = lash_sqlite_store::Store::open(
-        &data_dir
-            .path()
-            .join("lash-sessions")
-            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-    )
-    .await
-    .expect("open workbench Lashlang artifact store");
-    lash::persistence::LashlangArtifactStore::publish_module_artifact(
-        &artifact_store,
-        &lash::process::ArtifactOwner::host("mail-payload-test"),
-        &linked.artifact,
-    )
-    .await
-    .expect("publish mail-listener module");
+    let artifact_store = lash::persistence::LashlangArtifacts::new(Arc::new(
+        lash_sqlite_store::Store::open(
+            &data_dir
+                .path()
+                .join("lash-sessions")
+                .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+        )
+        .await
+        .expect("open workbench Lashlang artifact store"),
+    ));
+    artifact_store
+        .publish_module_artifact(
+            &lash::process::ArtifactOwner::host("mail-payload-test"),
+            &linked.artifact,
+        )
+        .await
+        .expect("publish mail-listener module");
     let process_input = lash_lashlang_runtime::LashlangProcessInput {
         module_ref: linked.artifact.module_ref().clone(),
         process_ref: linked

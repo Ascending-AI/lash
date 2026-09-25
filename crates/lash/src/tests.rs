@@ -803,10 +803,7 @@ struct ReusableStoreFactory {
 pub(crate) async fn backend_with_catalog(
     catalog: Arc<dyn lash_core::SessionStoreFactory>,
 ) -> Arc<DecoratedBackend> {
-    Arc::new(
-        DecoratedBackend::over_sqlite(memory_backend().await)
-            .session_store_factory(move |_| catalog),
-    )
+    Arc::new(DecoratedBackend::over(memory_backend().await).session_store_factory(move |_| catalog))
 }
 
 /// A memory backend whose catalog serves `store` for every session id:
@@ -816,7 +813,7 @@ pub(crate) async fn backend_serving(
     store: Arc<dyn lash_core::RuntimePersistence>,
 ) -> Arc<DecoratedBackend> {
     Arc::new(
-        DecoratedBackend::over_sqlite(memory_backend().await)
+        DecoratedBackend::over(memory_backend().await)
             .session_store_factory(move |_| Arc::new(ReusableStoreFactory { store })),
     )
 }
@@ -2367,9 +2364,7 @@ pub(crate) fn standard_core_over(backend: Arc<dyn lash_core::Backend>) -> LashCo
 /// Default RLM protocol factory for tests, over `backend`, the substrate its
 /// Lashlang artifacts live in.
 #[cfg(feature = "rlm")]
-fn rlm_factory(
-    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
-) -> lash_protocol_rlm::RlmProtocolPluginFactory {
+fn rlm_factory(backend: &dyn lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -2390,9 +2385,7 @@ async fn rlm_core_builder() -> crate::core::LashCoreBuilder {
 /// [`rlm_core_builder`] over `backend`: the core and its RLM factory share
 /// the one backend.
 #[cfg(feature = "rlm")]
-fn rlm_core_builder_over(
-    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
-) -> crate::core::LashCoreBuilder {
+fn rlm_core_builder_over(backend: Arc<dyn lash_core::Backend>) -> crate::core::LashCoreBuilder {
     let factory = rlm_factory(backend.as_ref());
     LashCore::rlm_builder(
         backend as Arc<dyn lash_core::Backend>,

@@ -1,6 +1,6 @@
 use super::*;
 use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
-use lashlang::LashlangArtifactStore;
+use lash_core_execution::ModuleArtifactStore;
 
 fn assert_corrupt<T>(result: Result<T, StoreError>, expected_kind: &'static str) {
     match result {
@@ -26,10 +26,10 @@ fn assert_storage_failure<T>(label: &str, result: Result<T, StoreError>) {
 
 fn assert_artifact_storage_failure<T>(
     label: &str,
-    result: Result<T, lashlang::ArtifactStoreError>,
+    result: Result<T, lash_core::ArtifactStoreError>,
 ) {
     match result {
-        Err(lashlang::ArtifactStoreError::Backend(message)) => assert!(
+        Err(lash_core::ArtifactStoreError::Backend(message)) => assert!(
             message.starts_with("sqlite storage failure:"),
             "expected SQLite storage failure from {label}, got {message}"
         ),
@@ -535,16 +535,14 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         params![MODULE_ARTIFACT_NAMESPACE],
     )
     .expect("insert dangling artifact reference");
-    let dangling_ref: lashlang::ModuleRef =
-        serde_json::from_value(serde_json::json!("dangling-artifact")).unwrap();
     let artifact_error = store
-        .get_module_artifact(&dangling_ref)
+        .get_module_artifact("dangling-artifact")
         .await
         .expect_err("dangling artifact reference must fail");
     assert!(
         matches!(
             artifact_error,
-            lashlang::ArtifactStoreError::Backend(ref message)
+            lash_core::ArtifactStoreError::Backend(ref message)
                 if message.contains("stored artifact reference data is corrupt")
         ),
         "expected mapped StoredDataCorrupt for dangling artifact reference, got {artifact_error:?}"
@@ -709,20 +707,21 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
             .await,
     );
 
-    assert_artifact_storage_failure(
-        "publish_module_artifact",
+    assert_artifact_storage_failure("publish_module_artifact", {
+        let module = lashlang::ModuleArtifact::from_program({
+            use lashlang::testing::ast_builders as b;
+
+            b::program(vec![b::finish(b::bool_lit(true))])
+        })
+        .expect("build module");
         store
             .publish_module_artifact(
                 &lash_core_execution::ArtifactOwner::host("readonly-test"),
-                &lashlang::ModuleArtifact::from_program({
-                    use lashlang::testing::ast_builders as b;
-
-                    b::program(vec![b::finish(b::bool_lit(true))])
-                })
-                .expect("build module"),
+                module.module_ref().as_str(),
+                &module.to_store_bytes().expect("encode module"),
             )
-            .await,
-    );
+            .await
+    });
 
     let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from("readonly-session"),

@@ -8,13 +8,12 @@ use super::*;
 #[tokio::test]
 async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let sink = CollectingProcessEventSink::default();
     let core = process_test_core_with_sink(backend.clone(), Arc::new(sink.clone()))?;
     let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
+        &artifact_store,
         // process main() signals { ready: any } {
         //   value = wait_signal("ready")
         //   finish value

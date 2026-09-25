@@ -24,13 +24,8 @@ const CONTRACT_SEED: u64 = 0x5eed_c047;
 
 /// The contract world: a sim engine and the backend its cores run on,
 /// observed when a checkpoint collector is installed.
-async fn contract_world() -> Result<
-    (
-        crate::backend::SimEngine,
-        Arc<dyn lash::persistence::LashlangArtifactBackend>,
-    ),
-    FixedScriptRunnerError,
-> {
+async fn contract_world()
+-> Result<(crate::backend::SimEngine, Arc<dyn lash::Backend>), FixedScriptRunnerError> {
     let collector = CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| slot.borrow().clone());
     let engine = crate::backend::SimEngine::new(CONTRACT_SEED).await?;
     let mut backend = crate::backend::DecoratedBackend::over_engine(&engine);

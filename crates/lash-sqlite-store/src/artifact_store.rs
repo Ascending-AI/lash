@@ -20,7 +20,6 @@ use lash_store_sql::artifact::owner_retirements::OwnerRetirementStatements;
 use lash_store_sql::artifact::owners::OwnerStatements;
 
 use super::*;
-#[cfg(feature = "lashlang")]
 use lash_sansio::sync::MutexExt;
 
 lash_store_sql::statements! {
@@ -383,157 +382,130 @@ impl Store {
     }
 }
 
-#[cfg(feature = "lashlang")]
 #[async_trait::async_trait]
-impl lashlang::LashlangArtifactStore for Store {
-    fn pause_next_publication_for_testing(&self) -> Option<lashlang::ArtifactPublicationPause> {
-        let pause = lashlang::ArtifactPublicationPause::default();
+impl lash_core_execution::ModuleArtifactStore for Store {
+    fn pause_next_publication_for_testing(
+        &self,
+    ) -> Option<lash_core_execution::ArtifactPublicationPause> {
+        let pause = lash_core_execution::ArtifactPublicationPause::default();
         *self.artifact_publication_pause.lock_recover() = Some(pause.clone());
         Some(pause)
     }
 
-    fn durability_tier(&self) -> lashlang::DurabilityTier {
-        lashlang::DurabilityTier::Durable
+    fn durability_tier(&self) -> lash_core_execution::DurabilityTier {
+        lash_core_execution::DurabilityTier::Durable
     }
 
     async fn publish_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-        artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(artifact.module_ref().as_str()) {
-            return Err(lashlang::ArtifactStoreError::Backend(
+        module_ref: &str,
+        bytes: &[u8],
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref) {
+            return Err(lash_core_execution::ArtifactStoreError::Backend(
                 "invalid module reference".into(),
             ));
         }
-        let bytes = artifact
-            .to_store_bytes()
-            .map_err(|err| lashlang::ArtifactStoreError::Encode(err.to_string()))?;
-        let artifact_ref = artifact.module_ref().as_str().to_string();
         let publication_pause = self.artifact_publication_pause.lock_recover().take();
         if let Some(pause) = publication_pause {
             pause.pause().await;
         }
         self.publish_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
-            artifact_ref,
+            module_ref.to_string(),
             BlobArtifactDescriptor::lashlang_module(),
-            bytes,
+            bytes.to_vec(),
             owner.clone(),
         )
         .await
-        .map_err(lashlang::ArtifactStoreError::from)?;
-        self.artifact_cache
-            .lock_recover()
-            .insert(artifact.module_ref().clone(), Arc::new(artifact.clone()));
-        Ok(())
+        .map_err(lash_core_execution::ArtifactStoreError::from)
     }
 
     async fn retain_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        module_ref: &str,
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
         let bytes = self
             .get_artifact_ref_blob(
                 MODULE_ARTIFACT_NAMESPACE,
-                module_ref.as_str().to_string(),
+                module_ref.to_string(),
                 format!("lashlang module artifact `{module_ref}`"),
             )
             .await
-            .map_err(lashlang::ArtifactStoreError::from)?
+            .map_err(lash_core_execution::ArtifactStoreError::from)?
             .ok_or_else(|| {
-                lashlang::ArtifactStoreError::Backend(format!(
+                lash_core_execution::ArtifactStoreError::Backend(format!(
                     "missing module artifact `{module_ref}`"
                 ))
             })?;
         self.publish_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
-            module_ref.as_str().to_string(),
+            module_ref.to_string(),
             BlobArtifactDescriptor::lashlang_module(),
             bytes,
             owner.clone(),
         )
         .await
-        .map_err(lashlang::ArtifactStoreError::from)
+        .map_err(lash_core_execution::ArtifactStoreError::from)
     }
 
     async fn transfer_module_artifact(
         &self,
         from: &lash_core_execution::ArtifactOwner,
         to: &lash_core_execution::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        module_ref: &str,
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
         self.transfer_artifact_ref_owner(
             MODULE_ARTIFACT_NAMESPACE,
-            module_ref.as_str().to_string(),
+            module_ref.to_string(),
             from.clone(),
             to.clone(),
         )
         .await
-        .map_err(lashlang::ArtifactStoreError::from)
+        .map_err(lash_core_execution::ArtifactStoreError::from)
     }
 
     async fn release_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        module_ref: &str,
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
         self.release_artifact_ref_owner(
             MODULE_ARTIFACT_NAMESPACE,
-            module_ref.as_str().to_string(),
+            module_ref.to_string(),
             owner.clone(),
         )
         .await
-        .map_err(lashlang::ArtifactStoreError::from)?;
-        self.artifact_cache.lock_recover().remove(module_ref);
-        Ok(())
+        .map_err(lash_core_execution::ArtifactStoreError::from)
     }
 
     async fn retire_module_artifact_owner(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
         self.retire_artifact_owner(MODULE_ARTIFACT_NAMESPACE, owner.clone())
             .await
-            .map_err(lashlang::ArtifactStoreError::from)?;
-        self.artifact_cache.lock_recover().clear();
-        Ok(())
+            .map_err(lash_core_execution::ArtifactStoreError::from)
     }
 
     async fn get_module_artifact(
         &self,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(module_ref.as_str()) {
-            return Err(lashlang::ArtifactStoreError::Backend(
+        module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core_execution::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref) {
+            return Err(lash_core_execution::ArtifactStoreError::Backend(
                 "invalid module reference".into(),
             ));
         }
-        let artifact_ref = module_ref.as_str().to_string();
-        let Some(bytes) = self
-            .get_artifact_ref_blob(
-                MODULE_ARTIFACT_NAMESPACE,
-                artifact_ref,
-                format!("lashlang module artifact `{module_ref}`"),
-            )
-            .await
-            .map_err(lashlang::ArtifactStoreError::from)?
-        else {
-            self.artifact_cache.lock_recover().remove(module_ref);
-            return Ok(None);
-        };
-        if let Some(artifact) = self.artifact_cache.lock_recover().get(module_ref).cloned() {
-            return Ok(Some(artifact));
-        }
-        let artifact = Arc::new(
-            lashlang::ModuleArtifact::from_store_bytes(&bytes)
-                .map_err(lashlang::ArtifactStoreError::from)?,
-        );
-        self.artifact_cache
-            .lock_recover()
-            .insert(module_ref.clone(), artifact.clone());
-        Ok(Some(artifact))
+        self.get_artifact_ref_blob(
+            MODULE_ARTIFACT_NAMESPACE,
+            module_ref.to_string(),
+            format!("lashlang module artifact `{module_ref}`"),
+        )
+        .await
+        .map_err(lash_core_execution::ArtifactStoreError::from)
     }
 }
 

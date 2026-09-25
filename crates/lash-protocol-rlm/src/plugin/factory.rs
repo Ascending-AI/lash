@@ -7,8 +7,8 @@ use lash_core::plugin::{
 };
 use lash_core::{TraceContext, facade_support::PluginHost, facade_support::TraceSink};
 use lash_lashlang_runtime::{
-    LashlangArtifactBackend, LashlangArtifactStore, LashlangHostEnvironment, LashlangProcessEngine,
-    LashlangSurface, SharedDeferredToolResolver, SharedDeferredTriggerResolver,
+    LashlangArtifacts, LashlangHostEnvironment, LashlangProcessEngine, LashlangSurface,
+    SharedDeferredToolResolver, SharedDeferredTriggerResolver,
 };
 
 use super::registration::register_rlm_protocol_plugin;
@@ -62,7 +62,7 @@ pub struct RlmProtocolPluginFactory {
     projection_resolver: Arc<dyn ProjectionResolver>,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
-    artifact_store: Arc<dyn LashlangArtifactStore>,
+    artifact_store: LashlangArtifacts,
     /// The binding identity of the backend `artifact_store` belongs to: a
     /// runtime over any other backend refuses this factory.
     artifact_backend: Arc<str>,
@@ -88,13 +88,13 @@ impl RlmProtocolPluginFactory {
     /// sessions wrote. Pass the backend the runtime is built over; a runtime
     /// over another backend refuses this factory
     /// ([`PluginFactory::bound_backend`]).
-    pub fn new(config: RlmProtocolPluginConfig, backend: &dyn LashlangArtifactBackend) -> Self {
+    pub fn new(config: RlmProtocolPluginConfig, backend: &dyn lash_core::Backend) -> Self {
         Self {
             config,
             projection_resolver: Arc::new(ProjectionRegistry::default()),
             deferred_tool_resolver: None,
             deferred_trigger_resolver: None,
-            artifact_store: backend.lashlang_artifact_store(),
+            artifact_store: LashlangArtifacts::of_backend(backend),
             artifact_backend: Arc::from(backend.binding_identity()),
             lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig::default(),
             process_lifecycle: OnceLock::new(),
@@ -155,8 +155,8 @@ impl RlmProtocolPluginFactory {
         self
     }
 
-    pub fn artifact_store(&self) -> Arc<dyn LashlangArtifactStore> {
-        Arc::clone(&self.artifact_store)
+    pub fn artifact_store(&self) -> LashlangArtifacts {
+        self.artifact_store.clone()
     }
 
     /// Declare process-lifecycle availability explicitly, for hosts that build
@@ -300,7 +300,7 @@ impl RlmProtocolPluginFactory {
         &self,
         owner: &lash_core::ArtifactOwner,
         artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         self.artifact_store
             .publish_module_artifact(owner, artifact)
             .await
@@ -346,7 +346,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             (None, Some(runtime)) => Some(runtime),
             (None, None) => None,
         };
-        let engine = LashlangProcessEngine::new(Arc::clone(&self.artifact_store), surface)
+        let engine = LashlangProcessEngine::new(self.artifact_store.clone(), surface)
             .with_execution_bounds(config.execution_bounds().into_engine())
             .with_execution_trace(execution_sink, ctx.trace_context().clone());
         Ok(vec![
@@ -370,7 +370,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         .map_err(|err| PluginError::Registration(err.to_string()))?;
         let services = RlmDialectServices {
             projection_resolver: Arc::clone(&self.projection_resolver),
-            artifact_store: Arc::clone(&self.artifact_store),
+            artifact_store: self.artifact_store.clone(),
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
             deferred_trigger_resolver: self.deferred_trigger_resolver.clone(),
             execution_trace_config: self.lashlang_execution_trace_config.clone(),

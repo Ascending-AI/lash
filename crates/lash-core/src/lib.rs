@@ -638,7 +638,10 @@ pub use triggers::{
 };
 
 pub(crate) mod facade_ops {}
-pub use lash_core_execution::{Backend, BackendQueuedWork, StoreSet};
+pub use lash_core_execution::{
+    ArtifactPublicationPause, ArtifactStoreError, Backend, BackendQueuedWork, DurabilityTier,
+    ModuleArtifactStore, StoreSet,
+};
 pub use lash_core_execution::{
     DriverAction, DriverContextView, Effect, HostTurnProtocol, PreparedTurnMachine,
     ProjectorContext, ProtocolDriverState, SansIoTurnInput, TurnDriverConfig, TurnDriverPreamble,

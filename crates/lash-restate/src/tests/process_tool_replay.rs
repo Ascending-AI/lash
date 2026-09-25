@@ -187,8 +187,8 @@ async fn signal_waiting_process_registration(process_id: &ProcessId) -> ProcessR
         &environment,
     )
     .expect("link the signal-waiting TypeScript process");
-    lashlang::LashlangArtifactStore::publish_module_artifact(
-        recovery_artifact_store().as_ref(),
+    lashlang::LashlangArtifacts::publish_module_artifact(
+        &recovery_artifact_store(),
         &lash_core::ArtifactOwner::host("restate-recovery-test"),
         &linked.artifact,
     )

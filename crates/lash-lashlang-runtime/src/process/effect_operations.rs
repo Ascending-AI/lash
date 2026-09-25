@@ -161,7 +161,7 @@ impl LashlangProcessHost<'_> {
         let mut recorded = None;
         let result = crate::trigger_commands::execute_trigger_operation_recording(
             ctx,
-            self.artifact_store.as_ref(),
+            &self.artifact_store,
             operation,
             payload,
             effect_id.clone(),

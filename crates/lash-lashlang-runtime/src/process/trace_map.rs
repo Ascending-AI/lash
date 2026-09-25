@@ -14,7 +14,7 @@ fn artifact_graph(artifact: &lashlang::ModuleArtifact) -> lashlang::WorkflowGrap
 #[derive(Debug, thiserror::Error)]
 pub enum TraceLanguageExecutionMapError {
     #[error("failed to read Lashlang module artifact: {0}")]
-    ArtifactStore(#[from] lashlang::ArtifactStoreError),
+    ArtifactStore(#[from] lash_core::ArtifactStoreError),
     #[error("Lashlang module artifact `{0}` is unavailable")]
     ArtifactMissing(String),
     #[error("process `{process_name}` is absent from Lashlang module `{module_ref}`")]
@@ -29,7 +29,7 @@ pub enum TraceLanguageExecutionMapError {
 /// This is independent of trace delivery: a host can call it after attaching
 /// to a resumed process whose initial `ExecutionStarted` event is unavailable.
 pub async fn trace_lashlang_process_map_snapshot(
-    store: &dyn lashlang::LashlangArtifactStore,
+    store: &lashlang::LashlangArtifacts,
     input: &crate::LashlangProcessInput,
 ) -> Result<TraceLanguageExecutionMap, TraceLanguageExecutionMapError> {
     let artifact = store

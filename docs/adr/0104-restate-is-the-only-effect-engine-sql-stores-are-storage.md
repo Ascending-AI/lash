@@ -111,7 +111,7 @@ Backend::new(engine: Arc<dyn EffectEngine>) -> Backend;
 EffectEngine::stores(&self) -> Arc<dyn StoreSet>;
 EffectEngine::process_work(&self) -> ProcessWorkWiring;
 StoreSet::binding_identity(&self) -> &StoreBindingId;
-StoreSet::lashlang_artifacts(&self) -> Arc<dyn LashlangArtifactStore>;
+StoreSet::module_artifacts(&self) -> Arc<dyn ModuleArtifactStore>;
 ```
 
 - **`Backend` has one private field, the engine.** Every port it hands out
@@ -124,10 +124,13 @@ StoreSet::lashlang_artifacts(&self) -> Arc<dyn LashlangArtifactStore>;
   state. Both are derived coherently when the engine is constructed and never
   compared at runtime. No API accepts a second, independently assembled binding.
 - **Ports above the kernel belong to the store set.** The Lashlang artifact
-  port is `StoreSet::lashlang_artifacts`, and its trait lives in a layer both
-  the store sets and lashlang can depend on. Today (FIG-3633) lashlang adds
-  it as extension traits, `LashlangArtifactBackend: Backend` and
-  `LashlangArtifactStoreSet: StoreSet`. The RLM protocol factory takes the
+  port is `StoreSet::module_artifacts`, and its trait lives in a layer both
+  the store sets and lashlang can depend on: the byte-level
+  `ModuleArtifactStore` sits in `lash-core-execution`, and lashlang reads it
+  through its typed `LashlangArtifacts` view, which owns the module codec.
+  The port's name is language-neutral because the kernel crates name no
+  integration (`lash-core`'s integration-boundary lint). This part is
+  implemented. The RLM protocol factory takes the
   backend, never a store, and names it through `PluginFactory::bound_backend`.
   A core over any other backend refuses the factory with
   `EmbedError::PluginBackendMismatch`.

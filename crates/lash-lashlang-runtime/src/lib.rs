@@ -50,9 +50,8 @@ pub use lash_trace::{
     TraceNodeWaitResolution,
 };
 pub use lashlang::{
-    CompiledProcessCache, LASH_TYPE_KEY, LashlangAbilities, LashlangArtifactBackend,
-    LashlangArtifactStore, LashlangArtifactStoreSet, LashlangHostCatalog, LashlangHostEnvironment,
-    LashlangLanguageFeatures,
+    CompiledProcessCache, LASH_TYPE_KEY, LashlangAbilities, LashlangArtifacts, LashlangHostCatalog,
+    LashlangHostEnvironment, LashlangLanguageFeatures,
 };
 
 pub const LASHLANG_ENGINE_KIND: &str = "lashlang";
@@ -829,7 +828,7 @@ pub struct PreparedLashlangProcessStart {
 }
 
 pub async fn prepare_lashlang_process_start(
-    artifact_store: Arc<dyn LashlangArtifactStore>,
+    artifact_store: LashlangArtifacts,
     parent_start_seed: &str,
     start: lashlang::ProcessStart,
     originator: lash_core::ProcessOriginator,
@@ -892,13 +891,8 @@ pub async fn prepare_lashlang_process_start(
         })?;
         let expected = artifact.resolve_type(&param.ty);
         if type_contains_process(&expected) {
-            validate_process_claims(
-                artifact_store.as_ref(),
-                value,
-                &expected,
-                param.name.to_string(),
-            )
-            .await?;
+            validate_process_claims(&artifact_store, value, &expected, param.name.to_string())
+                .await?;
         }
     }
     let signal_event_types = artifact
@@ -961,7 +955,7 @@ fn type_contains_process(ty: &lashlang::TypeExpr) -> bool {
 }
 
 fn validate_process_claims<'a>(
-    artifact_store: &'a dyn LashlangArtifactStore,
+    artifact_store: &'a LashlangArtifacts,
     value: &'a serde_json::Value,
     expected: &'a lashlang::TypeExpr,
     path: String,
@@ -1123,7 +1117,7 @@ fn lashlang_process_identity(input: &LashlangProcessInput) -> lash_core::Process
 
 #[derive(Clone)]
 pub struct LashlangProcessEngine {
-    artifact_store: Arc<dyn LashlangArtifactStore>,
+    artifact_store: LashlangArtifacts,
     process_cache: Arc<Mutex<CompiledProcessCache>>,
     surface: LashlangSurface,
     execution_sink: Option<Arc<dyn lash_trace::TraceSink>>,
@@ -1132,7 +1126,7 @@ pub struct LashlangProcessEngine {
 }
 
 impl LashlangProcessEngine {
-    pub fn new(artifact_store: Arc<dyn LashlangArtifactStore>, surface: LashlangSurface) -> Self {
+    pub fn new(artifact_store: LashlangArtifacts, surface: LashlangSurface) -> Self {
         Self {
             artifact_store,
             process_cache: Arc::new(Mutex::new(CompiledProcessCache::new())),
@@ -1158,8 +1152,8 @@ impl LashlangProcessEngine {
         self
     }
 
-    pub fn artifact_store(&self) -> Arc<dyn LashlangArtifactStore> {
-        Arc::clone(&self.artifact_store)
+    pub fn artifact_store(&self) -> LashlangArtifacts {
+        self.artifact_store.clone()
     }
 }
 

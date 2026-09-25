@@ -1029,7 +1029,7 @@ async fn execute_trigger_process_with_originator(
     expected_owner_scope: Option<lash_core::TriggerOwnerScope>,
     expect_success: bool,
 ) -> TriggerProcessResult {
-    let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+    let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
     let capture = TriggerEffectCapture::default();
     let backend = capture.backend().await;
@@ -1746,13 +1746,11 @@ fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
         let identity: lashlang::ProcessDefinitionIdentity =
             serde_json::from_value(identity).expect("a process definition identity");
 
-        let artifact = lashlang::LashlangArtifactStore::get_module_artifact(
-            store.as_ref(),
-            &identity.module_ref,
-        )
-        .await
-        .expect("the store is readable")
-        .expect("the registered module was stored");
+        let artifact =
+            lashlang::LashlangArtifacts::get_module_artifact(&store, &identity.module_ref)
+                .await
+                .expect("the store is readable")
+                .expect("the registered module was stored");
 
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(
@@ -1840,13 +1838,11 @@ fn repin_trigger_inputs_retired_record_form() {
             .into_json();
         let identity: lashlang::ProcessDefinitionIdentity =
             serde_json::from_value(identity).expect("a process definition identity");
-        let artifact = lashlang::LashlangArtifactStore::get_module_artifact(
-            store.as_ref(),
-            &identity.module_ref,
-        )
-        .await
-        .expect("the store is readable")
-        .expect("the registered module was stored");
+        let artifact =
+            lashlang::LashlangArtifacts::get_module_artifact(&store, &identity.module_ref)
+                .await
+                .expect("the store is readable")
+                .expect("the registered module was stored");
         let compiled = lashlang::testing::harness::try_compile_program(artifact.ir())
             .expect("the canonical IR compiles");
 
@@ -1871,7 +1867,7 @@ fn repin_trigger_inputs_retired_record_form() {
 async fn execute_typescript_with_capturing_trigger_effects(
     code: &str,
     capture: TriggerEffectCapture,
-    store: Arc<dyn lashlang::LashlangArtifactStore>,
+    store: lashlang::LashlangArtifacts,
 ) -> ExecResponse {
     let mut state = RlmExecutionState::for_engine("typescript");
     execute_code_with_channel_and_bounds(

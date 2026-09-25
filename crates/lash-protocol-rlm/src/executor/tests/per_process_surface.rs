@@ -108,7 +108,7 @@ const main = async () => "ok";
 #[tokio::test]
 async fn trigger_fired_process_runs_under_session_contributed_event_type() {
     let backend = crate::testing::memory_backend().await;
-    let artifact_store = lashlang::LashlangArtifactBackend::lashlang_artifact_store(&backend);
+    let artifact_store = lashlang::LashlangArtifacts::of_backend(&backend);
     let factory = Arc::new(crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
@@ -224,7 +224,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
 
     let registry = backend.process_registry();
     let engine = LashlangProcessEngine::new(
-        Arc::clone(&artifact_store),
+        artifact_store.clone(),
         LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),

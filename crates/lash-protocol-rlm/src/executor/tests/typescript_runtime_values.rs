@@ -16,7 +16,7 @@ use lash_core::testing::store_fixtures::durable_admission;
 /// `typescript.runtime.now`" before the process could complete.
 #[tokio::test]
 pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomness() {
-    let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+    let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();

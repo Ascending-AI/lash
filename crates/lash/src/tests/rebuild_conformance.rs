@@ -6,10 +6,9 @@
 //! from its one location.
 
 use super::*;
-use crate::persistence::LashlangArtifactBackend;
 use crate::testing::runtime_rebuild_and_worker_recovery;
 
-fn backend_over(backend: lash_sqlite_store::SqliteBackend) -> Arc<dyn LashlangArtifactBackend> {
+fn backend_over(backend: lash_sqlite_store::SqliteBackend) -> Arc<dyn lash_core::Backend> {
     Arc::new(backend)
 }
 

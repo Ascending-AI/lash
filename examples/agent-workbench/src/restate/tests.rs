@@ -730,8 +730,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     assert_eq!(binding.binding_id(), durable_host.turn_control_binding_id());
 
     let provider_calls = Arc::new(AtomicUsize::new(0));
-    let ownership_core = |backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
-                          name: &str| {
+    let ownership_core = |backend: Arc<dyn lash::Backend>, name: &str| {
         let provider_calls = Arc::clone(&provider_calls);
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-effect-replay-ownership")

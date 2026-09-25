@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError};
 use lash_lashlang_runtime::{
-    LashlangArtifactStore, SharedDeferredToolResolver, SharedDeferredTriggerResolver,
+    LashlangArtifacts, SharedDeferredToolResolver, SharedDeferredTriggerResolver,
 };
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
@@ -26,7 +26,7 @@ use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 #[derive(Clone)]
 pub(crate) struct RlmDialectServices {
     pub(crate) projection_resolver: Arc<dyn ProjectionResolver>,
-    pub(crate) artifact_store: Arc<dyn LashlangArtifactStore>,
+    pub(crate) artifact_store: LashlangArtifacts,
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     pub(crate) deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     pub(crate) execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig,
@@ -116,7 +116,7 @@ impl DialectSession {
             &mut self.state,
             ctx,
             request,
-            Arc::clone(&self.services.artifact_store),
+            self.services.artifact_store.clone(),
             self.surface.clone(),
             self.services.deferred_tool_resolver.clone(),
             self.services.deferred_trigger_resolver.clone(),

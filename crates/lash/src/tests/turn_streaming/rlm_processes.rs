@@ -158,7 +158,7 @@ pub(super) async fn frame_switch_state_after_cold_reopen(
         lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
     let observed_writes = checkpoint_writes.clone();
     let backend = Arc::new(
-        DecoratedBackend::over_sqlite(sqlite_backend).session_store_factory(move |inner| {
+        DecoratedBackend::over(sqlite_backend).session_store_factory(move |inner| {
             Arc::new(
                 lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
                     inner,

@@ -63,7 +63,7 @@ lash-plugin-process-controls = { workspace = true }
 lash-postgres-store = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-provider-openai = { workspace = true }
-lash-restate = { workspace = true, features = ["lashlang"] }
+lash-restate = { workspace = true }
 lash-sqlite-store = { workspace = true }
 lash-s3-store = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }

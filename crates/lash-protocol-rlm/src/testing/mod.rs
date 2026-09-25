@@ -30,7 +30,7 @@ thread_local! {
 /// The Lashlang artifact store of this test thread's memory backend, for a
 /// law that reaches artifacts but builds no runtime over a backend. Every
 /// call on one thread reaches the same store.
-pub(crate) async fn memory_artifact_store() -> Arc<dyn lashlang::LashlangArtifactStore> {
+pub(crate) async fn memory_artifact_store() -> lashlang::LashlangArtifacts {
     let existing = ARTIFACT_BACKEND.with(|held| held.borrow().clone());
     let backend = match existing {
         Some(backend) => backend,
@@ -40,7 +40,7 @@ pub(crate) async fn memory_artifact_store() -> Arc<dyn lashlang::LashlangArtifac
             backend
         }
     };
-    lashlang::LashlangArtifactBackend::lashlang_artifact_store(&backend)
+    lashlang::LashlangArtifacts::of_backend(&backend)
 }
 
 /// [`memory_backend`] for a synchronous law: the backend opens on a runtime
@@ -64,14 +64,14 @@ pub(crate) fn memory_backend_blocking() -> lash_sqlite_store::SqliteBackend {
 }
 
 /// [`fresh_memory_artifact_store`] for a synchronous law.
-pub(crate) fn memory_artifact_store_blocking() -> Arc<dyn lashlang::LashlangArtifactStore> {
-    lashlang::LashlangArtifactBackend::lashlang_artifact_store(&memory_backend_blocking())
+pub(crate) fn memory_artifact_store_blocking() -> lashlang::LashlangArtifacts {
+    lashlang::LashlangArtifacts::of_backend(&memory_backend_blocking())
 }
 
 /// A fresh memory backend's Lashlang artifact store, isolated from every
 /// other law's.
-pub(crate) async fn fresh_memory_artifact_store() -> Arc<dyn lashlang::LashlangArtifactStore> {
-    lashlang::LashlangArtifactBackend::lashlang_artifact_store(&memory_backend().await)
+pub(crate) async fn fresh_memory_artifact_store() -> lashlang::LashlangArtifacts {
+    lashlang::LashlangArtifacts::of_backend(&memory_backend().await)
 }
 
 /// The ports of a fresh memory backend: the host a cell's effects journal

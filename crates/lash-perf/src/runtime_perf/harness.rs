@@ -838,7 +838,7 @@ fn preview(value: &str, max_chars: usize) -> String {
 }
 
 fn benchmark_rlm_protocol_factory(
-    backend: &dyn lash::persistence::LashlangArtifactBackend,
+    backend: &dyn lash::Backend,
 ) -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -992,7 +992,7 @@ pub(crate) async fn build_embed_core(
         backend,
         stores,
     } = in_process_lane().await?;
-    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> = Arc::new(backend);
+    let backend: Arc<dyn lash::Backend> = Arc::new(backend);
     let effect_host = backend.effect_host();
     let provider = benchmark_provider(scenario).into_handle();
     let core = match scenario.execution_mode() {
@@ -1053,7 +1053,7 @@ pub(crate) async fn build_runtime(
         backend: perf_backend,
         stores: store_factory,
     } = in_process_lane().await?;
-    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> = Arc::new(perf_backend);
+    let backend: Arc<dyn lash::Backend> = Arc::new(perf_backend);
     let effect_host = backend.effect_host();
     let settlement_control = scenario
         .settlement_children()
@@ -1295,7 +1295,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         let metrics = factory.metrics();
         (Arc::new(factory), metrics)
     };
-    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> =
+    let backend: Arc<dyn lash::Backend> =
         Arc::new(PerfBackend::over(sqlite).with_catalog(Arc::clone(&store_factory)));
     let effect_host = backend.effect_host();
     for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
@@ -1335,7 +1335,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
 
 /// A benchmark core on a durable backend, with the lane's plugin stack.
 fn durable_benchmark_core(
-    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
+    backend: Arc<dyn lash::Backend>,
     mode_id: ExecutionMode,
     provider: ProviderHandle,
     plugin_stack: lash::PluginStack,

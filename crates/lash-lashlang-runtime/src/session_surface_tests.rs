@@ -119,8 +119,7 @@ fn surface_plugin_factory() -> Arc<dyn lash_core::facade_support::PluginFactory>
 /// data type and value constructor, granting them (when `grant`) only through
 /// the per-process plugin options the session plugin reads.
 async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput {
-    let artifact_store: Arc<dyn LashlangArtifactStore> =
-        crate::lib_tests::memory_artifact_store().await;
+    let artifact_store: LashlangArtifacts = crate::lib_tests::memory_artifact_store().await;
     let environment = lashlang::LashlangHostEnvironment::new(
         session_surface_resources(),
         lashlang::LashlangAbilities::default(),
@@ -176,7 +175,7 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     let watched = watch_process_registry(Arc::clone(&registry));
     let engine = LashlangProcessEngine::new(
-        Arc::clone(&artifact_store),
+        artifact_store.clone(),
         LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
@@ -360,8 +359,7 @@ impl lash_trace::TraceSink for CrashAfterFirstNodeCompleted {
 
 #[tokio::test]
 async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes_effect_once() {
-    let artifact_store: Arc<dyn LashlangArtifactStore> =
-        crate::lib_tests::memory_artifact_store().await;
+    let artifact_store: LashlangArtifacts = crate::lib_tests::memory_artifact_store().await;
     let environment = lashlang::LashlangHostEnvironment::new(
         recovery_echo_catalog(),
         lashlang::LashlangAbilities::default(),
@@ -432,9 +430,8 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
             })),
         ));
     let worker = |sink: Arc<dyn lash_trace::TraceSink>, backend: Arc<dyn lash_core::Backend>| {
-        let engine =
-            LashlangProcessEngine::new(Arc::clone(&artifact_store), LashlangSurface::default())
-                .with_execution_trace(Some(sink), lash_trace::TraceContext::default());
+        let engine = LashlangProcessEngine::new(artifact_store.clone(), LashlangSurface::default())
+            .with_execution_trace(Some(sink), lash_trace::TraceContext::default());
         let runtime_host = RuntimeHostConfig::new(
             backend,
             CommitBudget::bounded(1024 * 1024, 512),
@@ -588,8 +585,7 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
 /// claimable, so every sweep refuses again until an operator acts.
 #[tokio::test]
 async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal() {
-    let artifact_store: Arc<dyn LashlangArtifactStore> =
-        crate::lib_tests::memory_artifact_store().await;
+    let artifact_store: LashlangArtifacts = crate::lib_tests::memory_artifact_store().await;
     let environment = lashlang::LashlangHostEnvironment::new(
         recovery_echo_catalog(),
         lashlang::LashlangAbilities::default(),
@@ -665,9 +661,8 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
             })),
         ));
     let worker = |sink: Arc<dyn lash_trace::TraceSink>, backend: Arc<dyn lash_core::Backend>| {
-        let engine =
-            LashlangProcessEngine::new(Arc::clone(&artifact_store), LashlangSurface::default())
-                .with_execution_trace(Some(sink), lash_trace::TraceContext::default());
+        let engine = LashlangProcessEngine::new(artifact_store.clone(), LashlangSurface::default())
+            .with_execution_trace(Some(sink), lash_trace::TraceContext::default());
         let runtime_host = RuntimeHostConfig::new(
             backend,
             CommitBudget::bounded(1024 * 1024, 512),
@@ -825,8 +820,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
         ],
         Vec::new(),
     );
-    let artifact_store: Arc<dyn LashlangArtifactStore> =
-        crate::lib_tests::memory_artifact_store().await;
+    let artifact_store: LashlangArtifacts = crate::lib_tests::memory_artifact_store().await;
     let linked = lashlang::LinkedModule::link(
         module,
         lashlang::LashlangHostEnvironment::new(

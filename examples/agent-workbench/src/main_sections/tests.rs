@@ -141,7 +141,7 @@ pub(super) fn explicit_durable_test_facets_over(
 /// A durable test core over `backend`, whose RLM factory keeps its Lashlang
 /// artifacts in that same backend.
 pub(super) fn explicit_durable_test_facets_on(
-    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
+    backend: Arc<dyn lash::Backend>,
 ) -> lash::LashCoreBuilder {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()

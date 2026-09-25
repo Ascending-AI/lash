@@ -3,6 +3,9 @@ use std::collections::HashSet;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+use lash_core_execution::{
+    ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
+};
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -44,17 +47,6 @@ pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// through a binding cell rather than copying it, so a host bridge built for
 /// v13 would run a program this VM compiled under the old capture meaning.
 pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v14";
-
-/// Durability tier established by the execution path's concrete store or host.
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum DurabilityTier {
-    #[default]
-    Inline,
-    Durable,
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -535,62 +527,6 @@ pub enum ModuleArtifactError {
     },
 }
 
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum ArtifactStoreError {
-    #[error("failed to encode lashlang artifact: {0}")]
-    Encode(String),
-    #[error("failed to decode lashlang artifact: {0}")]
-    Decode(String),
-    /// The write named an owner a permanent retirement fence has already
-    /// closed. Typed so callers classify by variant, not by message text.
-    #[error("artifact owner has been permanently retired")]
-    OwnerRetired,
-    /// A transfer named a destination owner a permanent retirement fence has
-    /// already closed.
-    #[error("artifact destination owner has been permanently retired")]
-    DestinationOwnerRetired,
-    /// A transfer found neither the staging owner's edge nor the destination
-    /// owner's edge. `artifact` is the producer's noun phrase for the
-    /// artifact, e.g. `module artifact \`mod-…\``.
-    #[error("{artifact} is not retained by the staging owner")]
-    StagingEdgeMissing { artifact: String },
-    #[error("artifact store backend error: {0}")]
-    Backend(String),
-}
-
-impl From<lash_core_execution::StoreError> for ArtifactStoreError {
-    fn from(error: lash_core_execution::StoreError) -> Self {
-        match error {
-            lash_core_execution::StoreError::ArtifactOwnerRetired => Self::OwnerRetired,
-            lash_core_execution::StoreError::ArtifactDestinationOwnerRetired => {
-                Self::DestinationOwnerRetired
-            }
-            lash_core_execution::StoreError::ArtifactStagingEdgeMissing { artifact } => {
-                Self::StagingEdgeMissing { artifact }
-            }
-            other => Self::Backend(other.to_string()),
-        }
-    }
-}
-
-impl From<ArtifactStoreError> for lash_core_execution::PluginError {
-    fn from(error: ArtifactStoreError) -> Self {
-        match error {
-            ArtifactStoreError::OwnerRetired => {
-                lash_core_execution::runtime::process::artifact_owner_retired_error()
-            }
-            ArtifactStoreError::DestinationOwnerRetired => {
-                lash_core_execution::runtime::process::artifact_destination_owner_retired_error()
-            }
-            ArtifactStoreError::StagingEdgeMissing { artifact } => {
-                lash_core_execution::runtime::process::artifact_staging_edge_missing_error(artifact)
-            }
-            other => lash_core_execution::PluginError::Session(other.to_string()),
-        }
-    }
-}
-
 impl From<ModuleArtifactError> for ArtifactStoreError {
     fn from(value: ModuleArtifactError) -> Self {
         match value {
@@ -611,131 +547,149 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
     }
 }
 
-#[async_trait::async_trait]
-pub trait LashlangArtifactStore: Send + Sync {
-    /// Arm a one-shot conformance pause immediately before this backend's
-    /// publication serialization point. Production callers never use this
-    /// diagnostic seam; stores that participate in ownership conformance
-    /// return a handle and pause their next publish until it is resumed.
-    fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {
-        None
+/// The typed Lashlang view of a store set's module-artifact port.
+///
+/// The port ([`ModuleArtifactStore`]) keeps a module's verified store bytes
+/// and never decodes them; this view encodes a [`ModuleArtifact`] on publish
+/// and decodes and verifies it on read. Modules are content-addressed and
+/// immutable, so a decoded module is cached by its reference, and a read
+/// returns the cached module only once the port confirms the module is still
+/// retained. Cloning shares the port and the cache.
+#[derive(Clone)]
+pub struct LashlangArtifacts {
+    store: Arc<dyn ModuleArtifactStore>,
+    decoded: Arc<Mutex<BTreeMap<ModuleRef, Arc<ModuleArtifact>>>>,
+}
+
+impl LashlangArtifacts {
+    /// The typed view of `store`.
+    pub fn new(store: Arc<dyn ModuleArtifactStore>) -> Self {
+        Self {
+            store,
+            decoded: Arc::default(),
+        }
     }
 
-    /// Durability tier this artifact store provides; defaults to [`DurabilityTier::Inline`].
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Inline
+    /// The typed view of `backend`'s store set's artifact port: the
+    /// artifacts live in the storage that reopens the backend's sessions.
+    pub fn of_backend(backend: &dyn lash_core_execution::Backend) -> Self {
+        Self::new(backend.module_artifacts())
+    }
+
+    /// The port this view reads and writes through.
+    pub fn store(&self) -> &Arc<dyn ModuleArtifactStore> {
+        &self.store
+    }
+
+    /// See [`ModuleArtifactStore::pause_next_publication_for_testing`].
+    pub fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {
+        self.store.pause_next_publication_for_testing()
+    }
+
+    /// The durability tier of the port.
+    pub fn durability_tier(&self) -> DurabilityTier {
+        self.store.durability_tier()
     }
 
     /// Publish an immutable module and retain it for one exact owner.
-    async fn publish_module_artifact(
+    pub async fn publish_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
         artifact: &ModuleArtifact,
-    ) -> Result<(), ArtifactStoreError>;
+    ) -> Result<(), ArtifactStoreError> {
+        let bytes = artifact
+            .to_store_bytes()
+            .map_err(|err| ArtifactStoreError::Encode(err.to_string()))?;
+        self.store
+            .publish_module_artifact(owner, artifact.module_ref().as_str(), &bytes)
+            .await?;
+        self.decoded
+            .lock_recover()
+            .insert(artifact.module_ref().clone(), Arc::new(artifact.clone()));
+        Ok(())
+    }
 
-    async fn retain_module_artifact(
+    /// Add an owner edge to an already published module.
+    pub async fn retain_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
         module_ref: &ModuleRef,
-    ) -> Result<(), ArtifactStoreError>;
+    ) -> Result<(), ArtifactStoreError> {
+        self.store
+            .retain_module_artifact(owner, module_ref.as_str())
+            .await
+    }
 
     /// Atomically add `to` and sever `from` for one module artifact.
-    async fn transfer_module_artifact(
+    pub async fn transfer_module_artifact(
         &self,
         from: &lash_core_execution::ArtifactOwner,
         to: &lash_core_execution::ArtifactOwner,
         module_ref: &ModuleRef,
-    ) -> Result<(), ArtifactStoreError>;
+    ) -> Result<(), ArtifactStoreError> {
+        self.store
+            .transfer_module_artifact(from, to, module_ref.as_str())
+            .await
+    }
 
     /// Sever one exact owner edge and reclaim the module when it was the last.
-    async fn release_module_artifact(
+    pub async fn release_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
         module_ref: &ModuleRef,
-    ) -> Result<(), ArtifactStoreError>;
+    ) -> Result<(), ArtifactStoreError> {
+        self.store
+            .release_module_artifact(owner, module_ref.as_str())
+            .await?;
+        self.decoded.lock_recover().remove(module_ref);
+        Ok(())
+    }
 
     /// Permanently fence an execution owner against late publication and sever
     /// every module edge it still owns.
-    async fn retire_module_artifact_owner(
+    pub async fn retire_module_artifact_owner(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreError>;
+    ) -> Result<(), ArtifactStoreError> {
+        self.store.retire_module_artifact_owner(owner).await?;
+        self.decoded.lock_recover().clear();
+        Ok(())
+    }
 
-    async fn get_module_artifact(
+    /// The module published under `module_ref`, decoded and verified, if it is
+    /// retained.
+    pub async fn get_module_artifact(
         &self,
         module_ref: &ModuleRef,
-    ) -> Result<Option<Arc<ModuleArtifact>>, ArtifactStoreError>;
-}
-
-#[derive(Clone, Default)]
-pub struct ArtifactPublicationPause {
-    state: Arc<Mutex<ArtifactPublicationPauseState>>,
-}
-
-#[derive(Default)]
-struct ArtifactPublicationPauseState {
-    reached: bool,
-    resumed: bool,
-    writer_waker: Option<std::task::Waker>,
-}
-
-impl ArtifactPublicationPause {
-    pub fn is_reached(&self) -> bool {
-        self.state.lock_recover().reached
-    }
-
-    pub fn resume(&self) {
-        let mut state = self.state.lock_recover();
-        state.resumed = true;
-        if let Some(waker) = state.writer_waker.take() {
-            waker.wake();
+    ) -> Result<Option<Arc<ModuleArtifact>>, ArtifactStoreError> {
+        let Some(bytes) = self.store.get_module_artifact(module_ref.as_str()).await? else {
+            self.decoded.lock_recover().remove(module_ref);
+            return Ok(None);
+        };
+        if let Some(artifact) = self.decoded.lock_recover().get(module_ref).cloned() {
+            return Ok(Some(artifact));
         }
+        let artifact = Arc::new(ModuleArtifact::from_store_bytes(&bytes)?);
+        // The port keys bytes by the reference its caller names; the decoder
+        // proves the bytes hash to the reference they carry, and this proves
+        // that reference is the one asked for.
+        if artifact.module_ref() != module_ref {
+            return Err(ArtifactStoreError::Decode(format!(
+                "module artifact stored under `{module_ref}` is `{}`",
+                artifact.module_ref()
+            )));
+        }
+        self.decoded
+            .lock_recover()
+            .insert(module_ref.clone(), Arc::clone(&artifact));
+        Ok(Some(artifact))
     }
-
-    pub async fn pause(&self) {
-        std::future::poll_fn(|context| {
-            let mut state = self.state.lock_recover();
-            state.reached = true;
-            if state.resumed {
-                std::task::Poll::Ready(())
-            } else {
-                state.writer_waker = Some(context.waker().clone());
-                std::task::Poll::Pending
-            }
-        })
-        .await
-    }
 }
 
-/// A backend (ADR 0102) whose store set also keeps Lashlang module
-/// artifacts.
-///
-/// [`lash_core_execution::Backend`] sits below lashlang, so it cannot name
-/// [`LashlangArtifactStore`]. This extension trait adds that one port, and
-/// each backend answers it from the same store set its other ports come
-/// from: SQLite and PostgreSQL from their durable-core store, Restate from
-/// its SQL store set. A Lashlang host never takes an artifact store beside a
-/// backend; it takes the backend and reads the store from here, so the
-/// artifacts a session writes live in the substrate that reopens it, and the
-/// artifact cleanup sweep reaches the store the sessions wrote.
-pub trait LashlangArtifactBackend: lash_core_execution::Backend {
-    /// This backend's Lashlang module-artifact store. Every call hands out a
-    /// handle on the one store, like every other backend port.
-    fn lashlang_artifact_store(&self) -> Arc<dyn LashlangArtifactStore>;
-}
-
-/// A SQL [`lash_core_execution::StoreSet`] that also keeps Lashlang module
-/// artifacts: the store set an engine-backed [`LashlangArtifactBackend`]
-/// (Restate) takes its artifact store from.
-pub trait LashlangArtifactStoreSet: lash_core_execution::StoreSet {
-    /// This store set's Lashlang module-artifact store.
-    fn lashlang_artifact_store(&self) -> Arc<dyn LashlangArtifactStore>;
-}
-
-/// Reference model of [`LashlangArtifactStore`] for lashlang's own unit
-/// tests. Hosts take their artifact store from their backend
-/// ([`LashlangArtifactBackend`]); nothing outside this crate's tests can
-/// name this type.
+/// Reference model of [`ModuleArtifactStore`] for lashlang's own unit
+/// tests. Hosts take their artifact store from their store set
+/// ([`lash_core_execution::StoreSet::module_artifacts`]); nothing outside
+/// this crate's tests can name this type.
 #[cfg(test)]
 #[derive(Clone, Default)]
 pub(crate) struct InMemoryLashlangArtifactStore {
@@ -746,8 +700,8 @@ pub(crate) struct InMemoryLashlangArtifactStore {
 #[cfg(test)]
 #[derive(Default)]
 struct InMemoryArtifactState {
-    modules: BTreeMap<ModuleRef, Arc<ModuleArtifact>>,
-    owners: HashSet<(ModuleRef, lash_core_execution::ArtifactOwner)>,
+    modules: BTreeMap<String, Vec<u8>>,
+    owners: HashSet<(String, lash_core_execution::ArtifactOwner)>,
     retired_owners: HashSet<lash_core_execution::ArtifactOwner>,
 }
 
@@ -760,7 +714,7 @@ impl InMemoryLashlangArtifactStore {
 
 #[cfg(test)]
 #[async_trait::async_trait]
-impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
+impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
     fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {
         let pause = ArtifactPublicationPause::default();
         *self.publication_pause.lock_recover() = Some(pause.clone());
@@ -770,9 +724,10 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
     async fn publish_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-        artifact: &ModuleArtifact,
+        module_ref: &str,
+        bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
+        if !crate::namespace::is_valid_opaque_key(module_ref) {
             return Err(ArtifactStoreError::Backend(
                 "invalid module reference".into(),
             ));
@@ -785,28 +740,25 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         if state.retired_owners.contains(owner) {
             return Err(ArtifactStoreError::OwnerRetired);
         }
-        if let Some(existing) = state.modules.get(&artifact.module_ref)
-            && existing.as_ref() != artifact
+        if let Some(existing) = state.modules.get(module_ref)
+            && existing.as_slice() != bytes
         {
             return Err(ArtifactStoreError::Backend(format!(
-                "module artifact `{}` is immutable",
-                artifact.module_ref
+                "module artifact `{module_ref}` is immutable"
             )));
         }
         state
             .modules
-            .entry(artifact.module_ref.clone())
-            .or_insert_with(|| Arc::new(artifact.clone()));
-        state
-            .owners
-            .insert((artifact.module_ref.clone(), owner.clone()));
+            .entry(module_ref.to_string())
+            .or_insert_with(|| bytes.to_vec());
+        state.owners.insert((module_ref.to_string(), owner.clone()));
         Ok(())
     }
 
     async fn retain_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &ModuleRef,
+        module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
         if state.retired_owners.contains(owner) {
@@ -817,7 +769,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
                 "missing module artifact `{module_ref}`"
             )));
         }
-        state.owners.insert((module_ref.clone(), owner.clone()));
+        state.owners.insert((module_ref.to_string(), owner.clone()));
         Ok(())
     }
 
@@ -825,22 +777,22 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         &self,
         from: &lash_core_execution::ArtifactOwner,
         to: &lash_core_execution::ArtifactOwner,
-        module_ref: &ModuleRef,
+        module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
         if state.retired_owners.contains(to) {
             return Err(ArtifactStoreError::DestinationOwnerRetired);
         }
-        let from_edge = (module_ref.clone(), from.clone());
+        let from_edge = (module_ref.to_string(), from.clone());
         if !state.owners.contains(&from_edge) {
-            if state.owners.contains(&(module_ref.clone(), to.clone())) {
+            if state.owners.contains(&(module_ref.to_string(), to.clone())) {
                 return Ok(());
             }
             return Err(ArtifactStoreError::StagingEdgeMissing {
                 artifact: format!("module artifact `{module_ref}`"),
             });
         }
-        state.owners.insert((module_ref.clone(), to.clone()));
+        state.owners.insert((module_ref.to_string(), to.clone()));
         state.owners.remove(&from_edge);
         Ok(())
     }
@@ -848,10 +800,12 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
     async fn release_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &ModuleRef,
+        module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
-        state.owners.remove(&(module_ref.clone(), owner.clone()));
+        state
+            .owners
+            .remove(&(module_ref.to_string(), owner.clone()));
         if !state
             .owners
             .iter()
@@ -895,9 +849,9 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
 
     async fn get_module_artifact(
         &self,
-        module_ref: &ModuleRef,
-    ) -> Result<Option<Arc<ModuleArtifact>>, ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(module_ref.as_str()) {
+        module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref) {
             return Err(ArtifactStoreError::Backend(
                 "invalid module reference".into(),
             ));

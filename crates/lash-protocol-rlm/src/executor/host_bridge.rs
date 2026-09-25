@@ -40,7 +40,7 @@ pub(super) struct HostBridge<'run> {
     deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     /// The cell's journaled binding set, against the live registry (FIG-3587).
     cell_bindings: lash_lashlang_runtime::CellToolBindings,
-    artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
+    artifact_store: lashlang::LashlangArtifacts,
     /// Attempt bound stamped onto children this execution starts. `None` until
     /// this execution actually starts a child: an execution that never starts
     /// one pins nothing and leaves the durable snapshot root alone.
@@ -60,7 +60,7 @@ pub(super) struct HostBridgeConfig<'run> {
     pub host_environment: lashlang::LashlangHostEnvironment,
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     pub cell_bindings: lash_lashlang_runtime::CellToolBindings,
-    pub artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
+    pub artifact_store: lashlang::LashlangArtifacts,
     /// Bound already pinned by an earlier cell of this execution, if any.
     pub child_max_attempts: Option<std::num::NonZeroU32>,
 }
@@ -592,7 +592,7 @@ impl HostBridge<'_> {
             let in_flight = commands.enter(command, CommandShape::Value).await?;
             let result = lash_lashlang_runtime::execute_trigger_operation(
                 &in_flight.ctx,
-                self.artifact_store.as_ref(),
+                &self.artifact_store,
                 trigger_operation,
                 payload,
                 in_flight.command.key.as_str().to_string(),
@@ -768,7 +768,7 @@ impl HostBridge<'_> {
             {
                 let result = lash_lashlang_runtime::execute_trigger_operation(
                     &in_flight.ctx,
-                    self.artifact_store.as_ref(),
+                    &self.artifact_store,
                     trigger_operation,
                     payload,
                     format!(

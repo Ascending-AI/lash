@@ -10,7 +10,6 @@
 use std::sync::Arc;
 
 use lash_core::{Backend, EffectHost, SessionStoreFactory};
-use lash_lashlang_runtime::{LashlangArtifactStore, LashlangArtifactStoreSet as _};
 
 /// The seed of every in-process lane's server double. A perf run measures
 /// cost, not a schedule, so one fixed seed serves every scenario.
@@ -21,18 +20,16 @@ const RESTATE_SEED: u64 = 0x5eed_9e4f;
 /// keeps them there too.
 pub(super) struct PerfBackend {
     inner: Arc<dyn Backend>,
-    artifacts: Arc<dyn LashlangArtifactStore>,
     catalog: Arc<dyn SessionStoreFactory>,
     effect_host: Arc<dyn EffectHost>,
 }
 
 impl PerfBackend {
     /// `inner`, undecorated.
-    pub(super) fn over(inner: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>) -> Self {
+    pub(super) fn over(inner: Arc<dyn lash_core::Backend>) -> Self {
         Self {
             catalog: inner.session_store_factory(),
             effect_host: inner.effect_host(),
-            artifacts: inner.lashlang_artifact_store(),
             inner,
         }
     }
@@ -40,14 +37,7 @@ impl PerfBackend {
     /// The Restate test backend, undecorated. Its Lashlang artifacts live in
     /// its store set, as a deployment's do.
     pub(super) fn over_restate(backend: &lash_restate_test::RestateTestBackend) -> Self {
-        let artifacts = backend.stores().lashlang_artifact_store();
-        let inner = backend.lash_backend();
-        Self {
-            catalog: inner.session_store_factory(),
-            effect_host: inner.effect_host(),
-            artifacts,
-            inner,
-        }
+        Self::over(backend.lash_backend())
     }
 
     /// Serve sessions from `catalog`, the perf store decorator.
@@ -94,18 +84,16 @@ impl Backend for PerfBackend {
         self.inner.attachment_store()
     }
 
+    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
+        self.inner.module_artifacts()
+    }
+
     fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
         self.inner.process_work()
     }
 
     fn queued_work(&self) -> lash_core::BackendQueuedWork {
         self.inner.queued_work()
-    }
-}
-
-impl lash_lashlang_runtime::LashlangArtifactBackend for PerfBackend {
-    fn lashlang_artifact_store(&self) -> Arc<dyn LashlangArtifactStore> {
-        Arc::clone(&self.artifacts)
     }
 }
 

@@ -25,7 +25,9 @@ impl TypescriptDialect {
                 projection_resolver: std::sync::Arc::new(
                     crate::projection::ProjectionRegistry::new(),
                 ),
-                artifact_store: std::sync::Arc::new(PromptOnlyArtifactStore),
+                artifact_store: lashlang::LashlangArtifacts::new(std::sync::Arc::new(
+                    PromptOnlyArtifactStore,
+                )),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
@@ -42,8 +44,8 @@ impl TypescriptDialect {
 struct PromptOnlyArtifactStore;
 
 impl PromptOnlyArtifactStore {
-    fn refusal() -> lashlang::ArtifactStoreError {
-        lashlang::ArtifactStoreError::Backend(
+    fn refusal() -> lash_core::ArtifactStoreError {
+        lash_core::ArtifactStoreError::Backend(
             "a prompt-only RLM dialect executes no cell and stores no Lashlang artifact"
                 .to_string(),
         )
@@ -51,20 +53,21 @@ impl PromptOnlyArtifactStore {
 }
 
 #[async_trait::async_trait]
-impl lashlang::LashlangArtifactStore for PromptOnlyArtifactStore {
+impl lash_core::ModuleArtifactStore for PromptOnlyArtifactStore {
     async fn publish_module_artifact(
         &self,
         _owner: &lash_core::ArtifactOwner,
-        _artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        _module_ref: &str,
+        _bytes: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(Self::refusal())
     }
 
     async fn retain_module_artifact(
         &self,
         _owner: &lash_core::ArtifactOwner,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(Self::refusal())
     }
 
@@ -72,31 +75,30 @@ impl lashlang::LashlangArtifactStore for PromptOnlyArtifactStore {
         &self,
         _from: &lash_core::ArtifactOwner,
         _to: &lash_core::ArtifactOwner,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(Self::refusal())
     }
 
     async fn release_module_artifact(
         &self,
         _owner: &lash_core::ArtifactOwner,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(Self::refusal())
     }
 
     async fn retire_module_artifact_owner(
         &self,
         _owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Err(Self::refusal())
     }
 
     async fn get_module_artifact(
         &self,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<Option<std::sync::Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError>
-    {
+        _module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
         Err(Self::refusal())
     }
 }

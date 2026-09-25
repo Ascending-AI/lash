@@ -1504,13 +1504,11 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
             .iter()
             .next()
             .expect("stored process module");
-        let artifact = lashlang::LashlangArtifactStore::get_module_artifact(
-            artifact_store.as_ref(),
-            module_ref,
-        )
-        .await
-        .expect("read stored artifact")
-        .expect("artifact exists");
+        let artifact =
+            lashlang::LashlangArtifacts::get_module_artifact(&artifact_store, module_ref)
+                .await
+                .expect("read stored artifact")
+                .expect("artifact exists");
         // TypeScript is the only language a module can be compiled from
         // (ADR 0096), so a stored artifact names no dialect at all; one that
         // still does is refused as an incompatible format.
@@ -1562,7 +1560,7 @@ pub(super) fn process_engine_surface(surface: LashlangSurface) -> LashlangSurfac
 /// The engine registry a fixture process service admits recorded starts
 /// against: the one stock engine, over the artifacts the test publishes.
 pub(super) fn fixture_process_engines(
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    artifact_store: lashlang::LashlangArtifacts,
     surface: LashlangSurface,
 ) -> Arc<lash_core::ProcessEngineRegistry> {
     Arc::new(lash_core::ProcessEngineRegistry::new().with_registration(
@@ -2043,7 +2041,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
 #[tokio::test]
 pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_engine() {
-    let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+    let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();
@@ -2187,7 +2185,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
 
 #[tokio::test]
 pub(super) async fn typescript_restored_process_handle_await_crosses_turn_boundary() {
-    let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+    let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();
@@ -2325,7 +2323,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
 
 #[tokio::test]
 pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subsequent_operation() {
-    let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+    let artifact_store: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();

@@ -21,7 +21,6 @@ features = [
   "lash-internal-llm-tools/default",
   "lash-internal-plugin-mcp/default",
   "lash-internal-plugin-process-controls/default",
-  "lash-internal-postgres-store/default",
   "lash-internal-protocol-rlm/default",
   "lash-internal-protocol-standard/default",
   "lash-internal-provider-anthropic/default",
@@ -30,7 +29,6 @@ features = [
   "lash-internal-remote-protocol/default",
   "lash-internal-sansio/default",
   "lash-internal-store-sql/default",
-  "lash-internal-sqlite-store/default",
   "lash-internal-tool-support/default",
   "lash-internal-trace/default",
   "lash-perf/default",
@@ -204,14 +202,10 @@ commands = [
 [[lane]]
 name = "store-features"
 features = [
-  "lash-internal-sqlite-store/lashlang:on",
-  "lash-internal-sqlite-store/lashlang:off",
   "lash-internal-sqlite-store/perf-witness:on",
   "lash-internal-sqlite-store/perf-witness:off",
   "lash-internal-sqlite-store/testing:on",
   "lash-internal-sqlite-store/testing:off",
-  "lash-internal-postgres-store/lashlang:on",
-  "lash-internal-postgres-store/lashlang:off",
   "lash-internal-postgres-store/perf-witness:on",
   "lash-internal-postgres-store/perf-witness:off",
   "lash-internal-postgres-store/testing:on",
@@ -220,26 +214,21 @@ features = [
   "lash-internal-s3-store/testing:off",
   "lash-internal-conformance/lashlang:on",
   "lash-internal-conformance/lashlang:off",
-  "lash-internal-restate/lashlang:on",
-  "lash-internal-restate/lashlang:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-conformance", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-conformance", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--tests", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--tests", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-postgres-store", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-postgres-store", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
   ["cargo", "check", "-p", "lash-internal-postgres-store", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
   ["cargo", "check", "-p", "lash-internal-postgres-store", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-postgres-store", "--tests", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-s3-store", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-s3-store", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-restate", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
 ]
 
 [[lane]]

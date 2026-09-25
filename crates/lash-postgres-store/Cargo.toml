@@ -27,8 +27,6 @@ doctest = false
 workspace = true
 
 [features]
-default = ["lashlang"]
-lashlang = ["dep:lashlang"]
 perf-witness = ["lash-core-execution/perf-witness"]
 # Test/performance-only seams. Production builds cannot bypass the schema gate.
 testing = ["lash-core-execution/testing"]
@@ -38,7 +36,6 @@ lash-store-sql = { workspace = true }
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 lash-core-execution = { workspace = true }
-lashlang = { workspace = true, optional = true }
 rmp-serde = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

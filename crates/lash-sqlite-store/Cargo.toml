@@ -19,8 +19,6 @@ name = "lash_sqlite_store"
 doctest = false
 
 [features]
-default = ["lashlang"]
-lashlang = ["dep:lashlang"]
 perf-witness = ["lash-core-execution/perf-witness", "rusqlite/trace"]
 testing = ["lash-core-execution/testing"]
 
@@ -31,7 +29,6 @@ workspace = true
 lash-store-sql = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core-execution = { workspace = true }
-lashlang = { workspace = true, optional = true }
 async-trait = { workspace = true }
 flate2 = "1"
 rmp-serde = "1"

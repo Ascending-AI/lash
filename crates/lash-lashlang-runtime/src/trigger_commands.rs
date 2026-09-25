@@ -12,7 +12,7 @@ use crate::{
 /// tool-catalog membership and keep one implementation of the trigger mutation contract.
 pub async fn execute_trigger_operation(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
-    artifact_store: &dyn lashlang::LashlangArtifactStore,
+    artifact_store: &lashlang::LashlangArtifacts,
     operation: TriggerHostOperation,
     payload: Value,
     effect_id: String,
@@ -40,7 +40,7 @@ pub(crate) type RecordedTriggerOutcome = Option<(
 /// outcome of the trigger effect, when the effect ran and recorded one.
 pub(crate) async fn execute_trigger_operation_recording(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
-    artifact_store: &dyn lashlang::LashlangArtifactStore,
+    artifact_store: &lashlang::LashlangArtifacts,
     operation: TriggerHostOperation,
     payload: Value,
     effect_id: String,
@@ -70,7 +70,7 @@ pub(crate) async fn execute_trigger_operation_recording(
 
 async fn register_trigger(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
-    artifact_store: &dyn lashlang::LashlangArtifactStore,
+    artifact_store: &lashlang::LashlangArtifacts,
     payload: Value,
     effect_id: String,
     recorded: &mut RecordedTriggerOutcome,
@@ -88,7 +88,7 @@ async fn register_trigger(
 
 async fn prepare_trigger_draft(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
-    artifact_store: &dyn lashlang::LashlangArtifactStore,
+    artifact_store: &lashlang::LashlangArtifacts,
     request: &lashlang::TriggerRegistrationRequest,
 ) -> Result<lash_core::TriggerSubscriptionDraft, ExecutionHostError> {
     let artifact = artifact_store
@@ -234,7 +234,7 @@ async fn list_triggers(
 
 async fn update_trigger(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
-    artifact_store: &dyn lashlang::LashlangArtifactStore,
+    artifact_store: &lashlang::LashlangArtifacts,
     payload: Value,
     effect_id: String,
     revive: bool,

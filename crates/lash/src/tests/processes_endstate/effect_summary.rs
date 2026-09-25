@@ -65,7 +65,7 @@ struct SummaryHost {
 impl SummaryBackend {
     /// A fresh backend over this backend's durable state, with the
     /// Lashlang artifact store that goes with it.
-    async fn backend(&self) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend> {
+    async fn backend(&self) -> Arc<dyn lash_core::Backend> {
         match self {
             Self::Sqlite(root) => Arc::new(
                 lash_sqlite_store::SqliteBackend::open(root)
@@ -82,25 +82,21 @@ impl SummaryBackend {
         let provider = mock_provider();
         let provider_id = provider.kind().to_string();
         let backend = self.backend().await;
-        let (backend, faults): (Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>, _) =
-            match fault {
-                Some((event_type, count)) => {
-                    let faults = Arc::new(lash_core::EffectSummaryAppendFaults::new(
-                        backend.process_registry(),
-                        event_type,
-                        count,
-                    ));
-                    let registry = Arc::clone(&faults) as Arc<dyn lash_core::ProcessRegistry>;
-                    (
-                        Arc::new(
-                            DecoratedBackend::over_lashlang(backend)
-                                .process_registry(move |_| registry),
-                        ),
-                        Some(faults),
-                    )
-                }
-                None => (backend, None),
-            };
+        let (backend, faults): (Arc<dyn lash_core::Backend>, _) = match fault {
+            Some((event_type, count)) => {
+                let faults = Arc::new(lash_core::EffectSummaryAppendFaults::new(
+                    backend.process_registry(),
+                    event_type,
+                    count,
+                ));
+                let registry = Arc::clone(&faults) as Arc<dyn lash_core::ProcessRegistry>;
+                (
+                    Arc::new(DecoratedBackend::over(backend).process_registry(move |_| registry)),
+                    Some(faults),
+                )
+            }
+            None => (backend, None),
+        };
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -222,10 +218,10 @@ async fn start_process(
     process_id: &ProcessId,
     program: lashlang::Program,
 ) {
-    let artifact = backend.backend().await.lashlang_artifact_store();
+    let artifact =
+        lash_lashlang_runtime::LashlangArtifacts::of_backend(backend.backend().await.as_ref());
     let process =
-        LinkedTestProcess::new_with_catalog(artifact.as_ref(), program, "main", summary_catalog())
-            .await;
+        LinkedTestProcess::new_with_catalog(&artifact, program, "main", summary_catalog()).await;
     let mut start_request = process.start_request(process_id);
     start_request.originator = lash_core::ProcessOriginator::host_scoped("effect-summary-test");
     host.core

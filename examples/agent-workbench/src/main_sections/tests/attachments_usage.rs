@@ -56,7 +56,7 @@ fn attachment_usage_gate_sqlite() {
 /// One handle on the gate's backend: the backend a core and its RLM
 /// factory's Lashlang artifacts run on.
 struct GateBackend {
-    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
+    backend: Arc<dyn lash::Backend>,
 }
 
 async fn run_attachment_usage_gate(

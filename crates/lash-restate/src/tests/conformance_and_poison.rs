@@ -1927,8 +1927,8 @@ pub(super) static RECOVERY_PROCESS_ENV_STORE: LazyLock<Arc<dyn ProcessExecutionE
     LazyLock::new(|| RECOVERY_ARTIFACT_BACKEND.process_env_store());
 
 /// [`RECOVERY_ARTIFACT_BACKEND`]'s Lashlang artifact store.
-pub(super) fn recovery_artifact_store() -> Arc<dyn lashlang::LashlangArtifactStore> {
-    lashlang::LashlangArtifactBackend::lashlang_artifact_store(&*RECOVERY_ARTIFACT_BACKEND)
+pub(super) fn recovery_artifact_store() -> lashlang::LashlangArtifacts {
+    lashlang::LashlangArtifacts::of_backend(&*RECOVERY_ARTIFACT_BACKEND)
 }
 
 pub(super) struct CommitRetryStore {

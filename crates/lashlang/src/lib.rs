@@ -25,11 +25,9 @@ pub mod testing;
 #[cfg(test)]
 pub(crate) use artifact::InMemoryLashlangArtifactStore;
 pub use artifact::{
-    ArtifactPublicationPause, ArtifactStoreError, ContentHash, DurabilityTier, HostRequirements,
-    HostRequirementsRef, LASHLANG_COMPILER_VERSION, LASHLANG_SEMANTIC_HASH_VERSION,
-    LASHLANG_VM_ABI_VERSION, LashlangArtifactBackend, LashlangArtifactStore,
-    LashlangArtifactStoreSet, ModuleArtifact, ModuleArtifactError, ModuleExports, ModuleRef,
-    ProcessRef, host_requirements_for_program,
+    ContentHash, HostRequirements, HostRequirementsRef, LASHLANG_COMPILER_VERSION,
+    LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, LashlangArtifacts, ModuleArtifact,
+    ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef, host_requirements_for_program,
 };
 pub use ast::{
     AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BinaryOp, BindingVisibility,

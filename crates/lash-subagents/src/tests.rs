@@ -1042,8 +1042,7 @@ async fn run_seed_probe_inner(
     let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open the artifact backend");
-    let artifact_store =
-        lash_lashlang_runtime::LashlangArtifactBackend::lashlang_artifact_store(&artifact_backend);
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&artifact_backend);
 
     let factories: Vec<Arc<dyn PluginFactory>> = vec![
         Arc::new(
@@ -1094,7 +1093,7 @@ async fn run_seed_probe_inner(
     .with_plugin_extensions(&extensions)
     .expect("process lashlang surface should merge plugin extensions");
     let process_engine = Arc::new(
-        LashlangProcessEngine::new(Arc::clone(&artifact_store), process_surface)
+        LashlangProcessEngine::new(artifact_store.clone(), process_surface)
             .with_execution_trace(execution_sink, trace_context),
     );
     let plugins = host_plugins

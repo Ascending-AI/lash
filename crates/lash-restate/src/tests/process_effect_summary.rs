@@ -52,8 +52,8 @@ pub(super) async fn counting_lashlang_registration(process_id: &ProcessId) -> Pr
         lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::default()),
     )
     .expect("link effect-summary process");
-    lashlang::LashlangArtifactStore::publish_module_artifact(
-        recovery_artifact_store().as_ref(),
+    lashlang::LashlangArtifacts::publish_module_artifact(
+        &recovery_artifact_store(),
         &lash_core::ArtifactOwner::host("restate-effect-summary"),
         &linked.artifact,
     )

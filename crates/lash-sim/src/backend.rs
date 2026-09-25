@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use lash_core::sync::MutexExt as _;
 use lash_core::{Backend, SessionStoreFactory};
-use lash_lashlang_runtime::{LashlangArtifactStore, LashlangArtifactStoreSet as _};
 
 use crate::runner::FixedScriptRunnerError;
 use crate::store::{CheckpointWriteCollector, ObservedSessionStoreFactory};
@@ -240,7 +239,6 @@ impl lash::TurnActivitySink for DiscardedTurnActivity {
 /// keeps the inner backend's Lashlang artifacts.
 pub struct DecoratedBackend {
     inner: Arc<dyn Backend>,
-    artifacts: Arc<dyn LashlangArtifactStore>,
     factory: Arc<dyn SessionStoreFactory>,
 }
 
@@ -252,7 +250,6 @@ impl DecoratedBackend {
         let inner = engine.restate.lash_backend();
         Self {
             factory: inner.session_store_factory(),
-            artifacts: engine.restate.stores().lashlang_artifact_store(),
             inner,
         }
     }
@@ -302,17 +299,15 @@ impl Backend for DecoratedBackend {
         self.inner.attachment_store()
     }
 
+    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
+        self.inner.module_artifacts()
+    }
+
     fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
         self.inner.process_work()
     }
 
     fn queued_work(&self) -> lash_core::BackendQueuedWork {
         self.inner.queued_work()
-    }
-}
-
-impl lash_lashlang_runtime::LashlangArtifactBackend for DecoratedBackend {
-    fn lashlang_artifact_store(&self) -> Arc<dyn LashlangArtifactStore> {
-        Arc::clone(&self.artifacts)
     }
 }

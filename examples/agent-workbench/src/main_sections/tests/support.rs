@@ -24,7 +24,7 @@ pub(crate) fn memory_trigger_store() -> Arc<lash_sqlite_store::SqliteTriggerStor
 /// every other port its own, for a test that observes the effect boundary or
 /// the process-event sink.
 pub(crate) struct DecoratedBackend {
-    inner: Arc<dyn lash::persistence::LashlangArtifactBackend>,
+    inner: Arc<dyn lash::Backend>,
     catalog: Arc<dyn lash::persistence::SessionStoreFactory>,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     effect_host: Arc<dyn lash::durability::EffectHost>,
@@ -33,7 +33,7 @@ pub(crate) struct DecoratedBackend {
 }
 
 impl DecoratedBackend {
-    pub(crate) fn over(inner: Arc<dyn lash::persistence::LashlangArtifactBackend>) -> Self {
+    pub(crate) fn over(inner: Arc<dyn lash::Backend>) -> Self {
         Self {
             catalog: inner.session_store_factory(),
             trigger_store: inner.trigger_store(),
@@ -129,18 +129,16 @@ impl lash::Backend for DecoratedBackend {
         self.inner.attachment_store()
     }
 
+    fn module_artifacts(&self) -> Arc<dyn lash::persistence::ModuleArtifactStore> {
+        self.inner.module_artifacts()
+    }
+
     fn process_work(&self) -> Option<lash::process::ProcessWorkWiring> {
         self.process_work.clone()
     }
 
     fn queued_work(&self) -> lash::BackendQueuedWork {
         self.queued_work.clone()
-    }
-}
-
-impl lash::persistence::LashlangArtifactBackend for DecoratedBackend {
-    fn lashlang_artifact_store(&self) -> Arc<dyn lash::persistence::LashlangArtifactStore> {
-        self.inner.lashlang_artifact_store()
     }
 }
 

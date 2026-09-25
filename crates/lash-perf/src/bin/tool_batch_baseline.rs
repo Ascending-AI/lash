@@ -164,7 +164,7 @@ fn load_average() -> LoadAverage {
 /// registrations spell it: `Promise.all` is the cell-bridge surface, so the
 /// factory does not advertise the process lifecycle.
 fn rlm_factory(
-    backend: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+    backend: &dyn lash_core::Backend,
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -182,7 +182,7 @@ fn rlm_factory(
 
 fn producers(
     names: &[String],
-    artifacts: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+    artifacts: &dyn lash_core::Backend,
 ) -> Vec<lash_conformance::ToolBatchProducer> {
     names
         .iter()

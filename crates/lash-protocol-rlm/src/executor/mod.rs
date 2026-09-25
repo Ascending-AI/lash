@@ -56,7 +56,7 @@ async fn execute_code_unbounded_for_tests(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    artifact_store: lashlang::LashlangArtifacts,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
@@ -87,7 +87,7 @@ pub(crate) async fn execute_code_with_bounds(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    artifact_store: lashlang::LashlangArtifacts,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
@@ -116,7 +116,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    artifact_store: lashlang::LashlangArtifacts,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
@@ -147,7 +147,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    artifact_store: lashlang::LashlangArtifacts,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
@@ -201,7 +201,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
 #[cfg(feature = "testing")]
 pub struct RlmCheckpointPerfFixture {
     state: RlmExecutionState,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    artifact_store: lashlang::LashlangArtifacts,
     binding_count: usize,
     payload_bytes: usize,
 }
@@ -210,7 +210,7 @@ pub struct RlmCheckpointPerfFixture {
 impl RlmCheckpointPerfFixture {
     /// A fixture whose cells keep their Lashlang artifacts in `backend`.
     pub fn new(
-        backend: &dyn lashlang::LashlangArtifactBackend,
+        backend: &dyn lash_core::Backend,
         binding_count: usize,
         payload_bytes: usize,
     ) -> Result<Self, SessionError> {
@@ -231,7 +231,7 @@ impl RlmCheckpointPerfFixture {
         }
         Ok(Self {
             state,
-            artifact_store: backend.lashlang_artifact_store(),
+            artifact_store: lashlang::LashlangArtifacts::of_backend(backend),
             binding_count,
             payload_bytes,
         })
@@ -271,7 +271,7 @@ impl RlmCheckpointPerfFixture {
                 language: "typescript".to_string(),
                 code,
             },
-            Arc::clone(&self.artifact_store),
+            self.artifact_store.clone(),
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
@@ -318,7 +318,7 @@ async fn execute_code_inner(
     cell: Arc<Result<cell_run::CellRun, cell_run::LashlangCellOpener>>,
     code: &str,
     start: std::time::Instant,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    artifact_store: lashlang::LashlangArtifacts,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
@@ -639,7 +639,7 @@ async fn execute_code_inner(
         host_environment,
         deferred_execution_grants,
         cell_bindings,
-        artifact_store: Arc::clone(&artifact_store),
+        artifact_store: artifact_store.clone(),
         child_max_attempts: state.child_max_attempts(),
     });
     let env = lashlang::ExecutionEnvironment::new(&host)

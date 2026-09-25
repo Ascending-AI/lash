@@ -104,7 +104,7 @@ crates/lash-restate/src/effect_group/dispatch.rs  |  let outcome = tokio::select
 crates/lash-restate/src/effect_group/dispatch.rs  |  tokio::select! {  |  1  # AC18
 crates/lash-restate/src/process/admission.rs  |  nonce: uuid::Uuid::new_v4().to_string(),  |  1  # UNMAPPED
 crates/lash-restate/src/process/mod.rs  |  std::time::SystemTime::now()  |  1  # CR16
-crates/lashlang/src/artifact.rs  |  owners: HashSet<(ModuleRef, lash_core_execution::ArtifactOwner)>,  |  1  # UNMAPPED
+crates/lashlang/src/artifact.rs  |  owners: HashSet<(String, lash_core_execution::ArtifactOwner)>,  |  1  # UNMAPPED
 crates/lashlang/src/artifact.rs  |  retired_owners: HashSet<lash_core_execution::ArtifactOwner>,  |  1  # UNMAPPED
 crates/lashlang/src/artifact.rs  |  use std::collections::HashSet;  |  1  # UNMAPPED
 crates/lashlang/src/runtime/format.rs  |  futures_executor::block_on(append_stringified_value_async(output, value))  |  1  # UNMAPPED

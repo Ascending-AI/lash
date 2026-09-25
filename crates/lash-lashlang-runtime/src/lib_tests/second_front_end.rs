@@ -446,25 +446,24 @@ fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
 }
 
 /// Publishes `artifact` to a SQLite store at `path`, then reads it back
-/// through a second store opened on the same file, whose empty cache sends the
-/// read through the store's decoder.
+/// through a fresh view of a second store opened on the same file, whose
+/// empty cache sends the read through the decoder.
 async fn stored_reload(
     path: &std::path::Path,
     artifact: &lashlang::ModuleArtifact,
-) -> Arc<dyn LashlangArtifactStore> {
+) -> LashlangArtifacts {
     let publisher = lash_sqlite_store::Store::open(path)
         .await
         .expect("open the publishing store");
-    publisher
+    LashlangArtifacts::new(Arc::new(publisher))
         .publish_module_artifact(&lash_core::ArtifactOwner::host("mini"), artifact)
         .await
         .expect("the mini artifact publishes");
-    drop(publisher);
-    Arc::new(
+    LashlangArtifacts::new(Arc::new(
         lash_sqlite_store::Store::open(path)
             .await
             .expect("reopen the store"),
-    )
+    ))
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -508,7 +507,7 @@ async fn a_second_front_end_keeps_its_sites_across_relink_and_stored_reload() {
 /// from `store`, and returns its observed graph.
 async fn run_worker(
     run: &str,
-    store: Arc<dyn LashlangArtifactStore>,
+    store: LashlangArtifacts,
 ) -> (lashlang::ModuleCompileOutput, TraceLashlangGraph) {
     let output = mini_module();
     let worker = lifted_worker(&output.artifact);
@@ -690,12 +689,12 @@ async fn a_second_front_end_lifted_process_is_observed_and_redrives_identically(
     );
 
     // The redrive is a fresh engine over a freshly opened store: the module
-    // comes back through the store's decoder, not from the first run's cache.
-    let reopened: Arc<dyn LashlangArtifactStore> = Arc::new(
+    // comes back through the decoder, not from the first run's cache.
+    let reopened = LashlangArtifacts::new(Arc::new(
         lash_sqlite_store::Store::open(&path)
             .await
             .expect("reopen the store"),
-    );
+    ));
     let (_, redriven) = run_worker("mini-redrive", reopened).await;
     assert_eq!(
         emitted(&redriven),
