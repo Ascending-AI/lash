@@ -52,9 +52,11 @@ pub(super) struct NodeOracle {
 
 impl NodeOracle {
     /// The pinned Node binary: `LASH_NODE` when set, else the mise install
-    /// `~/.local/share/mise/installs/node/<pinned>/bin/node` when present,
-    /// else a failure naming both (FIG-3812 — `kiln run`'s Bazel environment
-    /// has no `node` on `PATH`).
+    /// `~/.local/share/mise/installs/node/<pinned>/bin/node` when present
+    /// (FIG-3812: `kiln run`'s Bazel environment has no `node` on `PATH`),
+    /// else `node` from `PATH`, which is how CI jobs provision it
+    /// (`actions/setup-node`). The oracle refuses any Node other than the
+    /// pinned one, so a wrong `PATH` node fails loudly rather than drifting.
     #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the live Node oracle is a test host capability.
     fn node_program() -> PathBuf {
         if let Some(node) = std::env::var_os("LASH_NODE") {
@@ -71,11 +73,7 @@ impl NodeOracle {
         if mise.is_file() {
             return mise;
         }
-        panic!(
-            "the Node session oracle needs Node {}: set LASH_NODE to its binary or install it at {}",
-            super::PINNED_NODE,
-            mise.display()
-        );
+        PathBuf::from("node")
     }
 
     /// Starts the oracle under [`Self::node_program`]'s resolution. The
@@ -92,9 +90,11 @@ impl NodeOracle {
             .spawn()
             .unwrap_or_else(|error| {
                 panic!(
-                    "start the Node session oracle ({} {}): {error}",
+                    "start the Node session oracle ({} {}): {error}; it needs Node {}: set \
+                     LASH_NODE, install it with mise, or put it on PATH",
                     node.display(),
-                    script.display()
+                    script.display(),
+                    super::PINNED_NODE
                 )
             });
         let stdin = child.stdin.take().expect("the oracle's stdin is piped");
