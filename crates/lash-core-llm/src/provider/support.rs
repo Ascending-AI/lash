@@ -11,7 +11,7 @@ pub(super) use crate::llm::transport::{
 pub(super) use crate::llm::types::{
     AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, LlmCallId, LlmCallRecord, LlmContentBlock,
-    LlmRequest, LlmResponse, LlmTerminalReason, NormalizedError, ProtocolPosition,
+    LlmRequest, LlmRequestScope, LlmResponse, LlmTerminalReason, NormalizedError, ProtocolPosition,
     ProviderReplayOriginConflict, ProviderRouteIdentity, RetryDecision,
 };
 pub(super) use lash_sansio::session_model::{FailureCode, Namespace, TurnFailureCode};

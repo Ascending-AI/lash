@@ -18,7 +18,9 @@ pub mod turn_vocabulary;
 /// of a module's published surface. Nothing outside the kernel uses them and
 /// `lash-core` re-exports each one crate-internally.
 pub mod core_internal {
-    pub use crate::provider::handle::{ProviderCompletionSideband, synthetic_terminal_call_record};
+    pub use crate::provider::handle::{
+        ProviderCompletionSideband, call_id_for_scope, synthetic_terminal_call_record,
+    };
 }
 
 // Crate-root vocabulary. These re-exports exist so the modules above keep the

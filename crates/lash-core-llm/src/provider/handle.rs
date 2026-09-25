@@ -322,6 +322,7 @@ impl ProviderHandle {
         sideband: ProviderCompletionSideband,
         charge_safety: crate::ChargeSafetyPolicy,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
+        let call_id = call_id_for_scope(&request.scope);
         let serving_route = sideband.serving_route();
         if let Err(error) = serving_route.validate_endpoint() {
             let error = LlmTransportError::new(error.to_string())
@@ -330,6 +331,7 @@ impl ProviderHandle {
                 .with_retry_verdict(TransportRetryVerdict::Forbidden);
             return Err(ProviderCompletionError {
                 call_record: Box::new(synthetic_terminal_call_record(
+                    call_id,
                     self.components.rate_limiter.clock().timestamp_ms(),
                     Duration::ZERO,
                     AttemptOutcome::Failed,
@@ -344,7 +346,6 @@ impl ProviderHandle {
         let reliability = self.options().reliability;
         let attempts = reliability.retry.attempts();
         let mut budget = RetryBudget::default();
-        let call_id = LlmCallId(uuid::Uuid::new_v4().to_string());
         let mut records = Vec::new();
         loop {
             let _permit = self
@@ -1079,7 +1080,19 @@ fn charge_safety_refusal(
     failure
 }
 
+/// A call record's id is the request scope's caller-owned request id: the
+/// scope already carries one identity per logical provider call, so sealing
+/// the same request again yields the same `call_id` instead of a fresh uuid.
+pub fn call_id_for_scope(scope: &LlmRequestScope) -> LlmCallId {
+    LlmCallId(scope.request_id.clone())
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each argument is one field of the sealed record; bundling them would only rename the same list"
+)]
 pub fn synthetic_terminal_call_record(
+    call_id: LlmCallId,
     started_at: u64,
     duration: Duration,
     outcome: AttemptOutcome,
@@ -1099,7 +1112,7 @@ pub fn synthetic_terminal_call_record(
     );
     attempt.outcome = outcome;
     LlmCallRecord {
-        call_id: LlmCallId(uuid::Uuid::new_v4().to_string()),
+        call_id,
         label: None,
         replay_drops,
         attempts: vec![attempt],

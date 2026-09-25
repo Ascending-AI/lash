@@ -274,6 +274,7 @@ impl RuntimeTurnDriver<'_> {
         let completion_sideband = call_provider.prepare_completion(&mut llm_request);
         let task_sideband = completion_sideband.clone();
         let charge_safety = self.policy.charge_safety.clone();
+        let call_id = crate::provider::call_id_for_scope(&llm_request.scope);
         let mut llm_task = crate::task::spawn(async move {
             call_provider
                 .complete_prepared(llm_request, task_sideband, charge_safety)
@@ -323,6 +324,7 @@ impl RuntimeTurnDriver<'_> {
                         crate::llm::transport::TransportRetryVerdict::NotRetryable,
                     );
                     call_record = Some(crate::provider::synthetic_terminal_call_record(
+                        call_id.clone(),
                         attempt_started_at,
                         self.host
                             .core
@@ -513,6 +515,7 @@ impl RuntimeTurnDriver<'_> {
                                 crate::llm::transport::TransportRetryVerdict::NotRetryable,
                             );
                             call_record = Some(crate::provider::synthetic_terminal_call_record(
+                                call_id.clone(),
                                 attempt_started_at,
                                 self.host
                                     .core
