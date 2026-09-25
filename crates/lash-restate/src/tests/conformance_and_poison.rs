@@ -716,6 +716,20 @@ mod on_the_server_double {
         (harness, prefix, effect_host, stores, turn_runner)
     });
 
+    // FIG-3788: a driver turn that switched frames, crashed after the switch
+    // commit and redelivered replays its recorded admission and switched
+    // turn from the journal and runs only the follow-on frame.
+    lash_conformance::frame_switch_redrive_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let prefix: &'static str =
+            Box::leak(format!("restate-frame-switch-{}", harness.run_nonce()).into_boxed_str());
+        (harness, prefix, effect_host, stores, turn_runner)
+    });
+
     // A cancelled turn drops its tool child even when the tool ignores the
     // cancellation: on Restate the child's dispatch invocation is cancelled
     // and its handler future dropped.
