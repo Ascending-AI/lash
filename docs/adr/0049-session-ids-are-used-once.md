@@ -113,32 +113,28 @@ owning operation has a recorded receipt and that is quiescent at sweep time,
 and leaves any scope without a recorded receipt alone — no receipt, no proof.
 
 A runtime-operation fence is permanent: those ids are used once. A process
-fence lasts until the host registers the same id again. Host-named process ids
-are reusable by contract, and the fence exists to cover the interval between
-the prune and that re-registration; the registration lifts it. The lift
-lives in the registry insert, not in any caller: every registrant — a direct
-registration, `Processes::start`, a session-scoped start, a trigger delivery,
-a tool-intent `StartProcess`, the Restate scheduler — ends in
-`ProcessRegistrar::register_process_with_observers`, and that write deletes
-the scope's `effect_scope_retirements` row in the same transaction as the
-registry insert, or in the same critical section on the in-memory registry.
+fence is permanent the same way: the id it names is minted, never chosen and
+never reused (ADR 0106), so nothing ever registers the pruned scope again —
+a later start under the same start key mints a new process id whose scope
+was never fenced. Before the cutover a host-named id could be registered
+again and the registry insert lifted the scope's fence in the same
+transaction; under minted ids no registration names a fenced scope, so the
+lift never fires for its original purpose — the mechanism survives only as
+bind-time repair, clearing journal-file fences written before a registry
+bound to them.
 
 Each store has exactly one commit point per registration and one per
 retirement, and the fence row lives where that commit point is. On
-PostgreSQL both live in one database: the registration transaction deletes the
-fence and inserts the record under the scope's advisory lock, and the
-retirement transaction proves quiescence, inserts the fence, and deletes the
-journal rows. On SQLite the process registry is its own file, and a
-multi-database write that modifies more than one file commits per file, so
-the process fence of a registered host lives in the registry file
-(`effect_scope_retirements` in `PROCESS_SCHEMA`). Registration is then a
-single-file transaction: fence delete and registry insert commit together or
-not at all, so a crash leaves the id either fenced-and-unregistered or
-registered-and-unfenced, never both and never neither. Retirement commits the
-fence into the registry file first — the quiescence proof and the fence
-insert are one transaction over the attached files under one `BEGIN
-IMMEDIATE` — and only then purges the journal rows in a second transaction on
-the journal file. A crash between the two leaves a fenced scope with stale
+PostgreSQL both live in one database, and the retirement transaction proves
+quiescence, inserts the fence, and deletes the journal rows. On SQLite the
+process registry is its own file, and a multi-database write that modifies
+more than one file commits per file, so a process scope's fence lives in the
+registry file (`effect_scope_retirements` in `PROCESS_SCHEMA`). Retirement
+commits the fence into the registry file first — the quiescence proof and
+the fence insert are one transaction over the attached files under one
+`BEGIN IMMEDIATE` — and only then purges the journal rows in a second
+transaction on the journal file. A crash between the two leaves a fenced
+scope with stale
 journal rows, which is safe: admission reads the fence from the registry file
 (the effect host attaches it for reads once the registry is bound), so a cold
 host over that journal admits nothing under the scope, and the leftover rows
@@ -209,12 +205,15 @@ in the shared conformance law rather than papered over.
   gone. Lash detects reuse at creation rather than relying on every downstream
   identity preimage to carry a lifetime discriminator.
 - A pruned process id is permanently unbindable as a session owner, and stays
-  so after `compact_process_tombstones` removes the process tombstone that
-  fenced its re-registration. Compaction frees registry rows, never ids:
-  re-registering a compacted process id starts a process whose derived session
-  stores cannot be created, failing with `StoreError::SessionDeleted` naming an
-  internal id the host never chose (`process-env:<id>` or
-  `process-session-turn:<id>`). Process ids are single-use for the store's life.
+  so after `compact_process_tombstones` removes its process tombstone.
+  Compaction frees registry rows, never ids, and under minted ids a compacted
+  id is never registered again: a start key reused after prune mints a new
+  process id (ADR 0106), whose derived session ids were never bound and create
+  cleanly. What stays tombstoned for the store's life is the pruned
+  lifetime's own ids — `process-env:<pruned id>` and
+  `process-session-turn:<pruned id>` — which refuse every bind with
+  `StoreError::SessionDeleted`. Process ids are single-use for the store's
+  life.
 - Fork materialization followed by observer publication spans transaction
   domains. The fork relation retains the selected process ids as durable apply
   intent until every idempotent observer event commits. A crash burns no

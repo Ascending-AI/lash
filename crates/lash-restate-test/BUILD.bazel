@@ -139,6 +139,23 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "process_successor_after_prune__test",
+    crate_features = [],
+    crate_name = "process_successor_after_prune",
+    crate_root = "tests/process_successor_after_prune.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "process_successor_after_prune", "//crates/lash-restate-test:process_successor_after_prune__test"),
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "server_semantics__test",
     crate_features = [],
     crate_name = "server_semantics",
@@ -287,6 +304,7 @@ lash_batch_test(
         ":handler_controller_turn__test",
         ":lash-restate-test__unit_test",
         ":process_crash_replay__test",
+        ":process_successor_after_prune__test",
         ":server_semantics__test",
         ":session_driver__test",
         ":session_send__test",
