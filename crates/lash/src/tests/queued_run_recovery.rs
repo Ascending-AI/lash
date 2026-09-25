@@ -692,7 +692,14 @@ async fn exhausted_input_root_resumes_or_is_withdrawn_without_new_input() -> Res
         }
         assert!(session.durable().pending_queued_run().await?.is_none());
         assert!(session.durable().pending_turn_inputs().await?.is_empty());
-        // The engine's drive may still be releasing the session's lane.
+        // The engine's drive may still hold the session's lane. A direct turn
+        // it turns away before accepting anything is resubmitted. One it turns
+        // away after accepting its input, or whose accepted input that drive
+        // reached first, is never resubmitted: its input is durably accepted,
+        // the still-running drive's next admission may run it, and a
+        // resubmission would only adopt the same row and find it ceded. The
+        // host redrives the accepted input by its receipt instead (FIG-3575),
+        // and whichever drive reaches it runs it once.
         let mut attempts = 0;
         loop {
             match session
@@ -702,6 +709,33 @@ async fn exhausted_input_root_resumes_or_is_withdrawn_without_new_input() -> Res
                 .await
             {
                 Ok(_) => break,
+                Err(crate::EmbedError::Runtime(error))
+                    if error.turn_input_acceptance.is_some()
+                        && matches!(
+                            error.code,
+                            lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
+                                | lash_core::RuntimeErrorCode::AcceptedTurnInputCeded
+                        ) =>
+                {
+                    let ports = core.substrate_slot.ports().await;
+                    ports.queued.schedule_drive(
+                        &SessionId::from("exhausted-queued-run"),
+                        lash_core::engine::DriveRequestId::new("host redrives direct work"),
+                    );
+                    for _ in 0..1_000 {
+                        if session.durable().pending_turn_inputs().await?.is_empty()
+                            && probe.provider_calls.load(Ordering::SeqCst) == 2
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    assert!(
+                        session.durable().pending_turn_inputs().await?.is_empty(),
+                        "the redriven direct input is settled"
+                    );
+                    break;
+                }
                 Err(crate::EmbedError::Runtime(error))
                     if error.code == lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
                         && attempts < 500 =>
