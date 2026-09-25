@@ -129,6 +129,13 @@ rejection_test!(
     Code::PrototypeMutationUnsupported
 );
 rejection_test!(rejects_this, "const x = this;", Code::ThisUnsupported);
+// The arguments object is a supported binding only inside a non-arrow
+// function; outside one it is refused under its own code (FIG-3708).
+rejection_test!(
+    rejects_arguments_outside_a_function,
+    "const x = arguments;",
+    Code::ArgumentsUnsupported
+);
 rejection_test!(
     rejects_namespaces,
     "namespace N {}",

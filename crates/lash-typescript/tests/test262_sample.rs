@@ -20,10 +20,7 @@ use lashlang::{
 };
 
 #[path = "test262/support/ingest.rs"]
-#[allow(
-    dead_code,
-    reason = "the corpus laws read the harness bindings; the runner does not"
-)]
+#[allow(dead_code, reason = "not every ingest helper is used in this shard")]
 mod ingest;
 #[path = "test262/support/metadata.rs"]
 mod metadata;
@@ -608,6 +605,19 @@ fn assertion_harness_keeps_upstream_semantics() {
         )
         .expect("a plain data property verifies"),
         ExecutionOutcome::Finished(Value::Bool(true))
+    );
+}
+
+/// A test whose own declarations collide with a name a shim binds is a
+/// harness outcome, not a divergence (FIG-3710): upstream's `assert` is a
+/// var-scoped function a test may redeclare, while the shim binds `assert`
+/// lexically, so the concatenated program is an early error the test alone
+/// does not carry.
+#[test]
+fn a_test_that_redeclares_a_harness_binding_is_a_harness_outcome() {
+    assert_eq!(
+        runner::run("test/language/reserved-words/unreserved-words.js").to_string(),
+        "harness binding-collision"
     );
 }
 

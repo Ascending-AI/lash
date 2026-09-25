@@ -24,7 +24,9 @@ use lashlang::{
     ExecutionHostError, ExecutionOutcome, RuntimeError, State, Value,
 };
 
-use super::ingest::{data_path, harness_shim, source_for, source_without_unshimmed};
+use super::ingest::{
+    data_path, harness_bindings, harness_shim, source_for, source_without_unshimmed, test_script,
+};
 use super::metadata::{self, Phase, TestFlag};
 
 /// The instruction budget one test runs under. It is deterministic, unlike a
@@ -62,6 +64,14 @@ pub(crate) const HOST_EFFECTS: &str = "host-effects";
 /// making it affordable; the runner records the qualifier without executing
 /// the test.
 pub(crate) const INSTRUCTION_COST: &str = "instruction-cost";
+
+/// The `harness` qualifier of a test whose own declarations collide with a
+/// name a shim binds. Upstream runs each harness file as its own Script, so a
+/// test may redeclare what it bound (upstream's `assert` is a var-scoped
+/// function). The runner concatenates shim and test into one cell, where the
+/// shim's lexical bindings meet the test's `var`, `let`, `const` or `function`
+/// of the same name as an ECMA early error the test alone does not carry.
+pub(crate) const BINDING_COLLISION: &str = "binding-collision";
 
 const UNEXPECTED_ABILITY: &str = "the Test262 host answers no host effect";
 
@@ -455,6 +465,39 @@ fn thrown_name(error: &RuntimeError) -> Option<String> {
     }
 }
 
+/// Whether `error` is a binding collision the harness causes, not the test:
+/// the duplicated name must be one a shim binds (`assert`, `Test262Error`,
+/// `verifyProperty`, …), and the test's own script must not duplicate it on
+/// its own — a test that redeclares the same name twice is invalid whether
+/// or not the harness is in the cell.
+fn collides_with_harness(path: &Path, meta: &metadata::Metadata, error: &Rejection) -> bool {
+    let message = error.to_string();
+    match error.code {
+        // The parser's duplicate-declaration error and the lowerer's both
+        // name the colliding binding.
+        DiagnosticCode::DuplicateBinding => {}
+        DiagnosticCode::SyntaxError if message.contains("already been declared") => {}
+        _ => return false,
+    }
+    let Some(name) = message.split('`').nth(1) else {
+        return false;
+    };
+    if !harness_bindings(meta).contains(name) {
+        return false;
+    }
+    // The test's own script must be clean of the same collision — a body
+    // that already duplicates the name, or has a syntax error of its own, is
+    // invalid whether or not the harness is in the cell.
+    !matches!(
+        admit(&test_script(path, meta, false)),
+        Err(alone)
+            if matches!(
+                alone.code,
+                DiagnosticCode::DuplicateBinding | DiagnosticCode::SyntaxError
+            )
+    )
+}
+
 fn evidence(text: impl fmt::Display) -> String {
     let text = text.to_string().replace(['\n', '\t'], " ");
     match text.char_indices().nth(240) {
@@ -507,9 +550,12 @@ pub(crate) fn run(relative: &str) -> Observed {
             if EARLY_ERROR_CODES.contains(&error.code) {
                 // An early error is the expected answer of a parse-negative
                 // test. Anywhere else the program is valid ECMAScript, so the
-                // front end rejecting it is a divergence, not a ruling.
+                // front end rejecting it is a divergence, not a ruling —
+                // unless the collision is the harness's own.
                 return if parse_negative {
                     Observed::Pass
+                } else if collides_with_harness(&path, &meta, &error) {
+                    Observed::Harness(BINDING_COLLISION.to_owned())
                 } else {
                     Observed::Diverged(evidence(format!(
                         "the front end rejects a valid program: {error}"

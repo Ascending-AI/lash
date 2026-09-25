@@ -1,0 +1,8 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3708	1	reject	"arguments"	"[object Arguments]"	TS_ARGUMENTS_UNSUPPORTED
+FIG-3708	2	reject	"arguments.length"	"1"	TS_ARGUMENTS_UNSUPPORTED
+FIG-3708	3	reject	"typeof arguments"	"object"	TS_ARGUMENTS_UNSUPPORTED
+FIG-3708	4	accept	"(function () { return arguments.length; })(1, 2, 3)"	"3"	-
+FIG-3708	5	accept	"(function () { return arguments[1]; })(7, 8)"	"8"	-
+FIG-3708	6	open-defect	"(function () { return (() => arguments.length)(); })(1, 2)"	"2"	arrow-arguments-argv
+FIG-3708	7	open-defect	"(() => arguments.length)()"	"1"	arrow-arguments-argv

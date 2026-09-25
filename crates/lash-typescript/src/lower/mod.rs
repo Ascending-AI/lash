@@ -1227,7 +1227,7 @@ impl Lowerer {
             Expr::Ident(name, _) if name == "arguments" && !self.has_binding(name) => {
                 if self.functions.is_empty() {
                     return Err(Diagnostic::new(
-                        DiagnosticCode::ThisUnsupported,
+                        DiagnosticCode::ArgumentsUnsupported,
                         "Unsupported: arguments. Declare an explicit ...rest parameter instead.",
                         None,
                     ));

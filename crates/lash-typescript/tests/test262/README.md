@@ -80,10 +80,12 @@ sorted by path inside each file. There is no bare `fail` and no wildcard.
 - **`harness <capability>`:** the runner cannot give the test what it needs
   in-dialect. `harness-shim/unshimmable.tsv` names the capability for each
   case: an include that cannot be rendered, `program-size` (the test fits the
-  64 KiB cell alone but not with the harness prepended) or `host-effects`.
-  A fourth qualifier, `instruction-cost`, is not an unshimmable capability:
-  it names a selected test whose full run exceeds the CI lane's cost bound,
-  registered in `harness-cost.tsv` (see below).
+  64 KiB cell alone but not with the harness prepended), `host-effects` or
+  `binding-collision` (the test's own declarations meet a name a shim binds —
+  upstream's harness bindings are var-scoped and redeclarable, the shims' are
+  lexical). A fifth qualifier, `instruction-cost`, is not an unshimmable
+  capability: it names a selected test whose full run exceeds the CI lane's
+  cost bound, registered in `harness-cost.tsv` (see below).
 
 The runner admits each test the way a cell is admitted: lowered, linked
 against a host environment, compiled from the linked artifact, then run under

@@ -7,10 +7,7 @@
 )]
 
 #[path = "test262/support/ingest.rs"]
-#[allow(
-    dead_code,
-    reason = "the corpus laws read the harness bindings; the runner does not"
-)]
+#[allow(dead_code, reason = "not every ingest helper is used in this shard")]
 mod ingest;
 #[path = "test262/support/metadata.rs"]
 #[allow(
