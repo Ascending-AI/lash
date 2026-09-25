@@ -1090,6 +1090,10 @@ impl ExecutionHost for HostBridge<'_> {
         self.ctx.is_cancelled() || self.cancellation.is_cancelled()
     }
 
+    fn observes_lashlang_execution(&self) -> bool {
+        self.lashlang_execution_trace.is_some()
+    }
+
     fn observe_lashlang_execution(&self, observation: lashlang::LashlangExecutionObservation) {
         let Some(trace) = &self.lashlang_execution_trace else {
             return;

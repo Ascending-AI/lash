@@ -117,6 +117,10 @@ where
         self.host.observe_profile(profile);
     }
 
+    fn observes_lashlang_execution(&self) -> bool {
+        true
+    }
+
     fn observe_lashlang_execution(&self, observation: lashlang::LashlangExecutionObservation) {
         use lashlang::LashlangExecutionObservation as Observation;
         match &observation {

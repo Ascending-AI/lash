@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 165,
+  "cargo_target_count": 166,
   "feature_lane_units": [
     {
       "features": [
@@ -16872,7 +16872,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 224,
+  "generated_label_count": 225,
   "packages": [
     {
       "declared_features": [
@@ -19519,6 +19519,12 @@
           "tags": []
         },
         {
+          "cargo": "observation_cost",
+          "kind": "test",
+          "label": "//crates/lashlang:observation_cost__test",
+          "tags": []
+        },
+        {
           "cargo": "diagnostic_locations",
           "kind": "test",
           "label": "//crates/lashlang:diagnostic_locations__test",
@@ -19558,6 +19564,7 @@
           "//crates/lashlang:diagnostic_locations__test",
           "//crates/lashlang:integration__test",
           "//crates/lashlang:lashlang__unit_test",
+          "//crates/lashlang:observation_cost__test",
           "//crates/lashlang:property__test",
           "//crates/lashlang:stack_budget__test",
           "//crates/lashlang:workflow_schema_generator__bin__unit_test"

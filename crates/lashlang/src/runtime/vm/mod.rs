@@ -261,6 +261,10 @@ pub struct Vm<'a, H> {
     execution_nonce: u64,
     #[cfg(test)]
     test_suspension: TestSuspension,
+    /// How many post-instruction import passes ran (FIG-3730): the law in
+    /// `control.rs` holds a plain-instruction loop to a constant count.
+    #[cfg(test)]
+    heapify_passes: u64,
 }
 
 #[derive(Clone)]
@@ -459,7 +463,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     Value::Undefined
                 };
                 let function = values.remove(0);
-                let active = self.begin_lashlang_execution(self.current_instruction_ip());
+                let active = self.begin_lashlang_call(self.current_instruction_ip());
                 match self.begin_function_call(
                     function,
                     receiver,

@@ -5,7 +5,9 @@ use super::super::{
     ExecutionOutcome, RuntimeError, RuntimeFailure, Value,
 };
 use super::effects::VmEffect;
-use super::heap_plan::{SlotExport, StackExport, instruction_heap_plan};
+use super::heap_plan::{
+    SlotExport, StackExport, instruction_heap_plan, instruction_keeps_vm_state_heapified,
+};
 use super::{IterCursor, Vm, VmRunOutcome};
 use crate::span::Span;
 
@@ -226,6 +228,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut budget = COOPERATIVE_YIELD_INSTRUCTION_BUDGET;
         let mut active_started = Instant::now();
         let mut next_clock_read = self.next_clock_read();
+        // Whether VM state held no inline compound after the last instruction:
+        // only then may an instruction that keeps it so skip the import pass.
+        let mut heapified = false;
         if let Err(error) = self.enforce_execution_bounds() {
             return Err(VmTrap {
                 error,
@@ -244,6 +249,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             if let Some(function) = self.active_function
                 && self.ip == self.chunk.functions[function].end_ip
             {
+                heapified = false;
                 if let Err(error) = self.return_from_function() {
                     self.route_runtime_error(error, self.ip.saturating_sub(1), None)?;
                 }
@@ -253,6 +259,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 break;
             };
             let instruction_ip = self.ip;
+            let keeps_heapified = heapified
+                && !self.heap.allocation_scope_needs_roots()
+                && instruction_keeps_vm_state_heapified(instruction, self.chunk);
+            // Every path that does not reach the import pass below, or skip it
+            // on a clean state, leaves the state unknown.
+            heapified = false;
             if let Err(error) = self.materialize_instruction_operands(instruction) {
                 self.route_runtime_error(error, instruction_ip, None)?;
                 continue;
@@ -309,11 +321,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 Err(error) => Err(error),
             };
-            if result.is_ok()
-                && let Err(error) = self.heapify_vm_state()
-            {
-                self.route_runtime_error(error, instruction_ip, None)?;
-                continue;
+            if result.is_ok() {
+                if !keeps_heapified && let Err(error) = self.heapify_vm_state() {
+                    self.route_runtime_error(error, instruction_ip, None)?;
+                    continue;
+                }
+                heapified = true;
             }
             if let Some((tag, start)) = profile {
                 self.record_instruction_profile(tag, start.elapsed().as_nanos());
@@ -580,6 +593,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// not: both are written once and then only read, so each carries a flag and
     /// is scanned exactly once.
     fn heapify_vm_state(&mut self) -> Result<(), RuntimeError> {
+        #[cfg(test)]
+        {
+            self.heapify_passes += 1;
+        }
         if self.heap.allocation_scope_needs_roots() {
             self.heap.begin_allocation_scope(self.heap_roots());
         }
@@ -923,5 +940,69 @@ mod tests {
         };
         assert_eq!(slot_id, operand_id);
         assert_eq!(vm.heap.objects_in_id_order().count(), 1);
+    }
+
+    /// `while (i < n) { acc = (acc * 31 + i) & 65535; i = i + 1; }` with
+    /// ECMA operators, then `finish acc`.
+    fn javascript_numeric_loop(iterations: f64) -> super::super::Chunk {
+        use crate::ast::{Expr, JavaScriptBinaryOp as Op};
+        use crate::testing::ast_builders as b;
+        fn js(left: Expr, op: Op, right: Expr) -> Expr {
+            Expr::JavaScriptBinary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            }
+        }
+        Compiler::compile_program(&b::program(vec![
+            b::assign("i", b::num(0.0)),
+            b::assign("acc", b::num(0.0)),
+            b::while_loop(
+                js(b::var("i"), Op::Less, b::num(iterations)),
+                b::block(vec![
+                    b::assign(
+                        "acc",
+                        js(
+                            js(
+                                js(b::var("acc"), Op::Multiply, b::num(31.0)),
+                                Op::Add,
+                                b::var("i"),
+                            ),
+                            Op::BitAnd,
+                            b::num(65535.0),
+                        ),
+                    ),
+                    b::assign("i", js(b::var("i"), Op::Add, b::num(1.0))),
+                ]),
+            ),
+            b::finish(b::var("acc")),
+        ]))
+        .0
+    }
+
+    /// FIG-3730: an instruction that cannot leave an inline compound behind
+    /// skips the post-instruction import pass, so a loop of plain ECMA
+    /// arithmetic runs a constant number of passes however long it runs. The
+    /// pass used to run after every instruction and scan every slot and
+    /// operand, whatever the instruction was.
+    #[tokio::test(flavor = "current_thread")]
+    async fn plain_instruction_loops_skip_the_import_pass() {
+        let host = crate::testing::harness::EchoHost;
+        let mut passes = Vec::new();
+        for iterations in [10.0, 1000.0] {
+            let chunk = javascript_numeric_loop(iterations);
+            let mut vm = holder_test_vm(&chunk, &host);
+            let outcome = vm.run_for_mode().await.expect("the loop finishes");
+            assert!(matches!(
+                outcome,
+                ExecutionOutcome::Finished(Value::Number(_))
+            ));
+            passes.push(vm.heapify_passes);
+        }
+        assert_eq!(
+            passes[0], passes[1],
+            "a loop 100 times longer runs the same number of import passes"
+        );
+        assert!(passes[1] <= 4, "import passes: {passes:?}");
     }
 }

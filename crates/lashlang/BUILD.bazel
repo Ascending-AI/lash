@@ -229,6 +229,27 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "observation_cost__test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "observation_cost",
+    crate_root = "tests/observation_cost.rs",
+    declared_features = [
+        "testing",
+    ],
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    extra_compile_data = [],
+    library = ":lashlang",
+    library_crate_name = "lashlang",
+    manifest_dir = "crates/lashlang",
+    package_name = "lash-internal-lashlang",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "diagnostic_locations__test",
     crate_features = [
         "testing",
@@ -347,14 +368,15 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 6,
+    cpu_count = 7,
     jobs = 2,
-    memory_kb = 2097152,
+    memory_kb = 5242880,
     tests = [
         ":benchmark_contract__test",
         ":diagnostic_locations__test",
         ":integration__test",
         ":lashlang__unit_test",
+        ":observation_cost__test",
         ":property__test",
         ":stack_budget__test",
         ":workflow_schema_generator__bin__unit_test",
