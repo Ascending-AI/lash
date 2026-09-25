@@ -2108,6 +2108,7 @@ dependencies = [
  "lash-internal-core-ids",
  "lash-internal-core-llm",
  "lash-internal-core-store",
+ "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",

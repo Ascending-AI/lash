@@ -65,6 +65,10 @@ proptest = "1"
 # FIG-3580: fixtures layer over a SQLite memory backend's effect host; the
 # store depends on lash-core-execution, not on this crate (ADR 0102).
 lash-sqlite-store = { workspace = true }
+# Kernel tests that need a real effect engine run on the Restate server
+# double. A dev-dependency cycle: the integration tests link the one
+# lash-core rlib the double links.
+lash-restate-test = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
