@@ -46,9 +46,7 @@ pub enum EffectJournalWriters {
     /// clock alone.
     Announced,
     /// A writer in another process can change the subject without waking the
-    /// notifier (a SQLite file, PostgreSQL rows), or its notification can be
-    /// lost (PostgreSQL group `NOTIFY`s across a `LISTEN` reconnect). A
-    /// parked driver also re-reads on a bounded poll, which is the only poll
+    /// notifier (a SQLite file). A parked driver also re-reads on a bounded poll, which is the only poll
     /// left on these paths.
     Unannounced,
 }
@@ -68,7 +66,7 @@ pub struct EffectJournalWake {
 /// The process-wide table of in-process journal notifiers.
 ///
 /// Keyed by the identity of the journal's backend (`sqlite:<path>`,
-/// `sqlite-memory:<id>`, `postgres:<digest>`) and then by subject. Entries are
+/// `sqlite-memory:<id>`) and then by subject. Entries are
 /// `Weak`: a subject nobody waits on keeps no notifier alive, and the table
 /// sweeps dead entries as it grows. Announcing a subject nobody waits on is a
 /// lock and a map miss, with no allocation, so a backend announces every

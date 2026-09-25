@@ -203,64 +203,26 @@ pub(super) async fn wait_for_process_signal_wait(
     anyhow::bail!("timed out waiting for process `{process_id}` signal `{signal_name}` wait")
 }
 
+/// Press the button from inside a Restate handler, where the emission
+/// journals: the deployment's effect host refuses an effect outside one.
 pub(super) async fn emit_button_event(
     storage: &PostgresStorage,
-    mock_provider_base_url: &str,
-    trace_dir: Option<PathBuf>,
     ingress_url: &str,
 ) -> Result<ProcessId> {
-    let backend = e2e_backend(
-        storage,
-        Arc::new(s3_store_from_env()?),
-        ingress_url.to_string(),
-        restate_authority_id()?,
-    );
-    let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
-        worker_id: "runner".to_string(),
-        storage: storage.clone(),
-        backend,
-        restate_ingress_url: ingress_url.to_string(),
-        restate_authority_id: restate_authority_id()?,
-        mock_provider_base_url: mock_provider_base_url.to_string(),
-        trace_dir,
+    let request = TurnRequest {
+        workflow_id: TRIGGER_EMIT_WORKFLOW_ID.to_string(),
         fail_once: false,
-    })?;
-    let source_key = empty_trigger_source_key(BUTTON_SOURCE_TYPE)?;
-    // The runner emits from outside a Restate handler, so the emission
-    // journals through the PostgreSQL deployment's own effect host.
-    let emit_backend = lash_postgres_store::PostgresBackend::new(
-        storage,
-        Arc::new(lash::persistence::FileAttachmentStore::new(
-            std::env::temp_dir().join("lash-e2e-button-trigger"),
-        )),
-    );
-    let scoped = lash::Backend::effect_host(&emit_backend)
-        .scoped_static(lash_core::AdmittedScope::runtime_operation(
-            "e2e-button-trigger",
-        ))?
-        .context("the PostgreSQL effect host lends a static controller")?;
-    let report = core
-        .triggers()
-        .emit(
-            TriggerOccurrenceRequest::new(
-                BUTTON_SOURCE_TYPE,
-                source_key,
-                json!({
-                    "button": "Red",
-                    "message": "pressed from runner",
-                    "pressed_at": "2026-06-08T12:00:00Z"
-                }),
-                "e2e-button-red-1",
-            )
-            .with_source(json!({"runner": true})),
-            scoped,
-        )
-        .await?;
-    report
-        .started_process_ids()
-        .first()
-        .cloned()
-        .context("trigger occurrence did not start a process")
+        scenario: TurnScenario::TriggerEmit,
+        signal: None,
+    };
+    submit_workflow(ingress_url, &request).await?;
+    let response = wait_for_terminal_result(storage.pool(), &request.workflow_id).await?;
+    let started = response
+        .final_value
+        .get("started_process_id")
+        .and_then(Value::as_str)
+        .context("trigger occurrence did not start a process")?;
+    Ok(ProcessId::from(started.to_string()))
 }
 
 pub(super) fn signal_process_output_value(await_output: Value) -> Result<Value> {

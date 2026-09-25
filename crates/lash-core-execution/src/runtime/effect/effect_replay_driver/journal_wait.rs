@@ -215,8 +215,7 @@ pub(super) enum Finalized {
 /// uncontended claim never touches the notifier table. Every later busy
 /// answer parks on the row, racing the lease's expiry on the clock — unless
 /// the clock already reached that expiry once and the store still called the
-/// lease live (a store whose lease clock runs behind the driver's, as a
-/// PostgreSQL server's may), in which case only the row's own notification
+/// lease live (a store whose lease clock runs behind the driver's), in which case only the row's own notification
 /// or the cross-process poll can move it.
 #[derive(Default)]
 pub(super) struct ClaimQueue {
@@ -236,7 +235,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     ///
     /// A subscription is an optimization, never a precondition: one the
     /// store refuses, or does not grant within [`SUBSCRIBE_BUDGET`] (a
-    /// PostgreSQL `LISTEN` connection still reconnecting, a saturated pool),
+    /// saturated pool),
     /// degrades to a poll-only watch rather than failing the wait. The wait
     /// then re-reads on the cross-process poll and is never left parked on a
     /// wake nobody will send.

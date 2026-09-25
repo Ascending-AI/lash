@@ -30,21 +30,20 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             turn_index + 1,
             expected_reply()
         ),
-        RuntimePerfScenario::RlmToolCalls
-        | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
-        | RuntimePerfScenario::DurableRlmCheckpointTurnPostgres => format!(
-            "Turn {} in RLM mode. Exercise the benchmark_echo tool path and reply with exactly: {}",
-            turn_index + 1,
-            expected_reply()
-        ),
+        RuntimePerfScenario::RlmToolCalls | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite => {
+            format!(
+                "Turn {} in RLM mode. Exercise the benchmark_echo tool path and reply with exactly: {}",
+                turn_index + 1,
+                expected_reply()
+            )
+        }
         RuntimePerfScenario::RlmAsyncToolCompletion => format!(
             "Turn {} in RLM mode. Exercise the pending benchmark_async tool completion path, then finish exactly: {}",
             turn_index + 1,
             expected_reply()
         ),
         RuntimePerfScenario::StandardToolCalls
-        | RuntimePerfScenario::DurableStandardToolTurnSqlite
-        | RuntimePerfScenario::DurableStandardToolTurnPostgres => format!(
+        | RuntimePerfScenario::DurableStandardToolTurnSqlite => format!(
             "Turn {} in standard mode. Use the batch tool to exercise parallel benchmark_echo calls, then reply with exactly: {}",
             turn_index + 1,
             expected_reply()
@@ -86,8 +85,7 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             expected_reply()
         ),
         RuntimePerfScenario::RlmSubagentSpawn
-        | RuntimePerfScenario::DurableAgentChildTurnSqlite
-        | RuntimePerfScenario::DurableAgentChildTurnPostgres => format!(
+        | RuntimePerfScenario::DurableAgentChildTurnSqlite => format!(
             "Turn {} in RLM mode. Start a process that spawns a default subagent with seeded input, await it, then finish exactly: {}",
             turn_index + 1,
             expected_reply()
@@ -175,11 +173,8 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             turn_index + 1
         ),
         RuntimePerfScenario::HighTrafficLoadSqlite
-        | RuntimePerfScenario::HighTrafficLoadPostgres
         | RuntimePerfScenario::HighTrafficKneeSqlite
-        | RuntimePerfScenario::HighTrafficKneePostgres
         | RuntimePerfScenario::DurableQueuedWorkContentionSqlite
-        | RuntimePerfScenario::DurableQueuedWorkContentionPostgres
         | RuntimePerfScenario::DurableCheckpointCurveSqlite
         | RuntimePerfScenario::DurableCheckpointCurvePostgres
         | RuntimePerfScenario::ResidentGraphAppendCurve => {

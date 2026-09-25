@@ -144,7 +144,7 @@ for field in ("session_ids", "process_ids", "trigger_process_ids"):
     if not seeded[field]:
         fail(f"seed left {field} empty: {seeded}")
 if seeded["committed_sessions"] != len(seeded["session_ids"]):
-    fail(f"seed did not commit a turn on every session: {seeded}")
+    fail(f"seed did not commit on every session: {seeded}")
 if seeded["trigger_reservations"] != 1:
     fail(f"the seeded trigger did not reserve exactly one delivery: {seeded}")
 
@@ -296,7 +296,7 @@ if any(db["verdict"] != "matches" for db in recreated_probe["schema"]["databases
     fail(f"the recreated store's schema did not read as matching: {recreated_probe['schema']}")
 
 health = checkpoint("verified_recreated_deployment", "04-health.jsonl")
-for gate in ("session_turn_committed", "process_ran_to_terminal", "trigger_fired"):
+for gate in ("session_committed", "process_ran_to_terminal", "trigger_fired"):
     if health.get(gate) is not True:
         fail(f"post-bump gate {gate} did not pass: {health}")
 if health["session_ids_reused"] != seeded["session_ids"]:

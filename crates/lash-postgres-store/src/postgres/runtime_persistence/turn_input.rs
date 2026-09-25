@@ -153,7 +153,7 @@ impl TurnInputStore for PostgresSessionStore {
                 .map_err(|error| StoreError::Backend(error.to_string()))?
                 .key()
                 .to_string();
-            crate::await_event::lock_scope(&mut tx, &scope_id)
+            crate::turn_cancel_closure::lock_scope(&mut tx, &scope_id)
                 .await
                 .map_err(store_sqlx_error)?;
             let retired: bool = sqlx::query_scalar(

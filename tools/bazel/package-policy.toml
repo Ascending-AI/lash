@@ -78,14 +78,11 @@ reason = "proves nothing without a live PostgreSQL or S3 server; the service job
 # This binary carries the generated-simulation and minimizer fixture replays
 # (measured 182-418 s each under Cargo). The whole binary ran 227-300 s on the
 # pool, which straddles Bazel's default `medium` 300 s bound; `long` is 900 s.
-# The Postgres effect-history consistency case reads the gate script and the
-# repository-root documents it must agree with.
 [[rule]]
 packages = ["lash-sim"]
 kinds = ["unit-test"]
 tags = ["dev-deferred"]
 reason = "the generated-profile, minimizer and replay-artifact cases run 109--213 s; too slow for the developer loop, still in the PR Bazel partition"
-data = ["//:confidence_gate_corpus"]
 shards = 8
 timeout = "long"
 
@@ -247,21 +244,15 @@ targets = ["dialect_cost"]
 compile_data = ["//:perf_guard_budgets"]
 
 [[rule]]
-packages = ["lash-internal-postgres-store"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["conformance"]
-bin_env = { LASH_CONFORMANCE_HELPER_EXE = "postgres-await-event-helper" }
-
-[[rule]]
 packages = ["lash-internal-sqlite-store"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["conformance"]
 bin_env = { LASH_CONFORMANCE_HELPER_EXE = "sqlite-await-event-helper" }
 
 [[rule]]
-packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
+packages = ["lash-internal-sqlite-store"]
 kinds = ["bin", "test", "example", "bench"]
-targets = ["postgres-await-event-helper", "sqlite-await-event-helper"]
+targets = ["sqlite-await-event-helper"]
 compile_data = ["//crates/lash-core:cold_process_drivers"]
 
 [[rule]]

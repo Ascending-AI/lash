@@ -597,9 +597,8 @@ fn lease_stamps_saturate_instead_of_overflowing() {
 }
 
 #[test]
-fn vocabularies_reproduce_each_backends_shipped_codes() {
+fn the_vocabulary_reproduces_sqlites_shipped_codes() {
     let sqlite = EffectReplayVocabulary::sqlite();
-    let postgres = EffectReplayVocabulary::postgres();
     assert_eq!(
         sqlite.code(EffectReplayFailure::LeaseLost),
         RuntimeErrorCode::SqliteEffectReplayLeaseLost
@@ -629,11 +628,7 @@ fn vocabularies_reproduce_each_backends_shipped_codes() {
         RuntimeErrorCode::SqliteEffectReplayDecode
     );
     assert_eq!(
-        postgres.code(EffectReplayFailure::LeaseLost),
-        RuntimeErrorCode::PostgresEffectReplayLeaseLost
-    );
-    assert_eq!(
-        postgres
+        sqlite
             .error(EffectReplayFailure::CorruptRow, "boom")
             .message,
         "boom".to_string()
@@ -666,10 +661,6 @@ fn row_defects_render_the_messages_hosts_already_see() {
         }
         .message(),
         "unknown runtime effect replay status `x`"
-    );
-    assert_eq!(
-        EffectRowDefect::VanishedUnderClaim.message(),
-        "effect replay insert conflicted but no row could be selected"
     );
     assert_eq!(
         EffectRowDefect::MissingDrainInput.message(),

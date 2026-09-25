@@ -36,6 +36,12 @@ pub const ENGINE_RESTART_SLEEP_SESSION_ID: &str =
     "restate-postgres-workers-e2e-engine-restart-sleep";
 pub const ENGINE_RESTART_SLEEP_WORKFLOW_ID: &str = "e2e-engine-restart-suspended-sleep";
 pub const BREAK_GLASS_SESSION_ID: &str = "restate-postgres-workers-e2e-break-glass";
+/// The session the crash-recovered frame switch runs in, apart from the shared
+/// session so its queued work is its own.
+pub const FRAME_CRASH_SESSION_ID: &str = "restate-postgres-workers-frame-crash-e2e";
+pub const FRAME_CRASH_WORKFLOW_ID: &str = "e2e-frame-switch-crash";
+/// The runner's button press, emitted from inside a Restate handler.
+pub const TRIGGER_EMIT_WORKFLOW_ID: &str = "e2e-trigger-emit";
 pub const BREAK_GLASS_WORKFLOW_ID: &str = "e2e-turn-break-glass";
 
 /// Keep the restart timer independent from the pre-existing parked gate turn,
@@ -187,7 +193,9 @@ pub enum TurnScenario {
     SegmentLoop,
     FrameSwitchQueued,
     FrameSwitchPrepared,
+    FrameSwitchCrash,
     FrameSwitchCancel,
+    TriggerEmit,
     TurnControlHold,
     TurnControlSleep,
     TurnControlComplete,
@@ -269,10 +277,7 @@ pub async fn reset_e2e_rows(pool: &PgPool) -> Result<()> {
             .await
             .with_context(|| format!("reset e2e rows with `{statement}`"))?;
     }
-    for session_id in [
-        DEFAULT_SESSION_ID,
-        "restate-postgres-workers-frame-crash-e2e",
-    ] {
+    for session_id in [DEFAULT_SESSION_ID, FRAME_CRASH_SESSION_ID] {
         for statement in [
             "DELETE FROM lash_sessions WHERE session_id = $1",
             "DELETE FROM lash_graph_nodes WHERE session_id = $1",
@@ -1341,6 +1346,57 @@ async fn record_tool_attempt(
     .await
     .with_context(|| format!("record tool attempt `{step_id}` for `{workflow_id}`"))?;
     Ok(count)
+}
+
+/// Claim the one exit a crash-injecting scenario takes at `marker`, recorded
+/// under the scenario's workflow. `true` exactly once per marker, so a
+/// redelivered invocation that reaches the same point again runs through.
+pub async fn claim_crash_exit(
+    pool: &PgPool,
+    marker: &str,
+    workflow_id: &str,
+    worker_id: &str,
+) -> bool {
+    let inserted = match sqlx::query(
+        "INSERT INTO lash_e2e_failover_markers
+             (workflow_id, worker_id, peer_takeover_expected, created_at_ms)
+         VALUES ($1, $2, FALSE, $3)
+         ON CONFLICT (workflow_id) DO NOTHING",
+    )
+    .bind(marker)
+    .bind(worker_id)
+    .bind(current_epoch_ms() as i64)
+    .execute(pool)
+    .await
+    {
+        Ok(result) => result.rows_affected() == 1,
+        Err(err) => {
+            tracing::error!(marker, worker_id, error = %err, "failed to claim crash marker");
+            return false;
+        }
+    };
+    if inserted {
+        let _ = record_worker_event(
+            pool,
+            workflow_id,
+            worker_id,
+            "intentional_exit",
+            serde_json::json!({"marker": marker}),
+        )
+        .await;
+    }
+    inserted
+}
+
+/// Whether the exit at `marker` has already been taken.
+pub async fn crash_exit_taken(pool: &PgPool, marker: &str) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM lash_e2e_failover_markers WHERE workflow_id = $1)",
+    )
+    .bind(marker)
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("read crash marker `{marker}`"))
 }
 
 async fn should_exit_for_peer_failover(

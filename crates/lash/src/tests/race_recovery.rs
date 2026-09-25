@@ -202,7 +202,6 @@ async fn race_recovery_worker() -> Result<()> {
     };
     let directory =
         std::path::PathBuf::from(std::env::var("LASH_RACE_RECOVERY_DIRECTORY").unwrap());
-    let database_url = std::env::var("LASH_RACE_RECOVERY_DATABASE_URL").ok();
     let crash = action == "crash";
     // The recovering worker starts well after the dead worker's leases lapsed,
     // so the store hands the run over rather than reporting it contended.
@@ -235,52 +234,18 @@ async fn race_recovery_worker() -> Result<()> {
         })
         .build()
         .into_handle();
-    let (backend, lease_timings): (Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>, _) =
-        match database_url {
-            // The durable execution-environment store is the backend's own:
-            // the loser's retained request names the environment its dead worker
-            // published, and a recovered child never invents one (ADR 0099 §3).
-            None => (
-                Arc::new(
-                    lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
-                        directory.join("sessions"),
-                        lash_sqlite_store::SqliteBackendOptions::default(),
-                        Arc::clone(&clock),
-                    )
-                    .await
-                    .unwrap(),
-                ),
-                None,
-            ),
-            Some(url) => {
-                let storage = lash_postgres_store::PostgresStorage::connect(&url)
-                    .await
-                    .unwrap();
-                let lease_timings = lash_core::facade_support::LeaseTimings::from_ttl(
-                    std::time::Duration::from_secs(3),
-                )
-                .expect("a three-second lease holds three renew intervals");
-                (
-                    Arc::new(
-                        lash_postgres_store::PostgresBackend::with_options_and_clock(
-                            &storage,
-                            Arc::new(crate::persistence::FileAttachmentStore::new(
-                                directory.join("attachments"),
-                            )),
-                            lash_postgres_store::PostgresBackendOptions {
-                                effect_replay: lash_postgres_store::PostgresEffectReplayOptions {
-                                    lease_timings,
-                                    drain_budget: Default::default(),
-                                },
-                                ..Default::default()
-                            },
-                            Arc::clone(&clock),
-                        ),
-                    ),
-                    Some(lease_timings),
-                )
-            }
-        };
+    // The durable execution-environment store is the backend's own:
+    // the loser's retained request names the environment its dead worker
+    // published, and a recovered child never invents one (ADR 0099 §3).
+    let backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend> = Arc::new(
+        lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+            directory.join("sessions"),
+            lash_sqlite_store::SqliteBackendOptions::default(),
+            Arc::clone(&clock),
+        )
+        .await
+        .unwrap(),
+    );
     let registry = backend.process_registry();
     register_intent_target(registry.as_ref()).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
@@ -290,16 +255,9 @@ async fn race_recovery_worker() -> Result<()> {
             crash,
             loser_ran: Arc::new(tokio::sync::Notify::new()),
         }));
-    let core = match lease_timings {
-        Some(lease_timings) => core.lease_timings(lease_timings),
-        None => core,
-    };
     let core = core
         .plugin(message_plugin())
         .build(crate::testing::runtime_lease_owner())?;
-    // The PostgreSQL tier times its session lease on the database's clock,
-    // not the injected one, so the recovering worker waits out the dead
-    // worker's short lease instead of skipping past it.
     let session = {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         loop {
@@ -376,32 +334,14 @@ async fn race_recovery_worker() -> Result<()> {
 /// the resumed opener recovers the loser rather than abandoning it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_race_loser_is_recovered_after_its_openers_worker_dies() {
-    crash_and_recover(None).await;
-}
-
-/// The same crash on the PostgreSQL tier, in an isolated database.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the PostgreSQL witness reads its database URL from the environment"
-)]
-async fn a_race_loser_is_recovered_after_its_openers_worker_dies_on_postgres() {
-    let Some(url) = std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .ok()
-        .filter(|url| !url.is_empty())
-    else {
-        eprintln!("skipping PostgreSQL race recovery: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    crash_and_recover(Some(database.url().to_string())).await;
+    crash_and_recover().await;
 }
 
 #[expect(
     clippy::disallowed_methods,
     reason = "cold-recovery harness owns worker processes and durable test files"
 )]
-async fn crash_and_recover(database_url: Option<String>) {
+async fn crash_and_recover() {
     use tokio::io::AsyncBufReadExt as _;
     let directory = tempfile::tempdir().unwrap();
     let command = |action: &str| {
@@ -417,9 +357,6 @@ async fn crash_and_recover(database_url: Option<String>) {
             .env("LASH_RACE_RECOVERY_ACTION", action)
             .env("LASH_RACE_RECOVERY_DIRECTORY", directory.path())
             .kill_on_drop(true);
-        if let Some(url) = &database_url {
-            command.env("LASH_RACE_RECOVERY_DATABASE_URL", url);
-        }
         command
     };
     let mut crashed = command("crash")

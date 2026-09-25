@@ -74,16 +74,10 @@ const SHAPE_ARTIFACT: &str = include_str!("../../schema-shape.txt");
 /// outside the verified scope, so a host port that omits it can hold a
 /// `singleton = FALSE` row that satisfies "the table has rows" and then fails
 /// every runtime read.
-const SEED_ROWS: [(&str, &str); 2] = [
-    (
-        "lash_process_change_clock",
-        "transactional process-change clock",
-    ),
-    ("lash_await_event_meta", "await-event signing secret"),
-];
-
-/// Required width of the store-resident await-event signing secret.
-pub(crate) const AWAIT_EVENT_SIGNING_SECRET_BYTES: usize = 32;
+const SEED_ROWS: [(&str, &str); 1] = [(
+    "lash_process_change_clock",
+    "transactional process-change clock",
+)];
 
 /// The namespace-anchoring table. Its resolution through `search_path` decides
 /// which installation every other object is read from.
@@ -1191,13 +1185,6 @@ pub enum SchemaFinding {
         /// What the row is for.
         detail: String,
     },
-    /// A seed row exists but carries a value lash cannot use.
-    InvalidSeedRow {
-        /// Table carrying the row.
-        table: String,
-        /// What is wrong with it.
-        detail: String,
-    },
 }
 
 impl SchemaFinding {
@@ -1216,7 +1203,7 @@ impl SchemaFinding {
             Self::MissingForeignKey { .. }
             | Self::ForeignKeyMismatch { .. }
             | Self::UnexpectedForeignKey { .. } => "FOREIGN KEY DRIFT",
-            Self::MissingSeedRow { .. } | Self::InvalidSeedRow { .. } => "SEED ROWS",
+            Self::MissingSeedRow { .. } => "SEED ROWS",
         }
     }
 }
@@ -1295,9 +1282,6 @@ impl fmt::Display for SchemaFinding {
             }
             Self::MissingSeedRow { table, detail } => {
                 write!(formatter, "{table}: seed row is missing ({detail})")
-            }
-            Self::InvalidSeedRow { table, detail } => {
-                write!(formatter, "{table}: seed row is unusable ({detail})")
             }
         }
     }

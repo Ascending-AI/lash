@@ -27,23 +27,6 @@ struct HighTrafficStepResult {
 
 const KNEE_TURN_INDEX_STEP_FACTOR: usize = 100_000_000;
 
-struct PostgresStepNamespace {
-    database: lash_postgres_store::testing::IsolatedDatabase,
-}
-
-impl PostgresStepNamespace {
-    async fn create(base_database_url: &str, _step_index: usize) -> Self {
-        Self {
-            database: lash_postgres_store::testing::IsolatedDatabase::create(base_database_url)
-                .await,
-        }
-    }
-
-    fn database_url(&self) -> &str {
-        self.database.url()
-    }
-}
-
 async fn take_population_sessions(
     runtime: &mut crate::runtime_perf::harness::BenchmarkRuntime,
     scenario: RuntimePerfScenario,
@@ -70,7 +53,6 @@ pub(super) async fn run_once_high_traffic(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
     config: &HighTrafficConfig,
-    postgres_database_url: Option<&str>,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
@@ -82,31 +64,11 @@ pub(super) async fn run_once_high_traffic(
     };
 
     let mut steps = Vec::with_capacity(populations.len());
-    for (step_index, population) in populations.into_iter().enumerate() {
-        let postgres_namespace = if scenario.is_high_traffic_knee() {
-            match postgres_database_url {
-                Some(database_url) => {
-                    Some(PostgresStepNamespace::create(database_url, step_index).await)
-                }
-                None => None,
-            }
-        } else {
-            None
-        };
-        let step_database_url = postgres_namespace
-            .as_ref()
-            .map_or(postgres_database_url, |namespace| {
-                Some(namespace.database_url())
-            });
+    for population in populations {
         let step_result = Box::pin(run_high_traffic_step(
-            scenario,
-            chat_turns,
-            population,
-            config,
-            step_database_url,
+            scenario, chat_turns, population, config,
         ))
         .await;
-        drop(postgres_namespace);
         steps.push(step_result?);
     }
 
@@ -383,34 +345,17 @@ pub(super) async fn run_once_high_traffic(
     })
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the caller provisions the SQLite root exactly once for this scenario and passes Some, which the message states"
-)]
 async fn run_high_traffic_step(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
     population: usize,
     config: &HighTrafficConfig,
-    postgres_database_url: Option<&str>,
 ) -> anyhow::Result<HighTrafficStepResult> {
-    let sqlite_root = if postgres_database_url.is_none() {
-        Some(make_temp_bench_dir(&format!(
-            "lash-runtime-perf-{}-{population}",
-            scenario.name()
-        ))?)
-    } else {
-        None
-    };
-    let mut runtime = if let Some(database_url) = postgres_database_url {
-        build_runtime_with_postgres_store(scenario, database_url).await?
-    } else {
-        build_runtime_with_sqlite_store(
-            scenario,
-            sqlite_root.as_ref().expect("SQLite root").clone(),
-        )
-        .await?
-    };
+    let sqlite_root = make_temp_bench_dir(&format!(
+        "lash-runtime-perf-{}-{population}",
+        scenario.name()
+    ))?;
+    let mut runtime = build_runtime_with_sqlite_store(scenario, sqlite_root.clone()).await?;
     let core = runtime.core();
     let metrics = runtime.store_metrics();
     let calls_before = metrics.call_counters();
@@ -490,9 +435,7 @@ async fn run_high_traffic_step(
     }
     runtime.close().await?;
     drop(runtime);
-    if let Some(root) = sqlite_root {
-        let _ = std::fs::remove_dir_all(root);
-    }
+    let _ = std::fs::remove_dir_all(&sqlite_root);
 
     Ok(HighTrafficStepResult {
         population,

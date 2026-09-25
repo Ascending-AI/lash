@@ -62,13 +62,10 @@ const TABLE_REGISTRY: &[TablePair] = &[
         "lash_artifact_owner_retirements",
     ),
     pair("artifact_owners", "lash_artifact_owners"),
-    pair("await_event_meta", "lash_await_event_meta"),
-    pair(
-        "await_event_revoked_sessions",
-        "lash_await_event_revoked_sessions",
-    ),
-    pair("await_event_waits", "lash_await_event_waits"),
-    pair("effect_scope_retirements", "lash_effect_scope_retirements"),
+    sqlite_engine_only("await_event_meta"),
+    sqlite_engine_only("await_event_revoked_sessions"),
+    sqlite_engine_only("await_event_waits"),
+    sqlite_engine_only("effect_scope_retirements"),
     pair("blobs", "lash_blobs"),
     pair("checkpoint_blob_refs", "lash_checkpoint_blob_refs"),
     pair("deleted_sessions", "lash_deleted_sessions"),
@@ -103,12 +100,9 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("queued_run_members", "lash_queued_run_members"),
     pair("queued_work_batches", "lash_queued_work_batches"),
     pair("queued_work_items", "lash_queued_work_items"),
-    pair("runtime_effect_group", "lash_runtime_effect_group"),
-    pair(
-        "runtime_effect_group_child",
-        "lash_runtime_effect_group_child",
-    ),
-    pair("runtime_effect_replay", "lash_runtime_effect_replay"),
+    sqlite_engine_only("runtime_effect_group"),
+    sqlite_engine_only("runtime_effect_group_child"),
+    sqlite_engine_only("runtime_effect_replay"),
     pair("runtime_turn_commits", "lash_runtime_turn_commits"),
     TablePair {
         sqlite_table: None,
@@ -143,10 +137,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
         "turn_cancel_closure_authorizations",
         "lash_turn_cancel_closure_authorizations",
     ),
-    pair(
-        "turn_cancel_closure_participants",
-        "lash_turn_cancel_closure_participants",
-    ),
+    sqlite_engine_only("turn_cancel_closure_participants"),
     pair(
         "turn_cancel_retired_scopes",
         "lash_turn_cancel_retired_scopes",
@@ -175,6 +166,19 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("wake_allocation_floors", "lash_wake_allocation_floors"),
     pair("wake_redelivery_fences", "lash_wake_redelivery_fences"),
 ];
+
+/// A table only SQLite's effect engine keeps: PostgreSQL is storage only and
+/// journals no effects (ADR 0104). The engine leaves with FIG-3668.
+const fn sqlite_engine_only(sqlite_table: &'static str) -> TablePair {
+    TablePair {
+        sqlite_table: Some(sqlite_table),
+        postgres_table: None,
+        parity: Parity::OneBackendOnly {
+            side: Backend::SQLite,
+            reason: "SQLite effect engine until FIG-3668; PostgreSQL journals no effects (ADR 0104)",
+        },
+    }
+}
 
 const fn pair(sqlite_table: &'static str, postgres_table: &'static str) -> TablePair {
     TablePair {
@@ -963,18 +967,20 @@ fn schema_congruence_expected_foreign_keys_match_both_backends() {
 fn schema_congruence_rejects_a_dropped_registered_foreign_key() {
     let sqlite_registry = sqlite_expected_foreign_keys();
     let postgres_registry = postgres_expected_foreign_keys();
-    for (dialect, source, registry, declaration) in [
+    for (dialect, source, registry, declaration, missing) in [
         (
             "SQLite",
             SQLITE_SCHEMA_SOURCE,
             &sqlite_registry[..],
             "    CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,\n",
+            "missing registered foreign key (group_key) REFERENCES",
         ),
         (
             "Postgres",
             POSTGRES_SCHEMA_SOURCE,
             &postgres_registry[..],
-            "    CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED,\n",
+            "    FOREIGN KEY (session_id, scope_id) REFERENCES lash_queued_runs(session_id, scope_id)\n",
+            "missing registered foreign key (session_id, scope_id) REFERENCES",
         ),
     ] {
         let dropped = source.replacen(declaration, "", 1);
@@ -982,7 +988,7 @@ fn schema_congruence_rejects_a_dropped_registered_foreign_key() {
         let failure = validate_expected_foreign_keys(&dropped, registry, dialect, &[])
             .expect_err("dropping a registered foreign key must fail the congruence gate");
         assert!(
-            failure.contains("missing registered foreign key (group_key) REFERENCES"),
+            failure.contains(missing),
             "unexpected {dialect} dropped-key failure: {failure}"
         );
     }

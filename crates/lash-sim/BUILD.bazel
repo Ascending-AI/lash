@@ -44,9 +44,6 @@ lash_rust_unit_test(
     declared_features = [],
     exec_properties = {"cpu_count": "2", "memory_kb": "4194304", "test.cpu_count": "4", "test.memory_kb": "1048576"},
     extra_compile_data = [],
-    extra_data = [
-        "//:confidence_gate_corpus",
-    ],
     manifest_dir = "crates/lash-sim",
     package_name = "lash-sim",
     shard_count = 8,

@@ -51,13 +51,7 @@ pub(super) async fn run_workflow_segment_one(
     let trigger_setup_response =
         wait_for_terminal_result(storage.pool(), &trigger_request.workflow_id).await?;
     assert_trigger_setup_response(&trigger_setup_response)?;
-    let trigger_process_id = emit_button_event(
-        storage,
-        mock_provider_base_url,
-        trace_dir.clone(),
-        ingress_url,
-    )
-    .await?;
+    let trigger_process_id = emit_button_event(storage, ingress_url).await?;
     wait_for_process_terminal(storage.pool(), &trigger_process_id).await?;
 
     let signal_setup_request = TurnRequest {
@@ -287,7 +281,15 @@ pub(super) async fn run_workflow_segment_two(
     assert_frame_switch_prepared_response(&frame_prepared_response)?;
 
     report_workflow_progress("e2e-frame-switch-crash", "starting");
-    let frame_crash_response = drive_frame_switch_crash_process(storage).await?;
+    let frame_crash_request = TurnRequest {
+        workflow_id: FRAME_CRASH_WORKFLOW_ID.to_string(),
+        fail_once: true,
+        scenario: TurnScenario::FrameSwitchCrash,
+        signal: None,
+    };
+    submit_workflow(ingress_url, &frame_crash_request).await?;
+    let frame_crash_response =
+        wait_for_terminal_result(storage.pool(), &frame_crash_request.workflow_id).await?;
     report_workflow_progress("e2e-frame-switch-crash", "completed");
     assert_frame_switch_crash_response(&frame_crash_response)?;
 

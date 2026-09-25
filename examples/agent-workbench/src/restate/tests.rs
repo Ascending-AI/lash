@@ -875,7 +875,7 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
         counted_settlement_attempts(
             &state,
             &SessionId::from("fig1058-terminal-settlement"),
-            lash::runtime::RuntimeErrorCode::PostgresEffectReplayLeaseLost,
+            lash::runtime::RuntimeErrorCode::SqliteEffectReplayLeaseLost,
         )
         .await,
         1,

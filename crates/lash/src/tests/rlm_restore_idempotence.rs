@@ -9,7 +9,7 @@
 //! execution (a never-persisted binding or global, a follow-on turn's
 //! assignment whose commit was refused) may reach the next prompt, the next
 //! execution result, or the next durable checkpoint. Each path is witnessed on
-//! the memory, SQLite and PostgreSQL backends with the shipped RLM plugin, not
+//! the memory and SQLite backends with the shipped RLM plugin, not
 //! a test protocol.
 //!
 //! Three bounds on that rebuild are witnessed alongside: a storeless session
@@ -363,7 +363,6 @@ struct Backend {
     backend: Arc<dyn lash_core::Backend>,
     factory: Arc<dyn SessionStoreFactory>,
     _tempdir: Option<tempfile::TempDir>,
-    _database: Option<lash_postgres_store::testing::IsolatedDatabase>,
 }
 
 impl Backend {
@@ -378,7 +377,6 @@ impl Backend {
             factory: backend.session_store_factory(),
             backend,
             _tempdir: None,
-            _database: None,
         }
     }
 
@@ -394,42 +392,7 @@ impl Backend {
             factory: backend.session_store_factory(),
             backend,
             _tempdir: Some(dir),
-            _database: None,
         }
-    }
-
-    async fn postgres() -> Option<Self> {
-        let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-            Ok(url) if !url.is_empty() => url,
-            _ => {
-                if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") {
-                    panic!("LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1");
-                }
-                eprintln!(
-                    "skipping PostgreSQL FIG-2521 witness: LASH_POSTGRES_DATABASE_URL is not set"
-                );
-                return None;
-            }
-        };
-        let database = lash_postgres_store::testing::IsolatedDatabase::create(&database_url).await;
-        let storage = lash_postgres_store::PostgresStorage::connect(database.url())
-            .await
-            .expect("connect isolated PostgreSQL");
-        let attachments = tempfile::tempdir().expect("attachment root");
-        let backend: Arc<dyn lash_core::Backend> =
-            Arc::new(lash_postgres_store::PostgresBackend::new(
-                &storage,
-                Arc::new(crate::persistence::FileAttachmentStore::new(
-                    attachments.path(),
-                )),
-            ));
-        Some(Self {
-            label: "postgres",
-            factory: backend.session_store_factory(),
-            backend,
-            _tempdir: Some(attachments),
-            _database: Some(database),
-        })
     }
 
     /// Creates a fresh session store holding one durable projected seed
@@ -956,13 +919,6 @@ async fn rlm_follow_on_failure_then_resident_reload_rebinds_the_frame_seed_on_sq
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_follow_on_failure_then_resident_reload_rebinds_the_frame_seed_on_postgres() {
-    if let Some(backend) = Backend::postgres().await {
-        Box::pin(follow_on_failure_then_resident_reload(backend)).await;
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_reopen_seed_receipt_replay_reloads_the_same_frame_on_memory() {
     Box::pin(reopen_seed_receipt_replay(Backend::memory().await)).await;
 }
@@ -973,13 +929,6 @@ async fn rlm_reopen_seed_receipt_replay_reloads_the_same_frame_on_sqlite() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_reopen_seed_receipt_replay_reloads_the_same_frame_on_postgres() {
-    if let Some(backend) = Backend::postgres().await {
-        Box::pin(reopen_seed_receipt_replay(backend)).await;
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_faulted_append_rollback_discards_the_unpersisted_binding_on_memory() {
     Box::pin(faulted_append_rollback(Backend::memory().await)).await;
 }
@@ -987,13 +936,6 @@ async fn rlm_faulted_append_rollback_discards_the_unpersisted_binding_on_memory(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_faulted_append_rollback_discards_the_unpersisted_binding_on_sqlite() {
     Box::pin(faulted_append_rollback(Backend::sqlite().await)).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_faulted_append_rollback_discards_the_unpersisted_binding_on_postgres() {
-    if let Some(backend) = Backend::postgres().await {
-        Box::pin(faulted_append_rollback(backend)).await;
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1010,16 +952,6 @@ async fn rlm_follow_on_failure_discards_the_uncommitted_execution_on_sqlite() {
         Backend::sqlite().await,
     ))
     .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_follow_on_failure_discards_the_uncommitted_execution_on_postgres() {
-    if let Some(backend) = Backend::postgres().await {
-        Box::pin(follow_on_failure_discards_the_uncommitted_execution(
-            backend,
-        ))
-        .await;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1729,13 +1661,6 @@ async fn rlm_rejected_turn_does_not_reach_the_next_turn_on_sqlite() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_rejected_turn_does_not_reach_the_next_turn_on_postgres() {
-    if let Some(backend) = Backend::postgres().await {
-        Box::pin(rejected_turn_does_not_reach_the_next_turn(backend)).await;
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_commit_after_rolled_back_append_matches_the_control_on_memory() {
     Box::pin(commit_after_rolled_back_append_matches_the_control(
         Backend::memory().await,
@@ -1752,13 +1677,6 @@ async fn rlm_commit_after_rolled_back_append_matches_the_control_on_sqlite() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_commit_after_rolled_back_append_matches_the_control_on_postgres() {
-    if let Some(backend) = Backend::postgres().await {
-        Box::pin(commit_after_rolled_back_append_matches_the_control(backend)).await;
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_message_append_keeps_the_committed_execution_on_memory() {
     Box::pin(message_append_keeps_the_committed_execution(
         Backend::memory().await,
@@ -1772,11 +1690,4 @@ async fn rlm_message_append_keeps_the_committed_execution_on_sqlite() {
         Backend::sqlite().await,
     ))
     .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_message_append_keeps_the_committed_execution_on_postgres() {
-    if let Some(backend) = Backend::postgres().await {
-        Box::pin(message_append_keeps_the_committed_execution(backend)).await;
-    }
 }

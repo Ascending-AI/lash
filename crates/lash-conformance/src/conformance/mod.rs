@@ -38,6 +38,7 @@ mod attachment_store;
 mod await_event_cold;
 mod backend;
 mod law_backend;
+pub use law_backend::recording_backend_over;
 pub(crate) use law_backend::{LawBackend, StoreLawBackend, law_session_store};
 mod admitted_head_redrive;
 mod cancelled_turn_withheld_input;

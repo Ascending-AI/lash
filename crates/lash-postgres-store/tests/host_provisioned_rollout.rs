@@ -192,22 +192,22 @@ async fn a_schema_missing_its_seed_row_is_refused_without_repair() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    scratch.apply("DELETE FROM lash_await_event_meta").await;
+    scratch.apply("DELETE FROM lash_process_change_clock").await;
 
     let error = scratch
         .open_host_provisioned(SchemaCheck::Enforce)
         .await
         .err()
-        .expect("a schema without the await-event seed must not open")
+        .expect("a schema without the process-change clock seed must not open")
         .to_string();
     assert!(
-        error.contains("lash_await_event_meta") && error.contains("schema.sql"),
-        "the refusal must name the missing seed and the artifact that owns it: {error}"
+        error.contains("lash_process_change_clock") && error.contains("seed row is missing"),
+        "the refusal must name the missing seed: {error}"
     );
 
     // No auto-repair: the seed row is still absent after the refused open, and
     // `verify_schema_for` still reports the version stamp the DDL wrote.
-    let remaining: i64 = sqlx::query("SELECT count(*) FROM lash_await_event_meta")
+    let remaining: i64 = sqlx::query("SELECT count(*) FROM lash_process_change_clock")
         .fetch_one(&scratch.pool)
         .await
         .expect("re-read the seed table")
@@ -226,7 +226,7 @@ async fn a_schema_missing_its_seed_row_is_refused_without_repair() {
             && report
                 .findings
                 .iter()
-                .any(|finding| finding.to_string().contains("lash_await_event_meta")),
+                .any(|finding| finding.to_string().contains("lash_process_change_clock")),
         "verify_schema_for must flag the missing seed row by name: {report}"
     );
 

@@ -36,7 +36,7 @@ else
     //runbooks/restate-postgres-workers "$LASH_PROCESS_OPERATIONS_BIN_DIR" >/dev/null
 fi
 export LASH_PROCESS_OPERATIONS_BIN_DIR
-for binary in lash-e2e-process-operations-worker lash-e2e-process-operator-flow; do
+for binary in lash-e2e-process-operations-worker; do
   if [ ! -x "$LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" ]; then
     echo "Missing executable worker: $LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" >&2
     exit 1
@@ -203,46 +203,6 @@ require_checkpoints "$artifact_dir/04-wake-turn-policy.log" \
   queued_work_claims_join_by_policy_and_merge_key
 echo "scenario 4 evidence: EachWake produced separate claims and Coalesce produced one multi-batch claim on PostgreSQL" | tee -a "$test_output"
 
-DATABASE_URL="$postgres_url" \
-  "$LASH_PROCESS_OPERATIONS_BIN_DIR/lash-e2e-process-operator-flow" selected-drain \
-  2>&1 | tee "$artifact_dir/08-selected-drain.jsonl" | tee -a "$test_output"
-python3 - "$artifact_dir/08-selected-drain.jsonl" <<'PY'
-import json
-import sys
-
-
-checkpoint = None
-with open(sys.argv[1], encoding="utf-8") as stream:
-    for line in stream:
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if value.get("checkpoint") == "selected_drain_scope_isolated":
-            checkpoint = value
-            break
-if checkpoint is None:
-    raise SystemExit("missing selected_drain_scope_isolated checkpoint")
-expected = {
-    "selected_satisfaction": "ClaimedNow",
-    "replay_satisfaction": "AlreadySatisfied",
-    "unselected_pending_after_claim": True,
-    "refusal": "UnclaimableTogether",
-    "provider_calls": 1,
-}
-for field, expected_value in expected.items():
-    if checkpoint.get(field) != expected_value:
-        raise SystemExit(
-            f"selected-drain field {field} was {checkpoint.get(field)!r}, "
-            f"expected {expected_value!r}: {checkpoint}"
-        )
-if checkpoint["unselected_batch_id"] not in checkpoint["pending_after_refusal"]:
-    raise SystemExit(f"selected drain settled unselected B: {checkpoint}")
-if checkpoint["refusal_unclaimed_batch_ids"] == []:
-    raise SystemExit(f"typed refusal named no unclaimed row: {checkpoint}")
-PY
-echo "scenario 8 evidence: selected A settled alone; unselected B remained pending; replay and refusal stayed typed" | tee -a "$test_output"
-
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   run_postgres_conformance_test process_trigger_retention \
   2>&1 | tee "$artifact_dir/07-retention.log" | tee -a "$test_output"
@@ -310,4 +270,4 @@ if grep -Fn 'panicked at' "$test_output" >&2; then
   exit 1
 fi
 echo "panic gate: clean (no Rust panic markers in process-operations E2E output)" | tee -a "$test_output"
-echo "process-operations e2e passed: scenarios=8 artifacts=$artifact_dir" | tee -a "$test_output"
+echo "process-operations e2e passed: scenarios=7 artifacts=$artifact_dir" | tee -a "$test_output"

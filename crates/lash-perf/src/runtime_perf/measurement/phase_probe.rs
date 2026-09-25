@@ -268,27 +268,16 @@ async fn run_once_inner(
             ))
             .await;
         }
-        RuntimePerfScenario::DurableQueuedWorkContentionSqlite
-        | RuntimePerfScenario::DurableQueuedWorkContentionPostgres => {
+        RuntimePerfScenario::DurableQueuedWorkContentionSqlite => {
             return Box::pin(run_once_durable_queued_work_contention(
                 scenario,
                 chat_turns,
                 contention_workers,
-                postgres.url(),
             ))
             .await;
         }
-        RuntimePerfScenario::HighTrafficLoadSqlite
-        | RuntimePerfScenario::HighTrafficLoadPostgres
-        | RuntimePerfScenario::HighTrafficKneeSqlite
-        | RuntimePerfScenario::HighTrafficKneePostgres => {
-            return Box::pin(run_once_high_traffic(
-                scenario,
-                chat_turns,
-                high_traffic,
-                postgres.url(),
-            ))
-            .await;
+        RuntimePerfScenario::HighTrafficLoadSqlite | RuntimePerfScenario::HighTrafficKneeSqlite => {
+            return Box::pin(run_once_high_traffic(scenario, chat_turns, high_traffic)).await;
         }
         RuntimePerfScenario::WriterContention2Workers
         | RuntimePerfScenario::WriterContention8Workers => {
@@ -366,17 +355,12 @@ async fn run_once_inner(
         | RuntimePerfScenario::TurnCancelRoundTrip
         | RuntimePerfScenario::IngressClaimProjection
         | RuntimePerfScenario::DurableStandardToolTurnSqlite
-        | RuntimePerfScenario::DurableStandardToolTurnPostgres
         | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
-        | RuntimePerfScenario::DurableRlmCheckpointTurnPostgres
-        | RuntimePerfScenario::DurableAgentChildTurnSqlite
-        | RuntimePerfScenario::DurableAgentChildTurnPostgres => {
+        | RuntimePerfScenario::DurableAgentChildTurnSqlite => {
             // The generic turn harness below. Every other scenario returned
             // from its own arm, so this list is what "generic" means.
         }
     }
-
-    let postgres_database_url = postgres.url();
 
     // The runtime-work witness is process-global and exclusive. Durable
     // scenarios are the ones whose commit boundary is worth counting, and the
@@ -393,7 +377,7 @@ async fn run_once_inner(
     let (sqlite_root, mut runtime) = run
         .build(async {
             let sqlite_root = if matches!(scenario, RuntimePerfScenario::SqliteStoreReopen)
-                || (scenario.is_durable() && !scenario.uses_postgres())
+                || scenario.is_durable()
             {
                 Some(make_temp_bench_dir(&format!(
                     "lash-runtime-perf-{}",
@@ -421,9 +405,7 @@ async fn run_once_inner(
                     lashlang_execution_jsonl_path: Some(root.join("lashlang-execution.jsonl")),
                     trace_level: lash::tracing::TraceLevel::Extended,
                 });
-            let runtime = if let Some(database_url) = postgres_database_url {
-                build_runtime_with_postgres_store(scenario, database_url).await?
-            } else if let Some(root) = sqlite_root.as_ref() {
+            let runtime = if let Some(root) = sqlite_root.as_ref() {
                 build_runtime_with_sqlite_store(scenario, root.clone()).await?
             } else {
                 build_runtime(scenario, trace_config).await?
@@ -814,18 +796,16 @@ async fn run_once_inner(
                 .lock_recover()
                 .insert(name.to_string(), value);
         }
-        // Only SQLite carries the statement witness today; emitting a zero for
-        // PostgreSQL would read as "no statements" rather than "not observed".
-        if !scenario.uses_postgres() {
-            extra_counters.lock_recover().insert(
-                "runtime_work.sql_statements".to_string(),
-                work.sql_statements,
-            );
-            for (verb, count) in work.sql_statements_by_verb {
-                extra_counters
-                    .lock_recover()
-                    .insert(format!("runtime_work.sql_statements.{verb}"), count);
-            }
+        // Only SQLite carries the statement witness today, and every durable
+        // scenario that reaches the generic harness is on it.
+        extra_counters.lock_recover().insert(
+            "runtime_work.sql_statements".to_string(),
+            work.sql_statements,
+        );
+        for (verb, count) in work.sql_statements_by_verb {
+            extra_counters
+                .lock_recover()
+                .insert(format!("runtime_work.sql_statements.{verb}"), count);
         }
     }
     extra_counters

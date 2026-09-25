@@ -1598,45 +1598,50 @@ macro_rules! fresh_session_admission_tests {
     };
 }
 
-/// Expansion machinery for session read-view registration.
-#[macro_export]
-macro_rules! __session_read_view_register {
-    ($fixture:block; $law:ident, $label:literal, failure) => {
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_fixture_guard, backend, _factory, advance) = $fixture;
-            let _ = $label;
-            $crate::registration_macro_support::$law(backend, advance).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-        }
-    };
-    ($fixture:block; $law:ident, $label:literal, read) => {
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_fixture_guard, _backend, factory, _advance) = $fixture;
-            let _ = $label;
-            $crate::registration_macro_support::$law(factory).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-        }
-    };
-}
-
-/// Register one independently reported test per session read-view law.
+/// Register the session read-view law: a storage law that reads through the
+/// session-store factory.
 ///
-/// The fixture yields `(guard, Arc<dyn Backend>, its session-store factory,
-/// advance-commit-clock)`: the failure-evidence law runs its turn on the
-/// backend, and the read law reads through the factory.
+/// The fixture yields `(guard, its session-store factory)`.
 #[macro_export]
 macro_rules! session_read_view_tests {
     ($fixture:block) => {
         $crate::session_read_view_tests!(@catalogue $fixture; [
-            (session_store_factory_mid_stream_failure_evidence, "session-read-mid-stream-failure", failure),
-            (session_store_factory_read_session, "session-read-view", read),
+            (session_store_factory_read_session, "session-read-view"),
         ]);
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
-            $crate::__session_read_view_register!($fixture; $law, $label, $mode);
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, factory) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(factory).await;
+                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+            }
+        )*
+    };
+}
+
+/// Register the mid-stream failure-evidence law: it runs a turn, so it needs
+/// a backend with an effect engine.
+///
+/// The fixture yields `(guard, Arc<dyn Backend>, advance-commit-clock)`.
+#[macro_export]
+macro_rules! session_failure_evidence_tests {
+    ($fixture:block) => {
+        $crate::session_failure_evidence_tests!(@catalogue $fixture; [
+            (session_store_factory_mid_stream_failure_evidence, "session-read-mid-stream-failure"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, backend, advance) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(backend, advance).await;
+                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+            }
         )*
     };
 }

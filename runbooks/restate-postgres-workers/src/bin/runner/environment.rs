@@ -496,56 +496,6 @@ pub(super) async fn wait_for_postgres(database_url: &str) -> Result<PostgresStor
     )
 }
 
-pub(super) async fn drive_frame_switch_crash_process(
-    storage: &PostgresStorage,
-) -> Result<TurnResponse> {
-    let binary = env(
-        "LASH_E2E_FRAME_CRASH_BIN",
-        "/usr/local/bin/lash-e2e-frame-crash",
-    );
-    for (mode, expected_code) in [("commit", 76), ("mid-follow", 77)] {
-        let output = tokio::process::Command::new(&binary)
-            .arg(mode)
-            .output()
-            .await
-            .with_context(|| format!("run frame-crash subprocess mode `{mode}`"))?;
-        anyhow::ensure!(
-            output.status.code() == Some(expected_code),
-            "frame-crash mode `{mode}` exited {:?}, expected {expected_code}; stdout={} stderr={}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-    }
-    let output = tokio::process::Command::new(&binary)
-        .arg("recover")
-        .output()
-        .await
-        .context("run frame-crash recovery subprocess")?;
-    anyhow::ensure!(
-        output.status.success(),
-        "frame-crash recovery failed; stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-    let final_value: Value =
-        serde_json::from_slice(&output.stdout).context("decode frame-crash recovery result")?;
-    let response = TurnResponse {
-        workflow_id: "e2e-frame-switch-crash".to_string(),
-        worker_id: "frame-crash-subprocess".to_string(),
-        process_id: ProcessId::from(String::new()),
-        process_ids: Vec::new(),
-        attachment_id: String::new(),
-        final_text: EXPECTED_FRAME_SWITCH_TEXT.to_string(),
-        final_value,
-        streamed_event_count: 0,
-        replay_cursor: None,
-        queued_turn_ran: true,
-    };
-    record_terminal_result(storage.pool(), &response).await?;
-    Ok(response)
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the literal `image/png` is a valid MediaType by the attachments grammar"

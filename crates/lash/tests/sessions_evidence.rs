@@ -246,62 +246,6 @@ fn drain_area_witnesses() {
             lash::runtime::RuntimeErrorCode::TurnInputSettlementSuperseded
         )
     });
-    // W0085: lash::runtime::RuntimeErrorCode::PostgresEffectReplayCorruptRow [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresEffectReplayCorruptRow
-        )
-    });
-    // W0086: lash::runtime::RuntimeErrorCode::PostgresEffectReplayDecode [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresEffectReplayDecode
-        )
-    });
-    // W0087: lash::runtime::RuntimeErrorCode::PostgresEffectReplayEncode [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresEffectReplayEncode
-        )
-    });
-    // W0088: lash::runtime::RuntimeErrorCode::PostgresEffectReplayHashConflict [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresEffectReplayHashConflict
-        )
-    });
-    // W0089: lash::runtime::RuntimeErrorCode::PostgresEffectReplayKeyMissing [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresEffectReplayKeyMissing
-        )
-    });
-    // W0090: lash::runtime::RuntimeErrorCode::PostgresEffectReplayLeaseLost [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresEffectReplayLeaseLost
-        )
-    });
-    // W0091: lash::runtime::RuntimeErrorCode::PostgresEffectReplayMissing [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresEffectReplayMissing
-        )
-    });
-    // W0092: lash::runtime::RuntimeErrorCode::PostgresEffectReplayStore [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresEffectReplayStore
-        )
-    });
     // W0093: lash::runtime::RuntimeErrorCode::ProcessPanicked [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(value, lash::runtime::RuntimeErrorCode::ProcessPanicked)
@@ -629,48 +573,6 @@ fn drain_area_witnesses() {
     // W0151: lash::runtime::RuntimeErrorCode::LlmProvider [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(value, lash::runtime::RuntimeErrorCode::LlmProvider)
-    });
-    // W0152: lash::runtime::RuntimeErrorCode::PostgresAwaitEventDecode [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresAwaitEventDecode
-        )
-    });
-    // W0153: lash::runtime::RuntimeErrorCode::PostgresAwaitEventEncode [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresAwaitEventEncode
-        )
-    });
-    // W0154: lash::runtime::RuntimeErrorCode::PostgresAwaitEventNotify [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresAwaitEventNotify
-        )
-    });
-    // W0155: lash::runtime::RuntimeErrorCode::PostgresAwaitEventSign [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresAwaitEventSign
-        )
-    });
-    // W0156: lash::runtime::RuntimeErrorCode::PostgresAwaitEventStore [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresAwaitEventStore
-        )
-    });
-    // W0157: lash::runtime::RuntimeErrorCode::PostgresEffectJournalRetirement [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::PostgresEffectJournalRetirement
-        )
     });
     // W0158: lash::runtime::RuntimeErrorCode::QueuedWork [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {

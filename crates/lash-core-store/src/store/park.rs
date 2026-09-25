@@ -235,8 +235,7 @@ impl ParkReason {
             }
             RuntimeErrorCode::LashlangCellBindingDrift => Some(Self::BindingDrift { message }),
             RuntimeErrorCode::EffectReplayDivergence
-            | RuntimeErrorCode::SqliteEffectReplayHashConflict
-            | RuntimeErrorCode::PostgresEffectReplayHashConflict => {
+            | RuntimeErrorCode::SqliteEffectReplayHashConflict => {
                 Some(Self::EffectReplayDivergence {
                     effect_kind: error
                         .summary
@@ -597,15 +596,14 @@ pub struct UnsettledTurnCounts {
 mod tests {
     use super::*;
 
-    /// `effect_replay_divergence` — and the two substrate hash-conflict codes
-    /// it replaced — must map to a parking reason: without the arm, a Restate
+    /// `effect_replay_divergence` — and the substrate hash-conflict code it
+    /// replaced — must map to a parking reason: without the arm, a Restate
     /// effect-journal divergence aborts instead of parking (FIG-3587).
     #[test]
     fn effect_replay_divergence_errors_park() {
         for code in [
             RuntimeErrorCode::EffectReplayDivergence,
             RuntimeErrorCode::SqliteEffectReplayHashConflict,
-            RuntimeErrorCode::PostgresEffectReplayHashConflict,
         ] {
             let mut error = RuntimeError::new(code.clone(), "the recorded envelope diverged");
             error.summary = Some(Box::new(crate::RuntimeEffectReplayMismatchReport {

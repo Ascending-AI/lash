@@ -47,12 +47,6 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
-        "turn_cancel_closure_participants",
-        LifecycleOwned {
-            scope: "catalog scope retirement after closure pins drain",
-        },
-    ),
-    (
         "turn_cancel_retired_scopes",
         PermanentlyExempt {
             reason: "scope tombstones prevent stale cancellation authority resurrection",
@@ -323,6 +317,24 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         // Host receipts lack a safe terminal gate (FIG-1956 / FIG-653).
         KnownGap { issue: "FIG-1956" },
     ),
+];
+
+/// Tables only the SQLite catalog carries: its attachment bytes, and its
+/// effect engine's journal (PostgreSQL journals no effects, ADR 0104; the
+/// SQLite engine leaves with FIG-3668).
+const SQLITE_ONLY: &[(&str, RetentionClass)] = &[
+    (
+        "attachment_blobs",
+        Bounded {
+            lever: "attachment GC (reclaim_unreferenced_attachments): a blob no manifest row roots is condemned and deleted",
+        },
+    ),
+    (
+        "turn_cancel_closure_participants",
+        LifecycleOwned {
+            scope: "catalog scope retirement after closure pins drain",
+        },
+    ),
     // Session and process retirement select by owner; runtime-operation scopes
     // retire through `EffectJournalRetirement::RuntimeOperation` once their
     // receipt is back (facade plugin operations) or their process is pruned
@@ -372,14 +384,6 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
 ];
-
-/// Tables only the SQLite catalog carries.
-const SQLITE_ONLY: &[(&str, RetentionClass)] = &[(
-    "attachment_blobs",
-    Bounded {
-        lever: "attachment GC (reclaim_unreferenced_attachments): a blob no manifest row roots is condemned and deleted",
-    },
-)];
 
 const POSTGRES_ONLY: &[(&str, RetentionClass)] = &[
     (
@@ -437,7 +441,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 57, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 49, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

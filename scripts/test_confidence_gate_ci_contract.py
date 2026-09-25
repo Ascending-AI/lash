@@ -252,7 +252,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         functions = {
             "harnesses": ["run_scenario_harnesses", "run_state_machine_and_fault_matrix", "run_sim_unit_suite",
                           "write_provider_transport_exclusion_evidence", "write_sim_lane_declarations",
-                          "write_full_lane_prerequisites", "write_postgres_effect_history_status",
+                          "write_full_lane_prerequisites",
                           "write_restate_postgres_workers_e2e_lane_status"],
             "generated": ["run_sim_generated_lane"],
             "minimizer": ["run_minimizer_fixture_suite"],
@@ -417,7 +417,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # The key -> path map is the gate's, not a second copy: a row names a
         # key and nothing else, so two rows cannot disagree about a path.
         artifact_paths = shell_assoc_array(gate, "confidence_artifact_paths")
-        self.assertEqual(15, len(artifact_paths), artifact_paths)
+        self.assertEqual(14, len(artifact_paths), artifact_paths)
         for key, path in artifact_paths.items():
             self.assertRegex(key, r"^[a-z0-9_]+$")
             self.assertRegex(path, r"^[a-z0-9./-]+\.json$")
@@ -1599,7 +1599,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         for writer in (
             "write_sim_lane_declarations",
             "write_full_lane_prerequisites",
-            "write_postgres_effect_history_status",
             "write_restate_postgres_workers_e2e_lane_status",
         ):
             self.assertIn(writer, evidence, writer)
@@ -2117,8 +2116,6 @@ derive_mutation_jobs() {{
         for helper in (
             "-p lash-internal-sqlite-store --locked --features testing",
             "--example sqlite-await-event-helper",
-            "-p lash-internal-postgres-store --locked --features testing",
-            "--example postgres-await-event-helper",
         ):
             self.assertIn(helper, definition)
 

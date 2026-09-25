@@ -787,7 +787,6 @@ impl EffectHost for RetirementFailsHost {
 /// The durable journal a sweep test observes: row counts by scope key.
 enum Journal {
     Sqlite(std::path::PathBuf),
-    Postgres(sqlx::PgPool),
 }
 
 impl Journal {
@@ -801,13 +800,6 @@ impl Journal {
                     |row| row.get(0),
                 )
                 .expect("count rows"),
-            Journal::Postgres(pool) => sqlx::query_scalar(&format!(
-                "SELECT COUNT(*) FROM lash_{table} WHERE scope_id = $1 {extra}"
-            ))
-            .bind(scope_key)
-            .fetch_one(pool)
-            .await
-            .expect("count rows"),
         }
     }
 
@@ -845,46 +837,10 @@ type SweepBackend = (
 /// receipt is joined by quiescence. The sweep refuses while the loser is
 /// live, survives the facade and session going away, and never touches a
 /// scope without a recorded receipt (FIG-2499 fix round 2, ruling 2).
-async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
+async fn draining_task_is_retired_by_the_reclaim_sweep() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let gate = format!("drain-{}", if pg { "postgres" } else { "sqlite" });
-    let mut postgres = None;
-    let (backend, host, journal, store_factory): SweepBackend = if pg {
-        let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-            assert!(
-                std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
-                "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            eprintln!(
-                "skipping Postgres sweep retirement test: LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            return;
-        };
-        let admin = sqlx::PgPool::connect(&url).await.expect("connect postgres");
-        let name = format!("sweep_retirement_{}", uuid::Uuid::new_v4().simple());
-        sqlx::query(&format!("CREATE DATABASE {name}"))
-            .execute(&admin)
-            .await
-            .expect("create a private database");
-        admin.close().await;
-        let (base, _) = url.rsplit_once('/').expect("database url has a path");
-        let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
-            .await
-            .expect("connect the private database");
-        let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
-            &storage,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                dir.path().join("attachments"),
-            )),
-        ));
-        let host = backend.effect_host();
-        host.register_group_executors(Arc::new(DrainExecutors { gate: gate.clone() }))
-            .expect("register group executors");
-        let factory = backend.session_store_factory();
-        let pool = storage.pool().clone();
-        postgres = Some(storage);
-        (backend, host, Journal::Postgres(pool), factory)
-    } else {
+    let gate = "drain-sqlite".to_string();
+    let (backend, host, journal, store_factory): SweepBackend = {
         let (backend, path) = sqlite_backend(dir.path()).await;
         let host = backend.effect_host();
         host.register_group_executors(Arc::new(DrainExecutors { gate: gate.clone() }))
@@ -892,7 +848,6 @@ async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
         let factory = backend.session_store_factory();
         (backend, host, Journal::Sqlite(path), factory)
     };
-    let _postgres = postgres.take();
 
     // A runtime operation nobody recorded a receipt for: the sweep has no
     // proof it is unreachable and must leave it alone.
@@ -1003,12 +958,7 @@ async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_draining_task_is_retired_by_the_reclaim_sweep() {
-    Box::pin(draining_task_is_retired_by_the_reclaim_sweep(false)).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_draining_task_is_retired_by_the_reclaim_sweep() {
-    Box::pin(draining_task_is_retired_by_the_reclaim_sweep(true)).await;
+    Box::pin(draining_task_is_retired_by_the_reclaim_sweep()).await;
 }
 
 /// The sweep retires facade-minted scopes only. A caller-supplied
@@ -1017,55 +967,18 @@ async fn postgres_draining_task_is_retired_by_the_reclaim_sweep() {
 /// an identical retry after the sweep still replays the receipt; a
 /// facade-minted scope in the same state is retired (FIG-2499 fix round 3,
 /// ruling 3; ADR 0067).
-async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
+async fn caller_supplied_scope_survives_the_reclaim_sweep() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let label = if pg { "postgres" } else { "sqlite" };
-    let mut postgres = None;
-    let mut catalog = None;
-    let (backend, host, journal, store_factory): SweepBackend = if pg {
-        let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-            assert!(
-                std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
-                "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            eprintln!(
-                "skipping Postgres caller-scope sweep test: LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            return;
-        };
-        let admin = sqlx::PgPool::connect(&url).await.expect("connect postgres");
-        let name = format!("sweep_caller_{}", uuid::Uuid::new_v4().simple());
-        sqlx::query(&format!("CREATE DATABASE {name}"))
-            .execute(&admin)
-            .await
-            .expect("create a private database");
-        admin.close().await;
-        let (base, _) = url.rsplit_once('/').expect("database url has a path");
-        let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
-            .await
-            .expect("connect the private database");
-        let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
-            &storage,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                dir.path().join("attachments"),
-            )),
-        ));
-        let host = backend.effect_host();
-        let factory = backend.session_store_factory();
-        let pool = storage.pool().clone();
-        postgres = Some(storage);
-        (backend, host, Journal::Postgres(pool), factory)
-    } else {
+    let label = "sqlite";
+    let catalog = dir
+        .path()
+        .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
+    let (backend, host, journal, store_factory): SweepBackend = {
         let (backend, path) = sqlite_backend(dir.path()).await;
         let host = backend.effect_host();
         let factory = backend.session_store_factory();
-        catalog = Some(
-            dir.path()
-                .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-        );
         (backend, host, Journal::Sqlite(path), factory)
     };
-    let _postgres = postgres.take();
     store_factory.bind_effect_host(&host);
     let core = core_over(Arc::clone(&backend));
     let session_id = SessionId::from(format!("caller-sweep-{label}"));
@@ -1111,30 +1024,15 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
         let receipt = lash_core::store::plugin_operation_receipt_storage_key(scope)
             .expect("receipt storage key");
         let session_id = session_id.clone();
-        let journal = &journal;
         let catalog = catalog.clone();
         async move {
-            match journal {
-                Journal::Sqlite(_) => {
-                    rusqlite::Connection::open(catalog.expect("sqlite catalog"))
-                        .expect("open the catalog")
-                        .execute(
-                            "INSERT INTO runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES (?1, ?2, 'witness', '{}', 0)",
-                            rusqlite::params![session_id.as_str(), receipt],
-                        )
-                        .expect("record the receipt");
-                }
-                Journal::Postgres(pool) => {
-                    sqlx::query(
-                        "INSERT INTO lash_runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES ($1, $2, 'witness', '{}', 0)",
-                    )
-                    .bind(session_id.as_str())
-                    .bind(receipt)
-                    .execute(pool)
-                    .await
-                    .expect("record the receipt");
-                }
-            }
+            rusqlite::Connection::open(&catalog)
+                .expect("open the catalog")
+                .execute(
+                    "INSERT INTO runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES (?1, ?2, 'witness', '{}', 0)",
+                    rusqlite::params![session_id.as_str(), receipt],
+                )
+                .expect("record the receipt");
         }
     };
 
@@ -1210,65 +1108,25 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_caller_supplied_scope_survives_the_reclaim_sweep() {
-    caller_supplied_scope_survives_the_reclaim_sweep(false).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_caller_supplied_scope_survives_the_reclaim_sweep() {
-    caller_supplied_scope_survives_the_reclaim_sweep(true).await;
+    caller_supplied_scope_survives_the_reclaim_sweep().await;
 }
 
 /// The maintenance sweep is another public retirement path, so it must hold
 /// the same promise-owner participant fence as direct host retirement. A
 /// receipted, quiescent operation stays replayable while its closure is pinned
 /// and retires normally after the catalog consumes and releases that pin.
-async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
+async fn reclaim_sweep_respects_turn_cancel_closure_participant() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let label = if pg { "postgres" } else { "sqlite" };
-    let mut postgres = None;
-    let mut sqlite_catalog = None;
-    let (_, host, journal, factory): SweepBackend = if pg {
-        let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-            assert!(
-                std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
-                "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            eprintln!("skipping Postgres pinned-sweep test: database URL is not set");
-            return;
-        };
-        let admin = sqlx::PgPool::connect(&url).await.expect("connect postgres");
-        let name = format!("pinned_sweep_{}", uuid::Uuid::new_v4().simple());
-        sqlx::query(&format!("CREATE DATABASE {name}"))
-            .execute(&admin)
-            .await
-            .expect("create a private database");
-        admin.close().await;
-        let (base, _) = url.rsplit_once('/').expect("database url has a path");
-        let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
-            .await
-            .expect("connect the private database");
-        let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
-            &storage,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                dir.path().join("attachments"),
-            )),
-        ));
-        let host = backend.effect_host();
-        let factory = backend.session_store_factory();
-        let pool = storage.pool().clone();
-        postgres = Some(storage);
-        (backend, host, Journal::Postgres(pool), factory)
-    } else {
+    let label = "sqlite";
+    let sqlite_catalog = dir
+        .path()
+        .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
+    let (_, host, journal, factory): SweepBackend = {
         let (backend, effect_path) = sqlite_backend(dir.path()).await;
         let host = backend.effect_host();
         let factory = backend.session_store_factory();
-        sqlite_catalog = Some(
-            dir.path()
-                .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-        );
         (backend, host, Journal::Sqlite(effect_path), factory)
     };
-    let _postgres = postgres.take();
     factory.bind_effect_host(&host);
 
     let session_id = SessionId::from(format!("pinned-sweep-{label}"));
@@ -1314,27 +1172,13 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
         .to_string();
     let receipt_key = lash_core::store::plugin_operation_receipt_storage_key(&scope)
         .expect("operation receipt key");
-    match &journal {
-        Journal::Sqlite(_) => {
-            rusqlite::Connection::open(sqlite_catalog.expect("sqlite catalog"))
-                .expect("open session catalog")
-                .execute(
-                    "INSERT INTO runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES (?1, ?2, 'witness', '{}', 0)",
-                    rusqlite::params![session_id.as_str(), receipt_key],
-                )
-                .expect("record operation receipt");
-        }
-        Journal::Postgres(pool) => {
-            sqlx::query(
-                "INSERT INTO lash_runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES ($1, $2, 'witness', '{}', 0)",
-            )
-            .bind(session_id.as_str())
-            .bind(receipt_key)
-            .execute(pool)
-            .await
-            .expect("record operation receipt");
-        }
-    }
+    rusqlite::Connection::open(&sqlite_catalog)
+        .expect("open session catalog")
+        .execute(
+            "INSERT INTO runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES (?1, ?2, 'witness', '{}', 0)",
+            rusqlite::params![session_id.as_str(), receipt_key],
+        )
+        .expect("record operation receipt");
 
     let scoped = host
         .scoped(admitted(scope.clone()))
@@ -1443,12 +1287,7 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_reclaim_sweep_respects_turn_cancel_closure_participant() {
-    reclaim_sweep_respects_turn_cancel_closure_participant(false).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_reclaim_sweep_respects_turn_cancel_closure_participant() {
-    reclaim_sweep_respects_turn_cancel_closure_participant(true).await;
+    reclaim_sweep_respects_turn_cancel_closure_participant().await;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1539,22 +1378,10 @@ impl EffectHost for ParticipantCrashHost {
 }
 
 async fn participant_crash_handles(
-    backend: &str,
     locator: &str,
 ) -> (Arc<dyn EffectHost>, Arc<dyn lash_core::SessionStoreFactory>) {
-    if backend == "postgres" {
-        let storage = lash_postgres_store::PostgresStorage::connect(locator)
-            .await
-            .expect("connect participant-crash PostgreSQL database");
-        (
-            Arc::new(storage.effect_host()) as Arc<dyn EffectHost>,
-            Arc::new(storage.session_store_factory_with_shared_process_registry())
-                as Arc<dyn lash_core::SessionStoreFactory>,
-        )
-    } else {
-        let (backend, _) = sqlite_backend(std::path::Path::new(locator)).await;
-        (backend.effect_host(), backend.session_store_factory())
-    }
+    let (backend, _) = sqlite_backend(std::path::Path::new(locator)).await;
+    (backend.effect_host(), backend.session_store_factory())
 }
 
 async fn authorize_participant_crash_closure(
@@ -1643,7 +1470,6 @@ async fn authorize_participant_crash_closure(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "spawned and killed by the participant lifecycle crash laws"]
 async fn participant_protocol_crash_child() {
-    let backend = std::env::var("LASH_PARTICIPANT_CRASH_BACKEND").expect("child backend");
     let locator = std::env::var("LASH_PARTICIPANT_CRASH_LOCATOR").expect("child locator");
     let scenario = std::env::var("LASH_PARTICIPANT_CRASH_SCENARIO").expect("child scenario");
     let marker = std::env::var_os("LASH_PARTICIPANT_CRASH_MARKER")
@@ -1657,7 +1483,7 @@ async fn participant_protocol_crash_child() {
         "release" => ParticipantCrashBoundary::BeforeOwnerRelease,
         boundary => panic!("unknown participant crash boundary {boundary}"),
     };
-    let (inner, factory) = participant_crash_handles(&backend, &locator).await;
+    let (inner, factory) = participant_crash_handles(&locator).await;
     let host: Arc<dyn EffectHost> = Arc::new(ParticipantCrashHost {
         inner,
         boundary,
@@ -1682,7 +1508,6 @@ async fn participant_protocol_crash_child() {
 }
 
 fn kill_child_at_participant_boundary(
-    backend: &str,
     locator: &str,
     scenario: &str,
     boundary: &str,
@@ -1697,7 +1522,6 @@ fn kill_child_at_participant_boundary(
         "--ignored",
         "--nocapture",
     ])
-    .env("LASH_PARTICIPANT_CRASH_BACKEND", backend)
     .env("LASH_PARTICIPANT_CRASH_LOCATOR", locator)
     .env("LASH_PARTICIPANT_CRASH_SCENARIO", scenario)
     .env("LASH_PARTICIPANT_CRASH_BOUNDARY", boundary)
@@ -1724,31 +1548,6 @@ fn kill_child_at_participant_boundary(
     assert!(!status.success(), "the boundary child must be killed");
 }
 
-async fn private_participant_crash_postgres_url(label: &str) -> Option<String> {
-    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-        assert!(
-            std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
-            "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        eprintln!("skipping PostgreSQL participant-crash law: database URL is not set");
-        return None;
-    };
-    let admin = sqlx::PgPool::connect(&url)
-        .await
-        .expect("connect participant-crash PostgreSQL admin");
-    let name = format!(
-        "participant_crash_{label}_{}",
-        uuid::Uuid::new_v4().simple()
-    );
-    sqlx::query(&format!("CREATE DATABASE {name}"))
-        .execute(&admin)
-        .await
-        .expect("create participant-crash database");
-    admin.close().await;
-    let (base, _) = url.rsplit_once('/').expect("database URL has a path");
-    Some(format!("{base}/{name}"))
-}
-
 async fn participant_protocol_survives_both_crash_windows(backend: &str, locator: &str) {
     let evidence = tempfile::tempdir().expect("participant crash marker directory");
 
@@ -1756,14 +1555,8 @@ async fn participant_protocol_survives_both_crash_windows(backend: &str, locator
     let register_scope =
         ExecutionScope::runtime_operation(format!("participant-crash-{register_scenario}"));
     let register_marker = evidence.path().join("after-owner-register");
-    kill_child_at_participant_boundary(
-        backend,
-        locator,
-        &register_scenario,
-        "register",
-        &register_marker,
-    );
-    let (register_host, register_factory) = participant_crash_handles(backend, locator).await;
+    kill_child_at_participant_boundary(locator, &register_scenario, "register", &register_marker);
+    let (register_host, register_factory) = participant_crash_handles(locator).await;
     register_factory.bind_effect_host(&register_host);
     let register_session = SessionId::from(format!("participant-crash-{register_scenario}"));
     assert_eq!(
@@ -1802,7 +1595,7 @@ async fn participant_protocol_survives_both_crash_windows(backend: &str, locator
     let release_scenario = format!("{backend}-release");
     let release_scope =
         ExecutionScope::runtime_operation(format!("participant-crash-{release_scenario}"));
-    let (release_host, release_factory) = participant_crash_handles(backend, locator).await;
+    let (release_host, release_factory) = participant_crash_handles(locator).await;
     let (store, lease, authorization) = authorize_participant_crash_closure(
         &release_host,
         &release_factory,
@@ -1839,14 +1632,8 @@ async fn participant_protocol_survives_both_crash_windows(backend: &str, locator
     drop(release_host);
 
     let release_marker = evidence.path().join("before-owner-release");
-    kill_child_at_participant_boundary(
-        backend,
-        locator,
-        &release_scenario,
-        "release",
-        &release_marker,
-    );
-    let (release_host, release_factory) = participant_crash_handles(backend, locator).await;
+    kill_child_at_participant_boundary(locator, &release_scenario, "release", &release_marker);
+    let (release_host, release_factory) = participant_crash_handles(locator).await;
     release_factory.bind_effect_host(&release_host);
     assert!(
         release_host
@@ -1884,12 +1671,4 @@ async fn sqlite_participant_protocol_survives_register_and_release_process_crash
         root.path().to_str().expect("UTF-8 SQLite crash path"),
     )
     .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_participant_protocol_survives_register_and_release_process_crashes() {
-    let Some(url) = private_participant_crash_postgres_url("both_boundaries").await else {
-        return;
-    };
-    participant_protocol_survives_both_crash_windows("postgres", &url).await;
 }

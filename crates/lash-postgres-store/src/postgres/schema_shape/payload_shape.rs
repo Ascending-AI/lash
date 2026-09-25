@@ -191,14 +191,6 @@ fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
         ),
         PayloadRegistration::of::<lash_core_execution::ExecutionScope>(),
     );
-    payloads.insert(
-        PayloadCarrier::new(
-            PayloadBackend::Postgres,
-            "lash_turn_cancel_closure_participants",
-            "scope_json",
-        ),
-        PayloadRegistration::of::<lash_core_execution::ExecutionScope>(),
-    );
     // FIG-3537: the turn-commit receipt is one serialized type on both SQL
     // backends, so the PostgreSQL block carries the SQLite column's projection
     // and the SQLite carrier registers its own fingerprint. A receipt shape
@@ -812,7 +804,6 @@ mod tests {
             identities,
             std::collections::BTreeSet::from([
                 String::from("postgres lash_runtime_turn_commits.result_json"),
-                String::from("postgres lash_turn_cancel_closure_participants.scope_json"),
                 String::from("postgres lash_turn_cancellation_bindings.admitted_scope_json"),
                 String::from("postgres lash_turn_park_events.reason_json"),
                 String::from("postgres lash_turn_parks.reason_json"),

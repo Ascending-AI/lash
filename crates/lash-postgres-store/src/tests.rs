@@ -322,7 +322,7 @@ async fn attachment_unwired_process_registry_factory_warns() {
         pool: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/unused")
             .unwrap(),
-        await_event_signing_secret: Arc::from(&b"unused"[..]),
+        catalog_id: Arc::from("unused.public"),
     };
     for path in [
         "PostgresStorage::session_store_factory",
@@ -369,7 +369,7 @@ async fn direct_session_store_defers_missing_identity_validation() {
         "SELECT tablename FROM pg_tables
          WHERE schemaname = 'public'
            AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_await_event_meta')
+           AND tablename NOT IN ('lash_schema_versions')
          ORDER BY tablename",
     )
     .fetch_all(storage.pool())
@@ -406,7 +406,7 @@ lash_conformance::unbound_session_meta_tests!({
         "SELECT tablename FROM pg_tables
          WHERE schemaname = 'public'
            AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_await_event_meta')
+           AND tablename NOT IN ('lash_schema_versions')
          ORDER BY tablename",
     )
     .fetch_all(storage.pool())

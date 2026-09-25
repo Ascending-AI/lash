@@ -1560,8 +1560,8 @@ jobs:
       # database and reset() truncates all lash_* tables), so no --test-threads=1.
       # That guard is per-process, so this must stay `cargo test` — nextest's
       # process-per-test model would race the suites against each other.
-      # Keep this package-wide: tests/attempt_atomicity.rs is part of this gate;
-      # narrowing to --test conformance would silently drop attempt atomicity.
+      # Keep this package-wide: the integration and schema binaries are part of
+      # this gate; narrowing to --test conformance would silently drop them.
       # It runs on every event (FIG-3572): FIG-3595 and FIG-3550 broke these
       # suites while they were dispatch-only. `integration__test` is one of
       # its binaries, so it also covers the parent-end recovery and automatic
@@ -2380,18 +2380,6 @@ jobs:
           LASH_E2E_WORKFLOW_SEGMENT: ${{ matrix.segment }}
           LASH_E2E_COMPLETED_WORKFLOW_MANIFEST: target/restate-postgres-workers-e2e-manifests/segment-${{ matrix.segment }}/completed-workflows.txt
         run: bash scripts/restate-postgres-workers-e2e.sh
-
-      - name: Run graceful drain operator-flow E2E
-        if: env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1
-        env:
-          LASH_GRACEFUL_DRAIN_ARTIFACT_DIR: target/operator-flow-artifacts/graceful-drain
-        run: bash scripts/graceful-drain-e2e.sh
-
-      - name: Run request abandon operator-flow E2E
-        if: env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1
-        env:
-          LASH_REQUEST_ABANDON_ARTIFACT_DIR: target/operator-flow-artifacts/request-abandon
-        run: bash scripts/request-abandon-e2e.sh
 
       - name: Run context-overflow recovery E2E
         if: env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1

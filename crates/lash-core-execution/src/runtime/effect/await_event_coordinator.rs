@@ -210,7 +210,7 @@ impl std::fmt::Debug for TerminalCas {
 ///
 /// Every method is one atomic unit on the substrate: the backend takes
 /// whatever transaction and lock it needs (SQLite's `BEGIN IMMEDIATE` write
-/// lock, PostgreSQL's per-session advisory transaction lock) so that the
+/// lock) so that the
 /// tombstone check, the identity comparison, and the write it guards cannot
 /// interleave. No method decides a promise outcome, mints or authenticates a
 /// key, or notifies a waiter.
@@ -794,7 +794,7 @@ mod tests {
 
     /// Minimal in-memory backend: enough substrate to pin the coordinator's own
     /// decisions without a database. Durable behavior is pinned by the SQLite
-    /// and PostgreSQL conformance suites, not here.
+    /// conformance suite, not here.
     #[derive(Clone, Default)]
     struct MemoryBackend {
         rows: Arc<Mutex<HashMap<String, MemoryRow>>>,

@@ -618,15 +618,9 @@ lash_store_sql::statements! {
                  FROM runtime_turn_commits
                  WHERE session_id = ?1 AND turn_id = ?2";
 
-        /// Drop every receipt of a deleted session older than `?1` except the
-        /// operation keys in `?2`.
-        ///
-        /// One statement for both shapes, because PostgreSQL's `= ANY(...)`
-        /// accepts an empty array and SQLite's `NOT IN (...)` has no spelling
-        /// for one.
-        delete_retained_except_live = "DELETE FROM runtime_turn_commits AS receipt
+        /// Drop every receipt of a deleted session older than `?1`.
+        delete_retained = "DELETE FROM runtime_turn_commits AS receipt
              WHERE receipt.committed_at_ms < ?1
-               AND NOT (receipt.turn_id = ANY(?2))
                AND EXISTS (SELECT 1 FROM deleted_sessions AS deleted
                            WHERE deleted.session_id = receipt.session_id)";
     }

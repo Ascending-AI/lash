@@ -8,9 +8,9 @@ set -euo pipefail
 # fourth phase runs the killed-worker recovery against a *direct* turn, which is
 # recoverable at all only because direct ingress accepts before it drives.
 #
-# PostgreSQL is optional. Set LASH_POSTGRES_DATABASE_URL to run every phase on a
-# shared substrate as well as SQLite; the companion owns no container and no host
-# port, so it never serializes against another worktree's assigned service.
+# Every phase runs on SQLite. PostgreSQL is storage only (ADR 0104), so its
+# session lease is exercised under Restate by the workers E2E. The companion
+# owns no container and no host port.
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
@@ -81,9 +81,6 @@ else
 fi
 
 backends="sqlite"
-if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-  backends="sqlite,postgres"
-fi
 echo "session-lease-triage backends: $backends" | tee "$test_output"
 
 # The lease trace transitions are contract, so their unit coverage is part of the

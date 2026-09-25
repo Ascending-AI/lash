@@ -339,29 +339,25 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
         RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS.as_slice(),
         [
             RuntimePerfScenario::DurableStandardToolTurnSqlite,
-            RuntimePerfScenario::DurableStandardToolTurnPostgres,
             RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
-            RuntimePerfScenario::DurableRlmCheckpointTurnPostgres,
             RuntimePerfScenario::DurableAgentChildTurnSqlite,
-            RuntimePerfScenario::DurableAgentChildTurnPostgres,
             RuntimePerfScenario::DurableCheckpointCurveSqlite,
             RuntimePerfScenario::DurableCheckpointCurvePostgres,
             RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
-            RuntimePerfScenario::DurableQueuedWorkContentionPostgres,
             RuntimePerfScenario::HighTrafficLoadSqlite,
-            RuntimePerfScenario::HighTrafficLoadPostgres,
             RuntimePerfScenario::HighTrafficKneeSqlite,
-            RuntimePerfScenario::HighTrafficKneePostgres,
         ]
     );
 
-    for pair in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS
-        .as_chunks::<2>()
-        .0
-    {
-        assert!(!pair[0].uses_postgres());
-        assert!(pair[1].uses_postgres());
-        assert_eq!(pair[0].execution_mode(), pair[1].execution_mode());
+    // The durable checkpoint curve is the one storage-only PostgreSQL leg: it
+    // measures the store directly and never builds a runtime on it.
+    for scenario in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS {
+        assert_eq!(
+            scenario.uses_postgres(),
+            scenario == RuntimePerfScenario::DurableCheckpointCurvePostgres,
+            "{}",
+            scenario.name()
+        );
     }
 
     for scenario in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS {
@@ -379,12 +375,8 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
 
 #[test]
 fn durable_queued_work_contention_inventory_is_backend_complete_and_opt_in() {
-    let scenarios = [
-        RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
-        RuntimePerfScenario::DurableQueuedWorkContentionPostgres,
-    ];
+    let scenarios = [RuntimePerfScenario::DurableQueuedWorkContentionSqlite];
     assert!(!scenarios[0].uses_postgres());
-    assert!(scenarios[1].uses_postgres());
     for scenario in scenarios {
         assert!(scenario.is_durable());
         assert!(scenario.is_queued_work_contention());
@@ -633,89 +625,6 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
             .metric_samples_ms
             .contains_key("durable_contention.pool_wait_ms"),
         "missing durable_contention.pool_wait_ms"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn durable_queued_work_contention_postgres_smoke_binds_pool_wait_subspan() {
-    if !require_postgres() {
-        return;
-    }
-
-    let workers = 4;
-    let turns = 2;
-    let result = Box::pin(run_once(
-        RuntimePerfScenario::DurableQueuedWorkContentionPostgres,
-        turns,
-        workers,
-        &checkpoint_curve_config(),
-        &high_traffic_config(),
-    ))
-    .await
-    .expect("durable queued-work contention PostgreSQL smoke should run");
-
-    let completed = result.extra_counters["durable_contention.completed_batches"];
-    assert_eq!(completed, (workers * turns) as u64);
-    assert_eq!(
-        result.extra_counters["durable_contention.pool_wait_observable"],
-        1
-    );
-    for percentile in [
-        "durable_contention.pool_wait_p50_micros",
-        "durable_contention.pool_wait_p95_micros",
-    ] {
-        assert!(result.extra_counters.contains_key(percentile));
-    }
-
-    let pool_wait = &result.metric_samples_ms["durable_contention.pool_wait_ms"];
-    let claim_wait = &result.metric_samples_ms["durable_contention.claim_wait_ms"];
-    let service = &result.metric_samples_ms["durable_contention.service_ms"];
-    assert!(
-        pool_wait.len() >= completed as usize,
-        "every completed batch must expose at least one checkout wait: pool_wait_samples={}, completed_batches={completed}",
-        pool_wait.len()
-    );
-    assert!(
-        pool_wait
-            .iter()
-            .all(|sample| sample.is_finite() && *sample > 0.0),
-        "checkout waits must be measured nonzero durations: {pool_wait:?}"
-    );
-    let first_pool_wait = pool_wait[0];
-    assert!(
-        pool_wait.windows(2).any(|pair| pair[0] != pair[1]),
-        "contended checkout waits must vary rather than report a constant: pool_wait_samples={}, constant_value={first_pool_wait}",
-        pool_wait.len()
-    );
-    let pool_wait_p95 = crate::perf_support::metrics::percentile_summary(pool_wait.clone()).p95;
-    let service_p95 = crate::perf_support::metrics::percentile_summary(service.clone()).p95;
-    assert!(
-        pool_wait_p95 < service_p95,
-        "checkout-wait p95 must be strictly below whole-call service p95: pool_wait_p95={pool_wait_p95}, service_p95={service_p95}"
-    );
-    let claim_wait_max = claim_wait
-        .iter()
-        .copied()
-        .reduce(f64::max)
-        .expect("contention run must emit claim-wait spans");
-    let service_max = service
-        .iter()
-        .copied()
-        .reduce(f64::max)
-        .expect("contention run must emit service spans");
-    let enclosing_span_max = claim_wait_max + service_max;
-    assert!(
-        pool_wait.iter().all(|sample| *sample <= enclosing_span_max),
-        "checkout waits must fit within the observed claim-plus-service bound: pool_wait_max={:?}, claim_wait_max={claim_wait_max}, service_max={service_max}",
-        pool_wait.iter().copied().reduce(f64::max)
-    );
-    let run_turn_ms = result
-        .stage(stage::RUN_TURN)
-        .expect("the contention run measures run_turn")
-        .duration_ms;
-    assert!(
-        pool_wait.iter().all(|sample| *sample <= run_turn_ms),
-        "checkout waits must fit within the whole contention run: run_turn_ms={run_turn_ms}, pool_wait={pool_wait:?}",
     );
 }
 
@@ -1192,7 +1101,6 @@ fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
         RuntimePerfScenario::TurnInputIngressInterrupt,
         RuntimePerfScenario::StoreHardeningHotPaths,
         RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
-        RuntimePerfScenario::DurableQueuedWorkContentionPostgres,
     ] {
         let metadata = RuntimePerfScenario::METADATA
             .iter()

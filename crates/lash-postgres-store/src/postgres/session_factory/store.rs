@@ -4,15 +4,13 @@ impl PostgresSessionStoreFactory {
     pub(super) fn turn_cancel_closure_owner_binding(
         &self,
     ) -> Option<lash_core_execution::TurnCancelClosureOwnerBinding> {
-        use sha2::Digest as _;
         let owner = self
             .turn_cancel_closure_owner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()?;
-        let catalog_digest = sha2::Sha256::digest(self.await_event_signing_secret.as_ref());
         Some(lash_core_execution::TurnCancelClosureOwnerBinding::new(
-            format!("postgres-catalog:{catalog_digest:x}"),
+            format!("postgres-catalog:{}", self.catalog_id),
             owner,
         ))
     }

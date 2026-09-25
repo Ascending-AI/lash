@@ -40,7 +40,7 @@ use crate::perf_support::time::{elapsed_ms, round3};
 
 use super::harness::{
     RuntimePerfTraceConfig, TurnEntry, build_embed_core, build_runtime,
-    build_runtime_with_postgres_store, build_runtime_with_sqlite_store,
+    build_runtime_with_sqlite_store,
     durable_postgres_session_store_factory_without_commit_measurement,
     durable_sqlite_session_store_factory_without_commit_measurement, memory_perf_store,
     memory_stores, restate_backend, seed_runtime_state, validate_runtime_perf_turn,

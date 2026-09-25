@@ -434,7 +434,7 @@ sqlite = [
     "crates/lash-sqlite-store/src/effect_replay.rs",
     "crates/lash-sqlite-store/src/scope_fence.rs",
 ]
-postgres = ["crates/lash-postgres-store/src/postgres/effect_replay.rs"]
+postgres = []
 # Provisioning, not persistence: the schema artifacts that create these tables
 # and seed them. No table name, column or durable encoding changes in this arc.
 schema = [
@@ -781,7 +781,7 @@ shared = [
     "crates/lash-store-sql/src/wait/revoked_sessions.rs",
 ]
 sqlite = ["crates/lash-sqlite-store/src/await_event.rs"]
-postgres = ["crates/lash-postgres-store/src/await_event.rs"]
+postgres = []
 schema = [
     "crates/lash-sqlite-store/src/schema.rs",
     "crates/lash-sqlite-store/src/schema_fragments.rs",
@@ -908,107 +908,93 @@ reason = "Same table, same reason. The GC's physical delete of one blob."
 
 [[dialect_only]]
 statement = "effect_journal.insert_session_scope_fences"
-backends = ["sqlite", "postgres"]
-kind = "server clock; boolean representation"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-PostgreSQL stamps the fence from the server's clock_timestamp() and writes the
-cleanup flag as FALSE. SQLite binds a host-clock stamp and writes 0, because
-the SQLite lease clock is the host's injected Clock.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "effect_replay.select_for_claim"
-backends = ["sqlite", "postgres"]
-kind = "FOR UPDATE"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-PostgreSQL must take the row's write lock explicitly (FOR UPDATE) to decide a
-claim under READ COMMITTED. SQLite already holds the database write lock from
-BEGIN IMMEDIATE, so the same projection carries no suffix. The projection
-itself is one column list, shared.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "effect_replay.insert_claimed"
-backends = ["sqlite", "postgres"]
-kind = "ON CONFLICT"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-PostgreSQL detects a concurrent claimant through ON CONFLICT DO NOTHING,
-because FOR UPDATE cannot lock a row that does not exist yet. Under SQLite's
-write lock that race is unreachable and a conflict is a defect, so the
-constraint error is kept rather than swallowed.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "effect_replay.finalize_terminal"
-backends = ["sqlite", "postgres"]
-kind = "server clock"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-PostgreSQL stamps and compares the lease from transaction_timestamp(), which is
-what makes its fencing survive skew between hosts; SQLite binds the host clock
-it shares with its runtime. The predicate is otherwise identical.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "effect_replay.renew_lease"
-backends = ["sqlite", "postgres"]
-kind = "server clock"
-reason = "Same lease-clock fork as effect_replay.finalize_terminal."
-
-[[dialect_only]]
-statement = "effect_replay.select_arbitration_by_key_locked"
-backends = ["postgres"]
+backends = ["sqlite"]
 kind = "operation exists on one backend only"
 reason = """
-The claim fence must serialize a minted admission against an in-flight
-decide_cancel on the minting child's replay row. PostgreSQL takes the row's
-write lock explicitly (FOR UPDATE OF the replay row) because READ COMMITTED
-would otherwise re-read the pre-commit arbitration state; SQLite already holds
-the database write lock from BEGIN IMMEDIATE and reads through the shared
-unlocked select_arbitration_by_key, so it has no locked counterpart to name.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "effect_group_child.insert_accepted"
-backends = ["sqlite", "postgres"]
-kind = "RETURNING"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-PostgreSQL returns the retained membership row from the insert, so the durable
-read-back costs a second statement only on the conflict path. SQLite reads it
-back unconditionally. The same fork, for the same reason, as
-effect_group.insert_new: these two inserts run in one transaction.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "effect_group.insert_new"
-backends = ["sqlite", "postgres"]
-kind = "RETURNING"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-PostgreSQL returns the inserted group row from the insert, so the durable
-read-back costs a second statement only on the conflict path. SQLite reads it
-back unconditionally, which is what its shared select_by_key is for.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "effect_scope_retirement.insert_fence"
-backends = ["sqlite", "postgres"]
-kind = "server clock; boolean representation"
-reason = "Same clock and boolean fork as effect_journal.insert_session_scope_fences."
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
+"""
 
 [[dialect_only]]
 statement = "effect_scope_retirement.select_pending_artifact_cleanup"
-backends = ["sqlite", "postgres"]
-kind = "boolean representation"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-artifact_cleanup_completed is INTEGER 0/1 on SQLite and BOOLEAN on PostgreSQL,
-so the predicate literal forks. The column is durable and unchanged by this
-arc.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "effect_scope_retirement.complete_artifact_cleanup"
-backends = ["sqlite", "postgres"]
-kind = "boolean representation"
-reason = "Same boolean fork as effect_scope_retirement.select_pending_artifact_cleanup."
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
+"""
 
 [[dialect_only]]
 statement = "effect_scope_retirement.select_all_scope_ids"
@@ -1027,48 +1013,47 @@ no bind-time repair, so it has no counterpart operation.
 
 [[dialect_only]]
 statement = "await_event_wait.insert_pending"
-backends = ["sqlite", "postgres"]
-kind = "ON CONFLICT"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-PostgreSQL cannot hold "read the absence, then insert" atomic under READ
-COMMITTED, so the conflict clause is what detects a concurrent registrar.
-SQLite reads the absence under the same BEGIN IMMEDIATE lock it inserts under.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "await_event_wait.insert_resolved"
-backends = ["sqlite", "postgres"]
-kind = "ON CONFLICT"
-reason = "Same conflict-detection fork as await_event_wait.insert_pending, plus its RETURNING."
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
+"""
 
 [[dialect_only]]
 statement = "await_event_wait.resolve_pending"
-backends = ["sqlite", "postgres"]
-kind = "compare-and-swap predicate (FIG-3381)"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-PostgreSQL carries the promise's identity comparison inside the UPDATE
-predicate because READ COMMITTED cannot hold a read of it across statements;
-SQLite compares the row it read under the write lock. This is a fencing/CAS
-fork, left exactly as it stands for FIG-3381 to decide once in shared code.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "await_event_wait.cancel_session_promises"
-backends = ["sqlite", "postgres"]
-kind = "boolean representation"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-turn_control is INTEGER 0/1 on SQLite and BOOLEAN on PostgreSQL, so the
-predicate literal forks.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "await_event_meta.select_signing_secret"
-backends = ["sqlite", "postgres"]
-kind = "boolean representation"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-The singleton flag is INTEGER 1 on SQLite and BOOLEAN TRUE on PostgreSQL. It is
-the table's only read, which is why await_event_meta owns a name and a column
-list here but no shared statement.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 # ---------------------------------------------------------------------------
@@ -3095,13 +3080,12 @@ commit, whose placeholder row is created inside the same transaction.
 
 [[dialect_only]]
 statement = "turn_commit.delete_retained"
-backends = ["sqlite"]
+backends = ["sqlite", "postgres"]
 kind = "operation exists on one backend only"
 reason = """
-SQLite only. It is the no-exclusions shape of the
-retention sweep: SQLite has no spelling for an empty `NOT IN (...)`, so the two
-shapes are two statements, where PostgreSQL's `= ANY(...)` accepts an empty
-array and needs only
+The no-exclusions shape of the retention sweep. PostgreSQL holds no effect
+journal, so it has no live scope receipts to exclude and issues only this
+shape; SQLite's sweep also keeps live scopes' receipts through
 `turn_commit.delete_retained_except_live`.
 """
 
@@ -3120,14 +3104,12 @@ round trip.
 
 [[dialect_only]]
 statement = "turn_commit.delete_retained_except_live"
-backends = ["sqlite", "postgres"]
+backends = ["sqlite"]
 kind = "list bind"
 reason = """
-A variable-length list binds as one JSON array through `json_each` on
-SQLite and as a text array through `unnest` / `= ANY(...)` on PostgreSQL.
-On SQLite this is the shape
-with a non-empty exclusion list; its empty-list twin is
-`turn_commit.delete_retained`.
+SQLite only: the retention sweep's shape with a non-empty exclusion list of
+live scopes' receipts, bound as one JSON array through `json_each`; its
+empty-list twin is `turn_commit.delete_retained`.
 """
 
 [[dialect_only]]
@@ -3776,32 +3758,39 @@ it `GREATEST`.
 
 [[dialect_only]]
 statement = "effect_replay.release_uncommitted_derivation"
-kind = "server clock"
-backends = ["sqlite", "postgres"]
-reason = "SQLite samples its host clock after writer admission and binds the timestamp; PostgreSQL samples transaction_timestamp in the fenced update."
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
+"""
 
 [[dialect_only]]
 statement = "effect_group.transition_lifecycle"
-backends = ["sqlite", "postgres"]
-kind = "JSON operator"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
 reason = """
-The lifecycle CAS guards on the phase tag inside the JSON column: SQLite reads
-it with `json_extract(lifecycle, '$.type')` over `json_each` and binds the
-phase list as a JSON array; PostgreSQL reads the JSONB column with
-`lifecycle->>'type'` and binds the phase list as a text array for `= ANY`.
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
 """
 
 [[dialect_only]]
 statement = "effect_group.select_unsettled_by_scope"
-backends = ["sqlite", "postgres"]
-kind = "JSON operator"
-reason = "Same phase-tag JSON fork as effect_group.transition_lifecycle."
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
+"""
 
 [[dialect_only]]
 statement = "effect_group.select_session_pins"
-backends = ["sqlite", "postgres"]
-kind = "JSON operator"
-reason = "Same phase-tag JSON fork as effect_group.transition_lifecycle."
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite only: PostgreSQL is storage only and journals no effects (ADR 0104).
+The statement leaves with SQLite's effect engine (FIG-3668).
+"""
 
 # ---------------------------------------------------------------------------
 # session_ingress family

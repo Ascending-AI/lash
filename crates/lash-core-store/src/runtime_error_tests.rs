@@ -15,7 +15,6 @@ fn missing_process_execution_id_round_trips() {
 fn replay_mismatch_classification_covers_every_durable_controller_code() {
     for code in [
         "sqlite_effect_replay_hash_conflict",
-        "postgres_effect_replay_hash_conflict",
         "effect_replay_divergence",
         "tool_intent_replay_key_format_cutover",
         "lashlang_cell_replay_divergence",
@@ -95,7 +94,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        196,
+        182,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
@@ -154,13 +153,9 @@ fn assistant_response_hook_failures_are_retryable_not_terminal() {
 /// succeeds, so it is not terminal either. A durable timeout is terminal.
 #[test]
 fn journal_lease_loss_is_redrivable_and_a_durable_timeout_is_terminal() {
-    for code in [
-        RuntimeErrorCode::PostgresEffectReplayLeaseLost,
-        RuntimeErrorCode::SqliteEffectReplayLeaseLost,
-    ] {
-        assert!(!code.is_retryable(), "{code} must not be retried unchanged");
-        assert!(!code.is_terminal(), "{code} must stay redrivable");
-    }
+    let code = RuntimeErrorCode::SqliteEffectReplayLeaseLost;
+    assert!(!code.is_retryable(), "{code} must not be retried unchanged");
+    assert!(!code.is_terminal(), "{code} must stay redrivable");
     assert!(RuntimeErrorCode::ProcessSignalWaitTimeout.is_terminal());
 }
 
@@ -354,7 +349,6 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
             RuntimeErrorCode::LashlangCellBindingDrift,
             RuntimeErrorCode::EffectReplayDivergence,
             RuntimeErrorCode::SqliteEffectReplayHashConflict,
-            RuntimeErrorCode::PostgresEffectReplayHashConflict,
         ]
         .iter()
         .map(RuntimeErrorCode::as_str)
@@ -393,9 +387,7 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
         RuntimeErrorCode::StoreCommitFailed,
         RuntimeErrorCode::ExecutionStateCaptureFailed,
         RuntimeErrorCode::SqliteEffectReplayStore,
-        RuntimeErrorCode::PostgresEffectReplayStore,
         RuntimeErrorCode::SqliteEffectReplayLeaseLost,
-        RuntimeErrorCode::PostgresEffectReplayLeaseLost,
         RuntimeErrorCode::RuntimeEffectTaskJoin,
         RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
         RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
@@ -465,7 +457,6 @@ fn replay_refusals_park_the_turn() {
         RuntimeErrorCode::LashlangCellBindingDrift,
         RuntimeErrorCode::EffectReplayDivergence,
         RuntimeErrorCode::SqliteEffectReplayHashConflict,
-        RuntimeErrorCode::PostgresEffectReplayHashConflict,
     ] {
         assert_eq!(
             code.turn_failure_cause(),
@@ -496,7 +487,6 @@ fn replay_refusals_park_the_turn() {
                     | RuntimeErrorCode::LashlangCellBindingDrift
                     | RuntimeErrorCode::EffectReplayDivergence
                     | RuntimeErrorCode::SqliteEffectReplayHashConflict
-                    | RuntimeErrorCode::PostgresEffectReplayHashConflict
             ),
             "{code}: only the replay refusals park"
         );

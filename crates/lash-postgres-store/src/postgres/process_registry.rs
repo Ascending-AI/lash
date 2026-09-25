@@ -306,7 +306,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         // winner's row is committed and `ON CONFLICT DO NOTHING` reports zero
         // rows instead of raising `lash_processes_pkey`. Re-read it under this
         // statement's own snapshot and abandon the attempt: the rollback takes
-        // the clock bump, the fence lift and the observer rows with it, so the
+        // the clock bump and the observer rows with it, so the
         // loser adds no event and no `change_seq` of its own (ADR 0046), and
         // the caller gets the sequential answer — the exact repeat is the
         // existing row, a differing fingerprint the typed refusal (FIG-3190).
@@ -329,26 +329,6 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 record.id, winner.registration_fingerprint, record.registration_fingerprint
             )));
         }
-        // The owner is back: lift the scope fence a prune left in the journal,
-        // in this same transaction, so a registration that fails keeps the id
-        // fenced (ADR 0049). The scope lock serializes this against a
-        // concurrent retirement of the same scope.
-        let fence_key = lash_core_execution::ExecutionScope::process(record.id.as_str())
-            .journal_identity()
-            .map_err(|error| PluginError::Session(error.to_string()))?;
-        crate::await_event::lock_scope(&mut tx, fence_key.key())
-            .await
-            .map_err(plugin_sqlx_error)?;
-        sqlx::query(
-            crate::effect_replay::effect_sql()
-                .fence
-                .delete_by_scope
-                .sql(),
-        )
-        .bind(fence_key.key())
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
         let process_id = record.id.clone();
         for session_id in observers {
             sqlx::query(process_sql().observer.insert.sql())
@@ -372,9 +352,8 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             .await?;
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        // Hosts whose fence is not this journal's table (a process-local or
-        // engine-held fence) are lifted now that the row is durable; the call
-        // is idempotent for this journal's own host.
+        // The owner is back: the effect hosts lift the scope fence a prune
+        // left, now that the registration is durable (ADR 0049).
         self.scope_fence_hosts
             .reinstate_process_scope(&record.id)
             .await?;
@@ -384,9 +363,8 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
     }
 
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
-        // The fence shares this registry's database and its registration
-        // transaction; a host reaches it through its own connection, so the
-        // binding carries only the registration truth.
+        // The host keeps its own scope fence; the binding carries only the
+        // registration truth it lifts that fence against.
         self.scope_fence_hosts.bind(
             effect_host,
             lash_core_execution::ProcessRegistryBinding {

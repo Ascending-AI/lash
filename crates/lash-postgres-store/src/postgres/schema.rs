@@ -384,7 +384,7 @@ pub(crate) struct SchemaOpenOptions {
 pub(crate) async fn ensure_schema(
     pool: &PgPool,
     options: SchemaOpenOptions,
-) -> Result<Vec<u8>, StoreError> {
+) -> Result<String, StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
     // Serializes lash's own openers, so two concurrent first opens cannot race
     // each other's DDL and a verifying open cannot read a half-applied batch from
@@ -544,41 +544,7 @@ pub(crate) async fn ensure_schema(
         }
     };
 
-    let signing_secret: Option<Vec<u8>> = sqlx::query_scalar(
-        "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
-    )
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    // The secret is a data precondition, not a shape: `SchemaCheck::WarnOnly`
-    // relaxes structural enforcement, never the store's ability to construct
-    // itself. Without this row there is no key to authenticate durable await-event
-    // promises with, so there is nothing to hand back. A host-provisioned database
-    // missing it must apply the seed statements from `schema.sql`.
-    //
-    // The admission is recorded only after this succeeds. Logging it earlier would
-    // let a database with an unusable secret produce an admission event and then a
-    // rejected open, which is the one shape of decision evidence worse than none.
-    let signing_secret = match signing_secret {
-        Some(secret) if secret.len() == AWAIT_EVENT_SIGNING_SECRET_BYTES => secret,
-        Some(secret) => {
-            record_schema_gate_decision(&report, options, "denied_seed_secret_width");
-            return Err(StoreError::Backend(format!(
-                "Postgres await-event signing secret has {} bytes, expected \
-                 {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
-                secret.len()
-            )));
-        }
-        None => {
-            record_schema_gate_decision(&report, options, "denied_seed_secret_missing");
-            return Err(StoreError::Backend(
-                "Postgres await-event signing secret row is missing from \
-                 lash_await_event_meta; apply the seed statements from this build's schema.sql \
-                 artifact"
-                    .to_string(),
-            ));
-        }
-    };
+    let catalog_id = read_catalog_id(&mut *tx).await.map_err(store_sqlx_error)?;
     record_schema_gate_decision(&report, options, admitted_as);
     // Only an admitted open stamps. A refused open has not written this
     // database and must not claim it did, and the write rides the admitting
@@ -588,7 +554,20 @@ pub(crate) async fn ensure_schema(
         .await
         .map_err(store_sqlx_error)?;
     tx.commit().await.map_err(store_sqlx_error)?;
-    Ok(signing_secret)
+    Ok(catalog_id)
+}
+
+/// The identity of the catalog a connection resolves: `<database>.<schema>`.
+///
+/// Two lash installations are two catalogs exactly when they differ in
+/// database or in schema, so the pair names one without any stored row.
+pub(crate) async fn read_catalog_id<'e, E>(executor: E) -> Result<String, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    sqlx::query_scalar("SELECT current_database()::text || '.' || current_schema()::text")
+        .fetch_one(executor)
+        .await
 }
 
 enum SchemaMigrationOutcome {

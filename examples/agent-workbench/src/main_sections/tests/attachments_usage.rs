@@ -53,47 +53,6 @@ fn attachment_usage_gate_sqlite() {
     });
 }
 
-#[test]
-#[ignore = "requires Postgres; use `just agent-workbench-attachment-usage-gate <port>`"]
-fn attachment_usage_gate_postgres() {
-    run_async_test_on_stack_budget_multi_thread(
-        "workbench-attachment-usage-postgres-gate",
-        4,
-        || async {
-            let database_url = std::env::var("AGENT_WORKBENCH_USAGE_GATE_DATABASE_URL")
-                .expect("AGENT_WORKBENCH_USAGE_GATE_DATABASE_URL is required");
-            let first_storage = lash_postgres_store::PostgresStorage::connect(&database_url)
-                .await
-                .expect("connect first Postgres gate storage");
-            let resumed_storage = lash_postgres_store::PostgresStorage::connect(&database_url)
-                .await
-                .expect("connect resumed Postgres gate storage");
-            let data_dir = std::env::temp_dir().join(format!(
-                "agent-workbench-attachment-usage-postgres-{}",
-                uuid::Uuid::new_v4()
-            ));
-            std::fs::create_dir_all(&data_dir).expect("create Postgres gate data dir");
-            let backend = |storage: &lash_postgres_store::PostgresStorage| {
-                let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
-                    storage,
-                    Arc::new(lash::persistence::FileAttachmentStore::new(
-                        data_dir.join("attachments"),
-                    )),
-                ));
-                GateBackend { backend }
-            };
-
-            Box::pin(run_attachment_usage_gate(
-                &data_dir,
-                backend(&first_storage),
-                backend(&resumed_storage),
-            ))
-            .await;
-            std::fs::remove_dir_all(&data_dir).expect("remove Postgres gate data dir");
-        },
-    );
-}
-
 /// One handle on the gate's backend: the backend a core and its RLM
 /// factory's Lashlang artifacts run on.
 struct GateBackend {

@@ -3,7 +3,6 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 helper="$repo/scripts/worktree-gate-env.sh"
-attachment_usage_gate="$repo/scripts/agent-workbench-attachment-usage-gate.sh"
 test_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lash-gate-env-test.XXXXXX")"
 holder_pid=""
 leaked_child_pid=""
@@ -44,16 +43,6 @@ alternate_state_root="$({
 })"
 [ "$alternate_state_root" = "$expected_state_root" ] \
   || fail "ambient temp directories changed the lock root to $alternate_state_root"
-
-for workbench_port in 3030 3032 3042 65535; do
-  postgres_port="$({
-    AGENT_WORKBENCH_USAGE_GATE_PORT_PROBE=1 \
-      bash "$attachment_usage_gate" "$workbench_port"
-  })"
-  postgres_offset=$((postgres_port - LASH_E2E_PORT_BASE))
-  ((postgres_offset >= 0 && postgres_offset <= 9)) \
-    || fail "workbench port $workbench_port derived reserved/out-of-block Postgres offset $postgres_offset"
-done
 
 mkdir -p "$test_tmp/a/checkout" "$test_tmp/b/checkout"
 slug_a="$(lash_gate_slug_for_root "$test_tmp/a/checkout")"

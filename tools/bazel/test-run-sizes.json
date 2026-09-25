@@ -1056,13 +1056,6 @@
     "peak_bytes": 17977344,
     "samples": 3
   },
-  "//runbooks/restate-postgres-workers:lash-e2e-process-operator-flow__bin__unit_test": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 16584704,
-    "samples": 3
-  },
   "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test": {
     "cpu_count": 1,
     "memory_kb": 1048576,

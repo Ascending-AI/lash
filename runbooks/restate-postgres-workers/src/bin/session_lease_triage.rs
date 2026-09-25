@@ -36,10 +36,11 @@
 //! nothing waits for it to notice, because it never will: that absence is the
 //! point of the scenario.
 //!
-//! Every phase runs against each configured backend (SQLite always, PostgreSQL
-//! when `LASH_POSTGRES_DATABASE_URL` is set) and prints one JSON `checkpoint`
-//! line per backend. Session ids carry a per-run suffix, so a shared PostgreSQL
-//! database never collides with an earlier run and no phase truncates tables.
+//! Every phase runs on SQLite, whose effect engine still drives these turns in
+//! process, and prints one JSON `checkpoint` line. PostgreSQL is storage only
+//! (ADR 0104): its session lease is exercised under Restate by the workers E2E
+//! until FIG-3600 replaces session leases. Session ids carry a per-run suffix,
+//! so no phase truncates tables.
 
 use lash::SessionId;
 use lash::sync::MutexExt;
@@ -54,7 +55,6 @@ use lash::persistence::{
     SessionLeaseDiagnostics, SessionLeaseRenewal, SessionStoreCreateRequest, SessionStoreFactory,
     StoreError,
 };
-use lash_postgres_store::PostgresStorage;
 use serde_json::{Value, json};
 use tracing_subscriber::layer::{Context as LayerContext, SubscriberExt};
 use tracing_subscriber::{Layer, Registry};
@@ -262,21 +262,13 @@ struct Backend {
     /// Lashlang artifacts included.
     backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
     factory: Arc<dyn SessionStoreFactory>,
-    /// Held so the SQLite root (and the PostgreSQL attachment root) outlive
-    /// the phase.
+    /// Held so the SQLite root outlives the phase.
     _scratch: tempfile::TempDir,
 }
 
 impl Backend {
     async fn configured() -> Result<Vec<Self>> {
-        let mut backends = vec![Self::sqlite().await?];
-        match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-            Ok(url) if !url.trim().is_empty() => backends.push(Self::postgres(&url).await?),
-            _ => eprintln!(
-                "session-lease-triage: LASH_POSTGRES_DATABASE_URL is unset; running SQLite only"
-            ),
-        }
-        Ok(backends)
+        Ok(vec![Self::sqlite().await?])
     }
 
     async fn sqlite() -> Result<Self> {
@@ -288,25 +280,6 @@ impl Backend {
         );
         Ok(Self {
             name: "sqlite",
-            factory: backend.session_store_factory(),
-            backend,
-            _scratch: scratch,
-        })
-    }
-
-    async fn postgres(database_url: &str) -> Result<Self> {
-        let storage = PostgresStorage::connect(database_url)
-            .await
-            .context("connect the PostgreSQL backend")?;
-        let scratch = tempfile::tempdir().context("attachment root for the PostgreSQL backend")?;
-        let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
-            &storage,
-            Arc::new(lash::persistence::FileAttachmentStore::new(
-                scratch.path().to_path_buf(),
-            )),
-        ));
-        Ok(Self {
-            name: "postgres",
             factory: backend.session_store_factory(),
             backend,
             _scratch: scratch,

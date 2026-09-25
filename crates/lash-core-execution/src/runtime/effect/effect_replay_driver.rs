@@ -17,7 +17,8 @@
 //!   semantics: leases, claim arbitration, replay decisions, journal payload
 //!   encoding, group membership, and the loser drain. Backends plug into it
 //!   through [`EffectReplayRowStore`], which is dumb row storage and nothing
-//!   more; PostgreSQL and SQLite are two sets of rows under one state machine.
+//!   more; SQLite's rows are the one set under this state machine (PostgreSQL is
+//!   storage only and journals no effects, ADR 0104).
 //!   Every backend's await-event rows live as long as the backend does, so every
 //!   one issues completion keys. The
 //!   [`EffectHost`](super::executor::EffectHost) and
@@ -69,9 +70,7 @@
 //! host happens to run the claim. That instant is
 //! [`EffectReplayRowStore::claim`]'s to read, and each backend reads its own
 //! (SQLite: the host's injected [`Clock`](crate::Clock), the same domain its
-//! rows already live in; PostgreSQL: `transaction_timestamp()`, per the
-//! [`Clock`](crate::Clock) contract's database-authoritative lease boundary,
-//! pinned by `postgres_clock_contract`).
+//! rows already live in).
 //! The driver's own [`Clock`](crate::Clock) never stamps a row and never
 //! decides a lease: it only sleeps — `Sleep` effect due times, busy-retry
 //! backoff, and the lease renewal interval.
@@ -122,21 +121,13 @@ use lease_renewal::ClaimedExecution;
 /// Process-wide sequence making each driver's owner id distinct.
 static EFFECT_OWNER_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-/// Backend-specific error vocabulary for driver-owned failures.
+/// The error vocabulary for driver-owned failures: SQLite's
+/// `sqlite_effect_replay_{suffix}` codes, the one journal this driver runs on.
 ///
-/// Hosts match on `RuntimeEffectControllerError::code`, so each backend keeps
-/// the codes it shipped: `{code_prefix}_effect_replay_{suffix}`. Substrate
-/// failures stay in the backend, which owns its own `_store` mapping.
+/// Hosts match on `RuntimeEffectControllerError::code`. Substrate failures
+/// stay in the backend, which owns its own `_store` mapping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EffectReplayVocabulary {
-    backend: EffectReplayBackend,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EffectReplayBackend {
-    Sqlite,
-    Postgres,
-}
+pub struct EffectReplayVocabulary(());
 
 /// What a caller of the shared claim loop wants a live competing claim, or the
 /// §5 barrier after its own §4 commit, to mean.
@@ -174,15 +165,7 @@ enum EffectReplayFailure {
 
 impl EffectReplayVocabulary {
     pub const fn sqlite() -> Self {
-        Self {
-            backend: EffectReplayBackend::Sqlite,
-        }
-    }
-
-    pub const fn postgres() -> Self {
-        Self {
-            backend: EffectReplayBackend::Postgres,
-        }
+        Self(())
     }
 
     pub fn store_code(&self) -> RuntimeErrorCode {
@@ -190,49 +173,14 @@ impl EffectReplayVocabulary {
     }
 
     fn code(&self, failure: EffectReplayFailure) -> RuntimeErrorCode {
-        match (self.backend, failure) {
-            (EffectReplayBackend::Sqlite, EffectReplayFailure::CorruptRow) => {
-                RuntimeErrorCode::SqliteEffectReplayCorruptRow
-            }
-            (EffectReplayBackend::Sqlite, EffectReplayFailure::Decode) => {
-                RuntimeErrorCode::SqliteEffectReplayDecode
-            }
-            (EffectReplayBackend::Sqlite, EffectReplayFailure::Encode) => {
-                RuntimeErrorCode::SqliteEffectReplayEncode
-            }
-            (EffectReplayBackend::Sqlite, EffectReplayFailure::HashConflict) => {
-                RuntimeErrorCode::SqliteEffectReplayHashConflict
-            }
-            (EffectReplayBackend::Sqlite, EffectReplayFailure::LeaseLost) => {
-                RuntimeErrorCode::SqliteEffectReplayLeaseLost
-            }
-            (EffectReplayBackend::Sqlite, EffectReplayFailure::Missing) => {
-                RuntimeErrorCode::SqliteEffectReplayMissing
-            }
-            (EffectReplayBackend::Sqlite, EffectReplayFailure::Store) => {
-                RuntimeErrorCode::SqliteEffectReplayStore
-            }
-            (EffectReplayBackend::Postgres, EffectReplayFailure::CorruptRow) => {
-                RuntimeErrorCode::PostgresEffectReplayCorruptRow
-            }
-            (EffectReplayBackend::Postgres, EffectReplayFailure::Decode) => {
-                RuntimeErrorCode::PostgresEffectReplayDecode
-            }
-            (EffectReplayBackend::Postgres, EffectReplayFailure::Encode) => {
-                RuntimeErrorCode::PostgresEffectReplayEncode
-            }
-            (EffectReplayBackend::Postgres, EffectReplayFailure::HashConflict) => {
-                RuntimeErrorCode::PostgresEffectReplayHashConflict
-            }
-            (EffectReplayBackend::Postgres, EffectReplayFailure::LeaseLost) => {
-                RuntimeErrorCode::PostgresEffectReplayLeaseLost
-            }
-            (EffectReplayBackend::Postgres, EffectReplayFailure::Missing) => {
-                RuntimeErrorCode::PostgresEffectReplayMissing
-            }
-            (EffectReplayBackend::Postgres, EffectReplayFailure::Store) => {
-                RuntimeErrorCode::PostgresEffectReplayStore
-            }
+        match failure {
+            EffectReplayFailure::CorruptRow => RuntimeErrorCode::SqliteEffectReplayCorruptRow,
+            EffectReplayFailure::Decode => RuntimeErrorCode::SqliteEffectReplayDecode,
+            EffectReplayFailure::Encode => RuntimeErrorCode::SqliteEffectReplayEncode,
+            EffectReplayFailure::HashConflict => RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            EffectReplayFailure::LeaseLost => RuntimeErrorCode::SqliteEffectReplayLeaseLost,
+            EffectReplayFailure::Missing => RuntimeErrorCode::SqliteEffectReplayMissing,
+            EffectReplayFailure::Store => RuntimeErrorCode::SqliteEffectReplayStore,
         }
     }
 
@@ -493,12 +441,6 @@ pub enum EffectRowDefect {
         /// The recorded commit state.
         commit_state: String,
     },
-    /// The backend's claim mechanics saw the row appear and then vanish.
-    ///
-    /// Reachable only on substrates whose claim is not a single serialized
-    /// write (PostgreSQL's insert-on-conflict retry); SQLite's
-    /// `BEGIN IMMEDIATE` cannot produce it.
-    VanishedUnderClaim,
 }
 
 impl EffectRowDefect {
@@ -529,9 +471,6 @@ impl EffectRowDefect {
                     "runtime effect row is `{commit_state}` but still `in_progress`; \
                      a decided or drained row journals its terminal in the same write"
                 )
-            }
-            Self::VanishedUnderClaim => {
-                "effect replay insert conflicted but no row could be selected".to_string()
             }
         }
     }
@@ -626,7 +565,6 @@ impl EffectRowState {
             Self::Corrupt(EffectRowDefect::MissingError) => EffectRowStatus::Failed.column(),
             Self::Corrupt(EffectRowDefect::UnexpectedPayloads { status, .. }) => status.column(),
             Self::Corrupt(EffectRowDefect::UnknownStatus { status }) => status,
-            Self::Corrupt(EffectRowDefect::VanishedUnderClaim) => "vanished",
             // Both defects describe `in_progress` rows: a boundary commit
             // leaves the status column alone, so a row missing its drain
             // input or ahead of its terminal still reads `in_progress`.
@@ -790,9 +728,8 @@ pub struct RecordedKeys {
 /// is unsupported and unrefereed.
 ///
 /// The seal is a marker rather than a wall, because Rust has no visibility that
-/// admits a sibling crate and excludes a foreign one — the two adapters live in
-/// `lash-sqlite-store` and `lash-postgres-store`, so a crate-private supertrait
-/// would exclude them too. What the seal buys is that the backends-only intent
+/// admits a sibling crate and excludes a foreign one — the adapter lives in
+/// `lash-sqlite-store`, so a crate-private supertrait would exclude it too. What the seal buys is that the backends-only intent
 /// is in the type system instead of only in prose.
 pub mod sealed;
 
@@ -809,9 +746,9 @@ pub mod sealed;
 /// else.
 ///
 /// Each method is one atomic unit: the backend takes whatever transaction and
-/// lock it needs (SQLite's `BEGIN IMMEDIATE` write lock, PostgreSQL's
-/// `SELECT … FOR UPDATE` in a server transaction) so the read, the decision,
-/// and the write it guards cannot interleave with a competing claimant.
+/// lock it needs (SQLite's `BEGIN IMMEDIATE` write lock) so the read, the
+/// decision, and the write it guards cannot interleave with a competing
+/// claimant.
 ///
 /// No method decides claimability, encodes or decodes a journal payload, or
 /// sleeps.
@@ -863,10 +800,8 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     ///
     /// The recorded-frontier read (FIG-3586). Byte order is the contract, not
     /// an accident of the backend: SQLite compares `TEXT` with its default
-    /// `BINARY` collation, and PostgreSQL's replay and group key columns are
-    /// `COLLATE "C"`, so a range bounded by a sentinel that sorts after every
-    /// key of a namespace answers the same on both, whatever the database
-    /// locale. A read, never a claim: nothing is locked or written.
+    /// `BINARY` collation, so a range bounded by a sentinel that sorts after
+    /// every key of a namespace answers the same whatever the locale. A read, never a claim: nothing is locked or written.
     async fn recorded_keys_in_range(
         &self,
         scope_id: &str,
@@ -1195,7 +1130,7 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     /// The driver enables the notifier *before* its journal read and parks on
     /// it afterwards, so a change committed between the read and the park is
     /// caught rather than slept through. Acquiring it is async so a backend
-    /// whose wake-up rides an external subscription (PostgreSQL `LISTEN`) can
+    /// whose wake-up rides an external subscription can
     /// await the subscription's installation before the caller's first read —
     /// the ordering the same guarantee needs across processes.
     ///
@@ -1488,9 +1423,9 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     /// a row or decides a lease — the substrate's own lease clock does that
     /// inside [`EffectReplayRowStore::claim`]. Pass the host's injected
     /// clock when the substrate shares the host's clock domain (SQLite), and an
-    /// explicit [`SystemClock`](crate::facade_support::SystemClock) when it does
-    /// not (PostgreSQL, whose lease decisions are server-side per the
-    /// [`Clock`](crate::Clock) contract, pinned by `postgres_clock_contract`).
+    /// explicit [`SystemClock`](crate::facade_support::SystemClock) when its
+    /// lease decisions are server-side per the [`Clock`](crate::Clock)
+    /// contract.
     pub fn new(
         row_store: P,
         await_events: AwaitEventCoordinator<A>,

@@ -14,6 +14,11 @@ description = "PostgreSQL-backed durable storage for the lash agent runtime."
 keywords = ["lash", "agent", "postgres", "persistence", "store"]
 categories = ["database", "asynchronous"]
 
+# The durable-read test includes lash-core's shared fixture through #[path];
+# cargo-shear does not follow that include, so it cannot see the lash-core use.
+[package.metadata.cargo-shear]
+ignored = ["lash-core"]
+
 [lib]
 name = "lash_postgres_store"
 doctest = false
@@ -41,25 +46,17 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync"] }
-tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash-conformance = { workspace = true, features = ["lashlang"] }
 fastrand = { workspace = true }
-lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
-lash-core-worker = { workspace = true, features = ["testing"] }
 lashlang = { workspace = true, features = ["testing"] }
 # Integration tests need this crate's own `testing` seams (the conformance
 # factory and probe impls), the same way lash-sqlite-store wires itself.
 lash-postgres-store = { package = "lash-internal-postgres-store", path = ".", features = ["testing"] }
-lash-lashlang-runtime = { workspace = true }
-lash-protocol-rlm = { workspace = true }
-lash-protocol-standard = { workspace = true }
-lash-plugin-process-controls = { workspace = true }
-lash-subagents = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
@@ -99,9 +96,3 @@ path = "tests/host_provisioned_rollout.rs"
 [[test]]
 name = "schema_constraints"
 path = "tests/schema_constraints.rs"
-
-# Recovery subprocesses use certification fixtures only as dev dependencies.
-[[example]]
-name = "postgres-await-event-helper"
-path = "src/bin/postgres-await-event-helper.rs"
-required-features = ["testing"]

@@ -25,9 +25,7 @@ fn every_rendered_statement_set_renders() {
     let _ = crate::connection_sql::connection_sql();
     let _ = crate::artifact_store::artifact_sql();
     let _ = crate::attachments::attachment_sql();
-    let _ = crate::await_event::wait_sql();
     let _ = crate::blobs::blob_sql();
-    let _ = crate::effect_replay::effect_sql();
     let _ = crate::process_sql::process_sql();
     let _ = crate::session_sql::session_sql();
     let _ = crate::trigger_store::trigger_sql();

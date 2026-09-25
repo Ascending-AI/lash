@@ -173,7 +173,7 @@ session count and node count against the reused session ids, the wake enqueue an
 arrival in the target session's queued work plus the process's terminal status, and the
 trigger's reservation count and delivered process status.
 
-**Expected observable evidence.** `session_turn_committed`, `process_ran_to_terminal`, and
+**Expected observable evidence.** `session_committed`, `process_ran_to_terminal`, and
 `trigger_fired` are each `true`; `session_ids_reused` equals the seeded session ids;
 `wake_enqueued` is `1` with `wake_delivered_to_target` true and a `Completed`
 `process_status`; `trigger_reservations` is `1` and `trigger_process_status` is

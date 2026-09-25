@@ -3,7 +3,6 @@ use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 use lash::sync::MutexExt;
-use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, SessionCommitStore,
@@ -22,10 +21,10 @@ use lash_restate_postgres_workers_e2e::{
     DirectDurableWaitResolveResponse, EXPECTED_ASYNC_TEXT, EXPECTED_DURABLE_INPUT_TEXT,
     EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
     EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, EXPECTED_TOOL_BATCH_TEXT,
-    ProcessSignalRequest, TURN_WORKFLOW_NAME, TurnRequest, TurnResponse, TurnScenario,
-    build_e2e_core, e2e_backend, e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env,
-    expected_attachment_bytes, record_terminal_result, reset_e2e_rows, s3_store_from_env,
-    turn_session_id,
+    FRAME_CRASH_WORKFLOW_ID, ProcessSignalRequest, TRIGGER_EMIT_WORKFLOW_ID, TURN_WORKFLOW_NAME,
+    TurnRequest, TurnResponse, TurnScenario, build_e2e_core, e2e_backend,
+    e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env, expected_attachment_bytes,
+    reset_e2e_rows, s3_store_from_env, turn_session_id,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -105,7 +104,7 @@ struct WorkflowSpec {
 //
 // Segment 1 (~3m22s) owns the cold-process AwaitEvent vectors and these chains:
 // - e2e-main -> queued work -> e2e-main-wake
-// - e2e-trigger-setup -> button delivery -> trigger process terminal
+// - e2e-trigger-setup -> e2e-trigger-emit (button delivery) -> trigger process terminal
 // - e2e-signal-suspend-setup -> e2e-failover -> e2e-failover-wake ->
 //   e2e-signal-first -> e2e-signal-second -> signal process terminal
 // - e2e-process-llm-query -> e2e-process-llm-query-replay
@@ -133,7 +132,7 @@ struct WorkflowSpec {
 // manifests, so shrinking the workflow set would otherwise pass the CI
 // coverage summary silently. Removing or adding a workflow must touch this
 // pin, forcing the change into reviewer view.
-const EXPECTED_WORKFLOW_INVENTORY_LEN: usize = 29;
+const EXPECTED_WORKFLOW_INVENTORY_LEN: usize = 30;
 const _: () = assert!(WORKFLOW_INVENTORY.len() == EXPECTED_WORKFLOW_INVENTORY_LEN);
 
 const WORKFLOW_INVENTORY: &[WorkflowSpec] = &[
@@ -147,6 +146,10 @@ const WORKFLOW_INVENTORY: &[WorkflowSpec] = &[
     },
     WorkflowSpec {
         id: "e2e-trigger-setup",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-trigger-emit",
         segment: WorkflowSegment::One,
     },
     WorkflowSpec {

@@ -7,14 +7,10 @@
 #[path = "support/mod.rs"]
 mod support;
 
-#[path = "attempt_atomicity.rs"]
-mod attempt_atomicity;
 #[path = "checkpoint_commit_delete_race.rs"]
 mod checkpoint_commit_delete_race;
 #[path = "commit_size_benchmark.rs"]
 mod commit_size_benchmark;
-#[path = "failure_settlement.rs"]
-mod failure_settlement;
 #[path = "orphaned_tombstone_reclaim.rs"]
 mod orphaned_tombstone_reclaim;
 #[path = "parent_end_payload.rs"]
@@ -25,10 +21,6 @@ mod parent_end_registration_race;
 mod postgres_clock_contract;
 #[path = "postgres_lease_multiconnection.rs"]
 mod postgres_lease_multiconnection;
-#[path = "pre_frame_key_cutover.rs"]
-mod pre_frame_key_cutover;
-#[path = "pre_sleep_spec_cutover.rs"]
-mod pre_sleep_spec_cutover;
 #[path = "pre_submission_digest_cutover.rs"]
 mod pre_submission_digest_cutover;
 #[path = "process_prune_reclaim.rs"]
@@ -39,16 +31,5 @@ mod refcount_benchmark;
 mod release_stamp;
 #[path = "session_execution_lease_renewal.rs"]
 mod session_execution_lease_renewal;
-#[path = "store_effect_group_drain_conformance.rs"]
-mod store_effect_group_drain_conformance;
-#[path = "tool_attempt_store_fault.rs"]
-mod tool_attempt_store_fault;
-#[path = "tool_child_invocation.rs"]
-mod tool_child_invocation;
 #[path = "turn_cancel_receipt_consistency.rs"]
 mod turn_cancel_receipt_consistency;
-
-#[path = "queued_run_recovery.rs"]
-mod queued_run_recovery;
-#[path = "replay_key_collation.rs"]
-mod replay_key_collation;

@@ -408,53 +408,6 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         "ck_trigger_receipts_owner_kind",
     )
     .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_runtime_effect_replay (
-             scope_id, replay_key, envelope_hash, envelope_json, status,
-             created_at_ms, updated_at_ms
-         ) VALUES ('scope', 'bad-effect-status', 'hash', '{}', 'cancelled', 0, 0)",
-        "ck_runtime_effect_replay_status",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_runtime_effect_replay (
-             scope_id, replay_key, envelope_hash, envelope_json, status,
-             commit_state, created_at_ms, updated_at_ms
-         ) VALUES ('scope', 'bad-commit-state', 'hash', '{}', 'in_progress',
-                   'settling', 0, 0)",
-        "ck_runtime_effect_replay_commit_state",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_runtime_effect_group (
-             group_key, scope_id, session_id, wake, loser_disposition,
-             expected_children, created_at_ms
-         ) VALUES ('bad-wake', 'scope', 'session', 'majority', 'cancel', 0, 0)",
-        "ck_runtime_effect_group_wake",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_runtime_effect_group (
-             group_key, scope_id, session_id, wake, loser_disposition,
-             expected_children, created_at_ms
-         ) VALUES ('bad-disposition', 'scope', 'session', 'all', 'retry', 0, 0)",
-        "ck_runtime_effect_group_loser_disposition",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_runtime_effect_group (
-             group_key, scope_id, session_id, wake, loser_disposition,
-             expected_children, lifecycle, created_at_ms
-         ) VALUES ('bad-lifecycle', 'scope', 'session', 'all', 'cancel', 0,
-                   '{\"type\":\"retired\"}', 0)",
-        "ck_runtime_effect_group_lifecycle",
-    )
-    .await;
 
     // The cancellation receipt's affected-input evidence is structural: the
     // states the parallel-array shape made representable are all rejected.

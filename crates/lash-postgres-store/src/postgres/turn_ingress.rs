@@ -11,8 +11,7 @@ use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
     TurnIngressStatements, cancel_requests::CancelRequestStatements,
     cancellation_bindings::CancellationBindingStatements,
-    closure_authorizations::ClosureAuthorizationStatements,
-    closure_participants::ClosureParticipantStatements, pending_inputs::PendingInputStatements,
+    closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
     queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
     retired_scopes::RetiredScopeStatements,
     session_execution_leases::SessionExecutionLeaseStatements,
@@ -120,8 +119,6 @@ pub(crate) struct TurnIngressSql {
     pub(crate) closures: ClosureAuthorizationStatements,
     /// `turn_cancel_closure_authorizations`, PostgreSQL only.
     pub(crate) closures_postgres: ClosureAuthorizationPostgresStatements,
-    /// `turn_cancel_closure_participants`, shared.
-    pub(crate) closure_participants: ClosureParticipantStatements,
     /// `turn_cancel_retired_scopes`, shared.
     /// `turn_parks`, shared.
     pub(crate) turn_parks: TurnParkStatements,
@@ -161,7 +158,6 @@ static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
         bindings_postgres: CancellationBindingPostgresStatements::render(dialect),
         closures: ClosureAuthorizationStatements::render(dialect),
         closures_postgres: ClosureAuthorizationPostgresStatements::render(dialect),
-        closure_participants: ClosureParticipantStatements::render(dialect),
         turn_parks: TurnParkStatements::render(dialect),
         turn_parks_postgres: TurnParkPostgresStatements::render(dialect),
         turn_park_clock: TurnParkClockPostgresStatements::render(dialect),

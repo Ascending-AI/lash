@@ -11,11 +11,6 @@
 //!
 //! * `sqlite` opens a fresh file `SqliteBackend` rooted at `--db-path` and
 //!   counts the delta in its effect journal's tables per rep.
-//! * `postgres` connects to `LASH_POSTGRES_DATABASE_URL` (or `--database-url`),
-//!   creates an isolated database, and counts the same tables under their
-//!   `lash_` names. The build carries lash-postgres-store's `testing` feature,
-//!   so statement counts include its testing-only probes; row counts are
-//!   unaffected.
 //! * `restate` serves a Restate backend's endpoint — every lash service, over
 //!   a SQLite memory store set — plus a probe workflow whose handler runs the
 //!   same measured turn through `RestateRuntimeEffectController` on that
@@ -51,7 +46,7 @@ const PROBE_SERVICE: &str = "ToolBatchProbe";
 #[command(about = "FIG-3398 pre-cutover tool-batch baseline measurement")]
 struct Args {
     /// Which backend to measure.
-    #[arg(long, value_parser = ["sqlite", "postgres", "restate"])]
+    #[arg(long, value_parser = ["sqlite", "restate"])]
     backend: String,
     /// Batch widths to measure.
     #[arg(long, default_value = "2,8,50", value_delimiter = ',')]
@@ -74,9 +69,6 @@ struct Args {
     /// SQLite backend root directory, created fresh (backend=sqlite).
     #[arg(long)]
     db_path: Option<PathBuf>,
-    /// PostgreSQL URL (backend=postgres).
-    #[arg(long, env = "LASH_POSTGRES_DATABASE_URL")]
-    database_url: Option<String>,
     /// Restate ingress URL (backend=restate).
     #[arg(long, env = "RESTATE_INGRESS_URL")]
     restate_ingress_url: Option<String>,
@@ -266,30 +258,6 @@ impl JournalCounter for SqliteJournalCounter {
     }
 }
 
-struct PostgresJournalCounter {
-    pool: sqlx::PgPool,
-}
-
-#[async_trait::async_trait]
-impl JournalCounter for PostgresJournalCounter {
-    async fn count(&self) -> anyhow::Result<BTreeMap<String, i64>> {
-        let names: Vec<String> = sqlx::query_scalar(
-            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND \
-             (tablename LIKE 'lash\\_runtime\\_effect%' OR tablename LIKE 'lash\\_tool\\_intent%')",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        let mut counts = BTreeMap::new();
-        for name in names {
-            let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM \"{name}\""))
-                .fetch_one(&self.pool)
-                .await?;
-            counts.insert(name, count);
-        }
-        Ok(counts)
-    }
-}
-
 fn count_delta(
     before: &BTreeMap<String, i64>,
     after: &BTreeMap<String, i64>,
@@ -342,60 +310,6 @@ async fn run_sqlite(
                     &args.out,
                     &MeasurementRow::new(
                         "sqlite",
-                        &producer.label,
-                        rep,
-                        &session,
-                        &measurement,
-                        count_delta(&before, &after),
-                        load,
-                    ),
-                )?;
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn run_postgres(
-    args: &Args,
-    producers: &[lash_conformance::ToolBatchProducer],
-) -> anyhow::Result<()> {
-    let url = args.database_url.clone().ok_or_else(|| {
-        anyhow::anyhow!("postgres needs --database-url or LASH_POSTGRES_DATABASE_URL")
-    })?;
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
-    let host = Arc::new(storage.effect_host()) as Arc<dyn lash_core::EffectHost>;
-    // The measured turn writes no attachment bytes.
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
-        &storage,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-            std::env::temp_dir().join("tool-batch-baseline-attachments"),
-        )),
-    )) as Arc<dyn lash_core::StoreSet>;
-    let counter = PostgresJournalCounter {
-        pool: storage.pool().clone(),
-    };
-    for producer in producers {
-        for &width in &args.widths {
-            for rep in 0..args.reps {
-                let session = session_id("postgres", &producer.label, width, rep);
-                let before = counter.count().await?;
-                let load = load_average();
-                let measurement = lash_conformance::measure_tool_batch(
-                    lash_sansio::SessionId::from(session.clone()),
-                    Arc::clone(&host),
-                    Arc::clone(&stores),
-                    None,
-                    producer,
-                    width,
-                )
-                .await;
-                let after = counter.count().await?;
-                emit(
-                    &args.out,
-                    &MeasurementRow::new(
-                        "postgres",
                         &producer.label,
                         rep,
                         &session,
@@ -752,7 +666,6 @@ async fn main() -> anyhow::Result<()> {
     let producers = producers(&args.producers, &artifacts);
     match args.backend.as_str() {
         "sqlite" => run_sqlite(&args, &producers).await?,
-        "postgres" => run_postgres(&args, &producers).await?,
         "restate" => run_restate(&args, &producers).await?,
         other => anyhow::bail!("unknown backend `{other}`"),
     }
