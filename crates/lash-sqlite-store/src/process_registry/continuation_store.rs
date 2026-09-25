@@ -43,6 +43,15 @@ impl ProcessContinuationStore for SqliteProcessRegistry {
         self.mark_segment_started_impl(segment, marker).await
     }
 
+    async fn retire_segment_handovers_through(
+        &self,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        self.retire_segment_handovers_through_impl(process_id, segment_ordinal)
+            .await
+    }
+
     async fn delete_segment_handovers(
         &self,
         process_id: &ProcessId,

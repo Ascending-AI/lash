@@ -210,6 +210,21 @@ where
         self.inner.wants_segment_boundary(progress)
     }
 
+    async fn observe_process_cancel(
+        &self,
+        lent_stop: &tokio_util::sync::CancellationToken,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.inner.observe_process_cancel(lent_stop).await
+    }
+
+    async fn record_process_drive_step(
+        &self,
+        name: String,
+        step: lash_core::ProcessDriveStep<'_>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.inner.record_process_drive_step(name, step).await
+    }
+
     async fn drive_independent_effect_work<'work>(
         &self,
         work: Vec<lash_core::IndependentEffectWork<'work>>,

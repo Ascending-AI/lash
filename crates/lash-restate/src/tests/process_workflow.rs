@@ -3,22 +3,6 @@ use lash_core::ProcessEventLogTestSupport as _;
 
 use lashlang::testing::ast_builders as b;
 
-#[test]
-pub(super) fn missing_segment_handover_distinguishes_superseded_orphan_from_current_input() {
-    let latest = lash_core::PersistedSegmentHandover {
-        segment_ordinal: 4,
-        handover: lash_core::SegmentHandover {
-            reason: lash_core::BoundaryReason::JournalBudget,
-            program_hash: "program-v1".to_string(),
-            engine_state: vec![4],
-        },
-    };
-    assert!(missing_segment_is_superseded(2, Some(&latest)));
-    assert!(!missing_segment_is_superseded(4, Some(&latest)));
-    assert!(!missing_segment_is_superseded(5, Some(&latest)));
-    assert!(!missing_segment_is_superseded(1, None));
-}
-
 #[tokio::test]
 pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
     let (registry, continuations) = process_stores();
@@ -59,20 +43,25 @@ pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
     );
 }
 
+/// A successor segment whose process was cancelled between segments is still
+/// driven, so its command emission matches its journal: its stop delivery
+/// fires the stop its runner was lent, and the runner's own recorded outcome
+/// is the cancellation (FIG-3673).
 #[tokio::test]
 pub(super) async fn cancel_redrives_successor_engine() {
-    let runner = Arc::new(SegmentedRecordingRunner {
-        outcomes: Mutex::new(VecDeque::from([
-            process_success(serde_json::Value::Null).into()
-        ])),
-        handovers: Mutex::new(Vec::new()),
-        runs: AtomicUsize::new(0),
-    });
+    let runner = Arc::new(CancellationAwareRunner::default());
     let registry = process_registry();
-    let workflow = LashProcessWorkflowImpl::new_for_test(
+    let signal_transport = Arc::new(BlockingCancelSignalTransport::default());
+    signal_transport.release.notify_one();
+    let workflow = LashProcessWorkflowImpl::new(
         runner.clone(),
         registry.clone(),
         continuation_store(),
+        RestateIngressClient::new(RestateConnection::with_transport(
+            "https://restate.invalid",
+            signal_transport.clone(),
+        )),
+        test_restate_authority_id(),
     );
     let registration = rerunnable_registration("cancel-between-segments");
     registry
@@ -96,8 +85,9 @@ pub(super) async fn cancel_redrives_successor_engine() {
         )
         .await
         .expect("cancel between segments");
-    let outcome = workflow
-        .run_registration_for_test(
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(5),
+        workflow.run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
             process_scope(&ProcessId::from("cancel-between-segments")),
@@ -107,19 +97,20 @@ pub(super) async fn cancel_redrives_successor_engine() {
                 program_hash: "program-v1".to_string(),
                 engine_state: vec![1],
             }),
-            async { Ok(()) },
-        )
-        .await
-        .expect("cancelled successor");
+        ),
+    )
+    .await
+    .expect("the cancelled successor settles")
+    .expect("cancelled successor");
     assert!(matches!(
         outcome,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
             if is_process_cancellation(output.as_ref())
     ));
     assert_eq!(
-        runner.runs.load(Ordering::SeqCst),
-        1,
-        "the cancelled successor must still be driven for replay-consistent command emission"
+        signal_transport.requests.lock_recover()[0].url,
+        "https://restate.invalid/LashProcessWorkflow/cancel-between-segments%231/await_cancel",
+        "the successor watches its own segment's cancel promise"
     );
 }
 
@@ -296,7 +287,6 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
             .expect("divergence-aborted child scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect_err("a diverged child must abort the parent invocation");
@@ -328,7 +318,6 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
             .expect("rerun child scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect("the rerunnable child must succeed on a fresh invocation");
@@ -369,7 +358,6 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
             .expect("first child scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect_err("opaque infrastructure failure must abort the invocation");
@@ -392,7 +380,6 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
             .expect("rerun child scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect("fresh invocation must be able to rerun the child");
@@ -638,15 +625,12 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
     assert_eq!(request.origin, lash_core::CancelOrigin::OperatorRequested);
     assert_eq!(request.requester, "actor:smoke");
     let expected = RestateProcessCancelRequest {
+        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
         process_ref,
         request: request.clone(),
     };
     assert_eq!(
         context.cancelled.lock_recover().as_slice(),
-        std::slice::from_ref(&expected)
-    );
-    assert_eq!(
-        runner.cancelled.lock_recover().as_slice(),
         std::slice::from_ref(&expected)
     );
 }
@@ -1028,7 +1012,6 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                     .expect("segmented child-await scope"),
                 ordinal,
                 input_handover.take(),
-                pending_process_cancel_signal(),
             )
             .await
             .expect("run segmented child-await process");
@@ -1058,7 +1041,6 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                                 .expect("replayed segment scope"),
                             ordinal,
                             None,
-                            pending_process_cancel_signal(),
                         )
                         .await
                         .expect("replay the same Restate invocation");

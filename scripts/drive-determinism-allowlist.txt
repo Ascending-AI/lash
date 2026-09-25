@@ -51,7 +51,6 @@ crates/lash-core/src/runtime/turn_loop/commit.rs  |  let mut seen = std::collect
 crates/lash-core/src/runtime/turn_loop/resident_session.rs  |  uuid::Uuid::new_v4()  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/lib.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/process.rs  |  Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB3
-crates/lash-lashlang-runtime/src/process.rs  |  tokio::select! {  |  2  # AC20
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  Pin<Box<dyn Future<Output = Result<AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB2
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  active_nodes: std::sync::Arc<Mutex<HashSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,  |  1  # UNMAPPED
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  let mut seen = HashSet::new();  |  1  # IO57
@@ -105,9 +104,6 @@ crates/lash-restate/src/effect_group/dispatch.rs  |  let outcome = tokio::select
 crates/lash-restate/src/effect_group/dispatch.rs  |  tokio::select! {  |  1  # AC18
 crates/lash-restate/src/process/admission.rs  |  nonce: uuid::Uuid::new_v4().to_string(),  |  1  # UNMAPPED
 crates/lash-restate/src/process/mod.rs  |  std::time::SystemTime::now()  |  1  # CR16
-crates/lash-restate/src/process/workflow.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), HandlerError>> + Send>> {  |  1  # AC19
-crates/lash-restate/src/process/workflow.rs  |  let outcome = tokio::select! {  |  1  # AC19
-crates/lash-restate/src/process/workflow.rs  |  tokio::time::sleep(PROCESS_CANCEL_CONFIRM_RETRY_DELAY).await;  |  1  # IO48
 crates/lashlang/src/artifact.rs  |  owners: HashSet<(ModuleRef, lash_core_execution::ArtifactOwner)>,  |  1  # UNMAPPED
 crates/lashlang/src/artifact.rs  |  retired_owners: HashSet<lash_core_execution::ArtifactOwner>,  |  1  # UNMAPPED
 crates/lashlang/src/artifact.rs  |  use std::collections::HashSet;  |  1  # UNMAPPED

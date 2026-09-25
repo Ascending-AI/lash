@@ -62,7 +62,8 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         let turn_scope = turn_cancel_scope.filter(|_| observe_turn_cancel && races_turn_gate);
         // The wait still races its execution's own token: for a wait that
         // observes no turn (a process body's `waitSignal`) that is the
-        // process drive's stop. P16 (FIG-3673) replaces with a recorded race.
+        // process's lent stop. The Restate engine races its recorded cancel
+        // promise instead (FIG-3673); this SQL driver goes with FIG-3668.
         let wait = self.await_events.await_resolution_with_clock(
             key,
             cancellation,
@@ -84,7 +85,9 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     /// cancellation gate inside the recorded execution when the sleep observes
     /// the turn: a stop ends it `RuntimeEffectSleepCancelled`, and that failure
     /// is what the journal records (FIG-3672 P9). A sleep that observes no
-    /// turn (a process body's) is raced by nothing, as before.
+    /// turn (a process body's) races its execution's lent stop the same way,
+    /// so the recorded outcome is what tells the process drive it was
+    /// cancelled (FIG-3673); FIG-3668 deletes this SQL driver.
     pub(super) async fn sleep_racing_turn(
         &self,
         due_at_ms: Option<u64>,
@@ -95,10 +98,17 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         let turn_scope = options
             .turn_cancel_scope
             .filter(|_| options.observe_turn_cancel && races_turn_gate);
+        let races_lent_stop = !options.observe_turn_cancel;
         tokio::select! {
             biased;
             stop = self.turn_stop(turn_scope.as_ref()) => {
                 stop?;
+                Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectSleepCancelled,
+                    "runtime effect sleep was cancelled",
+                ))
+            }
+            () = options.cancellation.cancelled(), if races_lent_stop => {
                 Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectSleepCancelled,
                     "runtime effect sleep was cancelled",
@@ -125,7 +135,8 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             .map(|turn| turn.scope.clone())
             .filter(|_| races_turn_gate);
         // A process command that observes no turn keeps the process drive's
-        // own stop. P16 (FIG-3673) replaces with a recorded race.
+        // own stop, until FIG-3668 deletes this SQL driver (Restate records the
+        // race, FIG-3673).
         let Some(scope) = scope else {
             return process.execute(command).await;
         };

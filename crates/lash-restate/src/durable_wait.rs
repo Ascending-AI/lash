@@ -573,7 +573,7 @@ pub(crate) fn restate_durable_wait_request(
 ///
 /// Every wait that can be cut short by turn cancellation — a timer, an
 /// await-event, a process terminal wait — reports through this one type, so a
-/// caller reads the same three answers whatever it was waiting on. `T` is
+/// caller reads the same answers whatever it was waiting on. `T` is
 /// whatever the wait produces when it wins its own race.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub enum RestateTurnCancelRaceOutcome<T> {
@@ -583,6 +583,23 @@ pub enum RestateTurnCancelRaceOutcome<T> {
     TurnCancelled,
     /// The session was revoked, so the turn has no ground left to stand on.
     SessionRevoked { session_id: SessionId },
+    /// A process drive's wait that observes no turn lost to the process
+    /// segment's own durable cancel promise (FIG-3673).
+    ProcessCancelled,
+}
+
+impl<T> RestateTurnCancelRaceOutcome<T> {
+    /// The same answer over what the wait produced when it won.
+    pub(crate) fn map<U>(self, map: impl FnOnce(T) -> U) -> RestateTurnCancelRaceOutcome<U> {
+        match self {
+            Self::Completed(value) => RestateTurnCancelRaceOutcome::Completed(map(value)),
+            Self::TurnCancelled => RestateTurnCancelRaceOutcome::TurnCancelled,
+            Self::SessionRevoked { session_id } => {
+                RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
+            }
+            Self::ProcessCancelled => RestateTurnCancelRaceOutcome::ProcessCancelled,
+        }
+    }
 }
 
 /// The verdict [`register_turn_cancel_gate`] returns for one gate entry.

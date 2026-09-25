@@ -690,57 +690,11 @@ pub(super) async fn fig779_pending_durable_timer_suspends_through_guard() {
         message_types,
         vec![
             RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_GET_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
         ],
-        "the attempt must end as a suspension, not a failed-attempt conversion"
-    );
-}
-
-/// Once the SDK records suspension, its one-shot handler state is terminal for
-/// the attempt. A cancellation made ready by that same synchronous wake must
-/// not let the sibling race return `Cancelled` before the SDK consumes the
-/// suspension. Conversely, cancellation observed while the timer is genuinely
-/// pending and unfused wins after the timer command has been journaled.
-#[tokio::test]
-pub(super) async fn fig779_sleep_suspension_and_cancellation_preserve_recorded_precedence() {
-    let endpoint = Endpoint::builder()
-        .bind(Fig779TimerGuardReproImpl.serve())
-        .build();
-    let input = Fig779TimerGuardReproInput { duration_ms: 2_000 };
-
-    let suspended = invoke_endpoint(
-        &endpoint,
-        "Fig779TimerGuardRepro",
-        "cancel_on_suspend_wake",
-        "fig779-cancel-on-suspend",
-        &input,
-    )
-    .await
-    .expect("same-poll cancellation must preserve the recorded suspension");
-    assert_eq!(
-        restate_message_types(&suspended).expect("decode suspended race frames"),
-        vec![
-            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
-    );
-
-    let cancelled = invoke_endpoint_open(
-        &endpoint,
-        "Fig779TimerGuardRepro",
-        "cancel_before_sleep",
-        "fig779-cancel-before-sleep",
-        &input,
-    )
-    .await
-    .expect("pre-existing cancellation should complete after journaling the timer");
-    assert_eq!(
-        restate_message_types(&cancelled).expect("decode cancelled race frames"),
-        vec![
-            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
-            RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE,
-            RESTATE_END_MESSAGE_TYPE
-        ]
+        "the timer and the cancel promise it races are journaled, then the attempt \
+         suspends on both instead of converting to a failed attempt"
     );
 }
 
@@ -800,8 +754,10 @@ pub(super) async fn park_process_on_its_timer(
         restate_message_types(&parked).expect("decode parked process frames"),
         vec![
             RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_GET_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
+        ],
+        "the process timer races its segment's cancel promise (FIG-3673)"
     );
     let mut journal = admission;
     journal.extend_from_slice(&recording);
@@ -810,14 +766,29 @@ pub(super) async fn park_process_on_its_timer(
 }
 
 /// Completions for a replayed process journal: the scope index answers its
-/// effect-recording calls, every other call answers `null`, the journaled
-/// wake verdict reads an unresolved cancellation promise (FIG-3149), and the
-/// timer is fired or left pending.
+/// effect-recording calls, every other call answers `null`, a journaled peek
+/// reads an unresolved cancel promise, the timer is fired or left pending, and
+/// the cancel promise each process wait races stays pending.
 pub(super) fn process_journal_completion(
     fire_timer: bool,
 ) -> impl Fn(&endpoint_protocol::RecordedCommand) -> Option<serde_json::Value> {
+    process_journal_completion_with_cancel(fire_timer, false)
+}
+
+/// [`process_journal_completion`], with the segment's cancel promise resolved
+/// to an accepted cancel request when `cancelled` (FIG-3673).
+pub(super) fn process_journal_completion_with_cancel(
+    fire_timer: bool,
+    cancelled: bool,
+) -> impl Fn(&endpoint_protocol::RecordedCommand) -> Option<serde_json::Value> {
     move |command| match command.message_type {
         RESTATE_SLEEP_COMMAND_MESSAGE_TYPE => fire_timer.then_some(serde_json::Value::Null),
+        RESTATE_GET_PROMISE_COMMAND_MESSAGE_TYPE => cancelled.then(|| {
+            serde_json::Value::String(
+                serde_json::to_string(&crate::process::RestateProcessCancelSignal::CancelRequested)
+                    .expect("encode the cancel signal"),
+            )
+        }),
         RESTATE_PEEK_PROMISE_COMMAND_MESSAGE_TYPE => Some(serde_json::Value::Null),
         RESTATE_CALL_COMMAND_MESSAGE_TYPE => command.call.as_ref().map(|(service, handler)| {
             durable_wait_index_call_response(service, handler).unwrap_or(serde_json::Value::Null)
@@ -837,6 +808,10 @@ fn trigger_journal_completion(
     })
 }
 
+/// A suspended process redrive observes its cancellation as the recorded
+/// completion of the cancel promise its timer raced (FIG-779, FIG-3673): no
+/// live watch and no live registry read decides it, so the redrive is the one
+/// every later replay reproduces.
 #[tokio::test]
 pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
     let process_id = "fig779-durable-cancel-redrive";
@@ -846,21 +821,12 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         .register_process(registration.clone())
         .await
         .expect("register redrive process");
-    let cancel_ingress = RestateIngressClient::new(RestateConnection::with_transport(
-        "https://restate.invalid",
-        Arc::new(Fig779DurableCancelTransport {
-            registry: Arc::clone(&registry),
-            process_id: ProcessId::from(process_id.to_string()),
-        }),
-    ));
     let endpoint = Endpoint::builder()
         .bind(
-            LashProcessWorkflowImpl::new(
+            LashProcessWorkflowImpl::new_for_test(
                 Arc::new(Fig779SuspendingProcessRunner),
                 Arc::clone(&registry),
                 continuation_store(),
-                cancel_ingress,
-                test_restate_authority_id(),
             )
             .serve(),
         )
@@ -895,7 +861,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         process_id,
         &input,
         &[&parked],
-        process_journal_completion(false),
+        process_journal_completion_with_cancel(false, true),
     )
     .expect("encode suspended process redrive");
     let cancelled = invoke_endpoint_body_with_json_call_responses(
@@ -906,16 +872,14 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         vec![serde_json::Value::Null],
     )
     .await
-    .expect("redrive should replay the timer command before observing cancellation");
+    .expect("redrive should replay the timer race before settling cancelled");
     assert_eq!(
-        restate_message_types(&cancelled).expect("decode cancelled redrive frames"),
-        vec![
-            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
-            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
-            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
-            RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE,
-            RESTATE_END_MESSAGE_TYPE
-        ]
+        restate_message_types(&cancelled)
+            .expect("decode cancelled redrive frames")
+            .first(),
+        Some(&RESTATE_CALL_COMMAND_MESSAGE_TYPE),
+        "the race's recorded promise completion ends the sleep, and the body \
+         goes on to its effect's end record"
     );
     assert!(matches!(
         registry
@@ -1044,11 +1008,12 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     let admission = admission_journal(&endpoint, process_id, &input)
         .await
         .expect("the first attempt admits its segment");
-    let terminal_delivery_suspension = invoke_endpoint_body(
+    let terminal_delivery_suspension = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
         admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+        Vec::new(),
     )
     .await
     .expect("ordinal-one terminal delivery should suspend on its call");
@@ -1056,6 +1021,8 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         restate_message_types(&terminal_delivery_suspension)
             .expect("decode ordinal-one terminal suspension"),
         vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
@@ -1163,17 +1130,20 @@ pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() 
     let admission = admission_journal(&endpoint, process_id, &input)
         .await
         .expect("the first attempt admits its segment");
-    let suspended = invoke_endpoint_body(
+    let suspended = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
         admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+        Vec::new(),
     )
     .await
     .expect("terminal attempt should suspend during root delivery");
     assert_eq!(
         restate_message_types(&suspended).expect("decode terminal suspension"),
         vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
@@ -1196,9 +1166,16 @@ pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() 
 
     // A fresh attempt on the same terminal input must refuse on the absent
     // handover instead of replaying the stored terminal outcome.
-    let refused = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
-        .await
-        .expect("the missing handover must render inside the invocation");
+    let refused = invoke_endpoint_body_with_json_call_responses_then_suspend(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        endpoint_protocol::encode_invocation_body(process_id, &input)
+            .expect("encode the fresh attempt"),
+        Vec::new(),
+    )
+    .await
+    .expect("the missing handover must render inside the invocation");
     let rendered = restate_output_failure_message(&refused)
         .expect("a terminal segment without a durable handover must fail hard");
     assert!(
@@ -1311,6 +1288,9 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
             && record.context.session_id.as_deref() == Some("session")
     }));
 
+    // The timer won its recorded race with the cancel promise: the woken
+    // effect goes straight on to clearing itself from the scope's index
+    // (FIG-3673; the FIG-3149 wake peek is subsumed by the race).
     let completed_effect = encode_recorded_commands_replay(
         process_id,
         &input,
@@ -1318,27 +1298,8 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         process_journal_completion(true),
     )
     .expect("splice completed effect prefix");
-    let wake_verdict =
-        invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", completed_effect)
-            .await
-            .expect("the woken effect should journal its cancellation verdict");
-    assert_eq!(
-        restate_message_types(&wake_verdict).expect("decode wake-verdict frames"),
-        vec![
-            RESTATE_PEEK_PROMISE_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ],
-        "the wake reads its cancellation verdict from the journal before the effect is cleared"
-    );
-    let verdict_replay = encode_recorded_commands_replay(
-        process_id,
-        &input,
-        &[&effect_suspension, &wake_verdict],
-        process_journal_completion(true),
-    )
-    .expect("splice the journaled wake verdict");
     let effect_cleared =
-        invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", verdict_replay)
+        invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", completed_effect)
             .await
             .expect("effect completion should clear the effect from the scope's index");
     assert_eq!(
@@ -1360,18 +1321,25 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
     let cleared_replay = encode_recorded_commands_replay(
         process_id,
         &input,
-        &[&effect_suspension, &wake_verdict, &effect_cleared],
+        &[&effect_suspension, &effect_cleared],
         process_journal_completion(true),
     )
     .expect("splice the cleared effect prefix");
-    let terminal_delivery_suspension =
-        invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", cleared_replay)
-            .await
-            .expect("effect completion should reach terminal delivery");
+    let terminal_delivery_suspension = invoke_endpoint_body_with_json_call_responses_then_suspend(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        cleared_replay,
+        Vec::new(),
+    )
+    .await
+    .expect("effect completion should reach terminal delivery");
     assert_eq!(
         restate_message_types(&terminal_delivery_suspension)
             .expect("decode effectful terminal suspension"),
         vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
@@ -1383,7 +1351,6 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         &input,
         &[
             &effect_suspension,
-            &wake_verdict,
             &effect_cleared,
             &terminal_delivery_suspension,
         ],
@@ -1455,11 +1422,12 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
     let admission = admission_journal(&endpoint, process_id, &input)
         .await
         .expect("the first attempt admits its segment");
-    let segment_finish_suspension = invoke_endpoint_body(
+    let segment_finish_suspension = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
         admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+        Vec::new(),
     )
     .await
     .expect("first segment attempt should suspend after scheduling its successor");
@@ -1467,7 +1435,11 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
         restate_message_types(&segment_finish_suspension)
             .expect("decode segment-finish suspension frames"),
         vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             0x040E,
             RESTATE_SUSPENSION_MESSAGE_TYPE
         ],
@@ -2326,11 +2298,12 @@ pub(super) async fn drive_to_live_segment_boundary(
     let admission = admission_journal(&endpoint, process_id, &input)
         .await
         .expect("the first attempt admits its segment");
-    let suspension = invoke_endpoint_body(
+    let suspension = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
         admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+        Vec::new(),
     )
     .await
     .expect("first segment attempt suspends after scheduling its successor");

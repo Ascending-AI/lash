@@ -137,9 +137,11 @@ async fn turn_stop_process_cancel_admission(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_restate_process_command<'ctx, C>(
     context: &C,
     authority_id: &RestateAuthorityId,
+    process_cancel: context::ProcessCancelRace,
     invocation: &RuntimeEffectInvocation,
     command: ProcessCommand,
     local_executor: RuntimeEffectLocalExecutor<'_>,
@@ -405,8 +407,9 @@ lash_core::TurnFailureCause::Outcome,
                     lash_core::runtime::registry_transitions::unknown_process(&process_id).into(),
                 );
             }
-            // A process await that observes no turn races nothing here, as
-            // before P9. P16 (FIG-3673) replaces with a recorded race.
+            // A process await that observes no turn races the awaiting
+            // process segment's durable cancel promise when a process drive
+            // issues it (FIG-3673).
             let turn_cancel = restate_process_turn_cancel_wait_request(
                 authority_id,
                 invocation,
@@ -417,7 +420,11 @@ lash_core::TurnFailureCause::Outcome,
             )?;
             trace_park("process");
             let first_wait = context
-                .await_process_terminal_or_turn_cancel(process_id.clone(), turn_cancel)
+                .await_process_terminal_or_turn_cancel(
+                    process_id.clone(),
+                    turn_cancel,
+                    process_cancel,
+                )
                 .await;
             let first_wait = match first_wait {
                 Ok(outcome) => outcome,
@@ -433,6 +440,19 @@ lash_core::TurnFailureCause::Outcome,
                 RestateTurnCancelRaceOutcome::Completed(output) => {
                     trace_resolve("process", lash_trace::TraceDurableWaitResolution::Resolved);
                     *output
+                }
+                RestateTurnCancelRaceOutcome::ProcessCancelled => {
+                    // The awaiting process was cancelled while it waited: its
+                    // await ends cancelled, which the drive records as its
+                    // own cancellation. The awaited process is left to its
+                    // own lifecycle; the ended parent scope's sweep, not this
+                    // wait, owns its children.
+                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Cancelled);
+                    lash_core::ProcessAwaitOutput::from_tool_output(
+                        lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
+                            format!("awaiting process `{process_id}` was cancelled"),
+                        )),
+                    )
                 }
                 RestateTurnCancelRaceOutcome::TurnCancelled => {
                     trace_resolve(

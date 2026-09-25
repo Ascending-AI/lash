@@ -1271,7 +1271,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 result = &mut wait => Some(result.map_err(|error| ingress_group_error(
                     "LashDurableWaitWorkflow/await_resolution(RANK)", error
                 ))?),
-                _ = cancel.cancellation().cancelled() => None, // P16 (FIG-3673) replaces with a recorded race.
+                _ = cancel.cancellation().cancelled() => None, // The waiter's own stop: no journal here.
                 stop = self.turn_stop(cancel.observed_scope()) => {
                     stop?;
                     None

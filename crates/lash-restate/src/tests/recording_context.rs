@@ -485,7 +485,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         request: RestateDurableWaitAwaitRequest,
         _replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        _process_stop: tokio_util::sync::CancellationToken,
+        _process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
@@ -526,18 +526,12 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         &'run self,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_stop: tokio_util::sync::CancellationToken,
+        _process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, ()>
     where
         'ctx: 'run,
     {
-        test_sleep_or_turn_cancel(
-            self,
-            &self.turn_cancel_gate,
-            duration,
-            turn_cancel,
-            process_stop,
-        )
+        test_sleep_or_turn_cancel(self, &self.turn_cancel_gate, duration, turn_cancel, None)
     }
 
     fn run_json_send<'run, T, Fut>(
@@ -714,7 +708,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_stop: tokio_util::sync::CancellationToken,
+        _process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
@@ -725,7 +719,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             request,
             replay_key,
             turn_cancel,
-            process_stop,
+            None,
         )
     }
 
@@ -783,6 +777,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         &'run self,
         process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        _process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
         'ctx: 'run,
@@ -792,6 +787,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             &self.turn_cancel_gate,
             process_id,
             turn_cancel,
+            None,
         )
     }
 
@@ -906,7 +902,13 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) process_cancel_committed: AtomicBool,
     pub(super) process_cancel_peek_records: Mutex<Vec<bool>>,
     pub(super) process_cancel_peek_cursor: AtomicUsize,
-    pub(super) process_cancel_peek_failures: AtomicUsize,
+    /// Wakes a recorded process cancel race when the stand-in promise is
+    /// committed (FIG-3673).
+    pub(super) process_cancel_notify: tokio::sync::Notify,
+    /// Which side each process-drive wait's recorded race took: `true` when
+    /// the cancel promise won.
+    pub(super) process_cancel_race_records: Mutex<Vec<bool>>,
+    pub(super) process_cancel_race_cursor: AtomicUsize,
     pub(super) events: Arc<RecordingContext>,
     pub(super) process_worker: Mutex<Option<lash_core_worker::DurableProcessWorker>>,
     pub(super) defer_process_workflows: AtomicBool,
@@ -1556,6 +1558,7 @@ impl ReplayableRecordingContext {
         self.append_missing_on_replay.store(false, Ordering::SeqCst);
         self.peek_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
+        self.process_cancel_race_cursor.store(0, Ordering::SeqCst);
     }
 
     pub(super) fn start_replay_allowing_journal_extension(&self) {
@@ -1563,32 +1566,83 @@ impl ReplayableRecordingContext {
         self.append_missing_on_replay.store(true, Ordering::SeqCst);
         self.peek_cursor.store(0, Ordering::SeqCst);
         self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
+        self.process_cancel_race_cursor.store(0, Ordering::SeqCst);
     }
 
     /// Resolves the stand-in process cancellation promise.
     pub(super) fn commit_process_cancel(&self) {
         self.process_cancel_committed.store(true, Ordering::SeqCst);
+        self.process_cancel_notify.notify_waiters();
+    }
+
+    /// The answers each journaled process cancel peek recorded (FIG-3673).
+    pub(super) fn process_cancel_peek_verdicts(&self) -> Vec<bool> {
+        self.process_cancel_peek_records.lock_recover().clone()
+    }
+
+    /// Which side each recorded process cancel race took (FIG-3673).
+    pub(super) fn process_cancel_race_verdicts(&self) -> Vec<bool> {
+        self.process_cancel_race_records.lock_recover().clone()
+    }
+
+    /// The stand-in cancel promise a process-drive wait races. A live race
+    /// resolves it once the cancel is committed; a replayed race answers from
+    /// the recorded winner, never from live state.
+    fn test_process_cancel(
+        self: &Arc<Self>,
+        race: ProcessCancelRace,
+    ) -> TestProcessCancel<'static> {
+        if race == ProcessCancelRace::NotRaced {
+            return None;
+        }
+        let context = Arc::clone(self);
+        if context.replaying.load(Ordering::SeqCst) {
+            let cursor = context
+                .process_cancel_race_cursor
+                .fetch_add(1, Ordering::SeqCst);
+            let won = context
+                .process_cancel_race_records
+                .lock_recover()
+                .get(cursor)
+                .copied()
+                .unwrap_or(false);
+            return Some(Box::pin(async move {
+                if !won {
+                    std::future::pending::<()>().await;
+                }
+            }));
+        }
+        Some(Box::pin(async move {
+            loop {
+                let notified = context.process_cancel_notify.notified();
+                if context.process_cancel_committed.load(Ordering::SeqCst) {
+                    return;
+                }
+                notified.await;
+            }
+        }))
+    }
+
+    /// Record a live race's winner; a replay reads it back.
+    fn record_process_cancel_race<T>(
+        &self,
+        race: ProcessCancelRace,
+        outcome: &Result<RestateTurnCancelRaceOutcome<T>, TerminalError>,
+    ) {
+        if race == ProcessCancelRace::Raced && !self.replaying.load(Ordering::SeqCst) {
+            self.process_cancel_race_records
+                .lock_recover()
+                .push(matches!(
+                    outcome,
+                    Ok(RestateTurnCancelRaceOutcome::ProcessCancelled)
+                ));
+        }
     }
 
     /// Clears live cancellation so a replayed wake can only answer from the
     /// journal.
     pub(super) fn clear_process_cancel(&self) {
         self.process_cancel_committed.store(false, Ordering::SeqCst);
-    }
-
-    pub(super) fn fail_next_process_cancel_peeks(&self, count: usize) {
-        self.process_cancel_peek_failures
-            .store(count, Ordering::SeqCst);
-    }
-
-    pub(super) fn process_cancel_wake_verdicts(&self) -> Vec<bool> {
-        self.process_cancel_peek_records.lock_recover().clone()
-    }
-
-    /// Models a journal deployed before the wake verdict command existed.
-    pub(super) fn forget_process_cancel_wake_verdicts(&self) {
-        self.process_cancel_peek_records.lock_recover().clear();
-        self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
     }
 
     pub(super) fn runs(&self) -> Vec<String> {
@@ -1741,18 +1795,12 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         &'run self,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_stop: tokio_util::sync::CancellationToken,
+        _process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, ()>
     where
         'ctx: 'run,
     {
-        test_sleep_or_turn_cancel(
-            self,
-            &self.turn_cancel_gate,
-            duration,
-            turn_cancel,
-            process_stop,
-        )
+        test_sleep_or_turn_cancel(self, &self.turn_cancel_gate, duration, turn_cancel, None)
     }
 
     fn run_json_send<'run, T, Fut>(
@@ -1836,7 +1884,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_stop: tokio_util::sync::CancellationToken,
+        _process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
@@ -1847,7 +1895,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
             request,
             replay_key,
             turn_cancel,
-            process_stop,
+            None,
         )
     }
 
@@ -1876,6 +1924,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         &'run self,
         process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        _process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
         'ctx: 'run,
@@ -1885,6 +1934,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
             &self.turn_cancel_gate,
             process_id,
             turn_cancel,
+            None,
         )
     }
 
@@ -1945,15 +1995,6 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     {
         let context = Arc::clone(self);
         Box::pin(async move {
-            let failures = context.process_cancel_peek_failures.load(Ordering::SeqCst);
-            if failures > 0 {
-                context
-                    .process_cancel_peek_failures
-                    .store(failures - 1, Ordering::SeqCst);
-                return Err(TerminalError::new(
-                    "simulated transient wake-verdict peek failure",
-                ));
-            }
             if context.replaying.load(Ordering::SeqCst) {
                 let cursor = context
                     .process_cancel_peek_cursor
@@ -2013,7 +2054,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         self.sleeps.lock_recover().push(duration.as_millis() as u64);
         let context = Arc::clone(self);
         Box::pin(async move {
-            if context.park_sleeps.load(Ordering::SeqCst) {
+            // A replayed timer completes from its journal entry.
+            if context.park_sleeps.load(Ordering::SeqCst)
+                && !context.replaying.load(Ordering::SeqCst)
+            {
                 context.sleep_started.notify_one();
                 context.sleep_release.notified().await;
             }
@@ -2025,18 +2069,23 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         &'run self,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_stop: tokio_util::sync::CancellationToken,
+        process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, ()>
     where
         'ctx: 'run,
     {
-        test_sleep_or_turn_cancel(
+        let race = test_sleep_or_turn_cancel(
             self,
             &self.events.turn_cancel_gate,
             duration,
             turn_cancel,
-            process_stop,
-        )
+            self.test_process_cancel(process_cancel),
+        );
+        Box::pin(async move {
+            let outcome = race.await;
+            self.record_process_cancel_race(process_cancel, &outcome);
+            outcome
+        })
     }
 
     fn run_json_send<'run, T, Fut>(
@@ -2201,19 +2250,24 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_stop: tokio_util::sync::CancellationToken,
+        process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
     {
-        test_await_event_or_turn_cancel(
+        let race = test_await_event_or_turn_cancel(
             self,
             &self.events.turn_cancel_gate,
             request,
             replay_key,
             turn_cancel,
-            process_stop,
-        )
+            self.test_process_cancel(process_cancel),
+        );
+        Box::pin(async move {
+            let outcome = race.await;
+            self.record_process_cancel_race(process_cancel, &outcome);
+            outcome
+        })
     }
 
     fn peek_event<'run>(
@@ -2269,16 +2323,23 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         &'run self,
         process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        process_cancel: ProcessCancelRace,
     ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
         'ctx: 'run,
     {
-        test_await_process_terminal_or_turn_cancel(
+        let race = test_await_process_terminal_or_turn_cancel(
             self,
             &self.events.turn_cancel_gate,
             process_id,
             turn_cancel,
-        )
+            self.test_process_cancel(process_cancel),
+        );
+        Box::pin(async move {
+            let outcome = race.await;
+            self.record_process_cancel_race(process_cancel, &outcome);
+            outcome
+        })
     }
 
     fn resolve_event<'run>(

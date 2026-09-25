@@ -478,6 +478,7 @@ pub(super) async fn restate_controller_cancel_requests_call_workflow_cancel() {
     assert_eq!(
         context.cancelled.lock_recover().as_slice(),
         &[RestateProcessCancelRequest {
+            journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
             process_ref: lash_core::ProcessRef::from_record(&record),
             request: request.clone(),
         }]
@@ -759,7 +760,6 @@ pub(super) struct RecordedProcessRun {
 #[derive(Default)]
 pub(super) struct RecordingRunner {
     pub(super) ran: Mutex<Vec<RecordedProcessRun>>,
-    pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
     /// Leave the process live: after recording the run, fail it with a
     /// retryable fault Restate would retry, so no terminal is written.
     pub(super) stay_live: std::sync::atomic::AtomicBool,
@@ -795,14 +795,6 @@ impl RestateProcessRunner for RecordingRunner {
             )));
         }
         Ok(process_success(serde_json::json!({"ok": true})).into())
-    }
-
-    async fn request_process_cancel(
-        &self,
-        request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        self.cancelled.lock_recover().push(request);
-        Ok(())
     }
 }
 
@@ -851,13 +843,6 @@ impl RestateProcessRunner for DivergenceThenSuccessRunner {
         }
         Ok(process_success(serde_json::json!({"rerun": "succeeded"})).into())
     }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait]
@@ -882,13 +867,6 @@ impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
         }
         Ok(process_success(serde_json::json!({"rerun": "succeeded"})).into())
     }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait]
@@ -910,13 +888,6 @@ impl RestateProcessRunner for TerminalFailureRunner {
             lash_core::RuntimeErrorCode::RestateServiceUnregistered,
             "no deployment binds the child worker",
         )))
-    }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
     }
 }
 
@@ -941,13 +912,6 @@ impl RestateProcessRunner for AlreadyStartedRunner {
             by: Box::new(self.winner.clone()),
         })
     }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 }
 
 pub(super) struct SegmentedRecordingRunner {
@@ -958,16 +922,16 @@ pub(super) struct SegmentedRecordingRunner {
 
 #[derive(Default)]
 pub(super) struct CancellationAwareRunner {
-    started: tokio::sync::Notify,
-    finish_successfully: tokio::sync::Notify,
-    failure_after_cancel: Option<&'static str>,
+    pub(super) started: tokio::sync::Notify,
+    pub(super) finish_successfully: tokio::sync::Notify,
+    pub(super) failure_after_cancel: Option<&'static str>,
 }
 
 #[derive(Debug, Default)]
 pub(super) struct BlockingCancelSignalTransport {
-    requests: Mutex<Vec<HttpRequest>>,
-    started: tokio::sync::Notify,
-    release: tokio::sync::Notify,
+    pub(super) requests: Mutex<Vec<HttpRequest>>,
+    pub(super) started: tokio::sync::Notify,
+    pub(super) release: tokio::sync::Notify,
 }
 
 #[derive(Debug)]
@@ -1105,13 +1069,6 @@ impl RestateProcessRunner for CancellationAwareRunner {
                 Ok(process_success(serde_json::json!("runner completed")).into()),
         }
     }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait]
@@ -1136,13 +1093,6 @@ impl RestateProcessRunner for SegmentedRecordingRunner {
             .pop_front()
             .ok_or_else(|| PluginError::Session("unexpected duplicate segment run".to_string()))
     }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 }
 
 /// The scoped controller a test runner receives for `process_id`'s workflow
@@ -1154,10 +1104,6 @@ pub(super) fn process_scope(process_id: &ProcessId) -> lash_core::ScopedEffectCo
         durable_admission(&ExecutionScope::process(process_id.to_string())),
     )
     .expect("process scope")
-}
-
-pub(super) async fn pending_process_cancel_signal() -> Result<(), HandlerError> {
-    std::future::pending().await
 }
 
 #[tokio::test]
@@ -1185,8 +1131,6 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
     let run = {
         let workflow = Arc::clone(&workflow);
         tokio::spawn(async move {
-            let cancellation_signal =
-                workflow.cancellation_signal(&ProcessId::from("prompt-cancel"), 0);
             workflow
                 .run_registration_for_test(
                     registration,
@@ -1194,7 +1138,6 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
                     process_scope(&ProcessId::from("prompt-cancel")),
                     0,
                     None,
-                    cancellation_signal,
                 )
                 .await
         })
@@ -1250,17 +1193,22 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
         ..CancellationAwareRunner::default()
     });
     let registry = process_registry();
-    let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
+    let signal_transport = Arc::new(BlockingCancelSignalTransport::default());
+    let workflow = Arc::new(LashProcessWorkflowImpl::new(
         Arc::clone(&runner),
         Arc::clone(&registry),
         continuation_store(),
+        RestateIngressClient::new(RestateConnection::with_transport(
+            "https://restate.invalid",
+            signal_transport.clone(),
+        )),
+        test_restate_authority_id(),
     ));
     let registration = rerunnable_session_turn_registration("cancel-cleanup-failure");
     registry
         .register_process(registration.clone())
         .await
         .expect("register process");
-    let (signal, cancellation_signal) = tokio::sync::oneshot::channel();
     let run = {
         let workflow = Arc::clone(&workflow);
         tokio::spawn(async move {
@@ -1271,18 +1219,12 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
                     process_scope(&ProcessId::from("cancel-cleanup-failure")),
                     0,
                     None,
-                    async move {
-                        cancellation_signal.await.map_err(|_| {
-                            HandlerError::from(TerminalError::new(
-                                "test cancellation signal sender dropped",
-                            ))
-                        })
-                    },
                 )
                 .await
         })
     };
     runner.started.notified().await;
+    signal_transport.started.notified().await;
     registry
         .append_event(
             &ProcessId::from("cancel-cleanup-failure"),
@@ -1300,7 +1242,7 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
         )
         .await
         .expect("append cancel request");
-    signal.send(()).expect("resolve cancellation signal");
+    signal_transport.release.notify_one();
 
     let outcome = tokio::time::timeout(Duration::from_secs(2), run)
         .await
@@ -1366,7 +1308,6 @@ pub(super) async fn session_turn_runner_failure_after_completion_stays_recoverab
             process_scope(&ProcessId::from("cancel-after-failure")),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await;
     assert!(
@@ -1395,17 +1336,22 @@ pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure(
         ..CancellationAwareRunner::default()
     });
     let registry = process_registry();
-    let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
+    let signal_transport = Arc::new(BlockingCancelSignalTransport::default());
+    let workflow = Arc::new(LashProcessWorkflowImpl::new(
         Arc::clone(&runner),
         Arc::clone(&registry),
         continuation_store(),
+        RestateIngressClient::new(RestateConnection::with_transport(
+            "https://restate.invalid",
+            signal_transport.clone(),
+        )),
+        test_restate_authority_id(),
     ));
     let registration = rerunnable_registration("non-session-cancel-failure");
     registry
         .register_process(registration.clone())
         .await
         .expect("register process");
-    let (signal, cancellation_signal) = tokio::sync::oneshot::channel();
     let run = {
         let workflow = Arc::clone(&workflow);
         tokio::spawn(async move {
@@ -1416,18 +1362,12 @@ pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure(
                     process_scope(&ProcessId::from("non-session-cancel-failure")),
                     0,
                     None,
-                    async move {
-                        cancellation_signal.await.map_err(|_| {
-                            HandlerError::from(TerminalError::new(
-                                "test cancellation signal sender dropped",
-                            ))
-                        })
-                    },
                 )
                 .await
         })
     };
     runner.started.notified().await;
+    signal_transport.started.notified().await;
     registry
         .append_event(
             &ProcessId::from("non-session-cancel-failure"),
@@ -1445,7 +1385,7 @@ pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure(
         )
         .await
         .expect("append cancel request");
-    signal.send(()).expect("resolve cancellation signal");
+    signal_transport.release.notify_one();
 
     let outcome = tokio::time::timeout(Duration::from_secs(2), run)
         .await
@@ -1508,7 +1448,6 @@ pub(super) async fn cancel_watch_reissues_after_attach_ceiling_until_segment_com
             process_scope(&ProcessId::from("ceiling-reissues")),
             0,
             None,
-            workflow.cancellation_signal(&ProcessId::from("ceiling-reissues"), 0),
         ),
     )
     .await
@@ -1528,8 +1467,13 @@ pub(super) async fn cancel_watch_reissues_after_attach_ceiling_until_segment_com
     );
 }
 
+/// A stop delivery whose watch keeps failing fails closed (FIG-3673): after
+/// the shared retry ladder it ends the attempt with a retryable
+/// infrastructure error, never a cancellation and never a recorded outcome,
+/// so the engine retries the attempt and its redrive watches again. A
+/// segment never keeps running a step body its committed cancel cannot reach.
 #[tokio::test]
-pub(super) async fn non_timeout_cancel_watch_error_fails_the_segment() {
+pub(super) async fn a_broken_cancel_watch_fails_the_attempt_after_its_retries() {
     let runner = Arc::new(CancellationAwareRunner::default());
     let workflow = LashProcessWorkflowImpl::new(
         Arc::clone(&runner),
@@ -1542,42 +1486,34 @@ pub(super) async fn non_timeout_cancel_watch_error_fails_the_segment() {
         test_restate_authority_id(),
     );
 
-    let error = workflow
-        .run_registration_for_test(
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        workflow.run_registration_for_test(
             rerunnable_registration("broken-cancel-watch"),
             ProcessExecutionContext::default(),
             process_scope(&ProcessId::from("broken-cancel-watch")),
             0,
             None,
-            workflow.cancellation_signal(&ProcessId::from("broken-cancel-watch"), 0),
-        )
-        .await
-        .expect_err("a non-timeout cancel watch failure must fail the segment");
+        ),
+    )
+    .await
+    .expect("an exhausted watch must end the attempt")
+    .expect_err("an exhausted watch fails the attempt");
     let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
-
     assert!(
-        source.to_string().contains("cancel watch transport failed"),
+        source.to_string().contains("cancel watch failed 8 times"),
         "unexpected handler error: {error:?}"
     );
     assert!(
-        source.to_string().starts_with("Retryable error"),
-        "a transport fault is worth retrying, which is the case the \
-         missing-registration terminal below has to be distinguishable from: \
-         {error:?}"
+        format!("{error:?}").contains("Retryable"),
+        "a transport fault is worth retrying: {error:?}"
     );
 }
 
-/// A cancel watch addressed to a service no deployment binds ends the segment
-/// with the engine's own 404-class **terminal**, not a retryable error the
-/// engine backs off forever (FIG-1579).
-///
-/// The cancel watch is a `loop`, and every error in it that is not a timeout
-/// leaves through one arm. Before this, a 404 left through the same arm as a
-/// broken socket and became `HandlerErrorInner::Retryable`, so a deployment that
-/// forgot to `bind(LashProcessWorkflowImpl…)` produced an invocation retrying
-/// with infinite exponential backoff and no operator ever told what was wrong —
-/// the engine-tier twin of the warn-and-strand this contract rules out. A
-/// missing registration is deterministic: retrying cannot make it appear.
+/// A stop delivery addressed to a service no deployment binds ends the
+/// attempt with the engine's own 404-class **terminal**, not a retryable error
+/// the engine backs off forever (FIG-1579): retrying cannot make the binding
+/// appear.
 #[tokio::test]
 pub(super) async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_indefinite_retry() {
     let runner = Arc::new(CancellationAwareRunner::default());
@@ -1599,26 +1535,22 @@ pub(super) async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_in
             process_scope(&ProcessId::from("unregistered-cancel-watch")),
             0,
             None,
-            workflow.cancellation_signal(&ProcessId::from("unregistered-cancel-watch"), 0),
         )
         .await
         .expect_err("a cancel watch against an unbound service must fail the segment");
     let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
     let rendered = source.to_string();
-
     assert!(
         rendered.starts_with("Terminal error [404]"),
-        "a missing registration must leave as the engine's own terminal, so the \
-         invocation ends instead of backing off forever: {error:?}"
+        "a missing registration must leave as the engine's own terminal: {error:?}"
     );
     assert!(
         rendered.contains("LashProcessWorkflow/await_cancel"),
-        "the terminal names the address nothing binds, because `404 from \
-         Restate` is not something an operator can act on: {error:?}"
+        "the terminal names the address nothing binds: {error:?}"
     );
 }
 
-/// The classifier the terminal above turns on: a `404` is a missing registration
+/// The classifier the stop delivery turns on: a `404` is a missing registration
 /// only on a route that addresses a service by name, and only for that status.
 ///
 /// The negative half is the one that matters. `404` is not self-describing — on
@@ -1682,121 +1614,6 @@ pub(super) fn only_a_404_on_a_service_call_route_reads_as_a_missing_registration
 }
 
 #[tokio::test]
-pub(super) async fn transient_cancel_registry_read_error_cannot_fall_through_to_success() {
-    let runner = Arc::new(CancellationAwareRunner::default());
-    let registry = process_registry();
-    let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
-        Arc::clone(&runner),
-        Arc::clone(&registry),
-        continuation_store(),
-    ));
-    let registration = rerunnable_registration("transient-cancel-read");
-    registry
-        .register_process(registration.clone())
-        .await
-        .expect("register process");
-
-    let (signal, cancellation_signal) = tokio::sync::oneshot::channel();
-    let run = {
-        let workflow = Arc::clone(&workflow);
-        tokio::spawn(async move {
-            workflow
-                .run_registration_for_test(
-                    registration,
-                    ProcessExecutionContext::default(),
-                    process_scope(&ProcessId::from("transient-cancel-read")),
-                    0,
-                    None,
-                    async move {
-                        cancellation_signal.await.map_err(|_| {
-                            HandlerError::from(TerminalError::new(
-                                "test cancellation signal sender dropped",
-                            ))
-                        })
-                    },
-                )
-                .await
-        })
-    };
-    runner.started.notified().await;
-    registry
-        .append_event(
-            &ProcessId::from("transient-cancel-read"),
-            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from("transient-cancel-read")).await.expect("retained cancellation target"),
-&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:transient_cancel_registry_read_error_cannot_fall_through_to_success", 11)),
-        )
-        .await
-        .expect("append cancel request");
-    workflow.fail_next_cancel_reads(1);
-    signal
-        .send(())
-        .expect("resolve process cancellation signal");
-    runner.finish_successfully.notify_one();
-
-    let outcome = tokio::time::timeout(Duration::from_secs(2), run)
-        .await
-        .expect("transient registry error must be retried")
-        .expect("join running process")
-        .expect("run process");
-    assert!(matches!(
-        outcome,
-        lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if is_process_cancellation(output.as_ref())
-    ));
-}
-
-#[tokio::test]
-pub(super) async fn exhausted_cancel_confirmation_is_a_retryable_handler_error() {
-    let workflow = LashProcessWorkflowImpl::new_for_test(
-        Arc::new(CancellationAwareRunner::default()),
-        process_registry(),
-        continuation_store(),
-    );
-    workflow.fail_next_cancel_reads(6);
-
-    let error = workflow
-        .confirm_process_cancel_requested_for_test(&ProcessId::from("cancel-confirmation"))
-        .await
-        .expect_err("exhausted confirmation must stay retryable");
-    let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
-    let rendered = source.to_string();
-
-    assert!(
-        format!("{error:?}").contains("Retryable"),
-        "unexpected handler error: {error:?}"
-    );
-    assert!(
-        rendered.contains("simulated transient cancel registry read failure"),
-        "unexpected handler error: {error:?}"
-    );
-}
-
-#[tokio::test]
-pub(super) async fn absent_event_after_cancel_promise_is_a_terminal_handler_error() {
-    let registry = process_registry();
-    registry
-        .register_process(rerunnable_registration("missing-cancel-event"))
-        .await
-        .expect("register process");
-    let workflow = LashProcessWorkflowImpl::new_for_test(
-        Arc::new(CancellationAwareRunner::default()),
-        registry,
-        continuation_store(),
-    );
-
-    let error = workflow
-        .confirm_process_cancel_requested_for_test(&ProcessId::from("missing-cancel-event"))
-        .await
-        .expect_err("a resolved promise without its durable event must be terminal");
-    let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
-
-    assert!(
-        source.to_string().starts_with("Terminal error [500]:"),
-        "unexpected handler error: {error:?}"
-    );
-}
-
-#[tokio::test]
 pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once() {
     let continuation = lash_core::SegmentHandover {
         reason: lash_core::BoundaryReason::JournalBudget,
@@ -1837,7 +1654,6 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
                 .expect("durable first-segment scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect("run first segment");
@@ -1881,7 +1697,6 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
                 .expect("durable successor scope"),
             1,
             Some(resumed),
-            pending_process_cancel_signal(),
         )
         .await
         .expect("run successor segment");
@@ -2070,7 +1885,6 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
                     process_scope(&ProcessId::from(process_id.clone())),
                     ordinal,
                     input_handover.take(),
-                    pending_process_cancel_signal(),
                 )
                 .await
                 .expect("matrix segment run");
@@ -2103,10 +1917,13 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
             };
             for _ in 0..cancel_checks {
                 assert!(
-                    !workflow
-                        .process_cancel_requested(&ProcessId::from(process_id.clone()))
+                    registry
+                        .get_process(&ProcessId::from(process_id.clone()))
                         .await
                         .expect("matrix cancel check")
+                        .expect("matrix process")
+                        .cancel_request
+                        .is_none()
                 );
             }
             let key = process_segment_workflow_key(&ProcessId::from(process_id.clone()), next);

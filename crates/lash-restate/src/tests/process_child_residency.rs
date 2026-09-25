@@ -81,7 +81,6 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
                 .expect("session-turn liveness process scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect("session turn run");

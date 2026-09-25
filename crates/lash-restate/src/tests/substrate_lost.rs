@@ -158,13 +158,6 @@ impl RestateProcessRunner for EffectRunner {
             output: Box::new(process_success(serde_json::json!("ran"))),
         })
     }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 }
 
 /// A process whose root execution started and handed segment 1 over, served
@@ -455,7 +448,6 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
                 .expect("segment 0 scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect("run segment 0");
@@ -489,9 +481,10 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
         .build();
     stores
         .registry
-        .fail_next_external_ref_write(PluginError::Session(
-            "injected store fault at segment 1's boundary".to_string(),
-        ));
+        .fail_next_external_ref_write(PluginError::Runtime(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::RuntimeStore,
+            "injected store fault at segment 1's boundary",
+        )));
     let key = process_segment_workflow_key(&process_id, 1);
     let crashed = invoke_process_workflow_endpoint(
         &endpoint,
@@ -763,13 +756,6 @@ impl RestateProcessRunner for BoundaryRunner {
             },
         ))
     }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 }
 
 /// A store fault on the successor-reference write is retryable: the
@@ -800,9 +786,10 @@ pub(super) async fn a_successor_reference_store_fault_is_retried_by_restate() {
     let input = segment_input(&registration, 0);
     stores
         .registry
-        .fail_next_external_ref_write(PluginError::Session(
-            "injected transient reference write failure".to_string(),
-        ));
+        .fail_next_external_ref_write(PluginError::Runtime(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::RuntimeStore,
+            "injected transient reference write failure",
+        )));
     let failed =
         invoke_process_workflow_endpoint(&endpoint, "run", process_id.as_str(), &input, true)
             .await
@@ -824,7 +811,15 @@ pub(super) async fn a_successor_reference_store_fault_is_retried_by_restate() {
         "a boundary whose successor reference failed hands nothing over"
     );
 
-    let journaled = restate_recorded_commands(&failed).map_or(0, |commands| commands.len());
+    // The failed handover step's run command was never acknowledged: Restate
+    // retries over the journal before it (FIG-3673).
+    let commands = restate_recorded_commands(&failed).unwrap_or_default();
+    assert_eq!(
+        commands.last().map(|command| command.message_type),
+        Some(RESTATE_RUN_COMMAND_MESSAGE_TYPE),
+        "the attempt ends at its unacknowledged handover step"
+    );
+    let journaled = commands.len() - 1;
     let body = encode_journal_retry(process_id.as_str(), &input, &failed, journaled)
         .expect("encode Restate's retry");
     let _ = invoke_process_workflow_body(&endpoint, "run", body, true).await;
@@ -908,6 +903,7 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
 pub(super) async fn a_retired_journal_generation_is_refused_before_any_command() {
     for (process_id, stamped) in [
         ("admission-retired-journal-v1", Some(1_u32)),
+        ("admission-retired-journal-v2", Some(2_u32)),
         ("admission-retired-journal-unstamped", None),
     ] {
         let registry = process_registry();
@@ -968,7 +964,10 @@ pub(super) async fn a_retired_journal_generation_is_refused_before_any_command()
                 ProcessAwaitOutput::Abandoned { evidence, .. }
                     if evidence.writer == lash_core::AbandonWriter::ResumeRefused {
                         reason: lash_core::ProcessResumeRefusal::RetiredGeneration {
-                            found: "restate-process-journal-v1".to_string(),
+                            found: format!(
+                                "restate-process-journal-v{}",
+                                stamped.unwrap_or(1)
+                            ),
                         },
                     }
             ),

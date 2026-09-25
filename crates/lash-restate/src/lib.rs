@@ -90,6 +90,7 @@ mod effect_host;
 mod ingress;
 mod process;
 mod process_attach;
+mod process_stop;
 mod services;
 mod session_administration;
 mod turn;

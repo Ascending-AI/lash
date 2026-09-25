@@ -8,7 +8,8 @@
 //! Restate at its sanctioned seams.
 
 use super::*;
-use crate::controller::context::guard_restate_context_future;
+use crate::controller::RestateEffectControllerOptions;
+use crate::controller::context::{ProcessCancelRace, guard_restate_context_future};
 use crate::controller::effect_journal::JournaledEffectRecord;
 use crate::controller::{
     RecordedRuntimeEffect, RestateEffectExecution, restate_await_event_turn_cancel_wait_request,
@@ -23,10 +24,9 @@ use crate::durable_wait::{
     validate_durable_wait_index_epoch,
 };
 use crate::process::{
-    boundary_must_be_declined, handler_error_from_plugin, missing_segment_is_superseded,
-    process_segment_workflow_key, restate_process_terminal_await_key,
-    restate_process_terminal_output, restate_process_terminal_resolution,
-    terminal_completion_workflow_key, workflow_key_authority,
+    boundary_must_be_declined, handler_error_from_plugin, process_segment_workflow_key,
+    restate_process_terminal_await_key, restate_process_terminal_output,
+    restate_process_terminal_resolution, terminal_completion_workflow_key, workflow_key_authority,
 };
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
@@ -175,7 +175,8 @@ use endpoint_protocol::{
     encode_process_terminal_delivery_replay, encode_recorded_commands_replay,
     encode_recorded_commands_with_invocations_replay, encode_run_replay, encode_signal_value,
     invoke_endpoint, invoke_endpoint_body, invoke_endpoint_body_open,
-    invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
+    invoke_endpoint_body_with_json_call_responses,
+    invoke_endpoint_body_with_json_call_responses_then_suspend,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
     invoke_process_workflow_body, invoke_process_workflow_endpoint, restate_call_frames,
     restate_command_frame_types, restate_completed_promise, restate_error_code,
@@ -624,6 +625,7 @@ const RESTATE_SLEEP_COMMAND_MESSAGE_TYPE: u16 = 0x040C;
 const RESTATE_CALL_COMMAND_MESSAGE_TYPE: u16 = 0x040D;
 const RESTATE_SUSPENSION_MESSAGE_TYPE: u16 = 0x0001;
 const RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x040B;
+const RESTATE_GET_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x0409;
 const RESTATE_PEEK_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x040A;
 const RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE: u16 = 0x0401;
 const RESTATE_END_MESSAGE_TYPE: u16 = 0x0003;
@@ -643,14 +645,6 @@ trait Fig779TimerGuardRepro {
 
     async fn raw_sleep(input: Json<Fig779TimerGuardReproInput>) -> HandlerResult<Json<()>>;
 
-    async fn cancel_on_suspend_wake(
-        input: Json<Fig779TimerGuardReproInput>,
-    ) -> HandlerResult<Json<()>>;
-
-    async fn cancel_before_sleep(
-        input: Json<Fig779TimerGuardReproInput>,
-    ) -> HandlerResult<Json<()>>;
-
     async fn repoll_fused_timer(input: Json<Fig779TimerGuardReproInput>)
     -> HandlerResult<Json<()>>;
 }
@@ -658,10 +652,9 @@ trait Fig779TimerGuardRepro {
 struct Fig779TimerGuardReproImpl;
 
 impl Fig779TimerGuardRepro for Fig779TimerGuardReproImpl {
-    /// The production geometry repaired by FIG-779: `turn_cancel == None`,
-    /// which is what every sleep inside a process body uses (process runners
-    /// call `without_turn_cancel_observation`). That branch guards `ctx.sleep()`
-    /// with `RestateContextFuture` inside the timer/cancellation race.
+    /// The production geometry of every sleep inside a process body:
+    /// `turn_cancel == None`, raced against the process segment's durable
+    /// cancel promise (FIG-3673). The timer's command, then the promise's.
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
@@ -671,7 +664,7 @@ impl Fig779TimerGuardRepro for Fig779TimerGuardReproImpl {
             &ctx,
             Duration::from_millis(input.duration_ms),
             None,
-            tokio_util::sync::CancellationToken::new(),
+            crate::controller::context::ProcessCancelRace::Raced,
         )
         .await?;
         assert!(matches!(
@@ -689,47 +682,6 @@ impl Fig779TimerGuardRepro for Fig779TimerGuardReproImpl {
     ) -> HandlerResult<Json<()>> {
         restate_sdk::context::ContextTimers::sleep(&ctx, Duration::from_millis(input.duration_ms))
             .await?;
-        Ok(Json(()))
-    }
-
-    async fn cancel_on_suspend_wake(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(input): Json<Fig779TimerGuardReproInput>,
-    ) -> HandlerResult<Json<()>> {
-        let cancellation = tokio_util::sync::CancellationToken::new();
-        let race = RestateControllerContext::sleep_or_turn_cancel(
-            &ctx,
-            Duration::from_millis(input.duration_ms),
-            None,
-            cancellation.clone(),
-        );
-        CancelOnWakeFuture {
-            future: Box::pin(race),
-            cancellation,
-        }
-        .await?;
-        Ok(Json(()))
-    }
-
-    async fn cancel_before_sleep(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(input): Json<Fig779TimerGuardReproInput>,
-    ) -> HandlerResult<Json<()>> {
-        let cancellation = tokio_util::sync::CancellationToken::new();
-        cancellation.cancel();
-        let outcome = RestateControllerContext::sleep_or_turn_cancel(
-            &ctx,
-            Duration::from_millis(input.duration_ms),
-            None,
-            cancellation,
-        )
-        .await?;
-        assert!(matches!(
-            outcome,
-            RestateTurnCancelRaceOutcome::TurnCancelled
-        ));
         Ok(Json(()))
     }
 
@@ -922,46 +874,6 @@ impl Fig1464RunGuardRepro for Fig1464RunGuardReproImpl {
     }
 }
 
-struct Fig779DurableCancelTransport {
-    registry: Arc<dyn ProcessRegistry>,
-    process_id: ProcessId,
-}
-
-impl std::fmt::Debug for Fig779DurableCancelTransport {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Fig779DurableCancelTransport")
-            .field("process_id", &self.process_id)
-            .finish_non_exhaustive()
-    }
-}
-
-#[async_trait::async_trait]
-impl HttpTransport for Fig779DurableCancelTransport {
-    async fn send(
-        &self,
-        _request: HttpRequest,
-        _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, LlmTransportError> {
-        let cancellation_is_durable = self
-            .registry
-            .get_process(&self.process_id)
-            .await
-            .map_err(|error| LlmTransportError::new(error.to_string()))?
-            .ok_or_else(|| LlmTransportError::new("cancellation target is missing"))?
-            .cancel_request
-            .is_some();
-        if !cancellation_is_durable {
-            return std::future::pending().await;
-        }
-        Ok(HttpResponse {
-            status: 200,
-            headers: vec![("content-type".to_string(), "application/json".to_string())],
-            body: HttpResponseBody::buffered(r#""cancel_requested""#),
-        })
-    }
-}
-
 #[derive(Debug)]
 struct Fig779SuspendingProcessRunner;
 
@@ -1015,28 +927,27 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
                     .with_turn_cancel_observation(false),
             )
             .await;
+        // The sleep's recorded outcome is the only cancel signal this body
+        // reads: its lent stop is never a drive input (FIG-3673).
         match outcome {
             Ok(RuntimeEffectOutcome::Sleep) => Ok(process_success(serde_json::Value::Null).into()),
-            Err(_) if cancellation.is_cancelled() => Ok(process_cancellation(
-                format!(
-                    "process `{}` observed durable cancellation",
-                    registration.id
-                ),
-                None,
-            )
-            .into()),
+            Err(error)
+                if error.code == lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled =>
+            {
+                Ok(process_cancellation(
+                    format!(
+                        "process `{}` observed durable cancellation",
+                        registration.id
+                    ),
+                    None,
+                )
+                .into())
+            }
             Err(error) => Err(PluginError::Session(error.to_string())),
             Ok(other) => Err(PluginError::Session(format!(
                 "unexpected sleep outcome: {other:?}"
             ))),
         }
-    }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
     }
 }
 
@@ -1079,13 +990,6 @@ impl RestateProcessRunner for Fig788TerminalRedriveRunner {
             .map_err(|error| PluginError::Session(error.to_string()))?;
         Ok(process_success(serde_json::json!({"runner": "replayed"})).into())
     }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
@@ -1113,13 +1017,6 @@ impl RestateProcessRunner for Fig788SegmentBoundaryRunner {
                 engine_state: vec![7, 8, 8],
             },
         ))
-    }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
     }
 }
 
@@ -1150,13 +1047,6 @@ impl RestateProcessRunner for Fig788OrdinalOneTerminalRunner {
             }
         );
         Ok(process_success(serde_json::json!({"segment": 1, "terminal": true})).into())
-    }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
     }
 }
 
@@ -1204,13 +1094,6 @@ impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
             .await
             .map_err(|error| PluginError::Session(error.to_string()))?;
         Ok(process_success(serde_json::json!({"segment": 1, "effectful_terminal": true})).into())
-    }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        Ok(())
     }
 }
 
@@ -1490,11 +1373,15 @@ mod drain_barrier;
 mod effect_execution;
 mod failure_settlement;
 mod process_await_redrive;
+mod process_cancel_race;
+mod process_cancel_race_sdk;
+mod process_cancel_steps;
 mod process_child_residency;
+mod process_drive_inputs;
 mod process_recovery;
 mod process_registry_core;
 mod process_registry_replay;
-mod process_sleep_wake_verdict;
+mod process_session_turn_cancel;
 mod process_workflow;
 mod recording_context;
 mod restate_redrive;

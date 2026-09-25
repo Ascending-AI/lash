@@ -252,12 +252,10 @@ The engine tests in `lash-core-execution` run this shape on a `!Send` and a
   which case no cancel call is made. A replay reads that answer and makes the
   same calls. A store fault inside the step is not recorded; the attempt
   retries. Effect-journal generation 8.
-- **Process-scope waits keep the process's own stop until P16.** A wait that
-  observes no turn — a process body's `waitSignal`, its group rank wait, its
-  process await and its sleep — keeps the cancellation it had before P9: the
-  process drive's own cancellation token wherever that token reached the wait.
-  P16 (FIG-3673) replaces each of these with a recorded race against the
-  segment's durable cancel promise.
+- **Process-scope waits race the process's cancellation (P16).** A wait
+  that observes no turn is a process body's (`waitSignal`, a group rank wait,
+  a process await, a sleep). It races the process segment's durable cancel
+  fact, as described under "Implemented (P16)" below.
 - **The drive keeps one recorded fact.** It is the cancellation the turn
   honours, advanced only by journaled gate peeks (start gate, after the model
   call, the step boundary, after a code cell that stopped on the host, and
@@ -308,6 +306,108 @@ The engine tests in `lash-core-execution` run this shape on a `!Send` and a
   - `ActiveTurnControl::watch_immediate` no longer takes a token.
   - A host `TurnCancelRequest` id may not start with `internal:`.
 - Effect-journal generation 7.
+
+**Implemented (P16): a process's cancellation is an engine event.**
+
+- **The fact.** A process segment's cancellation is a durable first-writer
+  fact. The drive observes it three ways, each recorded:
+  - a race on every durable wait the drive records that observes no turn;
+  - a peek at each cancel checkpoint of the process body (the lashlang
+    process host answers the VM's checkpoints with
+    `RuntimeEffectController::observe_process_cancel`);
+  - for a `SessionTurn` process, a peek before the child session is created
+    and one before its turn is admitted, which decide whether the runner
+    settles cancelled;
+  - one peek after a `SessionTurn` runner settles successfully, so that a
+    committed cancellation outranks the settled child (PR #897).
+
+  A recorded cancelled outcome of a wait or a step advances the drive's fact.
+  Nothing else does.
+- **The stop is execution-side only.** A process execution's token is lent to
+  the step bodies it runs (tool attempts, model calls, the tool children its
+  live opener lends). The token is never a drive input:
+  `RuntimeExecutionContext::with_lent_process_stop` keeps it out of
+  `is_cancelled`, and the lashlang process fact is never its child. A body
+  that observes the stop records a cancelled outcome, and that recorded
+  outcome is what reaches the drive.
+- **Where the obligation is met.**
+  - On Restate the fact is the segment workflow's `process_cancel_requested`
+    promise. Each process wait is guarded, then races a `GetPromise` of that
+    promise through the VM's first-completed await (journal order: the
+    guarded command, then the promise's). A lost event wait is released
+    `Cancelled`; a lost process await's call is cancelled. The peeks are
+    journaled `PeekPromise` commands.
+  - The execution-side watch that fires the lent stop (`process_stop.rs`)
+    fails closed. It retries transport faults on the shared gate ladder (8
+    attempts, 25ms doubling to 1s). When the ladder is exhausted it ends the
+    attempt with an unrecorded retryable error. When the workflow is unbound
+    it ends the attempt with the engine's 404 terminal (FIG-1579). A segment
+    never runs a step body that its committed cancel cannot reach.
+  - The `cancel` handler also asks a `SessionTurn` process's child turn to
+    stop, as a durable request on the turn's gate
+    (`lash.process.cancel.child-turn`). The turn honours it whether or not
+    the process runs anywhere.
+  - Controllers that record no process cancellation fact (the SQL driver and
+    the test controllers, which FIG-3668 deletes) answer the peek from the
+    lent stop they are handed. It is their only cancellation input, and
+    their journals are keyed. Their waits still race the lent stop inside
+    their own recorded executions.
+- **Every registry read and write of the segment handler is a named step.**
+  - `lash.process.complete` stamps the terminal evidence clock inside the
+    step and journals the stored outcome that the terminal promise
+    publishes.
+  - `lash.segment.boundary` records whether a boundary is declined.
+  - `lash.segment.handover` records the successor reference and the handover.
+  - `lash.segment.cancel-forward` records whether a cancel is forwarded to
+    the successor.
+  - `lash.segment.retire` retires the segment's own handover (and older
+    ones). It runs after the segment has sent its successor and recorded
+    the cancel it forwards. A put never retires an older handover. So a
+    segment redriven in its handover gap can still replay its runner and
+    forward a cancel that landed in the gap, even after its successor has
+    handed over in turn.
+  - In the shared `cancel` and `deliver_cancel` handlers, the steps are
+    `lash.process.cancel.record`, `lash.process.cancel.child-turn` and
+    `lash.process.cancel.route`.
+
+  Each step records a non-retryable refusal as its answer. A retryable
+  store fault ends the attempt unrecorded, so the step runs again.
+
+  The process body's wait-state writes are steps too, through
+  `RuntimeEffectController::record_process_drive_step`: entering and
+  clearing a signal wait (`lash.process.wait.enter:<key>`,
+  `lash.process.wait.clear:<key>`). A write the registry refuses because the
+  process is already terminal counts as settled. A redrive after the
+  completion step therefore reissues the wait the journal holds.
+
+  The one exception is the retired-generation refusal. It runs before the
+  handler's first command, because a step there would mismatch the retired
+  journal it refuses. It stores the typed `Abandoned` terminal and publishes
+  that terminal through the root's shared `complete_terminal`, a separate
+  invocation, so awaiters are released even when the refused invocation's
+  own journal can never replay. `cancel` and `deliver_cancel` carry the
+  generation their sender built them for and refuse any other generation
+  before journaling anything. In-flight invocations of a retired generation
+  meet the refusal as a journal mismatch, which the engine's retry policy
+  bounds. Drain or kill them at deploy.
+- **Admission records the segment's inputs.** The `lash.segment.admit`
+  verdict journals four things:
+  - that the segment is superseded;
+  - that the segment's handover is missing;
+  - the digest of the handover the segment resumes from, which the handler
+    checks against the retained handover it reads after admission;
+  - the boundary policy (`SegmentPolicy { effect_budget }`), which it
+    computes from the host selector inside the step.
+
+  `lash.segment.start` journals the process incarnation it started, so no
+  live read follows admission. A redeploy that changes the selector cannot
+  move a replayed cut.
+- **A substrate-admitted segment is not admitted again.** When a durable
+  substrate recorded the segment's start in its own journal, the process
+  worker reads that start and never runs its start CAS again. The CAS is a
+  live write, and it refuses a terminal process, which every redrive after
+  the completion step reaches.
+- Restate process journal generation 3. The effect journal is unchanged.
 
 ### 4. Group operations are complete
 

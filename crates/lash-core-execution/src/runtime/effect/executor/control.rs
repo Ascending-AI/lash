@@ -415,6 +415,48 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         None
     }
 
+    /// Whether the process execution this controller drives has a committed
+    /// cancellation, observed as a recorded operation (FIG-3673).
+    ///
+    /// A process's cancellation is a durable first-writer fact, and its drive
+    /// observes it only through recorded operations: a race on each durable
+    /// wait it records, this peek at each cancel checkpoint of its body and
+    /// before its first command, and this peek once after a `SessionTurn`
+    /// runner settles. An engine that records the fact answers from it and
+    /// never reads `lent_stop`, so a replay reads the answer the first
+    /// execution read.
+    ///
+    /// `lent_stop` is the stop the execution lends its step bodies. A
+    /// controller that records no process cancellation fact (the SQL driver
+    /// and the test controllers, which FIG-3668 deletes) answers from it: it is
+    /// that controller's only cancellation input, and its journal is keyed, not
+    /// positional. Forwarding wrappers forward.
+    async fn observe_process_cancel(
+        &self,
+        lent_stop: &CancellationToken,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        Ok(lent_stop.is_cancelled())
+    }
+
+    /// Run one registry step of a process drive whose answer the engine
+    /// records under `name` (FIG-3673): a process body's wait-state writes.
+    ///
+    /// An engine that replays its journal by position runs the step once and
+    /// serves its recorded answer on every redrive, so a redrive that meets a
+    /// registry the first execution has since moved on (a stored terminal)
+    /// takes the path the first execution took. A retryable fault of the
+    /// step is never recorded; the engine runs it again. The default runs the
+    /// step: a keyed journal replays nothing positional around it. Forwarding
+    /// wrappers forward.
+    async fn record_process_drive_step(
+        &self,
+        name: String,
+        step: ProcessDriveStep<'_>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let _ = name;
+        step.await.map_err(RuntimeEffectControllerError::from)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -706,6 +748,12 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 }
+
+/// One registry step of a process drive, for
+/// [`record_process_drive_step`](RuntimeEffectController::record_process_drive_step).
+pub type ProcessDriveStep<'step> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<(), crate::PluginError>> + Send + 'step>,
+>;
 
 /// One piece of work handed to
 /// [`drive_independent_effect_work`](RuntimeEffectController::drive_independent_effect_work):

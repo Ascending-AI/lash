@@ -31,11 +31,6 @@ impl SqliteProcessRegistry {
                         )));
                     }
                     tx.execute(
-                        process_sql().handover.delete_superseded.sql(),
-                        params![process_id.as_str(), handover.segment_ordinal as i64],
-                    )
-                    .map_err(process_sqlite_error)?;
-                    tx.execute(
                         process_sql().handover_sqlite.insert.sql(),
                         params![
                             process_id.as_str(),
@@ -167,6 +162,28 @@ impl SqliteProcessRegistry {
             .await
             .map_err(process_sqlite_error)??;
         Ok(marked)
+    }
+
+    pub(super) async fn retire_segment_handovers_through_impl(
+        &self,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        let process_id = ProcessId::from(process_id.to_string());
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    tx.execute(
+                        process_sql().handover.delete_through.sql(),
+                        params![process_id.as_str(), segment_ordinal as i64],
+                    )
+                    .map_err(process_sqlite_error)?;
+                    Ok(())
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)??;
+        Ok(())
     }
 
     pub(super) async fn delete_segment_handovers_impl(

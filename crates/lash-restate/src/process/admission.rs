@@ -18,12 +18,17 @@
 //!    `ResumeRefused { SubstrateLost }`. Absent: admit, and draw a fresh nonce
 //!    from OS randomness *inside* the step, so the nonce is journaled with the
 //!    verdict. A segment whose successor handover already exists completed; it
-//!    is superseded, never refused.
+//!    is superseded, never refused. A later segment whose own handover is
+//!    missing is refused terminally. The verdict also journals the segment's
+//!    inputs (FIG-3673): the digest of the handover it resumes from and the
+//!    boundary policy it cuts under, so no live read or host setting decides
+//!    the journal's shape on a redrive.
 //! 2. **Start** (`lash.segment.start`). Record the marker with that nonce,
 //!    set-if-absent. The recorded nonce equals ours: this execution's marker,
-//!    written now or by this execution's own earlier try. A different nonce: an
-//!    execution this one does not continue started the segment, so the process
-//!    ends `SubstrateLost`.
+//!    written now or by this execution's own earlier try, and the step journals
+//!    the process incarnation it started, so nothing after it reads the record
+//!    live. A different nonce: an execution this one does not continue started
+//!    the segment, so the process ends `SubstrateLost`.
 //! 3. **Effects**, only with the [`SegmentStarted`] proof step 2 returns. The
 //!    proof has no public constructor, and the process segment's controller
 //!    and the runner both require it, so no effect can precede the committed
@@ -45,16 +50,18 @@ use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// The generation of the Restate process handler's journaled command prefix.
+/// The generation of the Restate process handler's journaled commands.
 ///
-/// This version owns the leading commands every `LashProcessWorkflow/run`
-/// invocation journals: today the admission verdict and the start step above.
-/// Any change to those leading commands, or to what they key on, bumps it.
+/// This version owns the commands every `LashProcessWorkflow/run` invocation
+/// journals around its runner: the admission verdict and the start step above,
+/// the segment's recorded cancel races and peeks, and the terminal, boundary
+/// and handover steps after it (FIG-3673). Any change to those commands, or to
+/// what they key on, bumps it.
 /// Every submitter stamps it on
 /// [`RestateProcessWorkflowInput`](super::RestateProcessWorkflowInput), and the
 /// handler refuses any other generation before it journals anything. An
 /// unstamped input is generation 1, the prefix before FIG-3588.
-pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 2;
+pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 3;
 
 /// The journal name of the verdict step.
 const ADMIT_STEP: &str = "lash.segment.admit";
@@ -128,28 +135,74 @@ impl SegmentStarted {
     }
 }
 
+/// The boundary policy one segment cuts under, recorded at its admission
+/// (FIG-3673): a redeploy that changes the host's selector cannot move a
+/// replayed segment's cut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SegmentPolicy {
+    /// The number of completed effects after which the segment hands over.
+    pub(crate) effect_budget: u64,
+}
+
 /// What the verdict step journaled.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "verdict", rename_all = "snake_case")]
 enum AdmissionVerdict {
-    Admit { nonce: String },
-    SubstrateLost { lost: ProcessStarted },
-    Superseded { latest_segment_ordinal: u64 },
+    Admit {
+        nonce: String,
+        /// The digest of the retained handover a later segment resumes from;
+        /// `None` for segment 0.
+        handover: Option<String>,
+        policy: SegmentPolicy,
+    },
+    SubstrateLost {
+        lost: ProcessStarted,
+    },
+    Superseded {
+        latest_segment_ordinal: u64,
+    },
+    MissingHandover,
 }
 
 /// What the start step journaled.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "start", rename_all = "snake_case")]
 enum StartOutcome {
-    Started { execution_id: String },
-    SubstrateLost { lost: ProcessStarted },
+    Started {
+        execution_id: String,
+        process: ProcessRef,
+    },
+    SubstrateLost {
+        lost: ProcessStarted,
+    },
+}
+
+/// The digest a verdict journals for the handover a segment resumes from.
+pub(crate) fn handover_digest(
+    handover: &lash_core::SegmentHandover,
+) -> Result<String, HandlerError> {
+    use sha2::Digest;
+    let bytes = serde_json::to_vec(handover)
+        .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
+    Ok(sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 /// How one invocation of a segment proceeds.
 #[derive(Debug)]
 pub(crate) enum SegmentAdmission {
-    /// The marker committed; the segment may run.
-    Started(SegmentStarted),
+    /// The marker committed; the segment may run under the recorded policy,
+    /// from the handover whose digest the verdict recorded.
+    Started {
+        started: SegmentStarted,
+        handover: Option<String>,
+        policy: SegmentPolicy,
+    },
+    /// A later segment's handover is not retained: nothing can resume it.
+    MissingHandover,
     /// The segment started under a journal this invocation cannot read.
     SubstrateLost { lost: ProcessStarted },
     /// The segment already completed; its successor carries the process.
@@ -201,6 +254,7 @@ async fn read_record(
 /// record, which every later attempt and segment inherits, so it must name
 /// that grammar exactly as the runner would; an unstamped record is refused
 /// by an engine that keys its journal by grammar, before its body runs.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn admit_segment(
     ctx: &WorkflowContext<'_>,
     registry: &Arc<dyn ProcessRegistry>,
@@ -208,7 +262,9 @@ pub(crate) async fn admit_segment(
     process_id: &lash_sansio::ProcessId,
     segment_ordinal: u64,
     replay_grammar: Option<u32>,
+    effect_budget: impl Fn() -> u64 + Send + Sync + 'static,
 ) -> Result<SegmentAdmission, HandlerError> {
+    let effect_budget = Arc::new(effect_budget);
     let Json(verdict) = {
         let registry = Arc::clone(registry);
         let continuations = Arc::clone(continuations);
@@ -217,6 +273,7 @@ pub(crate) async fn admit_segment(
             let registry = Arc::clone(&registry);
             let continuations = Arc::clone(&continuations);
             let process_id = process_id.clone();
+            let effect_budget = Arc::clone(&effect_budget);
             async move {
                 let latest = continuations
                     .latest_segment_handover(&process_id)
@@ -229,6 +286,18 @@ pub(crate) async fn admit_segment(
                         latest_segment_ordinal: latest.segment_ordinal,
                     }));
                 }
+                let handover = if segment_ordinal == 0 {
+                    None
+                } else {
+                    let Some(persisted) = continuations
+                        .get_segment_handover(&process_id, segment_ordinal)
+                        .await
+                        .map_err(store_fault)?
+                    else {
+                        return Ok(Json(AdmissionVerdict::MissingHandover));
+                    };
+                    Some(handover_digest(&persisted.handover)?)
+                };
                 let record = read_record(&registry, &process_id).await?;
                 let started = if segment_ordinal == 0 {
                     record.first_started.as_deref().cloned()
@@ -246,6 +315,10 @@ pub(crate) async fn admit_segment(
                     Some(lost) => AdmissionVerdict::SubstrateLost { lost },
                     None => AdmissionVerdict::Admit {
                         nonce: uuid::Uuid::new_v4().to_string(),
+                        handover,
+                        policy: SegmentPolicy {
+                            effect_budget: effect_budget().max(1),
+                        },
                     },
                 }))
             }
@@ -253,8 +326,13 @@ pub(crate) async fn admit_segment(
         .name(ADMIT_STEP)
         .await?
     };
-    let nonce = match verdict {
-        AdmissionVerdict::Admit { nonce } => nonce,
+    let (nonce, handover, policy) = match verdict {
+        AdmissionVerdict::Admit {
+            nonce,
+            handover,
+            policy,
+        } => (nonce, handover, policy),
+        AdmissionVerdict::MissingHandover => return Ok(SegmentAdmission::MissingHandover),
         AdmissionVerdict::SubstrateLost { lost } => {
             return Ok(SegmentAdmission::SubstrateLost { lost });
         }
@@ -296,14 +374,14 @@ pub(crate) async fn admit_segment(
         .await?
     };
     match start {
-        StartOutcome::Started { execution_id } => {
-            let record = read_record(registry, process_id).await?;
-            Ok(SegmentAdmission::Started(SegmentStarted::new(
-                ProcessRef::from_record(&record),
-                segment_ordinal,
-                execution_id,
-            )))
-        }
+        StartOutcome::Started {
+            execution_id,
+            process,
+        } => Ok(SegmentAdmission::Started {
+            started: SegmentStarted::new(process, segment_ordinal, execution_id),
+            handover,
+            policy,
+        }),
         StartOutcome::SubstrateLost { lost } => Ok(SegmentAdmission::SubstrateLost { lost }),
     }
 }
@@ -331,6 +409,7 @@ async fn start_root_segment(
             if existing.owner.engine_process_execution_id(process_id) == Some(nonce.as_str()) {
                 StartOutcome::Started {
                     execution_id: nonce,
+                    process: ProcessRef::from_record(&record),
                 }
             } else {
                 StartOutcome::SubstrateLost {
@@ -356,6 +435,7 @@ async fn start_root_segment(
         lash_core::ProcessStartOutcome::Started(_)
         | lash_core::ProcessStartOutcome::AlreadyApplied(_) => Ok(StartOutcome::Started {
             execution_id: nonce,
+            process: ProcessRef::from_record(&record),
         }),
         lash_core::ProcessStartOutcome::AlreadyStarted { current, .. }
         | lash_core::ProcessStartOutcome::AttemptsExhausted { current, .. } => {
@@ -398,7 +478,10 @@ async fn start_later_segment(
         .await
         .map_err(store_fault)?;
     Ok(if recorded.nonce == nonce {
-        StartOutcome::Started { execution_id }
+        StartOutcome::Started {
+            execution_id,
+            process: ProcessRef::from_record(&record),
+        }
     } else {
         StartOutcome::SubstrateLost { lost: root }
     })

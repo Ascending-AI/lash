@@ -9,6 +9,29 @@ pub(crate) type TestTurnCancelRaceFuture<'run, T> = Pin<
     Box<dyn Future<Output = Result<RestateTurnCancelRaceOutcome<T>, TerminalError>> + Send + 'run>,
 >;
 
+/// A recording context's stand-in for a process segment's durable cancel
+/// promise (FIG-3673): resolves once the context committed the cancel. `None`
+/// when the wait races no promise.
+pub(crate) type TestProcessCancel<'run> = Option<Pin<Box<dyn Future<Output = ()> + Send + 'run>>>;
+
+/// Race a wait that observes no turn against the process cancel stand-in. The
+/// stand-in is polled first: it resolves only when the promise won — live,
+/// once the cancel committed; on replay, when the journal says it won — which
+/// is the winner the engine's journal would replay.
+async fn race_test_process_cancel<T>(
+    guarded: impl Future<Output = Result<T, TerminalError>>,
+    process_cancel: TestProcessCancel<'_>,
+) -> Result<RestateTurnCancelRaceOutcome<T>, TerminalError> {
+    let Some(cancelled) = process_cancel else {
+        return guarded.await.map(RestateTurnCancelRaceOutcome::Completed);
+    };
+    tokio::select! {
+        biased;
+        () = cancelled => Ok(RestateTurnCancelRaceOutcome::ProcessCancelled),
+        result = guarded => result.map(RestateTurnCancelRaceOutcome::Completed),
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct TestTurnCancelGate {
     state: Mutex<TestTurnCancelGateState>,
@@ -139,7 +162,7 @@ pub(crate) fn test_sleep_or_turn_cancel<'run, 'ctx, C>(
     gate: &'run TestTurnCancelGate,
     duration: Duration,
     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-    process_stop: tokio_util::sync::CancellationToken,
+    process_cancel: TestProcessCancel<'run>,
 ) -> TestTurnCancelRaceFuture<'run, ()>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
@@ -147,14 +170,7 @@ where
 {
     Box::pin(async move {
         let Some(turn_cancel) = turn_cancel else {
-            return tokio::select! {
-                result = context.sleep_send(duration) => {
-                    result.map(RestateTurnCancelRaceOutcome::Completed)
-                }
-                _ = process_stop.cancelled() => {
-                    Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
-                }
-            };
+            return race_test_process_cancel(context.sleep_send(duration), process_cancel).await;
         };
         let session_id = turn_cancel
             .key
@@ -204,20 +220,24 @@ pub(crate) fn test_await_event_or_turn_cancel<'run, 'ctx, C>(
     request: RestateDurableWaitAwaitRequest,
     replay_key: String,
     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-    process_stop: tokio_util::sync::CancellationToken,
+    process_cancel: TestProcessCancel<'run>,
 ) -> TestTurnCancelRaceFuture<'run, Resolution>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
     'ctx: 'run,
 {
     Box::pin(async move {
-        // A wait that observes no turn keeps the process drive's own stop:
-        // P16 (FIG-3673) replaces with a recorded race.
+        // A wait that observes no turn races the process cancel stand-in.
         let Some(turn_cancel) = turn_cancel else {
-            return context
-                .await_event(request, replay_key, process_stop)
-                .await
-                .map(RestateTurnCancelRaceOutcome::Completed);
+            return race_test_process_cancel(
+                context.await_event(
+                    request,
+                    replay_key,
+                    tokio_util::sync::CancellationToken::new(),
+                ),
+                process_cancel,
+            )
+            .await;
         };
         let session_id = turn_cancel
             .key
@@ -277,6 +297,7 @@ pub(crate) fn test_await_process_terminal_or_turn_cancel<'run, 'ctx, C>(
     gate: &'run TestTurnCancelGate,
     process_id: ProcessId,
     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    process_cancel: TestProcessCancel<'run>,
 ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
@@ -284,11 +305,12 @@ where
 {
     Box::pin(async move {
         let Some(turn_cancel) = turn_cancel else {
-            return context
-                .await_process_terminal(process_id)
-                .await
-                .map(Box::new)
-                .map(RestateTurnCancelRaceOutcome::Completed);
+            let guarded = context.await_process_terminal(process_id);
+            return race_test_process_cancel(
+                async move { guarded.await.map(Box::new) },
+                process_cancel,
+            )
+            .await;
         };
         let session_id = turn_cancel
             .key

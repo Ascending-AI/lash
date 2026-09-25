@@ -187,12 +187,6 @@ where
     }
 }
 
-impl<F> RestateContextFuture<F> {
-    pub(crate) fn is_fused(&self) -> bool {
-        self.future.is_none()
-    }
-}
-
 impl<F> Future for RestateContextFuture<F>
 where
     F: Future,
@@ -267,6 +261,7 @@ impl SynchronousWakeTracker {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn guard_restate_context_future<F>(future: F) -> RestateContextFuture<F>
 where
     F: Future,
