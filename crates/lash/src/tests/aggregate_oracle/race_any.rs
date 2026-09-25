@@ -45,6 +45,10 @@ async fn await_turn_end(driven: &DrivenOracle) {
 
 /// §11 clause 4: a timer admitted beside a held tool wins the race, and the
 /// aggregate resumes while the tool is still inside its attempt.
+///
+/// `after` is a held leaf, so the opener cannot finish — and the race's group
+/// cannot be closed — before `slow` has started: the loser's attempt is a
+/// rendezvous, not a wall-clock race against the turn's end.
 async fn a_race_resumes_on_its_timer_while_a_held_tool_runs(tier: &JournaledTier) -> Result<()> {
     let driven = drive_cells(
         tier,
@@ -54,14 +58,14 @@ async fn a_race_resumes_on_its_timer_while_a_held_tool_runs(tier: &JournaledTier
   oracle.step({ id: "slow", hold: true }),
   sleep(20)
 ]);
-await oracle.step({ id: "after" });
+await oracle.step({ id: "after", hold: true });
 finish({ timedOut: winner === undefined });"#,
         )],
     )
     .await?;
 
-    driven.theatre.await_started("slow").await;
     driven.theatre.await_started("after").await;
+    driven.theatre.await_started("slow").await;
     assert!(
         !driven.theatre.settled().contains(&"slow".to_string()),
         "{}: the race resumed on its timer while the held tool had not settled, saw {:?}",
@@ -69,6 +73,7 @@ finish({ timedOut: winner === undefined });"#,
         driven.theatre.settled()
     );
     driven.theatre.release("slow");
+    driven.theatre.release("after");
     let run = driven.finish().await?;
     assert_eq!(
         run.final_value(),
@@ -296,6 +301,10 @@ async fn an_intent_refusal_turns_a_would_be_any_winner_into_a_rejection(
 /// body. When that body finally returns — a stale writer behind a decision it
 /// cannot see — it can deliver nothing: its declared intent is never realized
 /// and the winner stays the answer.
+///
+/// `winner` is a held leaf: the race cannot decide — and the turn cannot end
+/// and close the group — until it is released, so the loser is inside its
+/// attempt by rendezvous rather than by a start-versus-close race.
 async fn a_losers_final_after_the_close_is_refused(tier: &JournaledTier) -> Result<()> {
     let driven = drive_cells(
         tier,
@@ -303,12 +312,13 @@ async fn a_losers_final_after_the_close_is_refused(tier: &JournaledTier) -> Resu
         vec![typescript_block(
             r#"finish(await Promise.race([
   oracle.step({ id: "stale", hold: true, intent: true }),
-  oracle.step({ id: "winner" })
+  oracle.step({ id: "winner", hold: true })
 ]));"#,
         )],
     )
     .await?;
     driven.theatre.await_started("stale").await;
+    driven.theatre.release("winner");
     driven.theatre.await_settled("winner").await;
     await_turn_end(&driven).await;
     driven.theatre.release("stale");
