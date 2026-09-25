@@ -131,7 +131,7 @@ fn nested(size: usize) -> Value {
         })
         .collect::<Vec<_>>();
     if inner.is_empty() {
-        return Value::List(vec![Value::List(vec![].into()).into()].into());
+        return Value::List(vec![Value::List(vec![].into())].into());
     }
     Value::List(inner.into())
 }
