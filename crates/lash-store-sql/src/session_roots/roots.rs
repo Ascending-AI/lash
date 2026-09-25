@@ -35,6 +35,12 @@ crate::statements! {
                  terminal_head_revision = ?5, terminal_at_ms = ?6
              WHERE session_id = ?1 AND root = ?2 AND terminal_kind IS NULL";
 
+        /// The roots of session `?1` without terminal evidence, in root
+        /// order: what its close ends.
+        select_open_roots = "SELECT root FROM session_roots
+             WHERE session_id = ?1 AND terminal_kind IS NULL
+             ORDER BY root";
+
         /// Every root of session `?1`: its deletion.
         delete_by_session = "DELETE FROM session_roots WHERE session_id = ?1";
     }

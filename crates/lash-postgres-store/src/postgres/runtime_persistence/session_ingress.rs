@@ -181,9 +181,14 @@ async fn drive_epoch_tx(
         })?;
     let epoch: i64 = row.try_get(0).map_err(store_sqlx_error)?;
     let admission: Option<String> = row.try_get(1).map_err(store_sqlx_error)?;
+    let closing: Option<i64> = row.try_get(2).map_err(store_sqlx_error)?;
     Ok(StoredDriveEpoch {
         epoch: u64_from_sql("SessionMeta", "drive_epoch", epoch)?,
         admission: admission.map(AdmissionId::new),
+        closing: closing
+            .map(|intent| u64_from_sql("SessionMeta", "closing_intent", intent))
+            .transpose()?
+            .map(lash_core_execution::store::ControlIntentId::from_sequence),
     })
 }
 
@@ -712,6 +717,7 @@ impl SessionIngressStore for PostgresSessionStore {
         let now = self.clock.timestamp_ms();
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = self.begin_ingress_tx(&mut connection, &session_id).await?;
+        crate::runtime_persistence::ensure_session_not_closing_tx(&mut tx, &session_id).await?;
         let digest =
             draft
                 .submission_digest()

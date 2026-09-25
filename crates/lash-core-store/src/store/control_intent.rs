@@ -394,6 +394,7 @@ mod tests {
             state,
             attempts: 0,
             created_at_ms: 1,
+            engine: None,
         }
     }
 
@@ -467,6 +468,7 @@ mod tests {
             &state_json,
             0,
             1,
+            None,
         )
         .expect("decode");
         assert_eq!(decoded, stored);

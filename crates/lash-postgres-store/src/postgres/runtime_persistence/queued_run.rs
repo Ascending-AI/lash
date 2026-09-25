@@ -828,3 +828,15 @@ pub(super) async fn validate_run_members_tx(
     }
     Ok(())
 }
+
+/// The root of session `session_id`'s pending queued run, if it has one, read
+/// in the caller's transaction: what a session close ends besides the roots
+/// its logical-root rows name (FIG-3600 S7).
+pub(crate) async fn pending_queued_root_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+) -> Result<Option<lash_sansio::TurnId>, StoreError> {
+    Ok(load_run_tx(tx, session_id, None)
+        .await?
+        .map(|run| lash_sansio::TurnId::from(run.scope.id())))
+}
