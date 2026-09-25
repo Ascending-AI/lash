@@ -1712,6 +1712,7 @@ async fn reset_postgres_surface(storage: &PostgresStorage) {
     .await
     .unwrap();
     sqlx::query("INSERT INTO lash_process_change_clock (singleton, current_seq, tombstone_compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, tombstone_compaction_horizon = 0").execute(storage.pool()).await.unwrap();
+    sqlx::query("INSERT INTO lash_turn_park_clock (singleton, current_seq, compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, compaction_horizon = 0").execute(storage.pool()).await.unwrap();
 }
 
 /// A fresh SQLite memory backend's process-exec-env store (ADR 0102): the

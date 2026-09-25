@@ -361,6 +361,19 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
         "a store-wide singleton counter row, not session state; it carries no session id and is \
          shared by every case in the one database this suite runs against",
     ),
+    (
+        "turn_park_clock",
+        "the turn park feed's sequence row: a store-wide singleton counter, not session state; \
+         it carries no session id and is shared by every case in the one database this suite \
+         runs against; owned by the turn_park_feed laws L1-L6 in lash-conformance",
+    ),
+    (
+        "turn_park_events",
+        "the turn park feed's durable ledger: no driven operation records or clears a park, so \
+         none can write it, and every feed append rides inside the transaction that changes \
+         `turn_parks`, which the digest already reads; owned by the turn_park_feed laws L1-L6 \
+         in lash-conformance",
+    ),
     ("await_event_meta", AWAIT_EVENT),
     ("await_event_waits", AWAIT_EVENT),
     ("await_event_revoked_sessions", AWAIT_EVENT),
