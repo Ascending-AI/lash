@@ -76,6 +76,13 @@ path = "tests/carrier_laws.rs"
 name = "corpus_laws"
 path = "tests/corpus_laws.rs"
 
+# The instruction-budget law (FIG-3729): a small binary so the budget law runs
+# in the ordinary PR partition, not the deferred tail the integration binary
+# sits in.
+[[test]]
+name = "fuel_law"
+path = "tests/fuel_law.rs"
+
 # The Test262 PR lane (FIG-3646): census and record checks plus a stratified
 # sample of the selection. Its own binary so the PR partition runs it without
 # the integration binary.

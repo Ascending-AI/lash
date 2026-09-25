@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 165,
+  "cargo_target_count": 166,
   "feature_lane_units": [
     {
       "features": [
@@ -16884,7 +16884,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 224,
+  "generated_label_count": 225,
   "packages": [
     {
       "declared_features": [
@@ -19233,6 +19233,12 @@
           ]
         },
         {
+          "cargo": "fuel_law",
+          "kind": "test",
+          "label": "//crates/lash-typescript:fuel_law__test",
+          "tags": []
+        },
+        {
           "cargo": "test262",
           "kind": "test",
           "label": "//crates/lash-typescript:test262__test",
@@ -19251,6 +19257,7 @@
       "test_batch": {
         "label": "//crates/lash-typescript:test_batch",
         "members": [
+          "//crates/lash-typescript:fuel_law__test",
           "//crates/lash-typescript:lash-typescript__unit_test",
           "//crates/lash-typescript:test262__test"
         ]
