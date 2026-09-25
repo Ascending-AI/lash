@@ -332,7 +332,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let is_array = matches!(
                 self.heap.get(*receiver)?,
                 HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_)
-            );
+            ) || self
+                .heap
+                .builtin_name(*receiver)
+                .is_some_and(|name| name == "Array.prototype");
             self.stack.push(Value::Bool(is_array));
             return Ok(());
         }

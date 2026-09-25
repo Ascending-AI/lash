@@ -1,0 +1,31 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3737	1	accept	"typeof Date.prototype"	"object"	-
+FIG-3737	2	accept	"Date.prototype.constructor === Date"	"true"	-
+FIG-3737	3	accept	"Date.prototype.hasOwnProperty('getDate')"	"true"	-
+FIG-3737	4	accept	"Date.prototype.getDate.length"	"0"	-
+FIG-3737	5	accept	"Date.prototype.getDate.name"	"getDate"	-
+FIG-3737	6	accept	"Date.prototype.setUTCHours.length"	"4"	-
+FIG-3737	7	accept	"Date.prototype.setUTCHours.name"	"setUTCHours"	-
+FIG-3737	8	accept	"Date.prototype.toGMTString === Date.prototype.toUTCString"	"true"	-
+FIG-3737	9	accept	"Date.prototype.hasOwnProperty('toGMTString')"	"true"	-
+FIG-3737	10	accept	"Set.prototype.keys === Set.prototype.values"	"true"	-
+FIG-3737	11	accept	"Array.prototype.length"	"0"	-
+FIG-3737	12	accept	"Array.isArray(Array.prototype)"	"true"	-
+FIG-3737	13	accept	"typeof Array.prototype.toLocaleString"	"function"	-
+FIG-3737	14	accept	"Array.prototype.hasOwnProperty('toLocaleString')"	"true"	-
+FIG-3737	15	accept	"Error.prototype.name"	"Error"	-
+FIG-3737	16	accept	"Error.prototype.message"	""	-
+FIG-3737	17	accept	"AggregateError.prototype.name"	"AggregateError"	-
+FIG-3737	18	accept	"AggregateError.prototype.message"	""	-
+FIG-3737	19	accept	"TypeError.prototype.name"	"TypeError"	-
+FIG-3737	20	accept	"TypeError.prototype.message"	""	-
+FIG-3737	21	accept	"TypeError.prototype.hasOwnProperty('toString')"	"false"	-
+FIG-3737	22	accept	"TypeError.prototype.toString === Error.prototype.toString"	"true"	-
+FIG-3737	23	accept	"new Error().message === Error.prototype.message"	"true"	-
+FIG-3737	24	accept	"RegExp.prototype.global"	"undefined"	-
+FIG-3737	25	accept	"RegExp.prototype.source"	"(?:)"	-
+FIG-3737	26	accept	"RegExp.prototype.flags"	""	-
+FIG-3737	27	accept	"RegExp.prototype.hasOwnProperty('global')"	"true"	-
+FIG-3737	28	accept	"(() => { const p = RegExp.prototype; const d = delete p.global; return [d, p.hasOwnProperty('global')]; })()"	"true,false"	-
+FIG-3737	29	accept	"(() => { try { RegExp.prototype.exec(''); return 'none'; } catch (e) { return e instanceof TypeError; } })()"	"true"	-
+FIG-3737	30	accept	"(() => { try { RegExp.prototype.test(''); return 'none'; } catch (e) { return e instanceof TypeError; } })()"	"true"	-

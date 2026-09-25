@@ -459,6 +459,7 @@ const BUILTIN_FUNCTIONS: &[BuiltinFunctionRow] = {
         (P::Array, "some", 1),
         (P::Array, "sort", 1),
         (P::Array, "splice", 2),
+        (P::Array, "toLocaleString", 0),
         (P::Array, "toReversed", 0),
         (P::Array, "toSorted", 1),
         (P::Array, "toSpliced", 2),
@@ -524,7 +525,16 @@ const BUILTIN_FUNCTIONS: &[BuiltinFunctionRow] = {
         (P::Set, "symmetricDifference", 1),
         (P::Set, "union", 1),
         (P::Set, "values", 0),
+        (P::Date, "getDate", 0),
+        (P::Date, "getDay", 0),
+        (P::Date, "getFullYear", 0),
+        (P::Date, "getHours", 0),
+        (P::Date, "getMilliseconds", 0),
+        (P::Date, "getMinutes", 0),
+        (P::Date, "getMonth", 0),
+        (P::Date, "getSeconds", 0),
         (P::Date, "getTime", 0),
+        (P::Date, "getTimezoneOffset", 0),
         (P::Date, "getUTCDate", 0),
         (P::Date, "getUTCDay", 0),
         (P::Date, "getUTCFullYear", 0),
@@ -533,9 +543,31 @@ const BUILTIN_FUNCTIONS: &[BuiltinFunctionRow] = {
         (P::Date, "getUTCMinutes", 0),
         (P::Date, "getUTCMonth", 0),
         (P::Date, "getUTCSeconds", 0),
+        (P::Date, "getYear", 0),
+        (P::Date, "setDate", 1),
+        (P::Date, "setFullYear", 3),
+        (P::Date, "setHours", 4),
+        (P::Date, "setMilliseconds", 1),
+        (P::Date, "setMinutes", 3),
+        (P::Date, "setMonth", 2),
+        (P::Date, "setSeconds", 2),
+        (P::Date, "setTime", 1),
+        (P::Date, "setUTCDate", 1),
+        (P::Date, "setUTCFullYear", 3),
+        (P::Date, "setUTCHours", 4),
+        (P::Date, "setUTCMilliseconds", 1),
+        (P::Date, "setUTCMinutes", 3),
+        (P::Date, "setUTCMonth", 2),
+        (P::Date, "setUTCSeconds", 2),
+        (P::Date, "setYear", 1),
+        (P::Date, "toDateString", 0),
         (P::Date, "toISOString", 0),
         (P::Date, "toJSON", 1),
+        (P::Date, "toLocaleDateString", 0),
+        (P::Date, "toLocaleString", 0),
+        (P::Date, "toLocaleTimeString", 0),
         (P::Date, "toString", 0),
+        (P::Date, "toTimeString", 0),
         (P::Date, "toUTCString", 0),
         (P::Date, "valueOf", 0),
         (P::RegExp, "exec", 1),
@@ -590,13 +622,46 @@ const READABLE_INSTANCE_EXTRAS: &[&str] = &[
     "bind",
     "call",
     "compile",
+    // The `Date.prototype` methods a call still refuses — local time and
+    // mutation are named refusals — but whose function values ECMA carries.
+    "getDate",
+    "getDay",
+    "getFullYear",
+    "getHours",
+    "getMilliseconds",
+    "getMinutes",
+    "getMonth",
+    "getSeconds",
+    "getTimezoneOffset",
+    "getYear",
     "isPrototypeOf",
     "localeCompare",
     "normalize",
     "propertyIsEnumerable",
+    "setDate",
+    "setFullYear",
+    "setHours",
+    "setMilliseconds",
+    "setMinutes",
+    "setMonth",
+    "setSeconds",
+    "setTime",
+    "setUTCDate",
+    "setUTCFullYear",
+    "setUTCHours",
+    "setUTCMilliseconds",
+    "setUTCMinutes",
+    "setUTCMonth",
+    "setUTCSeconds",
+    "setYear",
+    "toDateString",
+    "toGMTString",
+    "toLocaleDateString",
     "toLocaleLowerCase",
     "toLocaleString",
+    "toLocaleTimeString",
     "toLocaleUpperCase",
+    "toTimeString",
 ];
 
 /// The object-scope built-ins: the global constructors, namespaces and
@@ -923,9 +988,12 @@ const BUILTIN_OBJECTS: &[BuiltinFunctionRow] = {
 };
 
 /// Prototype members that are the same function object under two names —
-/// `(owner, alias, real)` — `Set.prototype.keys` is `Set.prototype.values`.
-const BUILTIN_FUNCTION_ALIASES: &[(BuiltinPrototype, &str, &str)] =
-    &[(BuiltinPrototype::Set, "keys", "values")];
+/// `(owner, alias, real)` — `Set.prototype.keys` is `Set.prototype.values`,
+/// and `Date.prototype.toGMTString` is `Date.prototype.toUTCString`.
+const BUILTIN_FUNCTION_ALIASES: &[(BuiltinPrototype, &str, &str)] = &[
+    (BuiltinPrototype::Date, "toGMTString", "toUTCString"),
+    (BuiltinPrototype::Set, "keys", "values"),
+];
 
 const fn is_advertised_instance_method(method: &str) -> bool {
     let mut i = 0;
@@ -966,7 +1034,8 @@ const _: () = {
     let mut i = 0;
     while i < BUILTIN_FUNCTION_ALIASES.len() {
         assert!(
-            is_advertised_instance_method(BUILTIN_FUNCTION_ALIASES[i].1),
+            is_advertised_instance_method(BUILTIN_FUNCTION_ALIASES[i].1)
+                || is_readable_instance_extra(BUILTIN_FUNCTION_ALIASES[i].1),
             "a built-in alias key is not an advertised instance method"
         );
         i += 1;
@@ -1072,10 +1141,17 @@ impl BuiltinFunction {
     /// lives under the `"Owner.prototype"` object scope.
     pub(crate) fn named_qualified(name: &str) -> Option<Self> {
         if let Some((owner, member)) = name.split_once(".prototype.") {
-            if let Some(prototype) = BuiltinPrototype::from_name(owner)
-                && let Some(function) = Self::named(prototype, member)
-            {
-                return Some(function);
+            if let Some(prototype) = BuiltinPrototype::from_name(owner) {
+                // `Set.prototype.keys` and `Date.prototype.toGMTString` are
+                // the aliased members: the one function object under two
+                // property keys.
+                let member = BUILTIN_FUNCTION_ALIASES
+                    .iter()
+                    .find(|(owner, alias, _)| *owner == prototype && *alias == member)
+                    .map_or(member, |(_, _, real)| *real);
+                if let Some(function) = Self::named(prototype, member) {
+                    return Some(function);
+                }
             }
             return Self::named_static(&format!("{owner}.prototype"), member);
         }

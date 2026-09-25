@@ -23,7 +23,9 @@
 //! constants.
 
 use super::*;
-use crate::runtime::access::{FUNCTION_PROTOTYPE_KEYS, is_object_prototype_key};
+use crate::runtime::access::{
+    DATE_PROTOTYPE_KEYS, FUNCTION_PROTOTYPE_KEYS, is_object_prototype_key,
+};
 
 /// Whether `name` is an ECMA global a bare identifier may materialize —
 /// exported for the lowerer, which cannot name the `ecma_stdlib` tables
@@ -75,25 +77,47 @@ enum BuiltinOwn {
     /// `Owner.prototype.constructor` — `{writable: true, enumerable: false,
     /// configurable: true}`, reading the owning constructor.
     PrototypeConstructor,
+    /// A data property the row metadata cannot carry — a string like
+    /// `Error.prototype.name`, a number like `Array.prototype.length`, or a
+    /// `RegExp.prototype` flag getter's prototype-receiver result —
+    /// non-enumerable, with `writable`/`configurable` from ECMA's descriptor.
+    Data {
+        value: BuiltinData,
+        writable: bool,
+        configurable: bool,
+    },
     /// A presence-only non-writable data name (`Symbol.iterator` and friends,
     /// which no `Value` can hold) — `{writable: false, enumerable: false,
     /// configurable: false}`.
     PresenceOnly,
 }
 
+/// The scalar an own [`BuiltinOwn::Data`] answers on read.
+#[derive(Clone, Copy)]
+enum BuiltinData {
+    Number(f64),
+    Text(&'static str),
+    Undefined,
+}
+
 impl BuiltinOwn {
     fn writable(self) -> bool {
-        matches!(self, BuiltinOwn::Method | BuiltinOwn::PrototypeConstructor)
+        match self {
+            BuiltinOwn::Method | BuiltinOwn::PrototypeConstructor => true,
+            BuiltinOwn::Data { writable, .. } => writable,
+            _ => false,
+        }
     }
 
     fn configurable(self) -> bool {
-        matches!(
-            self,
+        match self {
             BuiltinOwn::Length(_)
-                | BuiltinOwn::Name
-                | BuiltinOwn::Method
-                | BuiltinOwn::PrototypeConstructor
-        )
+            | BuiltinOwn::Name
+            | BuiltinOwn::Method
+            | BuiltinOwn::PrototypeConstructor => true,
+            BuiltinOwn::Data { configurable, .. } => configurable,
+            _ => false,
+        }
     }
 }
 
@@ -148,10 +172,12 @@ fn builtin_prototype_surface(owner: &str) -> &'static [&'static str] {
             "valueOf",
         ],
         "Boolean" => &["constructor", "toString", "valueOf"],
-        "Error" | "AggregateError" | "EvalError" | "RangeError" | "ReferenceError"
-        | "SyntaxError" | "TypeError" | "URIError" => {
-            &["constructor", "message", "name", "toString"]
-        }
+        "Date" => DATE_PROTOTYPE_KEYS,
+        "Error" => &["constructor", "message", "name", "toString"],
+        // The native-error and `AggregateError` prototypes own `constructor`,
+        // `name` and `message`; `toString` is `Error.prototype`'s, inherited.
+        "AggregateError" | "EvalError" | "RangeError" | "ReferenceError" | "SyntaxError"
+        | "TypeError" | "URIError" => &["constructor", "message", "name"],
         "Function" | "AsyncFunction" | "GeneratorFunction" => FUNCTION_PROTOTYPE_KEYS,
         "RegExp" => &[
             "compile",
@@ -159,6 +185,7 @@ fn builtin_prototype_surface(owner: &str) -> &'static [&'static str] {
             "exec",
             "flags",
             "global",
+            "hasIndices",
             "ignoreCase",
             "multiline",
             "source",
@@ -255,6 +282,71 @@ fn builtin_prototype_surface(owner: &str) -> &'static [&'static str] {
     }
 }
 
+/// The `Error`/`NativeError` names a `X.prototype` belongs to — the kinds
+/// whose prototypes carry `name` and `message` data properties and inherit
+/// `toString` from `Error.prototype`.
+fn error_prototype_name(owner: &str) -> Option<&'static str> {
+    Some(match owner {
+        "AggregateError" => "AggregateError",
+        "Error" => "Error",
+        "EvalError" => "EvalError",
+        "RangeError" => "RangeError",
+        "ReferenceError" => "ReferenceError",
+        "SyntaxError" => "SyntaxError",
+        "TypeError" => "TypeError",
+        "URIError" => "URIError",
+        _ => return None,
+    })
+}
+
+/// `Owner.prototype`'s own data properties the row metadata cannot carry:
+/// each error prototype's `name`/`message` (`writable`, `configurable`),
+/// `Array.prototype`'s exotic `length` (`writable`, non-configurable), and
+/// the `RegExp.prototype` flag accessors (getter-only, `configurable`) whose
+/// `RegExp.prototype` receiver answers ECMA's exemption — `undefined` for the
+/// flags, `"(?:)"` for `source` and `""` for `flags`.
+fn builtin_prototype_data(name: &str, key: &str) -> Option<BuiltinOwn> {
+    let owner = name.strip_suffix(".prototype")?;
+    let data = match (owner, key) {
+        ("Array", "length") => BuiltinOwn::Data {
+            value: BuiltinData::Number(0.0),
+            writable: true,
+            configurable: false,
+        },
+        ("RegExp", "source") => BuiltinOwn::Data {
+            value: BuiltinData::Text("(?:)"),
+            writable: false,
+            configurable: true,
+        },
+        ("RegExp", "flags") => BuiltinOwn::Data {
+            value: BuiltinData::Text(""),
+            writable: false,
+            configurable: true,
+        },
+        (
+            "RegExp",
+            "dotAll" | "global" | "hasIndices" | "ignoreCase" | "multiline" | "sticky" | "unicode"
+            | "unicodeSets",
+        ) => BuiltinOwn::Data {
+            value: BuiltinData::Undefined,
+            writable: false,
+            configurable: true,
+        },
+        (owner, "name") => BuiltinOwn::Data {
+            value: BuiltinData::Text(error_prototype_name(owner)?),
+            writable: true,
+            configurable: true,
+        },
+        (owner, "message") if error_prototype_name(owner).is_some() => BuiltinOwn::Data {
+            value: BuiltinData::Text(""),
+            writable: true,
+            configurable: true,
+        },
+        _ => return None,
+    };
+    Some(data)
+}
+
 /// The named own surface of `name` beyond `length`/`name`/`prototype`.
 fn builtin_extra_own(name: &str, key: &str) -> Option<BuiltinOwn> {
     if let Some(constant) = builtin_constant(name, key) {
@@ -270,6 +362,9 @@ fn builtin_extra_own(name: &str, key: &str) -> Option<BuiltinOwn> {
             .is_some_and(|function| function.callable())
         {
             return Some(BuiltinOwn::Method);
+        }
+        if let Some(data) = builtin_prototype_data(name, key) {
+            return Some(data);
         }
         if builtin_prototype_surface(owner).contains(&key) {
             return Some(BuiltinOwn::PresenceOnly);
@@ -571,6 +666,13 @@ impl Heap {
                 Some(BuiltinOwn::Method) => {
                     return self.builtin_value(&format!("{}.{}", name, key));
                 }
+                Some(BuiltinOwn::Data { value, .. }) => {
+                    return Ok(match value {
+                        BuiltinData::Number(number) => Value::Number(number),
+                        BuiltinData::Text(text) => Value::String(text.into()),
+                        BuiltinData::Undefined => Value::Undefined,
+                    });
+                }
                 Some(BuiltinOwn::PresenceOnly) => return Ok(Value::Undefined),
                 None => {}
             }
@@ -599,6 +701,18 @@ impl Heap {
                     }
                 }
             }
+        }
+        // A native-error or `AggregateError` prototype inherits from
+        // `Error.prototype`: its `toString` is the error `toString`, not
+        // `Object.prototype`'s.
+        if self
+            .builtin_name(id)
+            .as_deref()
+            .and_then(|name| name.strip_suffix(".prototype"))
+            .is_some_and(|owner| owner != "Error" && error_prototype_name(owner).is_some())
+            && let Some(function) = BuiltinFunction::named(BuiltinPrototype::Error, key)
+        {
+            return self.builtin_function(function);
         }
         match key {
             "constructor" => self.builtin_value("Object"),
@@ -685,7 +799,11 @@ impl Heap {
                 }
                 None => false,
             };
-            if !property.configurable() && !is_own {
+            // A non-configurable static stays non-configurable behind a
+            // write's expando shadow: ECMA's writable-but-frozen slots like
+            // `Array.prototype.length` update the same own property, so a
+            // delete refuses whether an expando shadowed it or not.
+            if !property.configurable() {
                 return Err(RuntimeError::type_error(format!(
                     "Cannot delete property '{key}' of {name}"
                 )));

@@ -3,6 +3,7 @@
 # whose program now round-trips, or whose refusal changed, fails the law
 # until it is deleted or corrected.
 # program id	refusal	reason
+test262:test/built-ins/AggregateError/prototype/message.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/Array/prototype/every/15.4.4.16-5-14.js	generated binding `__typescript_global_set` has no authored TypeScript spelling	a closure's write to a top-level binding lowers to the live session-slot write (FIG-3707), which the lens printer does not re-sugar
 test262:test/built-ins/Array/prototype/findLast/predicate-is-not-callable-throws.js	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a regular expression literal lowers to the heap builtin, which the lens printer does not re-sugar
 test262:test/built-ins/Array/prototype/includes/return-abrupt-tointeger-fromindex.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
@@ -15,7 +16,11 @@ test262:test/built-ins/Array/prototype/toReversed/zero-or-one-element.js	generat
 test262:test/built-ins/Array/prototype/unshift/S15.4.4.13_A1_T2.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/Array/prototype/with/index-casted-to-number.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/Date/S15.9.4_A3.js	cannot render a block in expression position as TypeScript	a `hasOwnProperty` call lowers to a statement sequence (its own-method dispatch), which has no expression spelling
+test262:test/built-ins/Date/prototype/S15.9.5_A26_T1.js	cannot render a block in expression position as TypeScript	a `hasOwnProperty` call lowers to a statement sequence (its own-method dispatch), which has no expression spelling
 test262:test/built-ins/Date/prototype/getUTCDay/this-value-invalid-date.js	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+test262:test/built-ins/Date/prototype/setMonth/prop-desc.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+test262:test/built-ins/Date/prototype/toLocaleTimeString/length.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+test262:test/built-ins/Error/name.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/JSON/parse/15.12.1.1-0-4.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/JSON/parse/15.12.1.1-g6-4.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/JSON/stringify/value-primitive-top-level.js	cannot render a block in expression position as TypeScript	the expression lowers to a statement sequence (operand conversions, a computed key or a short circuit), which has no expression spelling
@@ -26,6 +31,8 @@ test262:test/built-ins/Math/acosh/arg-is-one.js	generated binding `__typescript_
 test262:test/built-ins/Math/clz32/Math.clz32_2.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/Math/imul/length.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/Math/min/prop-desc.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+test262:test/built-ins/NativeErrors/EvalError/prototype/name.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+test262:test/built-ins/NativeErrors/SyntaxError/prototype/message.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/Number/isSafeInteger/length.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/Object/getOwnPropertyDescriptor/name.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 test262:test/built-ins/Object/getOwnPropertyNames/15.2.3.4-0-1.js	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
