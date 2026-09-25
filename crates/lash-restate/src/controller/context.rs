@@ -11,7 +11,6 @@ use lash_sansio::SessionId;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::Poll;
 use std::time::Duration;
 
 use lash_core::{
@@ -55,9 +54,9 @@ use crate::process_attach::{LashProcessAttachClient, RestateProcessAttachRequest
 
 mod wake;
 pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
-pub(crate) use wake::{
-    ClosureWakeRelay, guard_restate_context_future, guard_restate_run_future, relay_closure_wakes,
-};
+#[cfg(test)]
+pub(crate) use wake::guard_restate_context_future;
+pub(crate) use wake::{ClosureWakeRelay, guard_restate_run_future, relay_closure_wakes};
 
 /// The future every turn-cancel race returns across this seam.
 ///
@@ -74,6 +73,21 @@ pub(crate) type ResolveEventFuture<'run> = Pin<
 type TurnCancelRaceFuture<'run, T> = Pin<
     Box<dyn Future<Output = Result<RestateTurnCancelRaceOutcome<T>, TerminalError>> + Send + 'run>,
 >;
+
+/// Whether a wait that observes no turn races its process segment's durable
+/// cancel promise (FIG-3673).
+///
+/// Only a process segment's own controller asks for the race, and only a
+/// context with a workflow promise surface can answer it: every other wait
+/// keeps the command shape it had.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessCancelRace {
+    /// The wait belongs to no process drive.
+    NotRaced,
+    /// The wait is a process drive's: its journal records whether it or the
+    /// segment's cancel promise completed first.
+    Raced,
+}
 
 /// Which side of a gate race the journal completed first.
 enum GateRaceWinner {
@@ -132,7 +146,7 @@ where
             0 => Ok(GateRaceWinner::Guarded),
             1 => Ok(GateRaceWinner::Gate),
             index => Err(TerminalError::new(format!(
-                "turn-cancel gate race completed out-of-range branch {index}"
+                "gate race completed out-of-range branch {index}"
             ))),
         }
     }
@@ -270,6 +284,33 @@ where
     }
 }
 
+/// Race one parked wait of a process segment against the segment's own
+/// durable cancel promise (FIG-3673).
+///
+/// The promise is the segment workflow's `process_cancel_requested`, which
+/// the `cancel` and `deliver_cancel` handlers resolve after the registry
+/// records the request. Journal order is the deployed contract: the guarded
+/// wait's command, then the promise's. The VM's first-completed await records
+/// which completed first, so a replay takes the branch the first execution
+/// took whatever the promise's state is by then. A promise holding the
+/// segment's own `SegmentFinished` retirement is not a cancel: the guarded
+/// wait finishes on its own terms.
+async fn race_process_cancel<'run, T>(
+    promise: GateWait<'run, String>,
+    guarded: GateWait<'run, T>,
+) -> Result<RestateTurnCancelRaceOutcome<T>, TerminalError> {
+    match first_of_gate_race(&*guarded, &*promise).await? {
+        GateRaceWinner::Guarded => {}
+        GateRaceWinner::Gate => {
+            let payload = promise.await?;
+            if crate::process::process_cancel_promise_verdict(Some(payload)) {
+                return Ok(RestateTurnCancelRaceOutcome::ProcessCancelled);
+            }
+        }
+    }
+    guarded.await.map(RestateTurnCancelRaceOutcome::Completed)
+}
+
 /// The default every unregistered group-index call shares: a pinned refusal
 /// naming the handler, so a wiring miss surfaces as a typed terminal error
 /// rather than a silent `Ok`.
@@ -291,15 +332,15 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         'ctx: 'run;
 
     /// A durable timer, raced against the turn's cancellation gate when
-    /// `turn_cancel` names one; then nothing live races it. A sleep that
-    /// observes no turn (a process-scope sleep) still races the process
-    /// drive's own `process_stop` token: that is the process workflow's cancel
-    /// delivery. P16 (FIG-3673) replaces with a recorded race.
+    /// `turn_cancel` names one. A sleep that observes no turn races the
+    /// process segment's durable cancel promise when `process_cancel` says
+    /// the wait belongs to a process drive (FIG-3673); nothing live ever
+    /// races it.
     fn sleep_or_turn_cancel<'run>(
         &'run self,
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_stop: tokio_util::sync::CancellationToken,
+        process_cancel: ProcessCancelRace,
     ) -> TurnCancelRaceFuture<'run, ()>
     where
         'ctx: 'run;
@@ -371,26 +412,25 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         'ctx: 'run;
 
     /// A durable await, raced against the turn's cancellation gate when
-    /// `turn_cancel` names one; then nothing live races it. An await that
-    /// observes no turn (a process body's `waitSignal`) keeps the process
-    /// drive's own `process_stop` token as its cancel delivery: P16
-    /// (FIG-3673) replaces with a recorded race.
+    /// `turn_cancel` names one. An await that observes no turn (a process
+    /// body's `waitSignal`) races the process segment's durable cancel
+    /// promise when `process_cancel` says so (FIG-3673); a lost event wait is
+    /// released `Cancelled`.
     fn await_event_or_turn_cancel<'run>(
         &'run self,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        process_stop: tokio_util::sync::CancellationToken,
+        process_cancel: ProcessCancelRace,
     ) -> TurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run;
 
-    /// The journaled wake verdict for a durable process sleep (FIG-3149).
-    ///
-    /// Peeks the running process workflow's own cancellation promise through a
-    /// durable command, so every redrive of this wake observes exactly the
-    /// verdict the live wake committed instead of re-reading live registry
-    /// state that can answer differently on replay.
+    /// A journaled peek of the running process workflow's own cancellation
+    /// promise (FIG-3149, FIG-3673): a process drive's cancel checkpoint and
+    /// its post-runner verdict. Every redrive observes exactly the verdict the
+    /// first execution committed instead of re-reading live registry state
+    /// that can answer differently on replay.
     ///
     /// Contexts without a workflow promise surface carry no process
     /// cancellation and answer `false`.
@@ -418,11 +458,14 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run;
 
-    /// Race a process terminal wait against durable turn cancellation.
+    /// Race a process terminal wait against durable turn cancellation, or,
+    /// for a wait that observes no turn, against the awaiting process
+    /// segment's own cancel promise when `process_cancel` says so (FIG-3673).
     fn await_process_terminal_or_turn_cancel<'run>(
         &'run self,
         process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        process_cancel: ProcessCancelRace,
     ) -> TurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
         'ctx: 'run;
@@ -686,15 +729,14 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// Await an effect group's wait (its readiness or one of its ranks),
     /// raced against the turn's cancellation gate when `turn_cancel` names
     /// one, exactly as a durable wait is (FIG-3672 P9). A wait that observes
-    /// no turn (a process body's rank wait) races the process drive's own
-    /// `process_stop` token instead, answering `TurnCancelled` when it fires:
-    /// P16 (FIG-3673) replaces with a recorded race.
+    /// no turn (a process body's rank wait) races the process segment's
+    /// durable cancel promise when `process_cancel` says so (FIG-3673).
     fn await_effect_group_wait<'run>(
         &'run self,
         _request: RestateDurableWaitAwaitRequest,
         _replay_key: String,
         _turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-        _process_stop: tokio_util::sync::CancellationToken,
+        _process_cancel: ProcessCancelRace,
     ) -> TurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
@@ -755,6 +797,27 @@ macro_rules! impl_process_cancel_peek {
     };
 }
 
+/// The segment's cancel promise as a durable future, on a context that has a
+/// workflow promise surface; `None` on every other context.
+macro_rules! process_cancel_promise {
+    (promises, $context:ident, $run:lifetime, $ctx:expr) => {{
+        // Workflow contexts are covariant in their lifetime: shortening it to
+        // the borrow lets the SDK's `promise` borrow the context for exactly
+        // as long as the race holds the future.
+        let context: &$run $context<$run> = $ctx;
+        Some(erase_gate_wait(
+            restate_sdk::context::ContextPromises::promise::<String>(
+                context,
+                crate::process::PROCESS_CANCEL_PROMISE_KEY,
+            ),
+        ))
+    }};
+    (no_promises, $context:ident, $run:lifetime, $ctx:expr) => {{
+        let _ = $ctx;
+        None::<GateWait<$run, String>>
+    }};
+}
+
 macro_rules! impl_restate_controller_context {
     ($($context:ident : $promises:ident),+ $(,)?) => {
         $(
@@ -775,7 +838,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     duration: Duration,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                    process_stop: tokio_util::sync::CancellationToken,
+                    process_cancel: ProcessCancelRace,
                 ) -> TurnCancelRaceFuture<'run, ()>
                 where
                     'ctx: 'run,
@@ -783,44 +846,20 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let Some(turn_cancel) = turn_cancel else {
                             // `sleep()` journals `sys_sleep` synchronously at
-                            // construction. Construct it unconditionally so
-                            // every replay emits the same command.
-                            let timer = guard_restate_context_future(
+                            // construction, ahead of the promise it races.
+                            let timer = erase_gate_wait(
                                 restate_sdk::context::ContextTimers::sleep(self, duration),
                             );
-                            // P16 (FIG-3673) replaces with a recorded race.
-                            let cancelled = process_stop.cancelled();
-                            tokio::pin!(timer);
-                            tokio::pin!(cancelled);
-                            return std::future::poll_fn(|cx| {
-                                // A recorded suspension fuses the timer and wins immediately;
-                                // HandlerStateAwareFuture must consume it before cancellation
-                                // is polled.
-                                match timer.as_mut().poll(cx) {
-                                    Poll::Ready(result) => Poll::Ready(
-                                        result.map(RestateTurnCancelRaceOutcome::Completed),
-                                    ),
-                                    Poll::Pending if timer.as_ref().get_ref().is_fused() => {
-                                        Poll::Pending
-                                    }
-                                    Poll::Pending => match cancelled.as_mut().poll(cx) {
-                                        Poll::Ready(()) => {
-                                            // The stray timer is harmless only
-                                            // because its emission is
-                                            // deterministic across attempts.
-                                            // OutputCommand + End hides it when
-                                            // reached, but a panic, crash, or
-                                            // engine kill before then exposes
-                                            // it to replay.
-                                            Poll::Ready(Ok(
-                                                RestateTurnCancelRaceOutcome::TurnCancelled,
-                                            ))
-                                        }
-                                        Poll::Pending => Poll::Pending,
-                                    },
+                            let promise = match process_cancel {
+                                ProcessCancelRace::Raced => {
+                                    process_cancel_promise!($promises, $context, 'run, self)
                                 }
-                            })
-                            .await;
+                                ProcessCancelRace::NotRaced => None,
+                            };
+                            return match promise {
+                                Some(promise) => race_process_cancel(promise, timer).await,
+                                None => timer.await.map(RestateTurnCancelRaceOutcome::Completed),
+                            };
                         };
 
                         let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
@@ -1025,18 +1064,59 @@ macro_rules! impl_restate_controller_context {
                     request: RestateDurableWaitAwaitRequest,
                     replay_key: String,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                    process_stop: tokio_util::sync::CancellationToken,
+                    process_cancel: ProcessCancelRace,
                 ) -> TurnCancelRaceFuture<'run, Resolution>
                 where
                     'ctx: 'run,
                 {
                     Box::pin(async move {
-                        // P16 (FIG-3673) replaces with a recorded race.
                         let Some(turn_cancel) = turn_cancel else {
-                            return self
-                                .await_event(request, replay_key, process_stop)
-                                .await
-                                .map(RestateTurnCancelRaceOutcome::Completed);
+                            if process_cancel == ProcessCancelRace::NotRaced {
+                                return self
+                                    .await_event(
+                                        request,
+                                        replay_key,
+                                        tokio_util::sync::CancellationToken::new(),
+                                    )
+                                    .await
+                                    .map(RestateTurnCancelRaceOutcome::Completed);
+                            };
+                            // The event wait's CallCommand, then the promise's.
+                            let event_address = RestateDurableWaitAddress::for_key(&request.key);
+                            let event_key = request.key.clone();
+                            let event = self
+                                .workflow_client::<LashDurableWaitWorkflowClient>(
+                                    event_address.workflow_key.clone(),
+                                )
+                                .await_resolution(Json(request.into()))
+                                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
+                            let event = erase_gate_wait(event.call());
+                            let Some(promise) =
+                                process_cancel_promise!($promises, $context, 'run, self)
+                            else {
+                                return Err(TerminalError::new(
+                                    "a process cancel race needs a workflow promise surface",
+                                ));
+                            };
+                            return match race_process_cancel(promise, event).await? {
+                                RestateTurnCancelRaceOutcome::ProcessCancelled => {
+                                    // Release the losing event wait, as a
+                                    // turn-gate loser is released: nobody is
+                                    // left to resolve it.
+                                    let resolve = self
+                                        .object_client::<LashDurableWaitIndexClient>(
+                                            durable_wait_index_object_key(&event_address),
+                                        )
+                                        .resolve(Json(RestateDurableWaitResolveRequest {
+                                            key: event_key,
+                                            resolution: Resolution::Cancelled,
+                                        }))
+                                        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
+                                    let Json(_) = resolve.call().await?;
+                                    Ok(RestateTurnCancelRaceOutcome::ProcessCancelled)
+                                }
+                                outcome => Ok(outcome.map(|Json(resolution)| resolution)),
+                            };
                         };
 
                         let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
@@ -1087,8 +1167,9 @@ macro_rules! impl_restate_controller_context {
                                 let Json(_) = resolve.call().await?;
                                 Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
                             }
-                            RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
-                                Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id })
+                            outcome @ (RestateTurnCancelRaceOutcome::SessionRevoked { .. }
+                            | RestateTurnCancelRaceOutcome::ProcessCancelled) => {
+                                Ok(outcome.map(|Json(resolution)| resolution))
                             }
                         }
                     })
@@ -1152,17 +1233,40 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     process_id: ProcessId,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+                    process_cancel: ProcessCancelRace,
                 ) -> TurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
                 where
                     'ctx: 'run,
                 {
                     Box::pin(async move {
                         let Some(turn_cancel) = turn_cancel else {
-                            return self
-                                .await_process_terminal(process_id)
-                                .await
-                                .map(Box::new)
-                                .map(RestateTurnCancelRaceOutcome::Completed);
+                            let terminal = self
+                                .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
+                                .await_terminal(Json(RestateProcessAwaitRequest { process_id }));
+                            let terminal = terminal.call();
+                            let promise = match process_cancel {
+                                ProcessCancelRace::Raced => {
+                                    process_cancel_promise!($promises, $context, 'run, self)
+                                }
+                                ProcessCancelRace::NotRaced => None,
+                            };
+                            let Some(promise) = promise else {
+                                let Json(output) = terminal.await?;
+                                return Ok(RestateTurnCancelRaceOutcome::Completed(Box::new(output)));
+                            };
+                            // The terminal call's command, then the promise's.
+                            // A lost call is cancelled rather than left
+                            // parked on the child until the child ends.
+                            if let GateRaceWinner::Gate = first_of_gate_race(&terminal, &*promise).await?
+                                && crate::process::process_cancel_promise_verdict(Some(promise.await?))
+                            {
+                                restate_sdk::context::CallFuture::invocation_handle(&terminal)
+                                    .await?
+                                    .cancel();
+                                return Ok(RestateTurnCancelRaceOutcome::ProcessCancelled);
+                            }
+                            let Json(output) = terminal.await?;
+                            return Ok(RestateTurnCancelRaceOutcome::Completed(Box::new(output)));
                         };
                         let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
                         else {
@@ -1194,6 +1298,7 @@ macro_rules! impl_restate_controller_context {
                             RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
                                 "session_revoked"
                             }
+                            RestateTurnCancelRaceOutcome::ProcessCancelled => "process_cancelled",
                         };
                         tracing::info!(
                             target: "lash::restate",
@@ -1202,17 +1307,7 @@ macro_rules! impl_restate_controller_context {
                             winning_branch,
                             "Restate process-await adjudication"
                         );
-                        Ok(match outcome {
-                            RestateTurnCancelRaceOutcome::Completed(Json(output)) => {
-                                RestateTurnCancelRaceOutcome::Completed(Box::new(output))
-                            }
-                            RestateTurnCancelRaceOutcome::TurnCancelled => {
-                                RestateTurnCancelRaceOutcome::TurnCancelled
-                            }
-                            RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
-                                RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
-                            }
-                        })
+                        Ok(outcome.map(|Json(output)| Box::new(output)))
                     })
                 }
 
@@ -1537,7 +1632,7 @@ macro_rules! impl_restate_controller_context {
                     request: RestateDurableWaitAwaitRequest,
                     replay_key: String,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                    process_stop: tokio_util::sync::CancellationToken,
+                    process_cancel: ProcessCancelRace,
                 ) -> TurnCancelRaceFuture<'run, Resolution>
                 where
                     'ctx: 'run,
@@ -1549,31 +1644,19 @@ macro_rules! impl_restate_controller_context {
                             .await_resolution(Json(request.into()))
                             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
                         let Some(turn_cancel) = turn_cancel else {
-                            // The process drive's own stop, raced live: P16
-                            // (FIG-3673) replaces with a recorded race.
-                            let wait = guard_restate_context_future(call.call());
-                            let stopped = process_stop.cancelled();
-                            tokio::pin!(wait);
-                            tokio::pin!(stopped);
-                            return std::future::poll_fn(|cx| {
-                                match wait.as_mut().poll(cx) {
-                                    Poll::Ready(result) => Poll::Ready(result.map(
-                                        |Json(resolution)| {
-                                            RestateTurnCancelRaceOutcome::Completed(resolution)
-                                        },
-                                    )),
-                                    Poll::Pending if wait.as_ref().get_ref().is_fused() => {
-                                        Poll::Pending
-                                    }
-                                    Poll::Pending => match stopped.as_mut().poll(cx) {
-                                        Poll::Ready(()) => Poll::Ready(Ok(
-                                            RestateTurnCancelRaceOutcome::TurnCancelled,
-                                        )),
-                                        Poll::Pending => Poll::Pending,
-                                    },
+                            // The rank wait's CallCommand, then the promise's.
+                            let wait = erase_gate_wait(call.call());
+                            let promise = match process_cancel {
+                                ProcessCancelRace::Raced => {
+                                    process_cancel_promise!($promises, $context, 'run, self)
                                 }
-                            })
-                            .await;
+                                ProcessCancelRace::NotRaced => None,
+                            };
+                            let outcome = match promise {
+                                Some(promise) => race_process_cancel(promise, wait).await?,
+                                None => RestateTurnCancelRaceOutcome::Completed(wait.await?),
+                            };
+                            return Ok(outcome.map(|Json(resolution)| resolution));
                         };
                         let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
                         else {
@@ -1585,27 +1668,15 @@ macro_rules! impl_restate_controller_context {
                         // awakeable, then its registration: the geometry every
                         // guarded durable wait already has.
                         let wait = erase_gate_wait(call.call());
-                        Ok(
-                            match race_turn_cancel_gate(
-                                self,
-                                &SessionId::from(session_id),
-                                turn_cancel,
-                                || gate_awakeable(self),
-                                move || wait,
-                            )
-                            .await?
-                            {
-                                RestateTurnCancelRaceOutcome::Completed(Json(resolution)) => {
-                                    RestateTurnCancelRaceOutcome::Completed(resolution)
-                                }
-                                RestateTurnCancelRaceOutcome::TurnCancelled => {
-                                    RestateTurnCancelRaceOutcome::TurnCancelled
-                                }
-                                RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
-                                    RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
-                                }
-                            },
+                        Ok(race_turn_cancel_gate(
+                            self,
+                            &SessionId::from(session_id),
+                            turn_cancel,
+                            || gate_awakeable(self),
+                            move || wait,
                         )
+                        .await?
+                        .map(|Json(resolution)| resolution))
                     })
                 }
 

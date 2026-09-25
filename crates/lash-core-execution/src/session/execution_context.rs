@@ -68,6 +68,11 @@ pub struct RuntimeExecutionContext<'run> {
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     pub(super) turn_event_tx: Option<Sender<TurnActivity>>,
     pub(super) cancellation_token: Option<CancellationToken>,
+    /// Whether `cancellation_token` is only a stop lent to this execution's
+    /// step bodies (a process drive's, FIG-3673): then no drive decision reads
+    /// it, and [`is_cancelled`](Self::is_cancelled) answers from recorded facts
+    /// alone.
+    token_is_lent_stop: bool,
     turn_cancel: RecordedTurnCancel,
     pub(super) observe_turn_cancel: bool,
     /// Durable cancellation authority for waits issued by this execution.
@@ -522,6 +527,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_phase_probe: None,
             turn_event_tx: None,
             cancellation_token: None,
+            token_is_lent_stop: false,
             turn_cancel: RecordedTurnCancel::default(),
             observe_turn_cancel: true,
             turn_cancel_scope: None,
@@ -554,6 +560,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_event_tx: self.turn_event_tx.clone(),
             cancellation_token: self.cancellation_token.clone(),
+            token_is_lent_stop: self.token_is_lent_stop,
             turn_cancel: self.turn_cancel.clone(),
             observe_turn_cancel: self.observe_turn_cancel,
             turn_cancel_scope: self.turn_cancel_scope.clone(),
@@ -858,6 +865,45 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    /// A process drive's execution (FIG-3673): `stop` is lent to the step
+    /// bodies it runs, which record what it did to them, and is never a drive
+    /// input. The drive observes its process's cancellation only through
+    /// recorded outcomes, recorded wait races and
+    /// [`process_cancel_checkpoint`](Self::process_cancel_checkpoint).
+    pub fn with_lent_process_stop(mut self, stop: CancellationToken) -> Self {
+        self.cancellation_token = Some(stop);
+        self.token_is_lent_stop = true;
+        self
+    }
+
+    /// Run one registry step of a process body as a step the effect
+    /// controller records under `name` (FIG-3673).
+    pub async fn record_process_drive_step(
+        &self,
+        name: String,
+        step: crate::ProcessDriveStep<'_>,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.dispatch
+            .effect_controller
+            .controller()
+            .record_process_drive_step(name, step)
+            .await
+    }
+
+    /// A process body's cancel checkpoint (FIG-3673): the effect controller's
+    /// recorded observation of whether the process has a committed
+    /// cancellation. A replay reaches the same checkpoints and reads the same
+    /// answers.
+    pub async fn process_cancel_checkpoint(
+        &self,
+    ) -> Result<bool, crate::RuntimeEffectControllerError> {
+        self.dispatch
+            .effect_controller
+            .controller()
+            .observe_process_cancel(&self.cancellation_token.clone().unwrap_or_default())
+            .await
+    }
+
     /// Starts this execution's recorded turn-cancel fact: `honoured` is
     /// whether the turn had already recorded a cancellation when it built
     /// this execution, `control` is the gate pair a code cell's cancel
@@ -1098,10 +1144,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// failure.
     pub fn is_cancelled(&self) -> bool {
         self.turn_cancel.is_observed()
-            || self
-                .cancellation_token
-                .as_ref()
-                .is_some_and(CancellationToken::is_cancelled)
+            || (!self.token_is_lent_stop
+                && self
+                    .cancellation_token
+                    .as_ref()
+                    .is_some_and(CancellationToken::is_cancelled))
     }
 
     pub(super) fn process_id(&self) -> Option<&str> {
@@ -1597,12 +1644,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         };
         match outcome {
             crate::RuntimeEffectOutcome::Sleep => {
-                // Process sleeps remain uninterruptible, and the wake is where a
-                // committed cancellation takes ownership of settlement. The
-                // verdict itself is the effect host's to record: a live read at
-                // this boundary can answer differently on redrive, so the
-                // durable host journals the wake verdict and reports it as
-                // `RuntimeEffectSleepCancelled` instead (FIG-3149).
+                // A process's cancellation reaches its sleep only as the
+                // engine's recorded race of the timer against the process's
+                // cancel fact, reported as `RuntimeEffectSleepCancelled`
+                // (FIG-3673); a live read here could answer differently on
+                // redrive.
                 Ok(())
             }
             other => Err(crate::RuntimeEffectControllerError::new(

@@ -14,9 +14,8 @@ use crate::LashlangHostError;
 /// the tool bridges trip this scope instead of handing the guest something to
 /// catch, and the host reports it through `is_cancelled` from then on.
 ///
-/// A scope built with [`ExecutionCancellation::child_of`] is also cancelled when
-/// its parent is, so one field carries both the engine's cancellation and the
-/// run's own.
+/// Only recorded facts cancel it (FIG-3673): an engine's live stop is never
+/// its parent, so a replay reaches the same answer at the same point.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionCancellation(CancellationToken);
 
@@ -25,23 +24,12 @@ impl ExecutionCancellation {
         Self::default()
     }
 
-    /// A scope of this run's own, cancelled when `parent` is cancelled.
-    pub fn child_of(parent: &CancellationToken) -> Self {
-        Self(parent.child_token())
-    }
-
     pub fn cancel(&self) {
         self.0.cancel();
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.0.is_cancelled()
-    }
-
-    /// Resolves when this scope is cancelled, for a caller racing it against
-    /// execution.
-    pub fn cancelled(&self) -> tokio_util::sync::WaitForCancellationFuture<'_> {
-        self.0.cancelled()
     }
 }
 
@@ -412,17 +400,6 @@ mod tests {
         .expect_err("a cancelled reply is neither a value nor a retryable failure");
         assert_eq!(owned_error.message(), "approval window closed");
         assert!(owned_scope.is_cancelled());
-    }
-
-    /// The run's scope carries the engine's cancellation too, so one field
-    /// answers `is_cancelled` for both.
-    #[test]
-    fn a_run_scope_is_cancelled_by_its_parent() {
-        let engine = CancellationToken::new();
-        let run = ExecutionCancellation::child_of(&engine);
-        assert!(!run.is_cancelled());
-        engine.cancel();
-        assert!(run.is_cancelled());
     }
 
     /// The end-to-end pin for the seam the bridge owns: a guest that catches

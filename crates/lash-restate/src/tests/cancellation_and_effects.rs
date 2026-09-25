@@ -105,7 +105,7 @@ pub(super) async fn recording_context_propagates_revoked_session_from_turn_cance
             &SessionId::from("recording-revoked"),
             &TurnId::from("turn"),
         )),
-        tokio_util::sync::CancellationToken::new(),
+        crate::controller::context::ProcessCancelRace::NotRaced,
     )
     .await
     .expect("recording-context revoked verdict");
@@ -135,7 +135,7 @@ pub(super) async fn positional_replay_context_propagates_revoked_session_from_tu
             &SessionId::from("positional-revoked"),
             &TurnId::from("turn"),
         )),
-        tokio_util::sync::CancellationToken::new(),
+        crate::controller::context::ProcessCancelRace::NotRaced,
     )
     .await
     .expect("positional-context revoked verdict");
@@ -166,7 +166,7 @@ pub(super) async fn replayable_recording_context_propagates_revoked_session_from
             &SessionId::from("replayable-revoked"),
             &TurnId::from("turn"),
         )),
-        tokio_util::sync::CancellationToken::new(),
+        crate::controller::context::ProcessCancelRace::NotRaced,
     )
     .await
     .expect("replayable-context revoked verdict");
@@ -189,6 +189,7 @@ pub(super) async fn recording_context_process_await_reports_turn_cancelled() {
             &task_context,
             ProcessId::from("recording-process-child"),
             Some(turn_cancel),
+            crate::controller::context::ProcessCancelRace::NotRaced,
         )
         .await
     });
@@ -229,6 +230,7 @@ pub(super) async fn positional_replay_context_process_await_reports_turn_cancell
             &task_context,
             ProcessId::from("positional-process-child"),
             Some(turn_cancel),
+            crate::controller::context::ProcessCancelRace::NotRaced,
         )
         .await
     });
@@ -271,6 +273,7 @@ pub(super) async fn replayable_recording_context_process_await_reports_turn_canc
             &task_context,
             ProcessId::from("replayable-process-child"),
             Some(turn_cancel),
+            crate::controller::context::ProcessCancelRace::NotRaced,
         )
         .await
     });
@@ -310,7 +313,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
             &SessionId::from("recording-complete"),
             &TurnId::from("turn"),
         )),
-        tokio_util::sync::CancellationToken::new(),
+        crate::controller::context::ProcessCancelRace::NotRaced,
     )
     .await
     .expect("complete recording-context wait");
@@ -324,7 +327,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
             &SessionId::from("positional-complete"),
             &TurnId::from("turn"),
         )),
-        tokio_util::sync::CancellationToken::new(),
+        crate::controller::context::ProcessCancelRace::NotRaced,
     )
     .await
     .expect("complete positional-context wait");
@@ -338,7 +341,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
             &SessionId::from("replayable-complete"),
             &TurnId::from("turn"),
         )),
-        tokio_util::sync::CancellationToken::new(),
+        crate::controller::context::ProcessCancelRace::NotRaced,
     )
     .await
     .expect("complete replayable-context wait");
@@ -1390,12 +1393,13 @@ pub(super) async fn run_restate_replay_turn(
         .expect("run replay test turn")
 }
 
-/// A process body parked on `waitSignal` observes no turn, so its own stop —
-/// the process drive's token — still cancels it promptly until P16 (FIG-3673)
-/// replaces that live arm with a recorded race.
+/// A process body parked on `waitSignal` observes no turn: its wait races the
+/// segment's durable cancel promise, and the recorded race is the only thing
+/// that ends it (FIG-3673). The execution's lent stop is not a drive input, so
+/// firing it leaves the wait parked; committing the cancel ends it cancelled.
 #[tokio::test]
-pub(super) async fn a_process_parked_on_wait_signal_is_cancelled_by_its_process_stop() {
-    let context = Arc::new(RecordingContext::default());
+pub(super) async fn a_process_parked_on_a_signal_is_cancelled_by_its_durable_race() {
+    let context = Arc::new(ReplayableRecordingContext::default());
     let authority = RestateAuthorityId::new("process-signal-owner").expect("valid test authority");
     let key = restate_await_event_key_for_authority(
         &authority,
@@ -1403,35 +1407,40 @@ pub(super) async fn a_process_parked_on_wait_signal_is_cancelled_by_its_process_
         AwaitEventWaitIdentity::process_signal(lash_core::ProcessId::from("worker"), "go", 1),
     )
     .expect("process signal wait key");
-    let process_stop = tokio_util::sync::CancellationToken::new();
-    let task_stop = process_stop.clone();
+    let lent_stop = tokio_util::sync::CancellationToken::new();
+    let task_stop = lent_stop.clone();
     let task_context = context.clone();
     let wait = tokio::spawn(async move {
-        RestateRuntimeEffectController::new(task_context, authority)
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::AwaitEvent, "process-signal-wait"),
-                    RuntimeEffectCommand::AwaitEvent { key },
-                ),
-                RuntimeEffectLocalExecutor::await_event_under(
-                    &lash_core::TurnCancelWait::unobserved(task_stop),
-                    None,
-                    Arc::new(lash_core::facade_support::SystemClock),
-                ),
-            )
-            .await
+        RestateRuntimeEffectController::with_options(
+            task_context,
+            authority,
+            RestateEffectControllerOptions::default().process_segment_drive(),
+        )
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(RuntimeEffectKind::AwaitEvent, "process-signal-wait"),
+                RuntimeEffectCommand::AwaitEvent { key },
+            ),
+            RuntimeEffectLocalExecutor::await_event_under(
+                &lash_core::TurnCancelWait::unobserved(task_stop),
+                None,
+                Arc::new(lash_core::facade_support::SystemClock),
+            ),
+        )
+        .await
     });
+    lent_stop.cancel();
     tokio::time::sleep(Duration::from_millis(50)).await;
     if wait.is_finished() {
         panic!(
-            "the signal wait must genuinely park: {:?}",
+            "the lent stop must not end a recorded wait: {:?}",
             wait.await.expect("join the signal wait")
         );
     }
-    process_stop.cancel();
+    context.commit_process_cancel();
     let outcome = tokio::time::timeout(Duration::from_secs(5), wait)
         .await
-        .expect("the process stop ends the parked signal wait promptly")
+        .expect("the cancel promise ends the parked signal wait promptly")
         .expect("join the signal wait")
         .expect("signal wait outcome");
     assert!(matches!(
@@ -1440,4 +1449,5 @@ pub(super) async fn a_process_parked_on_wait_signal_is_cancelled_by_its_process_
             resolution: Resolution::Cancelled,
         }
     ));
+    assert_eq!(context.process_cancel_race_verdicts(), vec![true]);
 }

@@ -12,10 +12,9 @@ mod admission;
 mod workflow;
 
 pub use admission::{RESTATE_PROCESS_JOURNAL_VERSION, SegmentStarted};
-pub(crate) use admission::{SegmentAdmission, admit_segment};
+pub(crate) use admission::{SegmentAdmission, admit_segment, handover_digest};
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use lash_core::{
     AbandonEvidence, AbandonWriter, AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope,
@@ -41,12 +40,12 @@ pub(crate) use workflow::{
 };
 
 pub(crate) const PROCESS_CANCEL_PROMISE_KEY: &str = "process_cancel_requested";
-const PROCESS_CANCEL_CONFIRM_RETRIES: usize = 5;
-const PROCESS_CANCEL_CONFIRM_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// Wall-clock epoch milliseconds for terminal evidence written at the Restate
 /// tier (ADR 0019 recovery enforcement). The Restate boundary carries no
 /// injected Lash clock — its durability comes from the engine and workflow-key
-/// coalescing rather than a Lash lease — so it reads the system clock directly.
+/// coalescing rather than a Lash lease — so it reads the system clock directly,
+/// and only inside a journaled step or before the handler's first command
+/// (FIG-3673): the stamp a step journals is the one every redrive publishes.
 fn restate_now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -137,13 +136,6 @@ pub(crate) fn process_ingress_submit_error(
 
 pub(crate) fn boundary_must_be_declined(record: Option<&ProcessRecord>) -> bool {
     record.is_some_and(|record| record.wait.is_some())
-}
-
-pub(crate) fn missing_segment_is_superseded(
-    requested_ordinal: u64,
-    latest: Option<&lash_core::PersistedSegmentHandover>,
-) -> bool {
-    latest.is_some_and(|handover| handover.segment_ordinal > requested_ordinal)
 }
 
 pub(crate) fn restate_process_terminal_await_key(
@@ -253,9 +245,24 @@ where
 pub struct RestateProcessCancelRequest {
     pub process_ref: lash_core::ProcessRef,
     pub request: lash_core::CancelRequest,
+    /// The generation of the `cancel` and `deliver_cancel` handlers' journaled
+    /// commands the sender built this request for (FIG-3673): the handlers
+    /// refuse any other before journaling anything. An unstamped request is
+    /// generation 1.
+    #[serde(default = "admission::unstamped_journal_version")]
+    pub journal_version: u32,
 }
 
 impl RestateProcessCancelRequest {
+    /// A request for the handlers of this build's generation.
+    pub fn new(process_ref: lash_core::ProcessRef, request: lash_core::CancelRequest) -> Self {
+        Self {
+            process_ref,
+            request,
+            journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+        }
+    }
+
     pub(crate) fn from_record(record: &lash_core::ProcessRecord) -> Result<Self, PluginError> {
         let request = record.cancel_request.as_deref().cloned().ok_or_else(|| {
             PluginError::Session(format!(
@@ -263,13 +270,13 @@ impl RestateProcessCancelRequest {
                 record.id
             ))
         })?;
-        Ok(Self {
-            process_ref: lash_core::ProcessRef {
+        Ok(Self::new(
+            lash_core::ProcessRef {
                 process_id: record.id.clone(),
                 incarnation: record.incarnation,
             },
             request,
-        })
+        ))
     }
 }
 
@@ -287,17 +294,23 @@ pub(crate) trait RestateProcessRunner: Send + Sync + 'static {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError>;
 
-    async fn request_process_cancel(
-        &self,
-        request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError>;
-
     /// The replay-key grammar the engine running `registration` journals
     /// under (FIG-3586). Admission stamps it on segment 0's start marker,
     /// which is the incarnation's start record, so the record names the
     /// grammar the runner's engine requires before any body runs. A runner
     /// whose engine keys no journal by grammar answers `None`.
     fn replay_key_grammar(&self, registration: &ProcessRegistration) -> Option<u32>;
+
+    /// Ask the child turn a `SessionTurn` process drives to stop now, as a
+    /// durable request on the turn's gate (FIG-3673). A runner whose
+    /// processes drive no child turn answers `Ok`.
+    async fn stop_child_turn(
+        &self,
+        _record: &lash_core::ProcessRecord,
+        _request: &lash_core::CancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
 
     /// The live trace observer and context segment controllers report to,
     /// when the runner's worker has one. A workflow given its own sink uses
@@ -354,6 +367,16 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
             .and_then(|worker| worker.replay_key_grammar(registration))
     }
 
+    async fn stop_child_turn(
+        &self,
+        record: &lash_core::ProcessRecord,
+        request: &lash_core::CancelRequest,
+    ) -> Result<(), PluginError> {
+        self.worker()?
+            .request_session_turn_child_stop(record, request)
+            .await
+    }
+
     fn trace(&self) -> Option<(Arc<dyn lash_trace::TraceSink>, lash_trace::TraceContext)> {
         let worker = self.worker().ok()?;
         let tracing = &worker.config().runtime_host.tracing;
@@ -383,15 +406,6 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
             handover,
         ))
         .await
-    }
-
-    async fn request_process_cancel(
-        &self,
-        request: RestateProcessCancelRequest,
-    ) -> Result<(), PluginError> {
-        self.worker()?
-            .request_process_cancel(&request.process_ref, &request.request)
-            .await
     }
 }
 

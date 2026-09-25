@@ -543,6 +543,17 @@ pub trait ProcessContinuationStore: Send + Sync {
         process_id: &ProcessId,
     ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
 
+    /// Retire every handover of `process_id` up to and including
+    /// `segment_ordinal`: the segment that resumed from it has handed the
+    /// process on and recorded the cancel it forwards (FIG-3673). A put never
+    /// retires an older handover, so a segment's handover outlives its
+    /// successor's start until the segment itself retires it.
+    async fn retire_segment_handovers_through(
+        &self,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+    ) -> Result<(), PluginError>;
+
     async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError>;
 
     /// The start marker of the handover retained for `segment`, or `None`

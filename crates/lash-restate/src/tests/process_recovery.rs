@@ -318,7 +318,7 @@ pub(super) async fn trigger_lashlang_registration(
 /// artifact names it by its derived lift identity, not by the binding the
 /// source spelled. A fixture that wants "the process this module declares"
 /// asks the artifact rather than repeating a name the source no longer owns.
-fn sole_lifted_process_name(artifact: &lashlang::ModuleArtifact) -> String {
+pub(super) fn sole_lifted_process_name(artifact: &lashlang::ModuleArtifact) -> String {
     let mut processes =
         artifact
             .ir()
@@ -546,7 +546,10 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
         let context = Arc::clone(&context);
         let process_id = process_id.clone();
         tokio::spawn(async move {
-            let controller = RestateRuntimeEffectController::new_for_test(context);
+            let controller = RestateRuntimeEffectController::with_options_for_test(
+                context,
+                RestateEffectControllerOptions::default().process_segment_drive(),
+            );
             workflow
                 .run_registration_for_test(
                     registration,
@@ -559,7 +562,6 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
                         .expect("sleeping process scope"),
                     0,
                     None,
-                    pending_process_cancel_signal(),
                 )
                 .await
         })
@@ -611,128 +613,7 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
 }
 
 #[tokio::test]
-pub(super) async fn process_sleep_wake_verdict_failure_retries_before_settling_recorded_cancel() {
-    let process_id = "sleep-cancel-read-retry";
-    let (registry, continuations) = process_stores();
-    let registration = sleeping_process_registration(&ProcessId::from(process_id)).await;
-    registry
-        .register_process(registration.clone())
-        .await
-        .expect("register sleeping process");
-    let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
-    let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
-        Arc::new(RestateCoreProcessRunner::new(worker)),
-        Arc::clone(&registry),
-        continuations,
-    ));
-    let context = Arc::new(ReplayableRecordingContext::default());
-    context.park_sleeps();
-    let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        process_id,
-        "sleep-cancel-read-retry-invocation",
-    );
-    let first_run = {
-        let workflow = Arc::clone(&workflow);
-        let context = Arc::clone(&context);
-        let registration = registration.clone();
-        let execution_write_authority = execution_write_authority.clone();
-        tokio::spawn(async move {
-            let controller = RestateRuntimeEffectController::new_for_test(context);
-            workflow
-                .run_registration_for_test(
-                    registration,
-                    ProcessExecutionContext::default()
-                        .with_execution_write_authority(execution_write_authority),
-                    controller
-                        .process_scope_for_test(durable_admission(&ExecutionScope::process(
-                            process_id,
-                        )))
-                        .expect("sleeping process scope"),
-                    0,
-                    None,
-                    pending_process_cancel_signal(),
-                )
-                .await
-        })
-    };
-
-    context.await_sleep_started().await;
-    registry
-        .append_event(
-            &ProcessId::from(process_id),
-            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
-&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:process_sleep_wake_verdict_failure_retries_before_settling_recorded_cancel", 11)),
-        )
-        .await
-        .expect("commit cancel before wake");
-    context.commit_process_cancel();
-    context.fail_next_process_cancel_peeks(1);
-    context.release_sleep();
-
-    let first_error = tokio::time::timeout(Duration::from_secs(5), first_run)
-        .await
-        .expect("first attempt must leave the guest after the wake-verdict failure")
-        .expect("join first sleeping process attempt")
-        .expect_err("wake-verdict failure must abort the handler instead of settling the process");
-    let first_error_debug = format!("{first_error:?}");
-    assert!(
-        first_error_debug.contains("Retryable")
-            && first_error_debug.contains("simulated transient wake-verdict peek failure"),
-        "wake-boundary verdict failure must request Restate redelivery: {first_error_debug}"
-    );
-    assert_eq!(
-        registry
-            .get_process(&ProcessId::from(process_id))
-            .await
-            .expect("read process after retryable failure")
-            .expect("sleeping process remains registered")
-            .status,
-        lash_core::ProcessStatus::Running,
-        "retryable wake-verdict failure must not terminalize the process"
-    );
-
-    // The failed attempt never journaled a verdict, so its redrive replays the
-    // recorded prefix and emits the wake verdict as a journal extension.
-    context.start_replay_allowing_journal_extension();
-    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let retry = tokio::time::timeout(
-        Duration::from_secs(5),
-        workflow.run_registration_for_test(
-            registration,
-            ProcessExecutionContext::default()
-                .with_execution_write_authority(execution_write_authority),
-            controller
-                .process_scope_for_test(durable_admission(&ExecutionScope::process(process_id)))
-                .expect("sleeping process retry scope"),
-            0,
-            None,
-            pending_process_cancel_signal(),
-        ),
-    )
-    .await
-    .expect("redelivery must not park on the already completed sleep")
-    .expect("redeliver sleeping process after transient registry failure");
-    assert!(
-        matches!(
-            retry,
-            lash_core::ProcessRunOutcome::Terminal { ref output, .. }
-                if output.terminal_status() == Some(lash_core::ProcessStatus::Cancelled)
-        ),
-        "redelivered process must settle the committed cancellation: {retry:#?}"
-    );
-    assert_eq!(
-        registry
-            .get_process(&ProcessId::from(process_id))
-            .await
-            .expect("read retried process")
-            .expect("retried process remains registered")
-            .status,
-        lash_core::ProcessStatus::Cancelled
-    );
-}
-
-#[tokio::test]
-pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_effect() {
+pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wake_effect() {
     let process_id = "sleep-cancel-post-wake-effect";
     let (registry, continuations) = process_stores();
     let registration = sleeping_then_tool_process_registration(&ProcessId::from(process_id)).await;
@@ -764,7 +645,10 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
         let registration = registration.clone();
         let execution_write_authority = execution_write_authority.clone();
         tokio::spawn(async move {
-            let controller = RestateRuntimeEffectController::new_for_test(context);
+            let controller = RestateRuntimeEffectController::with_options_for_test(
+                context,
+                RestateEffectControllerOptions::default().process_segment_drive(),
+            );
             workflow
                 .run_registration_for_test(
                     registration,
@@ -777,7 +661,6 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
                         .expect("sleeping post-wake-effect scope"),
                     0,
                     None,
-                    pending_process_cancel_signal(),
                 )
                 .await
         })
@@ -831,9 +714,14 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
         .await
         .expect("commit cancellation in the redelivery gap");
     let runs_before_redelivery = context.runs();
-    context.start_replay();
+    // Restate replays the acknowledged prefix and the attempt then runs on
+    // past it, extending the journal from where the crash cut it.
+    context.start_replay_allowing_journal_extension();
 
-    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
+    let controller = RestateRuntimeEffectController::with_options_for_test(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().process_segment_drive(),
+    );
     let redelivery = workflow
         .run_registration_for_test(
             registration,
@@ -844,37 +732,39 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
                 .expect("sleeping post-wake-effect redelivery scope"),
             0,
             None,
-            async { Ok(()) },
         )
         .await
-        .expect("ready cancellation must pre-empt guest replay");
+        .expect("the redelivery replays its recorded prefix");
 
+    // The drive observed no cancellation before the crash: its timer won the
+    // recorded race and its post-wake effect is journaled. A cancel landing in
+    // the redelivery gap is observed at the drive's next recorded wait,
+    // checkpoint or end, never by pre-empting the replay of what the journal
+    // already holds (FIG-3673).
     assert!(
         matches!(
             redelivery,
             lash_core::ProcessRunOutcome::Terminal { ref output, .. }
-                if output.terminal_status() == Some(lash_core::ProcessStatus::Cancelled)
+                if output.terminal_status() != Some(lash_core::ProcessStatus::Cancelled)
         ),
-        "redelivery must settle cancellation instead of replay mismatch: {redelivery:#?}"
+        "the redelivery must reach the terminal its journal records: {redelivery:#?}"
     );
+    assert_eq!(context.process_cancel_race_verdicts(), vec![false]);
     assert_eq!(
-        context.sleeps.lock_recover().as_slice(),
-        &[300_000],
-        "the biased cancellation branch must win before guest sleep replay"
+        context
+            .recorded_runtime_effect_envelopes()
+            .iter()
+            .filter(|(_, envelope)| matches!(
+                envelope.command,
+                RuntimeEffectCommand::ToolAttempt { .. }
+            ))
+            .count(),
+        1,
+        "the recorded post-wake effect is replayed, not run again"
     );
-    assert_eq!(
-        context.runs(),
-        runs_before_redelivery,
-        "the recorded post-wake effect must not be replayed after cancellation wins"
-    );
-    assert_eq!(
-        registry
-            .get_process(&ProcessId::from(process_id))
-            .await
-            .expect("read redelivered process")
-            .expect("redelivered process remains registered")
-            .status,
-        lash_core::ProcessStatus::Cancelled
+    assert!(
+        context.runs().starts_with(&runs_before_redelivery),
+        "the redelivery replays the recorded prefix before extending it"
     );
 }
 
@@ -1371,7 +1261,7 @@ pub(super) async fn process_deployment_driver_and_workflow_share_registry() {
 }
 
 #[tokio::test]
-pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
+pub(super) async fn process_workflow_impl_runs_through_runner() {
     let runner = Arc::new(RecordingRunner::default());
     let registry = process_registry();
     let workflow = LashProcessWorkflowImpl::new_for_test(
@@ -1398,19 +1288,6 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
         .expect("read workflow target")
         .expect("retained target");
     assert!(!record.is_terminal());
-    assert!(record.cancel_request.is_none());
-    let cancel = RestateProcessCancelRequest {
-        process_ref: lash_core::ProcessRef::from_record(&record),
-        request: lash_core::CancelRequest::new(
-            lash_core::CancelOrigin::OperatorRequested,
-            "actor:workflow-test",
-            11,
-        ),
-    };
-    workflow
-        .cancel_registration(cancel.clone())
-        .await
-        .expect("workflow cancel while target is nonterminal");
 
     let output = workflow
         .run_registration_for_test(
@@ -1423,7 +1300,6 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
             .expect("process scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect("workflow run");
@@ -1441,10 +1317,6 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
             tool_effect_id: Some("tool-effect".to_string()),
             execution_scope_id: "task-workflow".to_string(),
         }]
-    );
-    assert_eq!(
-        runner.cancelled.lock_recover().as_slice(),
-        std::slice::from_ref(&cancel)
     );
 }
 
@@ -1686,7 +1558,6 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
             .expect("process scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect("run_registration");
@@ -1743,7 +1614,6 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
             .expect("process scope"),
             0,
             None,
-            pending_process_cancel_signal(),
         )
         .await
         .expect("run_registration");

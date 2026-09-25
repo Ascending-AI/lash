@@ -699,6 +699,11 @@ impl RuntimeSessionServices {
     ///
     /// Cancellation is the standard turn cancellation, not a teardown path:
     ///
+    /// Before the create commit and again before turn admission, the process's
+    /// cancellation is read through the engine's recorded observation
+    /// (`observe_process_cancel`), so a redrive takes the branch the first
+    /// execution took (FIG-3673).
+    ///
     /// * Observed before the create commit, nothing is created. A cancelled
     ///   redelivery still reconciles first: a previous attempt may have
     ///   committed the child and accepted this turn's input before crashing,
@@ -733,7 +738,20 @@ impl RuntimeSessionServices {
             cancellation,
         } = request;
         let requested_session_id = create_request.session_id.clone();
-        if cancellation.is_cancelled() {
+        // The process's cancellation is read through the engine's recorded
+        // observation, never from the lent stop directly: on a journaled
+        // engine a redrive must take the branch the first execution took
+        // (FIG-3673). A peek the engine cannot answer ends the attempt
+        // recoverably.
+        let cancelled_before_create = scoped_effect_controller
+            .controller()
+            .observe_process_cancel(&cancellation)
+            .await
+            .map_err(|source| SessionTurnInitError::Reconcile {
+                session_id: requested_session_id.clone(),
+                source: Box::new(crate::PluginError::RuntimeEffectController(source)),
+            })?;
+        if cancelled_before_create {
             self.settle_cancelled_process_child_inputs(
                 requested_session_id.as_ref(),
                 process_id,
@@ -804,7 +822,15 @@ impl RuntimeSessionServices {
                     "process child session `{session_id}` was not initialized for this run"
                 ))),
             })?;
-        if cancellation.is_cancelled() {
+        let cancelled_after_create = scoped_effect_controller
+            .controller()
+            .observe_process_cancel(&cancellation)
+            .await
+            .map_err(|source| SessionTurnInitError::Reconcile {
+                session_id: Some(session_id.clone()),
+                source: Box::new(crate::PluginError::RuntimeEffectController(source)),
+            })?;
+        if cancelled_after_create {
             self.settle_cancelled_process_child_inputs(Some(&session_id), process_id, &turn_id)
                 .await
                 .map_err(|source| SessionTurnInitError::Reconcile {

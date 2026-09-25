@@ -45,6 +45,7 @@ use lash_core::{
 };
 use restate_sdk::context::RunRetryPolicy;
 use restate_sdk::errors::TerminalError;
+use restate_sdk::serde::Json;
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitResolveRequest, RestateTurnCancelRaceOutcome,
@@ -85,6 +86,10 @@ pub struct RestateEffectControllerOptions {
     /// is vacuous here — but the option is held so the three tiers carry one
     /// construction-level vocabulary (FIG-3410).
     drain_budget: Duration,
+    /// Whether this controller drives a process segment, whose waits that
+    /// observe no turn race the segment's durable cancel promise and whose
+    /// cancel peeks read it (FIG-3673).
+    process_cancel: context::ProcessCancelRace,
 }
 
 impl Default for RestateEffectControllerOptions {
@@ -94,6 +99,7 @@ impl Default for RestateEffectControllerOptions {
             segment_effect_budget: 10_000,
             journaled_effect_byte_budget: None,
             drain_budget: lash_core::EffectGroupDrainBudget::DEFAULT.duration(),
+            process_cancel: context::ProcessCancelRace::NotRaced,
         }
     }
 }
@@ -163,6 +169,16 @@ impl RestateEffectControllerOptions {
         self.drain_budget = budget.duration();
         self
     }
+
+    /// Mark the controller as a process segment's drive (FIG-3673): a wait
+    /// it issues that observes no turn races the segment's durable cancel
+    /// promise, and [`observe_process_cancel`](RuntimeEffectController::observe_process_cancel)
+    /// is a journaled peek of that promise. Only the process workflow sets
+    /// it, on the workflow context whose promise it is.
+    pub(crate) fn process_segment_drive(mut self) -> Self {
+        self.process_cancel = context::ProcessCancelRace::Raced;
+        self
+    }
 }
 
 impl fmt::Debug for RestateEffectControllerOptions {
@@ -175,6 +191,7 @@ impl fmt::Debug for RestateEffectControllerOptions {
                 &self.journaled_effect_byte_budget,
             )
             .field("drain_budget", &self.drain_budget)
+            .field("process_cancel", &self.process_cancel)
             .finish()
     }
 }
@@ -656,7 +673,7 @@ where
                         request,
                         group_key.clone(),
                         None,
-                        tokio_util::sync::CancellationToken::new(),
+                        context::ProcessCancelRace::NotRaced,
                     )
                     .await
                     .map_err(|error| {
@@ -667,6 +684,7 @@ where
                     })? {
                     RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
                     RestateTurnCancelRaceOutcome::TurnCancelled
+                    | RestateTurnCancelRaceOutcome::ProcessCancelled
                     | RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
                         return Err(group_shape_error(format!(
                             "opening effect group {group_key} was cancelled while awaiting READY"
@@ -741,10 +759,10 @@ where
             let scope = ExecutionScope::runtime_operation(handle.group_key());
             let request = rank_wait_request(&scope, handle.group_key(), rank)?;
             // A turn-observing rank wait races the turn's durable cancellation
-            // gate, never a live token: the journal records which completed
-            // first (FIG-3672 P9). A rank wait that observes no turn (a
-            // process body's) still races its execution's own token: P16
-            // (FIG-3673) replaces with a recorded race.
+            // gate, and a process drive's rank wait that observes no turn
+            // races the segment's durable cancel promise; never a live token.
+            // The journal records which completed first (FIG-3672 P9,
+            // FIG-3673).
             let turn_cancel = restate_group_turn_cancel_wait_request(&self.authority_id, &cancel)?;
             let resolution = match self
                 .context
@@ -752,7 +770,7 @@ where
                     request,
                     handle.group_key().to_string(),
                     turn_cancel,
-                    cancel.cancellation().clone(),
+                    self.options.process_cancel,
                 )
                 .await
                 .map_err(|error| {
@@ -762,7 +780,8 @@ where
                     )
                 })? {
                 RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
-                RestateTurnCancelRaceOutcome::TurnCancelled => {
+                RestateTurnCancelRaceOutcome::TurnCancelled
+                | RestateTurnCancelRaceOutcome::ProcessCancelled => {
                     return Err(RuntimeEffectControllerError::new(
                         RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
                         format!(
@@ -939,6 +958,56 @@ where
         Ok(lash_core::RecordedJournal::Positional)
     }
 
+    /// A journaled peek of the segment workflow's own cancel promise, for a
+    /// process segment's drive, which never reads `lent_stop`. Any other
+    /// controller drives no process segment and records no process
+    /// cancellation fact, so it answers from the stop (FIG-3673).
+    async fn observe_process_cancel(
+        &self,
+        lent_stop: &tokio_util::sync::CancellationToken,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        match self.options.process_cancel {
+            context::ProcessCancelRace::NotRaced => Ok(lent_stop.is_cancelled()),
+            context::ProcessCancelRace::Raced => self
+                .context
+                .peek_process_cancel_requested()
+                .await
+                .map_err(|err| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RestateProcessCancel,
+                        err.to_string(),
+                    )
+                }),
+        }
+    }
+
+    /// One `ctx.run` step named `name`: its answer is journaled and replayed
+    /// (FIG-3673). A retryable fault ends the attempt unrecorded; any other
+    /// refusal is recorded as the step's answer.
+    async fn record_process_drive_step(
+        &self,
+        name: String,
+        step: lash_core::ProcessDriveStep<'_>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let Json(recorded) = self
+            .context
+            .run_json_or_retry_send::<Result<(), PluginError>, _>(name, async move {
+                match step.await {
+                    Ok(()) => Ok(Ok(())),
+                    Err(error) if error.is_retryable() => Err(error.to_string()),
+                    Err(error) => Ok(Err(error)),
+                }
+            })
+            .await
+            .map_err(|err| {
+                RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RestateEffectController,
+                    err.to_string(),
+                )
+            })?;
+        recorded.map_err(RuntimeEffectControllerError::from)
+    }
+
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,
@@ -973,6 +1042,7 @@ where
             } => execute_restate_process_command(
                 &self.context,
                 &self.authority_id,
+                self.options.process_cancel,
                 &invocation,
                 *command,
                 local_executor,
@@ -1010,6 +1080,7 @@ where
                         execute_restate_process_command(
                             &self.context,
                             &self.authority_id,
+                            self.options.process_cancel,
                             &invocation,
                             *command,
                             local_executor,
@@ -1027,7 +1098,7 @@ where
             }
             RestateEffectExecution::Timer { invocation, spec } => {
                 let RuntimeSleepOptions {
-                    cancellation,
+                    cancellation: _,
                     observe_turn_cancel,
                     turn_cancel_scope,
                     clock,
@@ -1050,7 +1121,7 @@ where
                 )?;
                 match self
                     .context
-                    .sleep_or_turn_cancel(duration, turn_cancel, cancellation.clone())
+                    .sleep_or_turn_cancel(duration, turn_cancel, self.options.process_cancel)
                     .await
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(())) => {}
@@ -1065,7 +1136,10 @@ where
                             lash_core::StoreError::SessionDeleted { session_id },
                         ));
                     }
-                    Ok(RestateTurnCancelRaceOutcome::TurnCancelled) => {
+                    Ok(
+                        RestateTurnCancelRaceOutcome::TurnCancelled
+                        | RestateTurnCancelRaceOutcome::ProcessCancelled,
+                    ) => {
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableTimerResolved {
                                 duration_ms,
@@ -1091,47 +1165,6 @@ where
                         ));
                     }
                 }
-                if matches!(
-                    invocation.execution_scope(),
-                    lash_sansio::ExecutionScope::Process { .. }
-                ) {
-                    // FIG-3149: process sleeps stay uninterruptible, and the
-                    // wake is where a committed cancellation takes ownership of
-                    // settlement. Read that verdict through a journaled peek of
-                    // the process workflow's own cancel promise: a live read
-                    // here can answer differently on redrive, and the guest
-                    // suffix it selects then diverges from the recorded
-                    // journal.
-                    let cancel_requested = self
-                        .context
-                        .peek_process_cancel_requested()
-                        .await
-                        .map_err(|err| {
-                            // Reading the verdict is the cancellation read this
-                            // class already names: a transient failure asks for
-                            // redelivery instead of terminalizing the process.
-                            RuntimeEffectControllerError::new(
-                                RuntimeErrorCode::RestateProcessCancel,
-                                err.to_string(),
-                            )
-                        })?;
-                    if cancel_requested {
-                        self.emit_trace(Some(&invocation), || {
-                            lash_trace::TraceEvent::DurableTimerResolved {
-                                duration_ms,
-                                status: lash_trace::TraceDurableTimerStatus::Cancelled,
-                            }
-                        });
-                        // The process body's own stop (not a turn's): the
-                        // process drive still reads its token. P16 (FIG-3673)
-                        // replaces with a recorded race.
-                        cancellation.cancel();
-                        return Err(RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::RuntimeEffectSleepCancelled,
-                            "runtime effect sleep observed process cancellation at wake",
-                        ));
-                    }
-                }
                 self.emit_trace(Some(&invocation), || {
                     lash_trace::TraceEvent::DurableTimerResolved {
                         duration_ms,
@@ -1154,12 +1187,12 @@ where
                     .await
                     .map_err(RuntimeEffectControllerError::from)?;
                 // A turn's cancellation reaches this wait only through the
-                // durable gate race below (FIG-3672 P9). The token is raced
-                // only by a wait that observes no turn, such as a process
-                // body's `waitSignal`: P16 (FIG-3673) replaces with a recorded
-                // race.
+                // durable gate race below (FIG-3672 P9); a process drive's
+                // wait that observes no turn, such as a process body's
+                // `waitSignal`, races the segment's durable cancel promise
+                // (FIG-3673). No live token reaches it.
                 let RuntimeAwaitEventOptions {
-                    cancellation,
+                    cancellation: _,
                     deadline,
                     clock,
                     observe_turn_cancel,
@@ -1192,7 +1225,12 @@ where
                 let replay_key = invocation.replay_key().to_string();
                 match self
                     .context
-                    .await_event_or_turn_cancel(request, replay_key, turn_cancel, cancellation)
+                    .await_event_or_turn_cancel(
+                        request,
+                        replay_key,
+                        turn_cancel,
+                        self.options.process_cancel,
+                    )
                     .await
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(resolution)) => {
@@ -1214,6 +1252,17 @@ where
                         Err(RuntimeEffectControllerError::from(
                             lash_core::StoreError::SessionDeleted { session_id },
                         ))
+                    }
+                    Ok(RestateTurnCancelRaceOutcome::ProcessCancelled) => {
+                        self.emit_trace(Some(&invocation), || {
+                            lash_trace::TraceEvent::DurableWaitResolved {
+                                wait_kind: "await_event".to_string(),
+                                resolution: lash_trace::TraceDurableWaitResolution::Cancelled,
+                            }
+                        });
+                        Ok(RuntimeEffectOutcome::AwaitEvent {
+                            resolution: Resolution::Cancelled,
+                        })
                     }
                     Ok(RestateTurnCancelRaceOutcome::TurnCancelled) => {
                         self.emit_trace(Some(&invocation), || {

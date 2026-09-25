@@ -530,6 +530,7 @@ impl DurableProcessWorker {
             scoped_effect_controller,
             cancellation,
             handover,
+            SegmentAdmissionOwner::Substrate,
         )
         .await
     }
@@ -544,6 +545,7 @@ impl DurableProcessWorker {
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
+        admission: SegmentAdmissionOwner,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
         let attachment_owner = crate::ProcessRef::from_record(&current);
         let (owner, fencing_token) = match &execution_write_authority {
@@ -576,27 +578,37 @@ impl DurableProcessWorker {
             Some(started) => started.replay_grammar,
             None => self.replay_key_grammar(&registration),
         };
-        let admitted = self
-            .config
-            .process_registry()
-            .record_first_started_with_authority(
-                &registration.id,
-                crate::ProcessStarted {
-                    owner,
-                    fencing_token,
-                    attempt,
-                    started_at_ms: self.now_ms(),
-                    replay_grammar,
-                },
-                &execution_write_authority,
-            )
-            .await?
-            .into_record()?;
-        // The attachment owner was read from `current`, before this authority
-        // CAS. The CAS is what decides whether this execution may write at all,
-        // and it refuses a superseded incarnation, so reaching here means the
-        // record it admitted still carries the incarnation we are about to bind
-        // under. Pinned because an owner bound from a stale incarnation would
+        // A durable substrate admits a segment in its own journal before the
+        // worker runs it (FIG-3588): the start record it wrote is read here,
+        // never written again. A second write on every redrive would be live
+        // registry I/O that answers differently once the process is terminal,
+        // and a redrive reaches it after the terminal is stored (FIG-3673).
+        // Only a record that holds no start yet is started here.
+        let admitted = match (admission, current.first_started.is_some()) {
+            (SegmentAdmissionOwner::Substrate, true) => current.clone(),
+            _ => self
+                .config
+                .process_registry()
+                .record_first_started_with_authority(
+                    &registration.id,
+                    crate::ProcessStarted {
+                        owner,
+                        fencing_token,
+                        attempt,
+                        started_at_ms: self.now_ms(),
+                        replay_grammar,
+                    },
+                    &execution_write_authority,
+                )
+                .await?
+                .into_record()?,
+        };
+        // The attachment owner was read from `current`, before the start that
+        // admitted this execution: this worker's authority CAS, or the
+        // substrate's own journaled start, which recorded the same record's
+        // incarnation. Either refuses a superseded incarnation, so reaching here
+        // means the admitted record still carries the incarnation we are about
+        // to bind under. Pinned because an owner bound from a stale incarnation would
         // root the earlier incarnation's blobs forever (FIG-2980), and because
         // the binding below must never be hoisted above this call.
         debug_assert_eq!(
@@ -1377,6 +1389,7 @@ impl DurableProcessWorker {
             scoped_effect_controller,
             cancellation.clone(),
             handover,
+            SegmentAdmissionOwner::Worker,
         );
         tokio::pin!(pending);
         loop {
@@ -1493,6 +1506,42 @@ impl DurableProcessWorker {
             )
             .await
             .map(|_| ())
+    }
+
+    /// Ask the child turn a `SessionTurn` process drives to stop now, as a
+    /// durable request on the turn's cancellation gate (FIG-3673).
+    ///
+    /// A process cancel reaches its child turn through this request whether
+    /// or not the process is running anywhere: the turn honours it where it
+    /// honours any request, and a redrive of the turn observes it through its
+    /// recorded peeks. The request is idempotent under one id per process
+    /// incarnation. A process that is not a `SessionTurn`, or whose child
+    /// session id is not recorded, has no addressable turn and is left to its
+    /// recorded waits and peeks.
+    pub async fn request_session_turn_child_stop(
+        &self,
+        record: &crate::ProcessRecord,
+        request: &crate::CancelRequest,
+    ) -> Result<(), PluginError> {
+        let ProcessInput::SessionTurn { create_request, .. } = record.input.as_ref() else {
+            return Ok(());
+        };
+        let Some(session_id) = create_request.session_id.clone() else {
+            return Ok(());
+        };
+        let turn_request = crate::TurnCancelRequest::new(
+            crate::TurnAddress::new(session_id, crate::TurnId::from(record.id.as_str())),
+            format!("process-cancel:{}:{}", record.id, record.incarnation),
+            Some(request.requester.clone()),
+        );
+        crate::TurnWorkDriver::for_catalog(
+            Arc::clone(&self.config.runtime_host.control.effect_host),
+            self.config.session_store_factory(),
+        )
+        .request_cancel(turn_request)
+        .await
+        .map(|_| ())
+        .map_err(PluginError::Runtime)
     }
 
     async fn runtime_for_registration(
@@ -1699,4 +1748,14 @@ fn parking_refusal(error: &PluginError) -> Option<&crate::RuntimeEffectControlle
         PluginError::RuntimeEffectController(refusal) if refusal.code.parks_turn() => Some(refusal),
         _ => None,
     }
+}
+
+/// Who recorded a segment's start before the worker runs it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SegmentAdmissionOwner {
+    /// The worker's own lease-fenced start CAS admits the attempt.
+    Worker,
+    /// A durable substrate admitted the segment in its own journal and wrote
+    /// the start record; the worker only reads it.
+    Substrate,
 }

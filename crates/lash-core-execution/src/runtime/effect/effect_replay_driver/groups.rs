@@ -858,8 +858,8 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             }
             tokio::select! {
                 // The execution's own stop: for a rank wait that observes no
-                // turn (a process body's), the process drive's. P16
-                // (FIG-3673) replaces with a recorded race.
+                // turn (a process body's), its lent stop, until FIG-3668
+                // deletes this SQL driver (Restate records the race, FIG-3673).
                 () = cancel.cancelled() => {
                     return Err(await_cancelled_error(handle.group_key(), rank));
                 }

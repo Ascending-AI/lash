@@ -560,10 +560,12 @@ pub async fn run_lashlang_process(
         lashlang_execution_trace.emit_started(&artifact);
     }
     let processes = context.processes();
-    // The run's own cancellation scope: cancelled when the engine cancels this
-    // process, and also when the run itself observes a terminal the guest may
-    // not catch — a cancelled tool call.
-    let cancellation = crate::ExecutionCancellation::child_of(&context.cancellation_token());
+    // The drive's recorded cancellation fact (FIG-3673): advanced only by what
+    // the engine recorded — a cancelled tool outcome, a wait the process's
+    // cancellation won, a cancel checkpoint's recorded peek — so a replay
+    // advances it at the same point. The engine's live stop is lent to step
+    // bodies and never read here.
+    let cancellation = crate::ExecutionCancellation::new();
     let (ctx, guard, mut state) = {
         let _phase = context.named_phase("rlm_process.build_context");
         let runtime_context = match context.into_runtime_context(tool_catalog) {
@@ -742,26 +744,19 @@ async fn execute_lashlang(
     };
     let mut progress = lash_core::SegmentProgress::default();
     loop {
+        // The VM runs until an effect or its end; its cancel checkpoints are
+        // its only waits on a long stretch of pure compute, and each one is a
+        // recorded peek of the process's cancellation (FIG-3673).
         let execution = if env.trace_runtime_errors() {
-            tokio::select! {
-                _ = cancellation.cancelled() => {
-                    return process_lashlang_cancelled("lashlang process was cancelled").into();
-                }
-                result = vm.run_process_traced_until_effect() => {
-                    result.map_err(|failure| {
-                        let error = failure.error.clone();
-                        env.observe_runtime_failure(failure);
-                        error
-                    })
-                }
-            }
+            vm.run_process_traced_until_effect()
+                .await
+                .map_err(|failure| {
+                    let error = failure.error.clone();
+                    env.observe_runtime_failure(failure);
+                    error
+                })
         } else {
-            tokio::select! {
-                _ = cancellation.cancelled() => {
-                    return process_lashlang_cancelled("lashlang process was cancelled").into();
-                }
-                result = vm.run_process_until_effect() => result,
-            }
+            vm.run_process_until_effect().await
         };
         if cancellation.is_cancelled() {
             return process_lashlang_cancelled("lashlang process was cancelled").into();
@@ -847,11 +842,11 @@ struct LashlangProcessHost<'run> {
     /// Attempt bound stamped onto every child this run starts, resolved once
     /// at the run's first segment and replayed from segment state afterwards.
     child_max_attempts: std::num::NonZeroU32,
-    /// This run's cancellation scope, read by the VM's cooperative cancellation
-    /// probe so a cancelled process terminates as an uncatchable host terminal
-    /// instead of running to completion inside a guest handler. It carries the
-    /// engine's cancellation and the cancellations this run observes for itself,
-    /// which is where a cancelled tool call lands.
+    /// This run's recorded cancellation fact, read by the VM's cooperative
+    /// cancellation probe so a cancelled process terminates as an uncatchable
+    /// host terminal instead of running to completion inside a guest handler.
+    /// Only recorded observations advance it: a cancelled tool call, a wait
+    /// the process's cancellation won, a cancel checkpoint (FIG-3673).
     cancellation: crate::ExecutionCancellation,
     /// The durable effect summary this run writes at result incorporation.
     effect_summary: EffectSummaryWriter,
@@ -871,6 +866,10 @@ trait SignalWaitProcesses: Send + Sync {
     >;
 
     async fn set_wait(&self, wait: lash_core::WaitState) -> Result<(), lash_core::PluginError>;
+
+    async fn clear_wait(&self) -> Result<(), lash_core::PluginError>;
+
+    async fn is_terminal(&self) -> Result<bool, lash_core::PluginError>;
 }
 
 #[async_trait::async_trait]
@@ -897,6 +896,35 @@ impl SignalWaitProcesses for lash_core::facade_support::ProcessEngineProcessCont
 
     async fn set_wait(&self, wait: lash_core::WaitState) -> Result<(), lash_core::PluginError> {
         self.set_wait(wait).await.map(|_| ())
+    }
+
+    async fn clear_wait(&self) -> Result<(), lash_core::PluginError> {
+        self.clear_wait().await.map(|_| ())
+    }
+
+    async fn is_terminal(&self) -> Result<bool, lash_core::PluginError> {
+        Ok(self
+            .record()
+            .await?
+            .is_some_and(|record| record.is_terminal()))
+    }
+}
+
+/// A wait-state write the registry refused because the process is already
+/// terminal is settled, not failed: the process's terminal was stored (a
+/// redrive after the completion step replays the body over it), and a wait
+/// on a terminal process has nothing left to record (FIG-3673).
+async fn settle_wait_write(
+    processes: &dyn SignalWaitProcesses,
+    written: Result<(), lash_core::PluginError>,
+) -> Result<(), lash_core::PluginError> {
+    match written {
+        Ok(()) => Ok(()),
+        Err(error) => match processes.is_terminal().await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(error),
+            Err(read) => Err(read),
+        },
     }
 }
 
@@ -925,8 +953,8 @@ async fn establish_signal_wait(
             ordinal,
         },
     };
-    processes
-        .set_wait(wait)
+    let written = processes.set_wait(wait).await;
+    settle_wait_write(processes, written)
         .await
         .map_err(SignalWaitSetupError::Set)?;
     Ok(())
@@ -1222,6 +1250,10 @@ impl LashlangProcessHost<'_> {
             Err(error)
                 if error.code == lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled =>
             {
+                // The process's cancellation won the recorded race with the
+                // timer: the drive's fact advances here, at the same point on
+                // every replay.
+                self.cancellation.cancel();
                 Some(lash_core::ProcessEffectOutcomeClass::Cancelled)
             }
             Err(_) => None,
@@ -1284,29 +1316,43 @@ impl LashlangProcessHost<'_> {
             &name,
             event_ordinal,
         );
-        establish_signal_wait(
-            &self.processes,
-            &self.process_id,
-            name.clone(),
-            event_type,
-            key.clone(),
-            event_ordinal,
-        )
-        .await
-        .map_err(|error| match error {
-            SignalWaitSetupError::Read(error) => LashlangHostError::ReadSignalWait {
+        // The wait-state write is a step the engine records: a redrive after
+        // the terminal is stored replays its answer instead of meeting a
+        // registry that refuses a terminal process's wait (FIG-3673).
+        let processes = self.processes.clone();
+        let process_id = self.process_id.clone();
+        let step_key = key.clone();
+        let step_name = name.clone();
+        self.ctx
+            .record_process_drive_step(
+                format!("lash.process.wait.enter:{key}"),
+                Box::pin(async move {
+                    establish_signal_wait(
+                        &processes,
+                        &process_id,
+                        step_name,
+                        event_type,
+                        step_key,
+                        event_ordinal,
+                    )
+                    .await
+                    .map_err(|error| match error {
+                        SignalWaitSetupError::Read(error) | SignalWaitSetupError::Set(error) => {
+                            error
+                        }
+                    })
+                }),
+            )
+            .await
+            .map_err(|error| LashlangHostError::SetSignalWait {
                 message: error.to_string(),
-            },
-            SignalWaitSetupError::Set(error) => LashlangHostError::SetSignalWait {
-                message: error.to_string(),
-            },
-        })?;
+            })?;
         if let Some(call_site) = &call_site {
             self.lashlang_execution_trace.emit_waiting(
                 call_site,
                 TraceNodeAwaited::Signal {
                     name: name.clone(),
-                    key,
+                    key: key.clone(),
                 },
             );
         }
@@ -1320,6 +1366,13 @@ impl LashlangProcessHost<'_> {
             )
             .await;
         commands.finish(&in_flight)?;
+        if matches!(&payload, Err(error)
+            if error.code == lash_core::RuntimeErrorCode::ProcessSignalWaitCancelled)
+        {
+            // The recorded wait ended cancelled: the process's cancellation
+            // won its race, or its wait was cancelled for it.
+            self.cancellation.cancel();
+        }
         let payload = payload.map_err(|error| {
             commands.journal_error(&in_flight, error, |error| {
                 LashlangHostError::AwaitSignal {
@@ -1328,8 +1381,15 @@ impl LashlangProcessHost<'_> {
                 .into()
             })
         })?;
-        self.processes
-            .clear_wait()
+        let processes = self.processes.clone();
+        self.ctx
+            .record_process_drive_step(
+                format!("lash.process.wait.clear:{key}"),
+                Box::pin(async move {
+                    let cleared = SignalWaitProcesses::clear_wait(&processes).await;
+                    settle_wait_write(&processes, cleared).await
+                }),
+            )
             .await
             .map_err(|error| LashlangHostError::ClearSignalWait {
                 message: error.to_string(),
@@ -1400,6 +1460,24 @@ impl lashlang::ExecutionHost for LashlangProcessHost<'_> {
 
     fn is_cancelled(&self) -> bool {
         self.cancellation.is_cancelled()
+    }
+
+    /// The body's cancel checkpoint (FIG-3673): the engine's recorded peek of
+    /// the process's cancellation, at an instruction count a replay reaches
+    /// again. A peek the controller refuses — a replay divergence among them —
+    /// ends the body like any nested effect it refused.
+    async fn cancel_checkpoint(&self, _checkpoint: u64) {
+        if self.cancellation.is_cancelled() {
+            return;
+        }
+        match self.ctx.process_cancel_checkpoint().await {
+            Ok(false) => {}
+            Ok(true) => self.cancellation.cancel(),
+            Err(error) => {
+                self.ctx.record_nested_effect_error(error);
+                self.cancellation.cancel();
+            }
+        }
     }
 
     fn observes_lashlang_execution(&self) -> bool {

@@ -23,12 +23,6 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
                 handover.segment_ordinal
             )));
         }
-        sqlx::query(process_sql().handover.delete_superseded.sql())
-            .bind(process_id.as_str())
-            .bind(handover.segment_ordinal as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(())
     }
@@ -109,6 +103,20 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
             )));
         };
         serde_json::from_str(&recorded).map_err(process_decode_error)
+    }
+
+    async fn retire_segment_handovers_through(
+        &self,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+    ) -> Result<(), PluginError> {
+        sqlx::query(process_sql().handover.delete_through.sql())
+            .bind(process_id.as_str())
+            .bind(segment_ordinal as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        Ok(())
     }
 
     async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError> {

@@ -80,7 +80,7 @@ pub(super) fn encode_input_command(payload: &[u8]) -> Bytes {
     encode_restate_message(0x0400, command.to_vec())
 }
 
-fn encode_invocation_body<T: serde::Serialize>(
+pub(super) fn encode_invocation_body<T: serde::Serialize>(
     workflow_key: &str,
     input: &T,
 ) -> Result<Bytes, TerminalError> {
@@ -292,10 +292,10 @@ pub(super) fn restate_recorded_commands(output: &[u8]) -> Option<Vec<RecordedCom
                     Some(u32::try_from(protobuf_varint_field(frame.get(8..)?, 10)?).ok()?),
                     None,
                 ),
-                // FIG-3149: the journaled wake verdict peeks the process
-                // cancellation promise, and its notification answers on the
+                // A process drive's cancel peek (0x040A) and the cancel promise
+                // its waits race (0x0409, FIG-3673) are answered on the
                 // command's own result completion id.
-                0x040A => (
+                0x0409 | 0x040A => (
                     Some(u32::try_from(protobuf_varint_field(frame.get(8..)?, 11)?).ok()?),
                     None,
                 ),
@@ -417,6 +417,15 @@ pub(super) fn encode_recorded_commands_with_invocations_replay<T: serde::Seriali
                 let value = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
                 body.extend_from_slice(&encode_call_completion(completion_id, &value));
             }
+            // FIG-3673: the cancel promise a process wait races completes
+            // with `value`; `None` leaves it pending.
+            0x0409 => {
+                let Some(value) = complete(command) else {
+                    continue;
+                };
+                let value = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
+                body.extend_from_slice(&encode_get_promise_completion(completion_id, &value));
+            }
             // FIG-3149: `Null` answers the peek with the void an unresolved
             // promise reads as; any other value resolves it.
             0x040A => {
@@ -482,6 +491,16 @@ pub(super) fn encode_call_completion(completion_id: u32, value: &[u8]) -> Bytes 
     put_varint_field(&mut notification, 1, u64::from(completion_id));
     put_len_field(&mut notification, 5, &nested_value);
     encode_restate_message(0x800D, notification.to_vec())
+}
+
+/// `GetPromiseCompletionNotification` (0x8009) carrying the resolved value.
+pub(super) fn encode_get_promise_completion(completion_id: u32, value: &[u8]) -> Bytes {
+    let mut nested_value = BytesMut::new();
+    put_len_field(&mut nested_value, 1, value);
+    let mut notification = BytesMut::new();
+    put_varint_field(&mut notification, 1, u64::from(completion_id));
+    put_len_field(&mut notification, 5, &nested_value);
+    encode_restate_message(0x8009, notification.to_vec())
 }
 
 /// FIG-3149: `PeekPromiseCompletionNotification` (0x800A). `None` is the void
@@ -628,71 +647,34 @@ pub(super) fn encode_completed_gate_sleep_replay<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
-/// FIG-788: splice the exact deployed segment-finish and successor-send
-/// commands, then complete only the send's invocation-id notification.
+/// FIG-788: replay every command a segment recorded up to its successor send —
+/// its boundary and handover steps, its segment-finished promise and the send
+/// — completing its runs, its calls and the send's invocation-id notification.
 pub(super) fn encode_process_segment_send_replay<T: serde::Serialize>(
     workflow_key: &str,
     input: &T,
     suspended_output: &[u8],
 ) -> Result<Bytes, TerminalError> {
-    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
-    let segment_finished = restate_message_frame(suspended_output, 0x040B)
-        .ok_or_else(|| TerminalError::new("segment attempt omitted CompletePromiseCommand"))?;
-    let successor_send = restate_message_frame(suspended_output, 0x040E)
-        .ok_or_else(|| TerminalError::new("segment attempt omitted OneWayCallCommand"))?;
-    let completion_id = u32::try_from(
-        protobuf_varint_field(
-            successor_send
-                .get(8..)
-                .ok_or_else(|| TerminalError::new("successor send omitted its frame payload"))?,
-            10,
-        )
-        .ok_or_else(|| TerminalError::new("successor send omitted its invocation-id index"))?,
+    encode_recorded_commands_with_invocations_replay(
+        workflow_key,
+        input,
+        &[suspended_output],
+        &["inv_fig788_successor"],
+        |command| (command.message_type == 0x040D).then_some(serde_json::Value::Null),
     )
-    .map_err(|_| TerminalError::new("successor invocation-id index exceeded u32"))?;
-    let mut body = BytesMut::new();
-    body.extend_from_slice(&encode_start_message(workflow_key, 3));
-    body.extend_from_slice(&encode_input_command(&input));
-    body.extend_from_slice(segment_finished);
-    body.extend_from_slice(successor_send);
-    body.extend_from_slice(&encode_invocation_id_completion(
-        completion_id,
-        "inv_fig788_successor",
-    ));
-    Ok(body.freeze())
 }
 
-/// FIG-788: splice the exact segment-finished and terminal-delivery commands
-/// from an ordinal greater than zero, then complete the terminal call.
+/// FIG-788: replay every command an ordinal greater than zero recorded up to
+/// its terminal delivery — its completion step, its segment-finished promise
+/// and its terminal call — and complete the terminal call.
 pub(super) fn encode_process_terminal_delivery_replay<T: serde::Serialize>(
     workflow_key: &str,
     input: &T,
     suspended_output: &[u8],
 ) -> Result<Bytes, TerminalError> {
-    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
-    let segment_finished = restate_message_frame(suspended_output, 0x040B)
-        .ok_or_else(|| TerminalError::new("terminal attempt omitted CompletePromiseCommand"))?;
-    let terminal_call = restate_message_frame(suspended_output, 0x040D)
-        .ok_or_else(|| TerminalError::new("terminal attempt omitted CallCommand"))?;
-    let completion_id = u32::try_from(
-        protobuf_varint_field(
-            terminal_call
-                .get(8..)
-                .ok_or_else(|| TerminalError::new("terminal call omitted its frame payload"))?,
-            11,
-        )
-        .ok_or_else(|| TerminalError::new("terminal call omitted its completion id"))?,
-    )
-    .map_err(|_| TerminalError::new("terminal call completion id exceeded u32"))?;
-    let completion =
-        serde_json::to_vec(&serde_json::Value::Null).map_err(TerminalError::from_error)?;
-    let mut body = BytesMut::new();
-    body.extend_from_slice(&encode_start_message(workflow_key, 3));
-    body.extend_from_slice(&encode_input_command(&input));
-    body.extend_from_slice(segment_finished);
-    body.extend_from_slice(terminal_call);
-    body.extend_from_slice(&encode_call_completion(completion_id, &completion));
-    Ok(body.freeze())
+    encode_recorded_commands_replay(workflow_key, input, &[suspended_output], |command| {
+        (command.message_type == 0x040D).then_some(serde_json::Value::Null)
+    })
 }
 
 /// FIG-793: splice a suspended pre-fix `RunCommand` and complete it with the
@@ -1303,22 +1285,6 @@ pub(super) async fn invoke_endpoint_body(
     )
     .await
     .map_err(|_| TerminalError::new("endpoint test timed out"))?
-}
-
-pub(super) async fn invoke_endpoint_open<T: serde::Serialize>(
-    endpoint: &Endpoint,
-    service: &str,
-    handler: &str,
-    key: &str,
-    input: &T,
-) -> Result<Bytes, TerminalError> {
-    invoke_endpoint_body_open(
-        endpoint,
-        service,
-        handler,
-        encode_invocation_body(key, input)?,
-    )
-    .await
 }
 
 pub(super) async fn invoke_endpoint_body_open(
@@ -1977,6 +1943,12 @@ async fn invoke_endpoint_body_with_json_call_responses_unbounded(
                 } else {
                     drop(input_sender.take());
                 }
+            }
+            if message_type == 0x040E {
+                // This driver scripts no invocation ids: a one-way send's
+                // handle stays unanswered and the attempt suspends on it, as
+                // an attempt whose input closed there does.
+                drop(input_sender.take());
             }
             if message_type == 0x0005 {
                 // The runtime acknowledges a proposed run completion with the

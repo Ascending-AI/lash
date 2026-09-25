@@ -126,7 +126,7 @@ where
                 request,
                 replay_key,
                 None,
-                tokio_util::sync::CancellationToken::new(),
+                super::context::ProcessCancelRace::NotRaced,
             )
             .await
             .map_err(|error| {
@@ -137,6 +137,7 @@ where
             })? {
             RestateTurnCancelRaceOutcome::Completed(resolution) => resolution,
             RestateTurnCancelRaceOutcome::TurnCancelled
+            | RestateTurnCancelRaceOutcome::ProcessCancelled
             | RestateTurnCancelRaceOutcome::SessionRevoked { .. } => {
                 return Err(group_shape_error(format!(
                     "effect group {group_key} drained wake for child {position} ended without \

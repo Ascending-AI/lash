@@ -33,7 +33,7 @@ use crate::effect_group::{
     EffectGroupChildRequest, admit_wait_request, arm_admission_witness, cancel_wait_request,
     decode_wait_resolution, payload_key, rank_wait_request, ready_wait_request,
 };
-use crate::process::{LashProcessWorkflowImpl, RestateProcessCancelRequest, RestateProcessRunner};
+use crate::process::{LashProcessWorkflowImpl, RestateProcessRunner};
 use crate::{
     EffectGroupAdoptRequest, EffectGroupCleanupFacts, EffectGroupDispatchRequest,
     EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadPutRequest,
@@ -78,13 +78,6 @@ impl RestateProcessRunner for ToolChildProcessRunner {
                 })),
             )),
         })
-    }
-
-    async fn request_process_cancel(
-        &self,
-        _request: RestateProcessCancelRequest,
-    ) -> Result<(), lash_core::PluginError> {
-        Ok(())
     }
 }
 
@@ -168,16 +161,6 @@ impl RestateProcessRunner for LawProcessRunner {
                     )
                     .await
             }
-        }
-    }
-
-    async fn request_process_cancel(
-        &self,
-        request: RestateProcessCancelRequest,
-    ) -> Result<(), lash_core::PluginError> {
-        match self.installed() {
-            Some(runner) => runner.request_process_cancel(request).await,
-            None => ToolChildProcessRunner.request_process_cancel(request).await,
         }
     }
 }

@@ -32,11 +32,11 @@ pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, IndependentEffectWork,
-    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
-    RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome,
-    RuntimeEffectController, ScopeBoundController, ScopedEffectController, SegmentProgress,
-    ServedOnlyRange, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-    TurnCancelClosureOwnerBinding,
+    ProcessDriveStep, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
+    QueuedLaneProbe, RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution,
+    ResolveOutcome, RuntimeEffectController, ScopeBoundController, ScopedEffectController,
+    SegmentProgress, ServedOnlyRange, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;

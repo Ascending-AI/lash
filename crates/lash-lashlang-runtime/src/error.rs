@@ -256,10 +256,8 @@ pub enum LashlangHostError {
     /// Validating a signal name at the process host boundary failed.
     #[error("{message}")]
     ValidateSignalName { message: String },
-    /// Reading durable signal-wait state at the process host boundary failed.
-    #[error("{message}")]
-    ReadSignalWait { message: String },
-    /// Persisting signal-wait state at the process host boundary failed.
+    /// Reading or persisting durable signal-wait state at the process host
+    /// boundary failed: one recorded step does both (FIG-3673).
     #[error("{message}")]
     SetSignalWait { message: String },
     /// Awaiting a signal at the process host boundary failed.

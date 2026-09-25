@@ -100,6 +100,21 @@ redelivery_laws = [
   "tests::restate_recovery_tests::live_restate_ingress_owner_restart_resumes_and_remains_cancellable",
 ]
 
+[suites.agent-workbench.replay.divergent]
+# Each law below is held back from the replay leg under the ticket that
+# brings it back. The process drive's own divergence (3e, a LashProcessWorkflow
+# journal mismatch) is fixed by FIG-3673 and is not held.
+# The queued run reads the store unjournaled at start, so its replay issues
+# another `call` at index 3.
+"tests::live_restate_cron_queued_turn_sync_cancel_path_end_to_end" = "the queued run's unjournaled store read at start diverges on replay; FIG-3600 S5 fixes it (FIG-3748)"
+"tests::restate_recovery_tests::live_restate_turn_input_ingress_delivers_once_and_queues_after_settle" = "the queued run's unjournaled store read at start diverges on replay; FIG-3600 S5 fixes it (FIG-3748)"
+# A replayed provider retry publishes its observation again: the transcript
+# keeps two copies of the retry prose.
+"tests::restate_recovery_tests::live_restate_rate_limit_retry_converges_observers_to_one_copy" = "observations are not deduplicated across replay, so the retry prose is kept twice (FIG-3753)"
+# The replacement owner cannot supersede the dead owner's SQL session-execution
+# lease within the law's window.
+"tests::restate_recovery_tests::live_restate_ingress_owner_restart_resumes_and_remains_cancellable" = "the SQL session-execution lease does not supersede on replay; S8's drive_epoch replaces it (FIG-3540)"
+
 [suites.agent-workbench.env]
 # `scripts/agent-workbench-restate-e2e.sh` runs the suite inside
 # `scripts/ci/with-service.sh pg16`, whose server carries one database per

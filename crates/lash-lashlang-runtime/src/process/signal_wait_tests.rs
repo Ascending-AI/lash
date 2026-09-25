@@ -7,6 +7,7 @@ struct RetainingSignalWaitProcesses {
         VecDeque<lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>>,
     >,
     written_waits: Mutex<Vec<lash_core::WaitState>>,
+    terminal: bool,
 }
 
 impl RetainingSignalWaitProcesses {
@@ -16,7 +17,14 @@ impl RetainingSignalWaitProcesses {
         Self {
             pages: tokio::sync::Mutex::new(pages.into_iter().collect()),
             written_waits: Mutex::new(Vec::new()),
+            terminal: false,
         }
+    }
+
+    /// A process whose terminal is stored: the registry refuses its waits.
+    fn terminal(mut self) -> Self {
+        self.terminal = true;
+        self
     }
 
     fn written_waits(&self) -> Vec<lash_core::WaitState> {
@@ -47,12 +55,68 @@ impl SignalWaitProcesses for RetainingSignalWaitProcesses {
     }
 
     async fn set_wait(&self, wait: lash_core::WaitState) -> Result<(), lash_core::PluginError> {
+        if self.terminal {
+            return Err(lash_core::PluginError::Session(
+                "terminal process cannot enter a wait state".to_string(),
+            ));
+        }
         self.written_waits
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push(wait);
         Ok(())
     }
+
+    async fn clear_wait(&self) -> Result<(), lash_core::PluginError> {
+        if self.terminal {
+            return Err(lash_core::PluginError::Session(
+                "terminal process cannot clear a wait state".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn is_terminal(&self) -> Result<bool, lash_core::PluginError> {
+        Ok(self.terminal)
+    }
+}
+
+/// A redrive that replays a body over its stored terminal reaches the signal
+/// wait's writes again, and the registry refuses a terminal process's wait
+/// state. The write is settled, not failed, so the body reissues the wait it
+/// recorded instead of ending where its journal holds that wait (FIG-3673).
+#[tokio::test]
+async fn a_wait_write_refused_on_a_terminal_process_is_settled() {
+    let processes = RetainingSignalWaitProcesses::new([]).terminal();
+    let written = processes
+        .set_wait(lash_core::WaitState {
+            since_ms: 1,
+            kind: lash_core::WaitKind::Signal {
+                name: "go".to_string(),
+                event_type: "process.signal.go".to_string(),
+                key: "key".to_string(),
+                ordinal: 1,
+            },
+        })
+        .await;
+    assert!(
+        written.is_err(),
+        "the registry refuses a terminal process's wait"
+    );
+    settle_wait_write(&processes, written)
+        .await
+        .expect("a refused wait on a terminal process is settled");
+    let cleared = SignalWaitProcesses::clear_wait(&processes).await;
+    settle_wait_write(&processes, cleared)
+        .await
+        .expect("a refused clear on a terminal process is settled");
+
+    let live = RetainingSignalWaitProcesses::new([]);
+    let refused = Err(lash_core::PluginError::Session("store fault".to_string()));
+    assert!(
+        settle_wait_write(&live, refused).await.is_err(),
+        "a refusal on a live process stays a failure"
+    );
 }
 
 fn process_event(

@@ -734,7 +734,7 @@ pub use runtime::{
     ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessEffectNodeSummary, ProcessEffectOmissions,
+    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectNodeSummary, ProcessEffectOmissions,
     ProcessEffectOmittedCounts, ProcessEffectOutcome, ProcessEffectOutcomeClass,
     ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,

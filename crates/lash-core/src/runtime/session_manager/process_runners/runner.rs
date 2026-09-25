@@ -186,7 +186,7 @@ impl RuntimeSessionServices {
             )
             .with_turn_phase_probe(services.current.turn_phase_probe.clone())
             .with_process_execution(&registration_for_runtime, event_context)
-            .with_cancellation_token(cancellation_for_runtime.clone())
+            .with_lent_process_stop(cancellation_for_runtime.clone())
             .without_turn_cancel_observation()
             .with_process_work(services.current.host.work.process_wiring().cloned())
             .with_opener_state(crate::session::OpenerState::new(

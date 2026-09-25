@@ -665,6 +665,24 @@ impl RuntimeEffectController for LayeredController<'_> {
         self.inner.as_ref().wants_segment_boundary(progress)
     }
 
+    async fn observe_process_cancel(
+        &self,
+        lent_stop: &tokio_util::sync::CancellationToken,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.inner.as_ref().observe_process_cancel(lent_stop).await
+    }
+
+    async fn record_process_drive_step(
+        &self,
+        name: String,
+        step: crate::ProcessDriveStep<'_>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.inner
+            .as_ref()
+            .record_process_drive_step(name, step)
+            .await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
