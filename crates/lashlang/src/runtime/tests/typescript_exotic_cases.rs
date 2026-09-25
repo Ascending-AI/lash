@@ -1934,3 +1934,57 @@ async fn map_and_set_for_each_use_a_live_durable_cursor() {
         ))
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn javascript_add_assign_fuses_a_self_concat() {
+    // `s = s + rhs` compiles to the fused opcode unconditionally: the
+    // accumulator `LoadName` is emitted where the unfused binary op reads
+    // it, so even a right operand that assigns `s` keeps its evaluation
+    // order.
+    let program = Program::block(vec![
+        ts_assign("s", Expr::String("a".into())),
+        ts_assign(
+            "s",
+            Expr::JavaScriptBinary {
+                left: Box::new(Expr::Variable("s".into())),
+                op: crate::JavaScriptBinaryOp::Add,
+                right: Box::new(Expr::String("x".into())),
+            },
+        ),
+        ts_assign(
+            "s",
+            Expr::JavaScriptBinary {
+                left: Box::new(Expr::Variable("s".into())),
+                op: crate::JavaScriptBinaryOp::Add,
+                right: Box::new(ts_assign("s", Expr::String("y".into()))),
+            },
+        ),
+        Expr::Finish(Box::new(Expr::Variable("s".into()))),
+    ]);
+    let compiled = compile_ast(&program).expect("compile TypeScript substrate AST");
+    assert_eq!(
+        compiled
+            .chunk
+            .code
+            .iter()
+            .filter(|instruction| matches!(instruction, Instruction::JavaScriptAddAssign(_)))
+            .count(),
+        2,
+        "both self-concats should compile to the fused add-assign opcode"
+    );
+    assert!(
+        !compiled
+            .chunk
+            .code
+            .iter()
+            .any(|instruction| matches!(instruction, Instruction::JavaScriptBinary(_))),
+        "neither `s = s + rhs` leaves an unfused binary op"
+    );
+    // The assignment expression's value is `null` at this level — the
+    // TypeScript lowerer closes assignments with an explicit read — so the
+    // fused order is `s` read before the nested assign, then `"ax" + null`.
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::String("axnull".into()))
+    );
+}

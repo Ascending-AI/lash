@@ -89,8 +89,7 @@ differential:FIG-3701:17	cannot render a block in expression position as TypeScr
 differential:FIG-3701:18	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3701:19	generated binding `__typescript_heap_instanceof` has no authored TypeScript spelling	`instanceof` lowers to a heap builtin, which the lens printer does not re-sugar
 differential:FIG-3701:9	generated binding `__typescript_heap_instanceof` has no authored TypeScript spelling	`instanceof` lowers to a heap builtin, which the lens printer does not re-sugar
-differential:FIG-3703:1	generated binding `__typescript_0_assignment_result` has no authored TypeScript spelling	an assignment used as a value lowers through a generated temporary, which has no authored spelling
-differential:FIG-3703:2	generated binding `__typescript_0_assignment_result` has no authored TypeScript spelling	an assignment used as a value lowers through a generated temporary, which has no authored spelling
+differential:FIG-3703:1	generated binding `__typescript_1_update_old` has no authored TypeScript spelling	an update expression used as a value lowers through a generated temporary, which has no authored spelling
 differential:FIG-3703:5	generated binding `__typescript_0_update_old` has no authored TypeScript spelling	an update expression used as a value lowers through a generated temporary, which has no authored spelling
 differential:FIG-3703:8	invalid var binding identifier `undefined`	the identifier is outside the set the printer spells bare as a var binding
 differential:FIG-3704:10	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
@@ -142,7 +141,6 @@ differential:FIG-3730:37	generated binding `__typescript_stdlib` has no authored
 differential:FIG-3730:38	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3730:39	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3730:40	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3730:54	generated binding `__typescript_0_assignment_result` has no authored TypeScript spelling	an assignment used as a value lowers through a generated temporary, which has no authored spelling
 differential:FIG-3730:55	generated binding `__typescript_0_reference_base` has no authored TypeScript spelling	a member update pins its reference base in a generated slot, which has no authored spelling
 differential:FIG-3730:56	generated binding `__typescript_0_reference_base` has no authored TypeScript spelling	a member update pins its reference base in a generated slot, which has no authored spelling
 differential:FIG-3730:57	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
@@ -310,7 +308,6 @@ differential:findings:264	cannot render a block in expression position as TypeSc
 differential:findings:265	cannot render a block in expression position as TypeScript	the operator lowers to a statement sequence (its operand conversions), which has no expression spelling
 differential:findings:266	cannot render a block in expression position as TypeScript	the operator lowers to a statement sequence (its operand conversions), which has no expression spelling
 differential:findings:267	cannot render a block in expression position as TypeScript	the operator lowers to a statement sequence (its operand conversions), which has no expression spelling
-differential:findings:268	generated binding `__typescript_1_assignment_result` has no authored TypeScript spelling	an assignment used as a value lowers through a generated temporary, which has no authored spelling
 differential:findings:27	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:275	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:findings:276	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
@@ -496,7 +493,6 @@ differential:findings:72	generated binding `__typescript_0_caught` has no author
 differential:findings:73	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:findings:74	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:findings:75	generated binding `__typescript_0_switch_value` has no authored TypeScript spelling	a switch lowers through generated temporaries, which have no authored spelling
-differential:findings:76	generated binding `__typescript_1_assignment_result` has no authored TypeScript spelling	an assignment used as a value lowers through a generated temporary, which has no authored spelling
 differential:findings:77	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:78	generated binding `__typescript_0_update_old` has no authored TypeScript spelling	an update expression used as a value lowers through a generated temporary, which has no authored spelling
 differential:findings:80	cannot render a block in expression position as TypeScript	the operator lowers to a statement sequence (its operand conversions), which has no expression spelling

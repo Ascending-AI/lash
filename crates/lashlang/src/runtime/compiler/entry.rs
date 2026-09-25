@@ -754,6 +754,25 @@ impl Compiler {
                 self.push_null_if(leave_value);
                 return;
             }
+            if let Expr::JavaScriptBinary {
+                left,
+                op: JavaScriptBinaryOp::Add,
+                right,
+            } = expr
+                && matches!(left.as_ref(), Expr::Variable(var) if var == name)
+            {
+                // `s = s + rhs` under ECMA-262 `+` rules. The accumulator is
+                // compiled where the unfused `JavaScriptBinary` reads it, so
+                // the instruction stream keeps the exact operand order —
+                // including any write the right side makes to `s` — and the
+                // opcode fuses only the trailing store.
+                self.compile_expr(left, &value_path().child(0));
+                self.compile_expr(right, &value_path().child(1));
+                self.code.push(Instruction::JavaScriptAddAssign(slot));
+                self.set_const_slot(slot, None);
+                self.push_null_if(leave_value);
+                return;
+            }
             if let Expr::BuiltinCall {
                 name: builtin_name,
                 args,

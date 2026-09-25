@@ -57,7 +57,9 @@ fn coercing_operand_count(chunk: &Chunk, instruction: Instruction) -> Option<usi
         }
         Instruction::Intrinsic(IntrinsicOp::JavaScriptHeapDeleteMember) => 2,
         Instruction::JavaScriptUnary(_) => 1,
-        Instruction::JavaScriptBinary(_) | Instruction::Index => 2,
+        Instruction::JavaScriptBinary(_)
+        | Instruction::JavaScriptAddAssign(_)
+        | Instruction::Index => 2,
         Instruction::Intrinsic(
             IntrinsicOp::JavaScriptStdlib(argc)
             | IntrinsicOp::JavaScriptHeapNew(argc)

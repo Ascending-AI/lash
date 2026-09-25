@@ -9,8 +9,10 @@
 //! propagates the wrapper so downstream consumers can tell that this came
 //! from a projected binding.
 
+use std::borrow::Borrow;
 use std::fmt;
 use std::future::Future;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -80,6 +82,273 @@ impl From<Vec<Value>> for ListValue {
 impl FromIterator<Value> for ListValue {
     fn from_iter<T: IntoIterator<Item = Value>>(iter: T) -> Self {
         iter.into_iter().collect::<Vec<_>>().into()
+    }
+}
+
+/// The string payload inside `Value::String`.
+///
+/// An inline-capacity string stays a plain `CompactString`: cloning it is a
+/// by-value copy, cheaper than managing a shared box. Anything larger lives
+/// behind an `Arc`, so cloning a slot's value — or stashing a completion in
+/// the VM's `last_value` — is a refcount bump rather than a copy of the text.
+///
+/// Mutation goes through `make_mut`/`push_str`, which copy-on-write the way
+/// `ListValue` does: a buffer that still has aliases is cloned, while one the
+/// binding holds alone is appended into. That is what lets `s = s + "x"`
+/// reuse its accumulator buffer instead of copying it each step (FIG-3733).
+#[derive(Debug)]
+pub struct StringValue(Repr);
+
+#[derive(Debug)]
+enum Repr {
+    /// A `CompactString` that fits inline — the `Owned` invariant. An owned
+    /// string never holds a heap buffer, so cloning one is a fixed-size copy.
+    Owned(CompactString),
+    /// Heap-sized contents behind an `Arc`: cloning is a refcount bump, and a
+    /// buffer with no other strong references is the one `make_mut` reuses.
+    Shared(Arc<CompactString>),
+}
+
+impl StringValue {
+    fn from_compact(value: CompactString) -> Self {
+        if value.is_heap_allocated() {
+            Self(Repr::Shared(Arc::new(value)))
+        } else {
+            Self(Repr::Owned(value))
+        }
+    }
+
+    /// `left ++ right` in one allocation sized to the result — the concat the
+    /// `+` operator and format sites use where no accumulator can be reused.
+    pub(crate) fn concatenated(left: &str, right: &str) -> Self {
+        let mut value = CompactString::with_capacity(left.len() + right.len());
+        value.push_str(left);
+        value.push_str(right);
+        Self::from_compact(value)
+    }
+
+    pub fn as_str(&self) -> &str {
+        match &self.0 {
+            Repr::Owned(value) => value.as_str(),
+            Repr::Shared(value) => value.as_str(),
+        }
+    }
+
+    /// Mutable access to the bytes: `Arc::make_mut` semantics, so an aliased
+    /// buffer is copied before it is touched while a sole-owned one is not.
+    ///
+    /// Promoting `Owned` into `Shared` is what keeps the invariant: a mutated
+    /// string may grow past inline capacity, and only `Shared` may hold heap
+    /// contents, since `Clone` on `Owned` must stay a by-value copy.
+    pub(crate) fn make_mut(&mut self) -> &mut CompactString {
+        if matches!(self.0, Repr::Owned(_)) {
+            let Repr::Owned(value) =
+                std::mem::replace(&mut self.0, Repr::Owned(CompactString::default()))
+            else {
+                unreachable!("matched Owned above")
+            };
+            self.0 = Repr::Shared(Arc::new(value));
+        }
+        match &mut self.0 {
+            Repr::Shared(value) => Arc::make_mut(value),
+            Repr::Owned(_) => unreachable!("owned strings promote before mutation"),
+        }
+    }
+
+    /// Appends `text`, growing geometrically so repeated appends stay
+    /// amortised O(1) rather than paying a resize per character.
+    pub(crate) fn push_str(&mut self, text: &str) {
+        let buffer = self.make_mut();
+        if buffer.capacity() - buffer.len() < text.len() {
+            buffer.reserve(buffer.len().max(text.len()));
+        }
+        buffer.push_str(text);
+    }
+
+    /// The contents as a fresh owned `CompactString`.
+    pub(crate) fn to_compact_string(&self) -> CompactString {
+        CompactString::from(self.as_str())
+    }
+}
+
+impl Clone for StringValue {
+    fn clone(&self) -> Self {
+        match &self.0 {
+            Repr::Owned(value) => {
+                debug_assert!(
+                    !value.is_heap_allocated(),
+                    "an owned string must fit inline storage for clone to stay cheap"
+                );
+                Self(Repr::Owned(value.clone()))
+            }
+            Repr::Shared(value) => Self(Repr::Shared(Arc::clone(value))),
+        }
+    }
+}
+
+impl Default for StringValue {
+    fn default() -> Self {
+        Self(Repr::Owned(CompactString::default()))
+    }
+}
+
+impl Deref for StringValue {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for StringValue {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Borrow<str> for StringValue {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for StringValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl PartialEq for StringValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for StringValue {}
+
+impl PartialOrd for StringValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StringValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl std::hash::Hash for StringValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
+    }
+}
+
+impl PartialEq<str> for StringValue {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for StringValue {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<String> for StringValue {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<StringValue> for String {
+    fn eq(&self, other: &StringValue) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl PartialEq<CompactString> for StringValue {
+    fn eq(&self, other: &CompactString) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl From<&str> for StringValue {
+    fn from(value: &str) -> Self {
+        Self::from_compact(value.into())
+    }
+}
+
+impl From<String> for StringValue {
+    fn from(value: String) -> Self {
+        Self::from_compact(value.into())
+    }
+}
+
+impl From<&String> for StringValue {
+    fn from(value: &String) -> Self {
+        Self::from(value.as_str())
+    }
+}
+
+impl From<CompactString> for StringValue {
+    fn from(value: CompactString) -> Self {
+        Self::from_compact(value)
+    }
+}
+
+impl From<&CompactString> for StringValue {
+    fn from(value: &CompactString) -> Self {
+        Self::from(value.as_str())
+    }
+}
+
+impl From<StringValue> for CompactString {
+    fn from(value: StringValue) -> Self {
+        match value.0 {
+            Repr::Owned(value) => value,
+            Repr::Shared(value) => match Arc::try_unwrap(value) {
+                Ok(value) => value,
+                Err(value) => value.as_ref().clone(),
+            },
+        }
+    }
+}
+
+impl From<StringValue> for String {
+    fn from(value: StringValue) -> Self {
+        CompactString::from(value).into()
+    }
+}
+
+impl From<&StringValue> for CompactString {
+    fn from(value: &StringValue) -> Self {
+        value.to_compact_string()
+    }
+}
+
+impl From<crate::AstString> for StringValue {
+    fn from(value: crate::AstString) -> Self {
+        Self::from_compact(value.into())
+    }
+}
+
+impl Serialize for StringValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for StringValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        CompactString::deserialize(deserializer).map(Self::from_compact)
     }
 }
 
@@ -185,7 +454,7 @@ pub enum Value {
     Undefined,
     Bool(bool),
     Number(f64),
-    String(CompactString),
+    String(StringValue),
     // Boxed: `ImageValue` is by far the largest variant, and images are rare in
     // value streams. Storing it inline would inflate `size_of::<Value>()` (and
     // therefore every `Vec<Value>`/record allocation) for the common case, so we

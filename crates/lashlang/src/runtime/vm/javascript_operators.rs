@@ -1,7 +1,8 @@
 //! JavaScript unary/binary fast evaluation and async projected-operand preparation.
 
 use super::super::{
-    ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
+    StringValue, ensure_javascript_string_size, javascript_operand_text,
+    javascript_string_size_error,
 };
 use super::*;
 use crate::runtime::heap::guest_coercion::PrimitiveHint;
@@ -108,15 +109,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             if matches!(left_primitive, Value::String(_))
                 || matches!(right_primitive, Value::String(_))
             {
-                let left = javascript_to_string(&left_primitive);
-                let right = javascript_to_string(&right_primitive);
+                let left = javascript_operand_text(&left_primitive);
+                let right = javascript_operand_text(&right_primitive);
                 let bytes = left
                     .len()
                     .checked_add(right.len())
                     .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
                 ensure_javascript_string_size(bytes)?;
                 self.stack
-                    .push(Value::String(format!("{left}{right}").into()));
+                    .push(Value::String(StringValue::concatenated(&left, &right)));
                 return Ok(());
             }
         }
@@ -149,7 +150,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// ECMA-262 ToPrimitive on an object operand: `+` and loose equality ask
     /// the default hint; every other operator's is number — a Date's default
     /// hint is its string, so the distinction is observable.
-    fn javascript_binary_operand_primitive(
+    pub(super) fn javascript_binary_operand_primitive(
         &self,
         op: JavaScriptBinaryOp,
         value: &Value,
@@ -158,7 +159,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .javascript_to_primitive_with_hint(value, javascript_binary_hint(op))
     }
 
-    async fn javascript_binary_operand_primitive_async(
+    pub(super) async fn javascript_binary_operand_primitive_async(
         &self,
         op: JavaScriptBinaryOp,
         value: &Value,
@@ -203,7 +204,7 @@ fn javascript_loose_equality_coerces_object(value: &Value) -> bool {
     matches!(value, Value::Bool(_) | Value::Number(_) | Value::String(_))
 }
 
-fn javascript_binary_operand_coercions(
+pub(super) fn javascript_binary_operand_coercions(
     op: JavaScriptBinaryOp,
     left: &Value,
     right: &Value,

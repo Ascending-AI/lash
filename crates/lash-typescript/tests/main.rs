@@ -73,6 +73,8 @@ mod scoping_regressions;
 mod session_globals;
 #[path = "spread_calls.rs"]
 mod spread_calls;
+#[path = "string_add_assign.rs"]
+mod string_add_assign;
 #[path = "structural_contract.rs"]
 mod structural_contract;
 #[path = "trigger_inputs.rs"]

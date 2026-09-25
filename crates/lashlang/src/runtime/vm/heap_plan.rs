@@ -226,6 +226,9 @@ pub(super) fn instruction_heap_plan(
             InstructionHeapPlan::stack(Top(0)).with_mutable_slot(slot)
         }
         I::AddAssignSlot { .. } => InstructionHeapPlan::heap_native(),
+        // Same shape as `JavaScriptBinary`: the operands are consumed as-is
+        // and the coercion exports what it needs inside the opcode.
+        I::JavaScriptAddAssign(_) => InstructionHeapPlan::heap_native(),
 
         I::Intrinsic(IntrinsicOp::FormatCompiled(template)) => {
             InstructionHeapPlan::stack(Top(chunk.format_templates[template].argc))
@@ -283,7 +286,8 @@ pub(super) fn instruction_keeps_vm_state_heapified(
         | I::IsNullish
         | I::ObserveStep
         | I::JavaScriptUnary(_)
-        | I::JavaScriptBinary(_) => true,
+        | I::JavaScriptBinary(_)
+        | I::JavaScriptAddAssign(_) => true,
         _ => false,
     }
 }

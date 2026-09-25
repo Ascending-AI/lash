@@ -835,6 +835,9 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::AppendAssign(slot) => {
             format!("append_assign {slot}:{}", slot_name(chunk, slot))
         }
+        Instruction::JavaScriptAddAssign(slot) => {
+            format!("javascript_add_assign {slot}:{}", slot_name(chunk, slot))
+        }
         Instruction::Print => "print".to_string(),
         Instruction::Finish => "finish".to_string(),
         Instruction::ProcessYield => "process_yield".to_string(),

@@ -470,7 +470,12 @@ impl<'p> Printer<'p> {
             {
                 Ok(format!("{prefix}continue;\n"))
             }
-            Expr::Block(_) => {
+            Expr::Block(items) => {
+                if let Some((name, operator, operand)) = compound_assign_block(items) {
+                    let name = self.identifier("binding", name)?;
+                    let operand = self.expression(operand)?;
+                    return Ok(format!("{prefix}{name} {operator}= {operand};\n"));
+                }
                 let mut inner = bound.clone();
                 Ok(format!(
                     "{prefix}{}\n",
@@ -1391,6 +1396,25 @@ fn suppresses_named_evaluation(target: &AssignTarget, expr: &Expr) -> bool {
         && matches!(expr, Expr::Function(function)
             if function.name.is_none()
                 && function.js_name.as_deref() != Some(target.root.as_str()))
+}
+
+/// The `x op= rhs` a compound assignment on a bare name lowers to: the
+/// assignment `x = x op rhs` closed by reading the target back, as the two
+/// statements of one block. Only the operators with a compound spelling take
+/// this shape: the comparisons and equalities spell `=` or `<`/`>` alone.
+fn compound_assign_block(items: &[Expr]) -> Option<(&str, &str, &Expr)> {
+    let [Expr::Assign { target, expr }, Expr::Variable(read)] = items else {
+        return None;
+    };
+    let Expr::JavaScriptBinary { left, op, right } = expr.as_ref() else {
+        return None;
+    };
+    (target.is_simple()
+        && read.as_str() == target.root.as_str()
+        && matches!(left.as_ref(), Expr::Variable(v) if v.as_str() == target.root.as_str()))
+    .then(|| javascript_binary_op(*op))
+    .filter(|op| !op.contains('=') && !matches!(*op, "<" | ">"))
+    .map(|operator| (target.root.as_str(), operator, right.as_ref()))
 }
 
 /// The authored target spelling, assignment operator (`=`, or `op=` for an

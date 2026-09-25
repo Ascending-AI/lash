@@ -467,6 +467,11 @@ pub(crate) enum Instruction {
         right: f64,
     },
     AppendAssign(usize),
+    /// `s = s + rhs` under ECMA-262 `+` rules: the operand stack carries
+    /// `JavaScriptBinary`'s pair — the accumulator read, then the right
+    /// operand — and the instruction fuses the store, so a uniquely owned
+    /// accumulator appends in place.
+    JavaScriptAddAssign(usize),
     Print,
     ProcessYield,
     Finish,
@@ -639,7 +644,8 @@ impl Instruction {
             | Instruction::AddAssignNumber { .. }
             | Instruction::AddAssignSlot { .. }
             | Instruction::AddAssignIndexNumber { .. }
-            | Instruction::AddAssignIndexSlotNumber { .. } => InstructionProfileTag::AddAssign,
+            | Instruction::AddAssignIndexSlotNumber { .. }
+            | Instruction::JavaScriptAddAssign(_) => InstructionProfileTag::AddAssign,
             Instruction::AppendAssign(_) => InstructionProfileTag::AppendAssign,
             Instruction::Print => InstructionProfileTag::Print,
             Instruction::Finish => InstructionProfileTag::Finish,
