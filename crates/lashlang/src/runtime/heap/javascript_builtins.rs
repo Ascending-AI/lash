@@ -690,8 +690,7 @@ impl Heap {
                     "Cannot delete property '{key}' of {name}"
                 )));
             }
-            if is_own {
-                let own = *self.builtin_expandos.get(&id).unwrap();
+            if is_own && let Some(&own) = self.builtin_expandos.get(&id) {
                 self.remove_record_key(own, key)?;
             }
             self.builtin_deleted

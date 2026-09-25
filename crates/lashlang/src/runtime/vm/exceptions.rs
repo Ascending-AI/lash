@@ -394,7 +394,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 if let Some(message) = reason.strip_prefix(prefix) {
                     return self
                         .heap
-                        .allocate_error(kind, Some(format!("{message}")), None, None);
+                        .allocate_error(kind, Some(message.to_string()), None, None);
                 }
             }
         }

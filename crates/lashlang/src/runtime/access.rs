@@ -673,7 +673,7 @@ pub(crate) fn javascript_heap_has_own(
         }
         HeapObject::RegExp(_) => key == "lastIndex" || REGEXP_FLAG_KEYS.contains(&key),
         HeapObject::RegExpMatch(result) => {
-            javascript_array_index_key(&key).is_some_and(|index| index < result.items.len())
+            javascript_array_index_key(key).is_some_and(|index| index < result.items.len())
                 || matches!(key, "index" | "input" | "groups" | "length")
         }
         HeapObject::Map(_) | HeapObject::Set(_) | HeapObject::UrlSearchParams(_) => key == "size",

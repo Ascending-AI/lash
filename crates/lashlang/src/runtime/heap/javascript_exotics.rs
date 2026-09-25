@@ -650,7 +650,7 @@ impl Heap {
         };
         // ToLength: NaN and non-positive numbers become 0; +Infinity and
         // anything past the safe-integer cap saturate to it.
-        if !(number > 0.0) {
+        if number.is_nan() || number <= 0.0 {
             return Ok(0);
         }
         Ok((number as u64).min(MAX_JAVASCRIPT_LENGTH))

@@ -639,7 +639,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             },
             "Error" | "AggregateError" | "EvalError" | "RangeError" | "ReferenceError"
             | "SyntaxError" | "TypeError" | "URIError" => {
-                let kind = crate::runtime::ErrorKind::from_name(&name).ok_or_else(|| {
+                let kind = crate::runtime::ErrorKind::from_name(name).ok_or_else(|| {
                     RuntimeError::ValidationFailed {
                         reason: format!("unknown error kind `{name}`"),
                     }
@@ -715,7 +715,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
             // `RegExp(p)` called as a function constructs, like `new RegExp`.
-            "RegExp" => self.construct_regexp(&args)?,
+            "RegExp" => self.construct_regexp(args)?,
             // `Object()` with no or a nullish argument is a fresh `{}`; an
             // object argument is the object itself. A primitive would need a
             // wrapper object the value model does not have.
