@@ -135,17 +135,6 @@ const PROBES: &[Probe] = &[
         "TS_CYCLIC_VALUE_UNSUPPORTED",
         "const node: any = {}; node.self = node; finish(1);",
     ),
-    // 5. Mutable captures, on the read path and on the write path.
-    probe(
-        5,
-        "TS_MUTABLE_CAPTURE_UNSUPPORTED",
-        "let n = 0; const f = () => n; n = 1; finish(f());",
-    ),
-    probe(
-        5,
-        "TS_MUTABLE_CAPTURE_UNSUPPORTED",
-        "let n = 0; const f = () => { n = 1; }; f(); finish(n);",
-    ),
     // 6. Mutual recursion.
     probe(
         6,

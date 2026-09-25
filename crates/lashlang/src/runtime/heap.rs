@@ -420,6 +420,44 @@ impl Heap {
         })
     }
 
+    /// Allocates a binding cell holding `value` (FIG-3707).
+    pub(crate) fn allocate_cell(&mut self, value: Value) -> Result<Value, RuntimeError> {
+        self.allocate_object(HeapObject::Cell(value))
+    }
+
+    /// The value the cell `cell` holds.
+    pub(crate) fn cell_value(&self, cell: &Value) -> Result<Value, RuntimeError> {
+        match cell {
+            Value::Ref(id) => match self.get(*id)? {
+                HeapObject::Cell(value) => Ok(value.clone()),
+                object => Err(RuntimeError::NotABindingCell {
+                    actual: object.kind().to_string(),
+                }),
+            },
+            value => Err(RuntimeError::NotABindingCell {
+                actual: super::value_type_name(value).to_string(),
+            }),
+        }
+    }
+
+    /// Stores `value` in the cell `cell`, keeping the heap's byte meter,
+    /// parent edges and write stamp exact.
+    pub(crate) fn set_cell(&mut self, cell: &Value, value: Value) -> Result<(), RuntimeError> {
+        let Value::Ref(id) = cell else {
+            return Err(RuntimeError::NotABindingCell {
+                actual: super::value_type_name(cell).to_string(),
+            });
+        };
+        let replacement = HeapObject::Cell(value);
+        let current = self.get(*id)?;
+        if !matches!(current, HeapObject::Cell(_)) {
+            return Err(RuntimeError::NotABindingCell {
+                actual: current.kind().to_string(),
+            });
+        }
+        self.commit_object_update(*id, replacement)
+    }
+
     pub(crate) fn allocate_list(&mut self, values: Vec<Value>) -> Result<Value, RuntimeError> {
         self.allocate_object(HeapObject::List(values))
     }
@@ -695,7 +733,9 @@ impl Heap {
                     export_child(self, child, active)
                 })?
             }
-            HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) => {
+            // A cell is reachable only from a frame slot or a closure's
+            // captures, so the closure is what a boundary meets first.
+            HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) | HeapObject::Cell(_) => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
             object @ (HeapObject::RegExp(_)
@@ -905,7 +945,7 @@ impl Heap {
                     self.export_inner(child, active, depth + 1)
                 })?
             }
-            HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) => {
+            HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) | HeapObject::Cell(_) => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
             HeapObject::RegExp(_)
@@ -984,7 +1024,13 @@ impl Heap {
                 }
                 // A built-in function is immutable and has one object per
                 // heap; a copy would be a second function where ECMA has one.
-                if matches!(self.get(*id)?, HeapObject::BuiltinFunction(_)) {
+                // A binding cell is the one storage of a shared binding: a
+                // closure copied with it still writes the binding its frame
+                // and every other closure read, so the cell is never copied.
+                if matches!(
+                    self.get(*id)?,
+                    HeapObject::BuiltinFunction(_) | HeapObject::Cell(_)
+                ) {
                     return Ok(Value::Ref(*id));
                 }
                 // Reserve before recursing so a cyclic graph terminates and both
@@ -1105,6 +1151,9 @@ impl Heap {
                 search_params: self.stage_isolation(&url.search_params, staging)?,
             }),
             HeapObject::UrlSearchParams(params) => HeapObject::UrlSearchParams(params.clone()),
+            HeapObject::Cell(_) => {
+                unreachable!("isolation shares a binding cell rather than copying it")
+            }
         })
     }
 
@@ -1406,7 +1455,8 @@ impl Heap {
             | HeapObject::Date(_)
             | HeapObject::Error(_)
             | HeapObject::Url(_)
-            | HeapObject::UrlSearchParams(_)) => {
+            | HeapObject::UrlSearchParams(_)
+            | HeapObject::Cell(_)) => {
                 return Err(reference_assignment::unwritable_member(
                     object,
                     &coerce_string(index)?,

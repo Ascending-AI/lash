@@ -748,6 +748,9 @@ impl Heap {
                 HeapObject::Error(error) => Some(error.kind.name().to_string()),
                 HeapObject::Url(_) => Some("URL".to_string()),
                 HeapObject::UrlSearchParams(_) => Some("URLSearchParams".to_string()),
+                // A binding cell is never a guest value, so nothing reads a
+                // member of one.
+                HeapObject::Cell(_) => None,
             },
             _ => None,
         })

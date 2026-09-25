@@ -547,12 +547,25 @@ fn callback_body(
     } else {
         LashExpr::Number(0.0)
     };
+    // Whether the receiver has an element at `index`: ECMA-262 HasProperty,
+    // which for a dense array is the index being below the current length. A
+    // callback that shrinks the array makes the indices past the new length
+    // absent, and the methods that skip holes skip them.
+    let present = binary(
+        variable(&index),
+        JavaScriptBinaryOp::Less,
+        field(receiver, "length"),
+    );
     let condition = if reverse {
         binary(
             variable(&index),
             JavaScriptBinaryOp::GreaterEqual,
             LashExpr::Number(0.0),
         )
+    } else if method == "arrayFromMap" {
+        // `Array.from` walks an array through its iterator, which reads the
+        // length at every step.
+        present.clone()
     } else {
         binary(
             variable(&index),
@@ -661,10 +674,44 @@ fn callback_body(
         },
         _ => unreachable!("callback method inventory is exhaustive"),
     };
+    let operation = if matches!(
+        method,
+        "forEach" | "map" | "filter" | "flatMap" | "some" | "every" | "reduce" | "reduceRight"
+    ) {
+        LashExpr::If {
+            condition: Box::new(present),
+            then_block: Box::new(operation),
+            else_block: Box::new(LashExpr::Undefined),
+        }
+    } else {
+        operation
+    };
     expressions.push(LashExpr::While {
         condition: Box::new(condition),
         body: Box::new(LashExpr::Block(vec![operation, step])),
     });
+    if method == "map" {
+        // `map`'s result has the receiver's original length. A skipped index
+        // is only ever a suffix (no callback runs once one is absent), and it
+        // is a hole in the result, which the dense array model refuses by
+        // name (`TS_SPARSE_ARRAY_UNSUPPORTED`, from the write past the end)
+        // rather than filling with `undefined`.
+        expressions.push(LashExpr::If {
+            condition: Box::new(binary(
+                field(&output, "length"),
+                JavaScriptBinaryOp::Less,
+                variable(&length),
+            )),
+            then_block: Box::new(LashExpr::Assign {
+                target: AssignTarget {
+                    root: output.as_str().into(),
+                    steps: vec![AssignPathStep::Index(variable(&length))],
+                },
+                expr: Box::new(LashExpr::Undefined),
+            }),
+            else_block: Box::new(LashExpr::Undefined),
+        });
+    }
     expressions.push(match method {
         "map" | "arrayFromMap" | "filter" | "flatMap" => variable(&output),
         "forEach" => LashExpr::Undefined,

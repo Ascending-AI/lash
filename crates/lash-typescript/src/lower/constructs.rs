@@ -2,7 +2,13 @@ use super::*;
 
 #[derive(Clone, Copy)]
 pub(super) enum PatternMode {
+    /// A `let`, `const`, parameter or `catch` declaration: it makes the
+    /// binding, and so its cell.
     Initialize,
+    /// A `var` declaration's initializer. The binding already exists (hoisted
+    /// with its frame, or the parameter of the same name it redeclares), so
+    /// the initializer is an assignment to it.
+    InitializeVar,
     Assign,
 }
 
@@ -27,6 +33,26 @@ pub(super) fn pattern_names(pattern: &Pattern, output: &mut Vec<String>) {
             if let Some(rest) = rest {
                 pattern_names(rest, output);
             }
+        }
+    }
+}
+
+/// Whether a parameter pattern contains an expression: a default, or a
+/// computed key (ECMA-262 ContainsExpression).
+pub(super) fn pattern_has_expression(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Ident(..) | Pattern::Member { .. } => false,
+        Pattern::Assign { .. } => true,
+        Pattern::Rest(target) => pattern_has_expression(target),
+        Pattern::Array { elements, rest } => {
+            elements.iter().flatten().any(pattern_has_expression)
+                || rest.as_deref().is_some_and(pattern_has_expression)
+        }
+        Pattern::Object { properties, rest } => {
+            properties.iter().any(|property| {
+                matches!(property.key, adapter::PropertyKey::Computed(_))
+                    || pattern_has_expression(&property.value)
+            }) || rest.as_deref().is_some_and(pattern_has_expression)
         }
     }
 }
@@ -61,12 +87,18 @@ impl Lowerer {
     /// Declares the session slot `name` on the cell's root scope unless the
     /// session or the cell's top level already binds it. A block binding of
     /// the same name does not count: it is a different, block-private slot.
-    fn ensure_global_binding(&mut self, name: &str) -> Result<bool, Diagnostic> {
+    ///
+    /// Answers whether this is the first write site of a slot only
+    /// `globalThis` creates: the cell's root declares each such slot up
+    /// front ([`Self::declare_global_this_slots`]), so a function declared
+    /// ahead of the write can read it, and the first site still sees it
+    /// unwritten.
+    pub(super) fn ensure_global_binding(&mut self, name: &str) -> Result<bool, Diagnostic> {
         if self.scopes[..self.root_scope_depth]
             .iter()
             .any(|scope| scope.bindings.contains_key(name))
         {
-            return Ok(false);
+            return Ok(self.unwritten_global_this_slots.remove(name));
         }
         if matches!(name, "undefined" | "NaN" | "Infinity") {
             return Err(Diagnostic::new(
@@ -75,7 +107,7 @@ impl Lowerer {
                 None,
             ));
         }
-        let id = self.declare_in_ledger(name, BindingKind::Var);
+        let id = self.declare_in_ledger(BindingKind::Var, (0, name.to_string()));
         let index = self.root_scope_depth.saturating_sub(1);
         #[expect(
             clippy::expect_used,
@@ -97,6 +129,24 @@ impl Lowerer {
             },
         );
         Ok(true)
+    }
+
+    /// Declares, at the head of the cell's root frame, every session slot
+    /// only a `globalThis.name` write in this cell creates. A hoisted function
+    /// is lowered before the statements that write the slot, and reads it by
+    /// name when it runs after them.
+    pub(super) fn declare_global_this_slots(&mut self) -> Result<(), Diagnostic> {
+        for name in self.global_this_writes.clone() {
+            if self.scopes[..self.root_scope_depth]
+                .iter()
+                .any(|scope| scope.bindings.contains_key(&name))
+            {
+                continue;
+            }
+            self.ensure_global_binding(&name)?;
+            self.unwritten_global_this_slots.insert(name);
+        }
+        Ok(())
     }
 
     pub(super) fn with_await<T>(
@@ -251,7 +301,7 @@ impl Lowerer {
         // as a `var` declaration in the body would, and the loop declares
         // nothing of its own.
         let mode = match kind {
-            Some(VarKind::Var) => PatternMode::Initialize,
+            Some(VarKind::Var) => PatternMode::InitializeVar,
             Some(kind) => {
                 let mut names = Vec::new();
                 pattern_names(pattern, &mut names);
@@ -492,22 +542,29 @@ impl Lowerer {
     ) -> Result<Vec<LashExpr>, Diagnostic> {
         match pattern {
             Pattern::Ident(name, _) => {
-                let target = match mode {
+                let (target, value) = match mode {
                     PatternMode::Initialize => {
-                        let binding = self.binding(name)?;
-                        let (internal, binding_id) = (binding.internal.clone(), binding.id);
-                        // A `var` exists (holding `undefined`) before its
-                        // declaration runs, so its initializer is an
-                        // assignment a closure may already have copied past.
-                        if binding.kind == BindingKind::Var {
-                            self.record_write(binding_id);
-                        }
+                        let binding = self.binding(name)?.clone();
+                        // The declaration makes the binding, and so its cell.
+                        let value = self.binding_initial_value(&binding, value);
                         self.initialize(name);
-                        AssignTarget::variable(internal.into())
+                        (AssignTarget::variable(binding.internal.into()), value)
                     }
-                    PatternMode::Assign => {
-                        self.lower_assign_target(&TsAssignTarget::Ident(name.clone()))?
+                    PatternMode::InitializeVar => {
+                        let binding = self.binding(name)?.clone();
+                        // A `var` exists (holding `undefined`, or the
+                        // argument of the parameter it redeclares) before its
+                        // declaration runs, so its initializer is an
+                        // assignment a closure may already have copied past,
+                        // into the cell the frame made on entry.
+                        self.record_write(binding.id);
+                        self.initialize(name);
+                        (AssignTarget::variable(binding.internal.into()), value)
                     }
+                    PatternMode::Assign => (
+                        self.lower_assign_target(&TsAssignTarget::Ident(name.clone()))?,
+                        value,
+                    ),
                 };
                 Ok(vec![LashExpr::Assign {
                     target,
@@ -516,7 +573,7 @@ impl Lowerer {
             }
             Pattern::Rest(target) => self.lower_pattern(target, value, mode),
             Pattern::Member { object, property } => {
-                if matches!(mode, PatternMode::Initialize) {
+                if matches!(mode, PatternMode::Initialize | PatternMode::InitializeVar) {
                     return Err(Diagnostic::refusal(
                         DiagnosticCode::UnsupportedExpression,
                         "member targets are not valid binding patterns",

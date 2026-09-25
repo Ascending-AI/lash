@@ -5,7 +5,7 @@
 # include	capability its rendering needs
 compareIterator.js	an iterator object whose next() the harness drives; the dialect has no iterator protocol (TS_FOR_OF_UNSUPPORTED names the snapshot iteration it has instead)
 nativeErrors.js	first-class error constructors in an array (Error, TypeError, ...); the dialect has no constructor values (TS_NEW_UNSUPPORTED)
-nativeFunctionMatcher.js	a NativeFunction-grammar parser whose nested closures advance one shared position; the dialect refuses writes to a captured binding (TS_MUTABLE_CAPTURE_UNSUPPORTED)
+nativeFunctionMatcher.js	a NativeFunction-grammar parser whose identifier classes spell UTF-16 surrogate halves (`\uD800[\uDC00-...]`), which the v1 UTF-8 string model cannot hold (TS_LONE_SURROGATE_LITERAL_UNSUPPORTED)
 wellKnownIntrinsicObjects.js	each intrinsic is reached by evaluating its source text with the Function constructor (TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED)
 program-size	running the harness as its own Script before the test; the runner prepends it to the test in one cell, and a test that alone fits the 64 KiB cell limit (TS_SOURCE_TOO_LARGE) can exceed it with the harness
 host-effects	a host that answers tool calls and every other host effect; the runner answers only print, finish and the journaled clock and random reads

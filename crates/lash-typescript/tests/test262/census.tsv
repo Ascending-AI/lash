@@ -251,7 +251,7 @@ typescript	labels	rejected	TS_LABEL_UNSUPPORTED	outer: while (true) { break oute
 typescript	lone-surrogate-values	rejected	TS_LONE_SURROGATE_UNSUPPORTED	const s = '😀'[0];
 typescript	matchall-iterator-position	rejected	TS_REGEX_ITERATOR_POSITION	const it = 'a'.matchAll(/a/g);
 typescript	method-arity	rejected	TS_METHOD_UNSUPPORTED	[1].map();
-typescript	mutable-captures	rejected	TS_MUTABLE_CAPTURE_UNSUPPORTED	let n = 0; const f = () => { n = 1; };
+typescript	mutable-captures	accepted	-	-
 typescript	namespaces	rejected	TS_NAMESPACE_UNSUPPORTED	namespace N { }
 typescript	new-arbitrary	rejected	TS_NEW_UNSUPPORTED	function F() { } const o = new F();
 typescript	non-null-assertion	accepted	-	-

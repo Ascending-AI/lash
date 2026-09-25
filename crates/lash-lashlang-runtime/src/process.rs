@@ -99,9 +99,12 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// v21 (FIG-3701) embeds VM continuation v24, whose heap may hold a built-in
 /// method value (`'x'.includes`). A v20 segment holds v23 continuations, so it
 /// is refused rather than decoded.
+/// v22 (FIG-3707) embeds VM continuation v25, whose heap may hold a binding
+/// cell. A v21 segment holds v24 continuations, so it is refused rather than
+/// decoded.
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 21;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 22;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

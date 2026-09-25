@@ -55,7 +55,6 @@ pub enum DiagnosticCode {
     TemporalDeadZone,
     UnknownBinding,
     AssignConst,
-    MutableCaptureUnsupported,
     FunctionNotPersisted,
     NonLiftableCapture,
     ProcessParamTypeUnsupported,
@@ -136,7 +135,6 @@ impl DiagnosticCode {
         Self::TemporalDeadZone,
         Self::UnknownBinding,
         Self::AssignConst,
-        Self::MutableCaptureUnsupported,
         Self::FunctionNotPersisted,
         Self::NonLiftableCapture,
         Self::ProcessParamTypeUnsupported,
@@ -253,9 +251,6 @@ impl DiagnosticCode {
             Self::MutualRecursionUnsupported => {
                 "restructure the functions so one calls the other, or drive the recursion with an explicit work list"
             }
-            Self::MutableCaptureUnsupported => {
-                "pass the value into the function as a parameter and return the new value"
-            }
             Self::FunctionNotPersisted => {
                 "define the function again in this cell; keep data, not functions, in session globals"
             }
@@ -355,7 +350,6 @@ impl DiagnosticCode {
             | Self::LoneSurrogateLiteralUnsupported
             | Self::DeclareUnsupported
             | Self::MutualRecursionUnsupported
-            | Self::MutableCaptureUnsupported
             | Self::FunctionNotPersisted
             | Self::NonLiftableCapture
             | Self::DateImmutable
@@ -456,7 +450,6 @@ impl DiagnosticCode {
             Self::TemporalDeadZone => "TS_TEMPORAL_DEAD_ZONE",
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
             Self::AssignConst => "TS_ASSIGN_CONST",
-            Self::MutableCaptureUnsupported => "TS_MUTABLE_CAPTURE_UNSUPPORTED",
             Self::FunctionNotPersisted => "TS_FUNCTION_NOT_PERSISTED",
             Self::NonLiftableCapture => "TS_NON_LIFTABLE_CAPTURE",
             Self::ProcessParamTypeUnsupported => "TS_PROCESS_PARAM_TYPE_UNSUPPORTED",
@@ -742,6 +735,7 @@ mod tests {
                 include_str!("adapter/optional_chain.rs"),
             ),
             ("lower/mod.rs", include_str!("lower/mod.rs")),
+            ("lower/assignment.rs", include_str!("lower/assignment.rs")),
             ("lower/binding.rs", include_str!("lower/binding.rs")),
             ("lower/calls.rs", include_str!("lower/calls.rs")),
             ("lower/captures.rs", include_str!("lower/captures.rs")),
@@ -780,6 +774,7 @@ mod tests {
                 include_str!("lower/process_wrapper.rs"),
             ),
             ("lower/triggers.rs", include_str!("lower/triggers.rs")),
+            ("lower/cells.rs", include_str!("lower/cells.rs")),
             ("lower/param_types.rs", include_str!("lower/param_types.rs")),
             ("adapter/types.rs", include_str!("adapter/types.rs")),
             (

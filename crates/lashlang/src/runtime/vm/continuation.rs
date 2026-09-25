@@ -106,9 +106,15 @@ use super::exceptions::PendingErrorOrigin;
 /// scope. A v25 reader rejects the unknown field, so the bump is what makes
 /// its refusal a version boundary.
 ///
+/// v27 (FIG-3707) carries binding cells: a captured binding that something
+/// assigns lives in a `cell` heap object its frame and every closure over it
+/// reference, and the error enum gains `NotABindingCell` (an uncatchable
+/// lowering defect, never a pending guest error). A v26 continuation's reader
+/// meets an unknown kind, so it is refused.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 26;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 27;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
@@ -480,6 +486,12 @@ mod continuation_serde {
         UrlSearchParams {
             entries: Vec<(String, String)>,
         },
+        /// A binding cell (FIG-3707): the one storage location of a captured
+        /// binding that something assigns, shared by the frame that owns it
+        /// and every closure over it through their references to this id.
+        Cell {
+            value: ValueWire,
+        },
     }
 
     fn value_to_wire(value: &Value) -> Result<ValueWire, &'static str> {
@@ -633,6 +645,9 @@ mod continuation_serde {
             HeapObject::UrlSearchParams(params) => HeapObjectWire::UrlSearchParams {
                 entries: params.entries.clone(),
             },
+            HeapObject::Cell(value) => HeapObjectWire::Cell {
+                value: value_to_wire(value)?,
+            },
         })
     }
 
@@ -738,6 +753,7 @@ mod continuation_serde {
             HeapObjectWire::UrlSearchParams { entries } => {
                 HeapObject::UrlSearchParams(UrlSearchParamsObject { entries })
             }
+            HeapObjectWire::Cell { value } => HeapObject::Cell(value_from_wire(value)?),
         })
     }
 

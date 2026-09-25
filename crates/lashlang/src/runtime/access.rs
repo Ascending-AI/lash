@@ -223,6 +223,9 @@ pub(crate) fn heap_inherited_builtin(object: &HeapObject, key: &str) -> Option<B
         HeapObject::Url(_) => BuiltinPrototype::Url,
         HeapObject::UrlSearchParams(_) => BuiltinPrototype::UrlSearchParams,
         HeapObject::BuiltinFunction(_) => BuiltinPrototype::Object,
+        // A binding cell is never a guest value, so nothing reads a member
+        // of one.
+        HeapObject::Cell(_) => return None,
     };
     BuiltinFunction::inherited(prototype, key)
 }
@@ -645,6 +648,9 @@ pub(crate) fn javascript_heap_has_property(
         // exhaustive.
         HeapObject::BuiltinFunction(_) => return heap.builtin_has_property(id, key),
         HeapObject::Record(_) => is_object_prototype_key(key),
+        // A binding cell is never a guest value, so nothing reads a member
+        // of one.
+        HeapObject::Cell(_) => false,
     })
 }
 
@@ -694,6 +700,9 @@ pub(crate) fn javascript_heap_has_own(
         // `is_builtin_object` answered above; the arm only keeps the match
         // exhaustive.
         HeapObject::BuiltinFunction(_) => return heap.builtin_has_own(id, key),
+        // A binding cell is never a guest value, so nothing reads a member
+        // of one.
+        HeapObject::Cell(_) => false,
     })
 }
 

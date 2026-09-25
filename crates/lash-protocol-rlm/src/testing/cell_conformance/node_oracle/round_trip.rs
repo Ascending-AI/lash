@@ -58,10 +58,16 @@ pub(super) struct Row {
 }
 
 /// The heap kinds no program of the dialect builds, and why.
-pub(super) const NOT_A_DIALECT_VALUE: &[(&str, &str)] = &[(
-    "tuple",
-    "an IR tuple, which the TypeScript lowering never builds and the printer refuses to spell; a TypeScript array is a list",
-)];
+pub(super) const NOT_A_DIALECT_VALUE: &[(&str, &str)] = &[
+    (
+        "tuple",
+        "an IR tuple, which the TypeScript lowering never builds and the printer refuses to spell; a TypeScript array is a list",
+    ),
+    (
+        "binding cell",
+        "the storage a closure shares with the frame whose binding it captures and assigns (FIG-3707); the guest never holds one as a value, and it lives only in function frames, block-private slots and closure captures, none of which reaches a session global",
+    ),
+];
 
 const fn row(
     kind: &'static str,
@@ -204,6 +210,14 @@ pub(super) const ROWS: &[Row] = &[
         "object-holding-a-map",
         "const value = { tags: new Map([['k', 1]]), n: 1 };",
         "console.log(value.tags.get('k'), value.n);",
+    ),
+    // A top-level binding a closure assigns is the session slot itself, so
+    // the next cell reads the value the closure left (FIG-3707).
+    row(
+        "number",
+        "closure-assigned-global",
+        "let value = 0;\n[1, 2, 3].forEach((n) => { value += n; });",
+        "console.log(value, value * 2);",
     ),
     row(
         "list",

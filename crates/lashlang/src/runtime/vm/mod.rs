@@ -517,9 +517,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 };
                 let items = items
                     .iter()
-                    // This is the one isolation boundary: each callback
-                    // borrows its already-independent item.
-                    .map(|value| self.heap.isolate_value(value))
+                    // Each callback receives the item itself: a heap
+                    // reference stays the object it names (ECMA identity), and
+                    // only an inline compound is given its own object.
+                    .map(|value| match value {
+                        Value::Ref(_) => Ok(value.clone()),
+                        value => self.heap.isolate_value(value),
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 if items.is_empty() {
                     self.stack.push(Value::List(Vec::new().into()));
@@ -1390,6 +1394,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::JavaScriptGlobalGet => self.execute_javascript_global_get()?,
             IntrinsicOp::JavaScriptGlobalHas => self.execute_javascript_global_has()?,
             IntrinsicOp::JavaScriptGlobalSet => self.execute_javascript_global_set()?,
+            IntrinsicOp::BindingCellNew
+            | IntrinsicOp::BindingCellGet
+            | IntrinsicOp::BindingCellSet => self.execute_binding_cell(op)?,
             IntrinsicOp::JavaScriptUriCodec(codec) => self.execute_javascript_uri_codec(codec)?,
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;

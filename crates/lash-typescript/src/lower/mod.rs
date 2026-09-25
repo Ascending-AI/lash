@@ -20,11 +20,13 @@ use stdlib::*;
 mod array_callbacks;
 mod array_map;
 mod arrays;
+mod assignment;
 mod attribute_update;
 mod await_expr;
 mod binding;
 mod calls;
 mod captures;
+mod cells;
 mod constructs;
 mod entry;
 mod graph;
@@ -45,10 +47,7 @@ pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_work
 use graph::{shortest_cycle_through, strongly_connected_components};
 use param_types::process_param_type;
 pub(crate) use process_wrapper::{process_run_wrapper, wrapped_run_body};
-use triggers::{
-    is_trigger_registration_operation, names_the_retired_trigger_event,
-    retired_trigger_event_diagnostic,
-};
+use triggers::is_trigger_registration_operation;
 
 pub(crate) fn accepts_instance_method(method: &str) -> bool {
     stdlib::is_instance_stdlib_method(method)
@@ -85,6 +84,12 @@ struct FunctionContext {
     /// Where the enclosing frame creates this closure: the point its captures
     /// are copied at.
     creation: Site,
+    /// Whether the parameters contain expressions (a default or a computed
+    /// key). ECMA-262 then gives the body a variable environment of its own
+    /// (FunctionDeclarationInstantiation step 28): a body `var` named like a
+    /// parameter is a separate binding that starts with the parameter's
+    /// value, so a closure a default made keeps reading the parameter.
+    separate_var_environment: bool,
 }
 
 /// A hoisted function declaration awaiting a place in the emission order.
@@ -151,6 +156,13 @@ struct Lowerer {
     /// Where each closure copies its captures and where each binding is
     /// assigned, judged once the program has lowered.
     capture_ledger: CaptureLedger,
+    /// The slots that live in a binding cell (FIG-3707), as the first
+    /// lowering pass's ledger judged them. Empty on that first pass.
+    cells: BTreeSet<captures::SlotKey>,
+    /// How many binding-cell temporaries this lowering minted. A separate
+    /// counter from the generated bindings', so the pass that boxes mints
+    /// exactly the generated names the pass that judged did.
+    cell_temporaries: usize,
     /// The source-level names this program calls, computed once before
     /// lowering. A `const`-bound async arrow outside this set is a
     /// process-literal candidate (FIG-2997).
@@ -166,6 +178,9 @@ struct Lowerer {
     /// Every name the program writes as `globalThis.name`: such a name is the
     /// program's own again, whatever the session dropped.
     global_this_writes: BTreeSet<String>,
+    /// The `globalThis`-only session slots the root declared up front whose
+    /// first write site has not been lowered yet.
+    unwritten_global_this_slots: BTreeSet<String>,
     /// The name ECMA-262's NamedEvaluation/SetFunctionName positions assign to
     /// the next anonymous function lowered. Naming contexts set it just before
     /// lowering their value expression; `lower_function` takes it at entry so
@@ -279,13 +294,17 @@ impl Lowerer {
                             None,
                         ));
                     }
+                    if binding.kind == BindingKind::Parameter {
+                        let parameter = binding.internal.clone();
+                        hoisted.extend(self.separate_parameter_var(&name, &parameter));
+                    }
                     continue;
                 }
                 self.declare(&name, BindingKind::Var, true, root)?;
-                let internal = self.binding(&name)?.internal.clone();
+                let binding = self.binding(&name)?.clone();
                 hoisted.push(LashExpr::Assign {
-                    target: AssignTarget::variable(internal.into()),
-                    expr: Box::new(LashExpr::Undefined),
+                    target: AssignTarget::variable(binding.internal.as_str().into()),
+                    expr: Box::new(self.binding_initial_value(&binding, LashExpr::Undefined)),
                 });
             }
             hoisted
@@ -293,6 +312,9 @@ impl Lowerer {
             Vec::new()
         };
         self.predeclare(statements, root)?;
+        if root && self.current_function() == 0 {
+            self.declare_global_this_slots()?;
+        }
 
         let local_function_internals = statements
             .iter()
@@ -339,14 +361,15 @@ impl Lowerer {
                     }
                     _ => unreachable!("function lowering returns a function expression"),
                 };
+                let captures = definition
+                    .captures
+                    .iter()
+                    .map(|capture| capture.as_str().to_string())
+                    .collect();
                 pending.push(PendingFunction {
                     internal: binding.internal.clone(),
-                    captures: definition
-                        .captures
-                        .iter()
-                        .map(|capture| capture.as_str().to_string())
-                        .collect(),
-                    expression,
+                    captures,
+                    expression: self.binding_initial_value(&binding, expression),
                 });
             }
         }
@@ -572,8 +595,13 @@ impl Lowerer {
                             .transpose()?
                             .unwrap_or(LashExpr::Undefined)
                     };
+                    let mode = if *kind == VarKind::Var {
+                        PatternMode::InitializeVar
+                    } else {
+                        PatternMode::Initialize
+                    };
                     let mut initialization =
-                        self.lower_pattern(&declaration.pattern, value, PatternMode::Initialize)?;
+                        self.lower_pattern(&declaration.pattern, value, mode)?;
                     // A `var` initializer assigns the binding its function
                     // hoisted, so it lowers as the assignment statement it is:
                     // the same program `x = value;` lowers to, which is also
@@ -791,7 +819,18 @@ impl Lowerer {
                             }
                             if let Pattern::Ident(name, _) = pattern {
                                 self.initialize(name);
-                                self.binding(name)?.internal.clone()
+                                let binding = self.binding(name)?.clone();
+                                if self.is_cell(&binding) {
+                                    // The exception arrives in a slot of its
+                                    // own, and the binding's cell is made
+                                    // from it on entry to the clause.
+                                    let exception = self.cell_temporary();
+                                    prefix
+                                        .push(Self::cell_from_slot(&binding.internal, &exception));
+                                    exception
+                                } else {
+                                    binding.internal
+                                }
                             } else {
                                 let exception = self.temporary("caught");
                                 prefix.extend(self.lower_pattern(
@@ -886,6 +925,7 @@ impl Lowerer {
             captures: BTreeSet::new(),
             receiver: None,
             creation,
+            separate_var_environment: function.params.iter().any(pattern_has_expression),
         });
         // ECMA binds a function's own name inside its body. A declaration
         // already owns an outer binding to reuse; a named function expression
@@ -906,7 +946,7 @@ impl Lowerer {
             (_, internal_name) => internal_name,
         };
         if let (Some(source_name), Some(internal)) = (&function.name, &internal_name) {
-            let binding_id = self.declare_in_ledger(source_name, BindingKind::Function);
+            let binding_id = self.declare_in_ledger(BindingKind::Function, (id, internal.clone()));
             #[expect(
                 clippy::unwrap_used,
                 reason = "the lowerer pushes the program root scope before any function and never pops past it"
@@ -932,7 +972,9 @@ impl Lowerer {
         // it, whose `this` is lexical — resolves to it like any other name and
         // an arrow captures it like any other `const`.
         if !function.is_arrow {
-            let binding_id = self.declare_in_ledger(RECEIVER_BINDING, BindingKind::Const);
+            // Named on first read; a receiver is never assigned, so its slot
+            // is never boxed and the ledger needs no name for it.
+            let binding_id = self.declare_in_ledger(BindingKind::Const, (id, String::new()));
             #[expect(
                 clippy::unwrap_used,
                 reason = "the function-name scope was pushed above"
@@ -1010,7 +1052,16 @@ impl Lowerer {
                 pattern => pattern,
             };
             let slot = if let Some(name) = single_pattern_name(target) {
-                self.binding(name)?.internal.clone()
+                let binding = self.binding(name)?.clone();
+                if self.is_cell(&binding) {
+                    // The argument arrives in a slot of its own, and the
+                    // parameter's cell is made from it on entry.
+                    let slot = self.cell_temporary();
+                    prologue.push(Self::cell_from_slot(&binding.internal, &slot));
+                    slot
+                } else {
+                    binding.internal
+                }
             } else {
                 self.temporary("parameter")
             };
@@ -1361,7 +1412,10 @@ impl Lowerer {
                     None,
                 ));
             }
-            if !matches!(binding.kind, BindingKind::Const) {
+            // A binding in a cell is one something assigns (FIG-3707), even
+            // a `const` sharing its slot with one: the process could not see
+            // the value it had when it started.
+            if !matches!(binding.kind, BindingKind::Const) || self.is_cell(&binding) {
                 return Err(Diagnostic::with_repair(
                     DiagnosticCode::NonLiftableCapture,
                     format!(
@@ -1406,189 +1460,6 @@ impl Lowerer {
                 body: Box::new(process_wrapper::process_run_wrapper(closure, call_args)),
             },
         )))
-    }
-
-    fn lower_assign_target(&mut self, target: &TsAssignTarget) -> Result<AssignTarget, Diagnostic> {
-        match target {
-            TsAssignTarget::Ident(name) | TsAssignTarget::ParenIdent(name) => {
-                let Some(binding) = self
-                    .scopes
-                    .iter()
-                    .rev()
-                    .find_map(|scope| scope.bindings.get(name))
-                    .cloned()
-                else {
-                    return Err(self.unknown_binding(name, None));
-                };
-                // `let`, `var`, parameters and `catch` bindings are mutable:
-                // reassigning them is ordinary ECMA-262. `const` (tsc TS2588)
-                // and function-declaration bindings stay refused.
-                if matches!(binding.kind, BindingKind::Const | BindingKind::Function) {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::AssignConst,
-                        format!("cannot assign to `{name}`"),
-                        None,
-                    ));
-                }
-                if binding.owner_function != self.current_function() {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::MutableCaptureUnsupported,
-                        format!(
-                            "mutable binding `{name}` cannot be captured until live lexical cells are available"
-                        ),
-                        None,
-                    ));
-                }
-                self.record_write(binding.id);
-                Ok(AssignTarget::variable(binding.internal.into()))
-            }
-            TsAssignTarget::Member { object, property } => {
-                self.member_assign_target(object, property)
-            }
-            TsAssignTarget::Pattern(_) => Err(Diagnostic::defect(
-                DiagnosticCode::UnsupportedExpression,
-                "destructuring targets are lowered as a pattern, not a scalar assignment",
-                None,
-            )),
-        }
-    }
-
-    fn member_assign_target(
-        &mut self,
-        object: &Expr,
-        property: &MemberProperty,
-    ) -> Result<AssignTarget, Diagnostic> {
-        let (root, mut steps) = self.member_path(object)?;
-        steps.push(match property {
-            MemberProperty::Field(field) => AssignPathStep::Field(field.as_str().into()),
-            MemberProperty::Index(index) => AssignPathStep::Index(self.lower_expr(index)?),
-        });
-        Ok(AssignTarget {
-            root: root.into(),
-            steps,
-        })
-    }
-
-    fn member_path(&mut self, expr: &Expr) -> Result<(String, Vec<AssignPathStep>), Diagnostic> {
-        match expr {
-            Expr::Ident(name, _) => Ok((self.resolve(name)?, Vec::new())),
-            Expr::Member {
-                object, property, ..
-            } => {
-                let (root, mut steps) = self.member_path(object)?;
-                steps.push(match property {
-                    MemberProperty::Field(field) => AssignPathStep::Field(field.as_str().into()),
-                    MemberProperty::Index(index) => AssignPathStep::Index(self.lower_expr(index)?),
-                });
-                Ok((root, steps))
-            }
-            _ => Err(Diagnostic::defect(
-                DiagnosticCode::UnsupportedExpression,
-                "assignment target must start at a lexical binding",
-                None,
-            )),
-        }
-    }
-
-    fn lower_member(
-        &mut self,
-        object: &Expr,
-        property: &MemberProperty,
-    ) -> Result<LashExpr, Diagnostic> {
-        if matches!(property, MemberProperty::Field(field) if field == "stack") {
-            return Err(Diagnostic::refusal(
-                DiagnosticCode::MethodUnsupported,
-                "Unsupported: Error.stack is nondeterministic across engines. Inspect error.name and error.message instead.",
-                None,
-            ));
-        }
-        if matches!(object, Expr::Ident(name, _) if name == "globalThis" && !self.has_binding(name))
-        {
-            return match property {
-                MemberProperty::Field(field)
-                    if !matches!(field.as_str(), "undefined" | "NaN" | "Infinity") =>
-                {
-                    // The session slot, read live wherever the read runs: a
-                    // function or closure reads the root frame's current
-                    // value, as a global object property read does, never a
-                    // copy and never a local of the same name.
-                    self.refuse_global_this_in_process(field)?;
-                    self.refuse_expired_global_read(field)?;
-                    Ok(LashExpr::BuiltinCall {
-                        name: "__typescript_global_get".into(),
-                        args: vec![LashExpr::String(field.as_str().into())],
-                    })
-                }
-                MemberProperty::Field(field) => Err(Diagnostic::new(
-                    DiagnosticCode::ReservedIdentifier,
-                    format!("globalThis.{field} is a reserved value identifier"),
-                    None,
-                )),
-                MemberProperty::Index(_) => Err(Diagnostic::refusal(
-                    DiagnosticCode::UnsupportedExpression,
-                    "Unsupported: computed globalThis access. Use globalThis.identifier so session state remains statically named.",
-                    None,
-                )),
-            };
-        }
-        if let Expr::Ident(owner, _) = object
-            && is_javascript_builtin_global(owner)
-            && !self.has_binding(owner)
-        {
-            let name = match property {
-                MemberProperty::Field(field) => field.as_str(),
-                MemberProperty::Index(_) => "",
-            };
-            if let Some(value) = builtin_constant(owner, name) {
-                return Ok(LashExpr::Number(value));
-            }
-            // The rest of the built-in's surface is a read on the built-in
-            // object itself — `Number.prototype`, `Math.constructor`, a miss
-            // — and the heap answers what Node answers: the property value or
-            // `undefined`.
-            let target = Box::new(Self::stdlib_call(
-                "Lash.Builtin",
-                vec![LashExpr::String(owner.as_str().into())],
-            ));
-            return Ok(match property {
-                MemberProperty::Field(field) => LashExpr::Field {
-                    target,
-                    field: field.as_str().into(),
-                },
-                MemberProperty::Index(index) => LashExpr::Index {
-                    target,
-                    index: Box::new(self.lower_expr(index)?),
-                },
-            });
-        }
-        // `(async function(){}).constructor` is %AsyncFunction%: the runtime
-        // erases async-ness from a closure, so the lowerer answers from the
-        // AST before the value ever materializes.
-        if let Expr::Function(function) = object
-            && function.is_async
-            && matches!(property, MemberProperty::Field(field) if field == "constructor")
-        {
-            return Ok(Self::stdlib_call(
-                "Lash.Builtin",
-                vec![LashExpr::String("AsyncFunction".into())],
-            ));
-        }
-        // The retired global, named and refused rather than left to reject as
-        // an unknown binding, which said nothing about where the event went.
-        if names_the_retired_trigger_event(object, property) && !self.has_binding("trigger") {
-            return Err(retired_trigger_event_diagnostic());
-        }
-        let target = Box::new(self.lower_expr(object)?);
-        Ok(match property {
-            MemberProperty::Field(field) => LashExpr::Field {
-                target,
-                field: field.as_str().into(),
-            },
-            MemberProperty::Index(index) => LashExpr::Index {
-                target,
-                index: Box::new(self.lower_expr(index)?),
-            },
-        })
     }
 }
 

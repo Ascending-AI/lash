@@ -56,7 +56,10 @@ pub use canonical_messagepack::{
 // is not a prototype, so the field names the owning scope. A v12 reader meets
 // an unknown field while deserializing, so the bump is what makes its refusal
 // a version boundary.
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 13;
+// v14 writes a binding cell as a `cell` heap object (FIG-3707): a closure's
+// captures may reference one. A v13 reader meets an unknown kind, so the bump
+// is what makes its refusal a version boundary.
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 14;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 /// The longest summary [`State::opaque_bindings`] renders, in characters.
 pub const BINDING_SUMMARY_MAX_CHARS: usize = super::heap::SUMMARY_MAX_CHARS;

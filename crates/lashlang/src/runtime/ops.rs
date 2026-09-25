@@ -156,11 +156,12 @@ pub(crate) async fn execute_intrinsic(
         | IntrinsicOp::JavaScriptGlobalGet
         | IntrinsicOp::JavaScriptGlobalHas
         | IntrinsicOp::JavaScriptGlobalSet
-        | IntrinsicOp::JavaScriptUriCodec(_) => {
-            Err(RuntimeError::ContextDependentIntrinsicMisdispatch {
-                context: "TypeScript container intrinsic".into(),
-            })
-        }
+        | IntrinsicOp::JavaScriptUriCodec(_)
+        | IntrinsicOp::BindingCellNew
+        | IntrinsicOp::BindingCellGet
+        | IntrinsicOp::BindingCellSet => Err(RuntimeError::ContextDependentIntrinsicMisdispatch {
+            context: "TypeScript container intrinsic".into(),
+        }),
         IntrinsicOp::Join => {
             expect_arg_count("join", values, 2)?;
             execute_join_builtin_async(&values[0], &values[1]).await

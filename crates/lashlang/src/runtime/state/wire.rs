@@ -57,6 +57,11 @@ pub(super) enum CanonicalHeapObject {
     UrlSearchParams {
         entries: Vec<CanonicalUrlSearchParamsEntry>,
     },
+    /// A binding cell (FIG-3707): the one storage location a captured,
+    /// assigned binding and every closure over it share.
+    Cell {
+        value: CanonicalValue,
+    },
 }
 
 impl CanonicalHeapObject {
@@ -194,6 +199,9 @@ impl CanonicalHeapObject {
                     })
                     .collect(),
             },
+            HeapObject::Cell(value) => Self::Cell {
+                value: CanonicalValue::from_runtime(value, &format!("{location}.value"), 0)?,
+            },
         })
     }
 
@@ -324,6 +332,7 @@ impl CanonicalHeapObject {
                         .collect(),
                 })
             }
+            Self::Cell { value } => HeapObject::Cell(value.into_runtime()?),
         })
     }
 }

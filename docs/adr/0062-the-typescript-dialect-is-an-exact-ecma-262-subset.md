@@ -83,6 +83,35 @@ replay. Register entry 13's refusal of string coercion for a plain object, a
 has no primitive the runtime can give (its source text), so converting one
 refuses as `TS_FUNCTION_STRING_COERCION`; see ADR 0064.
 
+Amended 2026-09-25 (FIG-3707, decision 44): **captures are exact.** A closure
+shares every binding it closes over, as ECMA-262 environments do: it reads the
+binding's current value, and an assignment inside it writes the one binding
+the enclosing frame and every other closure over it read. Register entry 5 is
+retired and `TS_MUTABLE_CAPTURE_UNSUPPORTED` is deleted. A capture nothing can
+assign after the closure copied it stays a plain copy, which is exact; the
+capture ledger names every other slot (an assignment after the closure, in a
+later iteration of a loop the binding outlives, inside a closure, or through
+`globalThis` inside a function), and that slot holds a **binding cell**: one
+heap object the owning frame and every closure over the binding reference. Each
+binding instance is its own cell: a declaration, a hoisted `var` on frame
+entry, a parameter, a `catch` binding, each `for...of`/`for...in` iteration and
+each classic-`for` per-iteration copy (CreatePerIterationEnvironment) mints a
+fresh one. A top-level binding that stays a session global is never a cell: it
+is the session slot, which a closure reads and writes live, as it already reads
+`globalThis.name` (FIG-3620). The IR spells cells with three front-end
+intrinsics (`__typescript_cell_new`, `__typescript_cell_get`,
+`__typescript_cell_set`); the heap holds a cell like any other object, so
+roots, collection, suspension and snapshots carry it, and the continuation and
+snapshot wires encode it canonically (`cell { value }`). **The cell boundary:**
+a cell never crosses a session cell boundary, by construction rather than by a
+refusal. Cells live in function frames, in block-private top-level slots (which
+end with their cell) and in closure captures (a closure ends with its cell,
+`closure-boundary`); a top-level binding a closure writes is the session slot
+itself, so the boundary persists its current value like any global's. The
+bytecode, VM ABI, VM continuation, snapshot and semantic-hash versions move
+together; a continuation or snapshot from before cells is refused by its
+format version.
+
 ## Context
 
 Lash accepts model-authored code, and a model's prior on TypeScript is far
@@ -117,8 +146,8 @@ deviation register below names every shape-dependent runtime rejection that
 remains. The register is small and closed — outside it, no semantic deviation is
 intentionally accepted for an operation in the accepted surface.
 
-The accepted v1 surface is `let`/`const`, functions and arrows with immutable
-captures, blocks, `if`, `while`, classic `for` in every head, condition and
+The accepted v1 surface is `let`/`const`, functions and arrows with exact
+captures (amended by FIG-3707), blocks, `if`, `while`, classic `for` in every head, condition and
 update form (amended by FIG-3706), `for...of`, `break`, `continue`, `try`/`catch`/`finally`, `throw`,
 `return`, arrays, records, field and index access and assignment, calls, the
 primitive unary, arithmetic, comparison, equality and logical operators,
@@ -155,19 +184,17 @@ Async authoring beyond that would require suspension points the durable
 machinery does not yet place.
 
 **Mutually recursive function declarations** reject, naming the cycle
-(`cycle: isEven -> isOdd -> isEven`). v1 captures by value, so a declaration
-cycle has no emission order, and routing it through a shared mutable record
-would build a heap cycle reachable from a durable root — which the durable graph
+(`cycle: isEven -> isOdd -> isEven`). A declaration copies its captures when it
+is created, so a declaration cycle has no emission order, and routing it through
+shared binding cells would build a heap cycle reachable from a durable root — which the durable graph
 encoding cannot hold. The program would run and then fail to suspend or
 snapshot, so failing closed at compile time is the honest form of the same
 deferral. Self-recursion, named self-recursive function *expressions*, nested
 declarations and acyclic chains are unaffected.
 
-**Mutable lexical captures** reject, on both captured reads and captured writes,
-until durable lexical cells exist. A capture is mutable when an assignment to
-the binding can run after the closure copied it; a binding nothing assigns
-after that point is captured exactly, however it was declared. Immutable
-captures and mutation *through* a captured object reference are supported.
+**Mutable lexical captures** *(retired by FIG-3707: captures are exact; see the
+amendment above).* They rejected, on both captured reads and captured writes,
+until durable lexical cells existed.
 
 ### The agent surface
 
@@ -618,14 +645,12 @@ that each entry is a limit taken knowingly.
    state is captured; shared *acyclic* object identity is preserved
    byte-for-byte. Cycle-capable durable graph encoding is deferred, and the
    front end never silently copies a cycle to avoid the question.
-5. **Mutable captures.** Rejected on both the read and the write path until
-   durable lexical cells exist, as `TS_MUTABLE_CAPTURE_UNSUPPORTED`. A closure
-   copies what it captures when it is created, so the read path refuses a
-   capture that an assignment can reach afterwards: later in the same frame, in
-   a later iteration of a loop the binding outlives, or through a
-   `globalThis.name` write. The write path refuses an assignment to a captured
-   binding from inside the closure. A `const`, a `let` assigned only before the
-   closure exists, and a per-iteration loop binding are captured exactly.
+5. **Mutable captures** — *retired by FIG-3707.* A closure copied what it
+   captured, so an assignment that could reach a capture after the copy was
+   refused as `TS_MUTABLE_CAPTURE_UNSUPPORTED`, on the read and the write path.
+   Such a binding now lives in a binding cell every closure over it shares, and
+   a top-level one is reached live through its session slot (see the FIG-3707
+   amendment). The number stays reserved.
 6. **Mutual recursion.** Rejected, for the durable-cycle reason above.
 7. **The JSON-shaped host boundary.** Object properties whose value is
    `undefined` are omitted and array elements become `null`; incoming JSON

@@ -476,9 +476,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0xe9, 0x7d, 0x1d, 0x3e, 0x2d, 0xca, 0xc4, 0x5e, 0x8f, 0x62, 0x13, 0x01, 0xaa, 0x2c,
-            0x4d, 0xc3, 0xa4, 0xe2, 0x7e, 0x2f, 0x90, 0x60, 0xdb, 0xa3, 0xdd, 0xf5, 0xae, 0x28,
-            0xac, 0x62, 0xef, 0x6a,
+            0x34, 0xbe, 0x89, 0x9a, 0xc6, 0x8e, 0xc2, 0x5e, 0xef, 0xff, 0x44, 0x41, 0xa9, 0x4f,
+            0xb4, 0xc3, 0x31, 0x03, 0xd8, 0x53, 0x4d, 0xfd, 0xd4, 0x97, 0xc5, 0x56, 0x08, 0x2e,
+            0x27, 0x9e, 0x7c, 0xf7,
         ]
     );
 }
@@ -668,7 +668,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e0da7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e0ea7676c6f62616c7390");
 }
 
 #[test]
@@ -2012,5 +2012,57 @@ fn a_snapshot_round_trips_a_builtin_function_object() {
         backed.heap.builtin_function(values).expect("read again"),
         function,
         "the restored heap answers the built-in with the object it restored"
+    );
+}
+
+/// The canonical snapshot carries a binding cell (FIG-3707) byte-stably, and
+/// two references to one cell restore to one cell: a closure's capture and
+/// its frame's slot share the cell they shared before.
+#[test]
+fn a_snapshot_round_trips_a_binding_cell_and_its_sharing() {
+    let mut heap = Heap::default();
+    let cell = heap.allocate_cell(Value::Number(3.0)).expect("allocate");
+    let holder = heap
+        .allocate(HeapObject::List(vec![cell.clone(), cell.clone()]))
+        .expect("allocate");
+    let mut runtime_globals = Record::new();
+    runtime_globals.insert("holder".to_string(), holder);
+    let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
+        mode: StateMode::HeapBacked(Box::new(HeapBackedState {
+            runtime_globals,
+            projected: Record::new(),
+            heap,
+        })),
+    };
+    let bytes = snapshot.to_canonical_bytes().expect("encode");
+    let object = [
+        &[0x82, 0xa4][..],
+        b"kind",
+        &[0xa4],
+        b"cell",
+        &[0xa5],
+        b"value",
+    ]
+    .concat();
+    assert!(
+        bytes.windows(object.len()).any(|window| window == object),
+        "the canonical bytes spell the cell by its kind and value"
+    );
+    let decoded = Snapshot::from_canonical_bytes(&bytes).expect("decode");
+    assert_eq!(decoded.to_canonical_bytes().expect("re-encode"), bytes);
+    let StateMode::HeapBacked(backed) = decoded.mode else {
+        panic!("a heap-backed snapshot decodes heap-backed");
+    };
+    let Some(Value::Ref(holder)) = backed.runtime_globals.get("holder") else {
+        panic!("the holder restores as a heap reference");
+    };
+    let HeapObject::List(members) = backed.heap.get(*holder).expect("holder") else {
+        panic!("the holder restores as a list");
+    };
+    assert_eq!(members[0], members[1], "one cell stays one cell");
+    assert_eq!(
+        backed.heap.cell_value(&members[0]).expect("a cell"),
+        Value::Number(3.0)
     );
 }

@@ -2,7 +2,10 @@ use super::super::{
     ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_number,
     javascript_to_string, javascript_to_uint32, nullish_property_read,
 };
-use super::javascript_array::{copy_within, javascript_array_method_for_value};
+use super::javascript_array::{
+    append_flat_map_by_reference, array_iteration_source, copy_within,
+    javascript_array_method_for_value,
+};
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
 pub(super) use super::javascript_number::*;
 pub(super) use super::javascript_stdlib::*;
@@ -160,6 +163,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             values = self.applied_stdlib_arguments(values)?;
         }
+        if let Some(source) = array_iteration_source(&self.heap, &mut values)? {
+            self.stack.push(source);
+            return Ok(());
+        }
         // An authored member call on a plain object: the object's own
         // property is the method (ECMA-262 GetValue, then Call with the object
         // as `this`). The lowerer calls a built-in method name through here
@@ -244,6 +251,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             };
             self.stack
                 .push(values.first().cloned().unwrap_or(Value::Undefined));
+            return Ok(());
+        }
+        if let [Value::String(method), Value::Ref(output), value] = values.as_slice()
+            && method.as_str() == "__appendFlatMap"
+            && let Some(appended) = append_flat_map_by_reference(&self.heap, *output, value)?
+        {
+            self.stack.push(appended);
             return Ok(());
         }
         if let [Value::String(method), value] = values.as_slice()

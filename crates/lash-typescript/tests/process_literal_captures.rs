@@ -134,3 +134,25 @@ fn process_environment() -> lashlang::LashlangHostEnvironment {
         .expect("processes.start binding");
     lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
 }
+
+/// FIG-3707: inside a lifted body, a closure shares the body's own bindings
+/// (a binding cell the body's frame holds); only a capture of the starting
+/// cell's mutable bindings still refuses, since the process sees the values
+/// it was started with.
+#[test]
+fn a_lifted_body_shares_its_own_bindings_with_its_closures() {
+    let source = r#"
+        const tally = async (tick: unknown) => {
+            let n = 0;
+            [1, 2, 3].forEach((x) => { n += x; });
+            return n;
+        };
+    "#;
+    let program = lash_typescript::parse(source)
+        .expect("a closure inside a process body may assign the body's own binding");
+    let text = format!("{:?}", program.main);
+    assert!(
+        text.contains("__typescript_cell_new"),
+        "the body's binding lives in a cell its closure shares: {text}"
+    );
+}

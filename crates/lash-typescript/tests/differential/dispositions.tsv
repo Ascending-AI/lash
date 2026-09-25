@@ -27,11 +27,6 @@
 # back. A registered over-rejection, not a conformance claim.
 "JSON.stringify(JSON.parse('{\"__proto__\":1,\"a\":2}'))"	runtime-reject	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 "Object.keys(JSON.parse('{\"a\":1,\"__proto__\":2}')).join(',')"	runtime-reject	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-
-# FIG-3604: a closure copies what it captures, so one created before its
-# binding is reassigned refuses rather than reading the stale copy (register
-# entry 5, the read path).
-"(() => { let x = 1; const f = () => x; x = 2; return f(); })()"	reject	TS_MUTABLE_CAPTURE_UNSUPPORTED
 # The closed-shape field guard (FIG-3626, ADR 0062 register entry 22): a read
 # or write of a field a statically closed object literal lacks is refused at
 # link, as TypeScript's checker refuses it. These rows still run Node-exact

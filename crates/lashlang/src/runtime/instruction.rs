@@ -525,6 +525,12 @@ pub(crate) enum IntrinsicOp {
     JavaScriptGlobalHas,
     JavaScriptGlobalSet,
     JavaScriptUriCodec(JavaScriptUriCodec),
+    /// A fresh binding cell holding the value on top of the stack (FIG-3707).
+    BindingCellNew,
+    /// The value the binding cell on top of the stack holds.
+    BindingCellGet,
+    /// Stores the top value in the binding cell beneath it, leaving the value.
+    BindingCellSet,
     Trim,
     Slice,
     ToString,
@@ -692,7 +698,9 @@ impl IntrinsicOp {
             | IntrinsicOp::JavaScriptGlobalDelete
             | IntrinsicOp::JavaScriptGlobalGet
             | IntrinsicOp::JavaScriptGlobalHas
-            | IntrinsicOp::JavaScriptUriCodec(_) => 1,
+            | IntrinsicOp::JavaScriptUriCodec(_)
+            | IntrinsicOp::BindingCellNew
+            | IntrinsicOp::BindingCellGet => 1,
             IntrinsicOp::Contains
             | IntrinsicOp::GrepText
             | IntrinsicOp::StartsWith
@@ -703,6 +711,7 @@ impl IntrinsicOp {
             | IntrinsicOp::JavaScriptJoin
             | IntrinsicOp::JavaScriptHeapInstanceOf
             | IntrinsicOp::JavaScriptGlobalSet
+            | IntrinsicOp::BindingCellSet
             | IntrinsicOp::JavaScriptHeapDeleteMember
             | IntrinsicOp::Validate
             | IntrinsicOp::CeilDiv
@@ -748,7 +757,10 @@ impl IntrinsicOp {
             | IntrinsicOp::JavaScriptGlobalGet
             | IntrinsicOp::JavaScriptGlobalHas
             | IntrinsicOp::JavaScriptGlobalSet
-            | IntrinsicOp::JavaScriptUriCodec(_) => BuiltinProfileTag::TypeScriptStdlib,
+            | IntrinsicOp::JavaScriptUriCodec(_)
+            | IntrinsicOp::BindingCellNew
+            | IntrinsicOp::BindingCellGet
+            | IntrinsicOp::BindingCellSet => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::Trim => BuiltinProfileTag::Trim,
             IntrinsicOp::Slice => BuiltinProfileTag::Slice,
             IntrinsicOp::ToString => BuiltinProfileTag::ToString,

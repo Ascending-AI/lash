@@ -127,6 +127,7 @@ pub(crate) fn rebind_object(object: &mut HeapObject, rebind: &mut Rebind<'_>) ->
             changed
         }
         HeapObject::Set(object) => rebind_values(&mut object.values, rebind),
+        HeapObject::Cell(value) => rebind_value(value, rebind),
         HeapObject::RegExpMatch(object) => {
             let mut changed = rebind_values(&mut object.items, rebind);
             changed |= rebind_value(&mut object.index, rebind);

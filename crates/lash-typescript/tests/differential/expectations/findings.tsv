@@ -270,7 +270,7 @@ findings	268	accept	"(() => { let total = 0; for (var n of [1, 2]) { total += n;
 findings	269	accept	"(() => { var x = 0; for (var x of [1, 2]) {} return x; })()"	"2"	-
 findings	270	accept	"(() => { for (var k in { a: 1, b: 2 }) {} return k; })()"	"b"	-
 findings	271	accept	"(() => { var v = 1; v = 2; return v; })()"	"2"	-
-findings	272	reject	"(() => { let x = 1; const f = () => x; x = 2; return f(); })()"	"2"	TS_MUTABLE_CAPTURE_UNSUPPORTED
+findings	272	accept	"(() => { let x = 1; const f = () => x; x = 2; return f(); })()"	"2"	-
 findings	273	accept	"(() => { function h(p) { p = p + 1; return p; } return h(1); })()"	"2"	-
 findings	274	accept	"(() => { try { throw 1; } catch (e) { e = 2; return e; } })()"	"2"	-
 findings	275	accept	"Array.isArray(new Set([1]))"	"false"	-

@@ -255,6 +255,20 @@ pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
         name: "__typescript_global_set",
         arity: Arity::Exact(2),
     },
+    // Binding cells (FIG-3707): a captured binding that something assigns
+    // lives in one cell the owning frame and every closure over it share.
+    Builtin {
+        name: "__typescript_cell_new",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "__typescript_cell_get",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "__typescript_cell_set",
+        arity: Arity::Exact(2),
+    },
     Builtin {
         name: "__typescript_encode_uri_component",
         arity: Arity::Exact(1),
@@ -309,6 +323,9 @@ mod tests {
             ("__typescript_async_map", Arity::Exact(2)),
             ("__typescript_closure", Arity::Exact(3)),
             ("__typescript_global_set", Arity::Exact(2)),
+            ("__typescript_cell_new", Arity::Exact(1)),
+            ("__typescript_cell_get", Arity::Exact(1)),
+            ("__typescript_cell_set", Arity::Exact(2)),
             ("__typescript_encode_uri_component", Arity::Exact(1)),
             ("__typescript_decode_uri_component", Arity::Exact(1)),
             ("__typescript_encode_uri", Arity::Exact(1)),

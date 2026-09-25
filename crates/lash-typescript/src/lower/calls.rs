@@ -218,7 +218,7 @@ impl Lowerer {
         };
         let slot = slot.to_string();
         let owner_function = self.current_function();
-        let id = self.declare_in_ledger(&slot, BindingKind::Const);
+        let id = self.declare_in_ledger(BindingKind::Const, (owner_function, slot.clone()));
         self.scopes.push(Scope::default());
         #[expect(clippy::unwrap_used, reason = "the scope was pushed on the line above")]
         self.scopes.last_mut().unwrap().bindings.insert(
@@ -1019,10 +1019,18 @@ impl Lowerer {
                     .with_hint("call Array.from(source) or Array.from(source, (item) => ...)"));
                 }
             };
+            // A mapper walks an array source live (the array iterator reads
+            // each index and the length at every step); a plain copy has no
+            // guest code to observe the difference.
+            let source = if mapping_args.is_empty() {
+                "Lash.ArrayFromIterable"
+            } else {
+                "Lash.ArrayIterationSource"
+            };
             let array = LashExpr::BuiltinCall {
                 name: "__typescript_stdlib".into(),
                 args: vec![
-                    LashExpr::String("Lash.ArrayFromIterable".into()),
+                    LashExpr::String(source.into()),
                     self.lower_iterable_sink(value)?,
                 ],
             };

@@ -54,15 +54,18 @@ pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 /// at each cancel checkpoint the cell's VM reaches (FIG-3672 P9), placed by
 /// lashlang's instruction accounting ([`lashlang::INSTRUCTION_ACCOUNTING_VERSION`]):
 /// v3 journals hold no such peeks, and a v4 journal replayed under other
-/// accounting would meet its peeks at other positions. A cell's iteration sync
+/// accounting would meet its peeks at other positions. v5 moves with
+/// instruction accounting v2 (FIG-3707): a captured, assigned binding compiles
+/// to binding-cell intrinsics, so a v4 journal's checkpoints sit at other
+/// positions than the v5 re-execution's. A cell's iteration sync
 /// stamps this version, and a cell whose sync names another is refused before
 /// it runs. Process bodies journal no binding set and stay on the key grammar.
-pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 4;
+pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 5;
 
 // The instruction accounting is part of the cell journal grammar: moving it
 // moves this grammar with it.
 const _: () = assert!(
-    lashlang::INSTRUCTION_ACCOUNTING_VERSION == 1,
+    lashlang::INSTRUCTION_ACCOUNTING_VERSION == 2,
     "an instruction-accounting change is a cell journal grammar change: bump \
      LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION and update this pin"
 );

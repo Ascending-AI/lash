@@ -40,7 +40,10 @@ pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// instruction pointer (`site`) or its per-instruction `occurrence`. A host
 /// keys an aggregate by the issue ordinal it mints when the batch leaves the
 /// VM, so nothing compiler-derived reaches a replay key.
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v13";
+/// v14 (FIG-3707): a compiled program shares an assigned captured binding
+/// through a binding cell rather than copying it, so a host bridge built for
+/// v13 would run a program this VM compiled under the old capture meaning.
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v14";
 
 /// Durability tier established by the execution path's concrete store or host.
 #[derive(

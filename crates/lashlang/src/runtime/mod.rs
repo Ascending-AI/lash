@@ -165,7 +165,11 @@ pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 /// moves checkpoints to other journal positions: it bumps this version, and
 /// with it the cell journal grammar, which refuses a journal written under
 /// another before its cell runs.
-pub const INSTRUCTION_ACCOUNTING_VERSION: u32 = 1;
+///
+/// v2 (FIG-3707): a captured, assigned binding compiles to `BindingCellNew`/
+/// `BindingCellGet`/`BindingCellSet` intrinsics instead of plain slot loads
+/// and stores, so the same program emits a different instruction stream.
+pub const INSTRUCTION_ACCOUNTING_VERSION: u32 = 2;
 
 /// Instructions before a run's first cancel checkpoint (FIG-3672 P9). The VM
 /// hands its host checkpoint `n` when its executed-instruction count reaches
