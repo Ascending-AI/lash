@@ -167,6 +167,9 @@ const GENERATION_PARK_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const SEQUENCE_IDENTITY_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-124-1d0b41349/sqlite-expected.json",
 ];
+const PG_ENGINE_CUT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-125-2ee4a034b/sqlite-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/sqlite-expected.json",
 ];
@@ -322,7 +325,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 91"),
+        message.contains("supports schema version 92"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -347,7 +350,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 91"),
+        message.contains("supports schema version 92"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(
@@ -407,7 +410,7 @@ async fn sqlite_v73_envelope_database_is_refused_before_blob_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 91"),
+        message.contains("supports schema version 92"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -455,7 +458,7 @@ async fn sqlite_v76_pending_input_database_is_refused_before_replay() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 91"),
+        message.contains("supports schema version 92"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -489,7 +492,7 @@ async fn sqlite_v77_catalog_without_attachment_blobs_is_refused() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 91"),
+        message.contains("supports schema version 92"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(

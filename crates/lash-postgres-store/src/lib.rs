@@ -519,7 +519,18 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // whose redrive the session-state generation gate refused, which an older
 // build cannot decode. No relation changes; component-130 catalogs are
 // rejected and recreated.
-const SCHEMA_VERSION: i32 = 131;
+// Version 132 (FIG-3667) deletes the PostgreSQL effect engine: the eight
+// engine tables (`lash_runtime_effect_group`, `lash_runtime_effect_group_child`,
+// `lash_runtime_effect_replay`, `lash_await_event_meta`,
+// `lash_await_event_waits`, `lash_await_event_revoked_sessions`,
+// `lash_effect_scope_retirements`, `lash_turn_cancel_closure_participants`)
+// and the await-event signing-secret seed leave the catalog, and the
+// `postgres_effect_replay_*`, `postgres_await_event_*` and
+// `postgres_effect_journal_retirement` runtime-error codes leave the durable
+// vocabulary. Component-131 catalogs are rejected and recreated: tear down
+// the whole lash schema (or recreate the database) before the new build
+// opens it.
+const SCHEMA_VERSION: i32 = 132;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

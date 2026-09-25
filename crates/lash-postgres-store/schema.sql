@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 131.
+-- lash-postgres-store schema, component version 132.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -779,7 +779,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- Seed rows. Every open mode requires them: the component version stamp and
 -- the transactional clock rows.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 131)
+VALUES ('lash-postgres-store', 132)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (
