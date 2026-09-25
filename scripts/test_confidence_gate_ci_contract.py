@@ -626,40 +626,48 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "docs_only": "false",
             "fail_open": "false",
         }
-        # This scenario exercises deferral, so it is the unselected case: a
-        # trusted pull request that does select `restate_suites` runs the live
-        # Restate legs instead (asserted below and in test_ci_plan.py).
+        # This scenario exercises deferral. The fast pull-request board runs
+        # no live suite at all — the workers jobs are dispatch-only and the
+        # store suite is merge-group and dispatch work.
         needs["plan"]["outputs"]["restate_suites"] = "false"
         needs["workspace-tests"]["result"] = "skipped"
         # Trusted events seal the API inside `bazel-tests`.
         needs["check"]["result"] = "skipped"
         for job in dispatch_only:
             needs[job] = {"result": "skipped", "outputs": {}}
+        workers = (
+            "worker-artifacts",
+            "restate-postgres-workers",
+            "restate-postgres-workers-summary",
+        )
+        for job in workers:
+            needs[job] = {"result": "skipped", "outputs": {}}
+        needs["postgres-store"] = {"result": "skipped", "outputs": {}}
         needs["bazel-tests-tail"] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
         needs["bazel-tests-tail"] = {"result": "success", "outputs": {}}
-        self.assertEqual(evaluate(needs, "merge_group"), [])
-        # The exception to the dispatch-only ruling: on a trusted pull request
-        # whose diff selects `restate_suites`, the functional-e2e Restate legs
-        # run and must succeed — skipping them is a conclusion failure. The
-        # merge group still defers them.
+        needs["postgres-store"] = {"result": "success", "outputs": {}}
+        self.assertEqual(evaluate(needs, "merge_group", False), [])
+        # A pull request keeps the live Restate legs skipped even when the
+        # diff selects `restate_suites` — the selection is dispatch work now —
+        # and running them is the violation, not skipping them. The merge
+        # group defers them as before.
         restate_needs = {
             job: {**value, "outputs": dict(value.get("outputs", {}))}
             for job, value in needs.items()
         }
         restate_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
         restate_needs["plan"]["outputs"]["restate_suites"] = "true"
-        self.assertEqual(evaluate(restate_needs, "merge_group"), [])
+        self.assertEqual(evaluate(restate_needs, "merge_group", False), [])
         restate_needs["bazel-tests-tail"]["result"] = "skipped"
-        restate_needs["functional-e2e"]["result"] = "success"
-        restate_needs["functional-e2e-process-operations"]["result"] = "success"
+        restate_needs["postgres-store"]["result"] = "skipped"
         self.assertEqual(evaluate(restate_needs, "pull_request"), [])
-        restate_needs["functional-e2e"]["result"] = "skipped"
+        restate_needs["functional-e2e"]["result"] = "success"
         self.assertEqual(
             evaluate(restate_needs, "pull_request"),
             [
-                "dispatch-only job functional-e2e ended with 'skipped' on a"
-                " pull_request event, expected success"
+                "dispatch-only job functional-e2e ended with 'success' on a"
+                " pull_request event, expected skipped"
             ],
         )
         dispatch_needs = {
@@ -670,20 +678,22 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         dispatch_needs["workspace-tests"]["result"] = "skipped"
         dispatch_needs["check"]["result"] = "skipped"
         self.assertEqual(evaluate(dispatch_needs, "workflow_dispatch"), [])
-        for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
+        for job in workers:
             needs[job] = {"result": "skipped", "outputs": {}}
+        needs["bazel-tests-tail"]["result"] = "skipped"
+        needs["postgres-store"]["result"] = "skipped"
+        self.assertEqual([], evaluate(needs, "pull_request"))
+        needs["restate-postgres-workers"]["result"] = "success"
         self.assertIn(
-            "ungated job restate-postgres-workers ended with 'skipped', expected success",
-            plan["evaluate_conclusion"](needs, "pull_request"),
+            "workers E2E job restate-postgres-workers ended with 'success' on a"
+            " pull_request event that does not run it, expected skipped",
+            evaluate(needs, "pull_request"),
         )
 
-        # Workers E2E runs on the full-profile dispatch and on pull requests
-        # carrying the `ci:workers` label, and nowhere else.
-        workers_guard = (
-            "github.event_name == 'workflow_dispatch'\n"
-            "      || (github.event_name == 'pull_request'"
-            " && contains(github.event.pull_request.labels.*.name, 'ci:workers'))"
-        )
+        # Workers E2E runs on the full-profile dispatch and nowhere else: the
+        # `ci:workers` pull-request opt-in is retired with the rest of the PR
+        # board's breadth.
+        workers_guard = "github.event_name == 'workflow_dispatch'"
         self.assertIn(
             workers_guard, workflow_job_block(workflow, "restate-postgres-workers")
         )
@@ -691,6 +701,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             workers_guard,
             workflow_job_block(workflow, "restate-postgres-workers-summary"),
         )
+        self.assertNotIn("'ci:workers'", workflow)
 
         # The matrix now comes from `scripts/ci_plan.py postgres-matrix`, so the
         # bracket is asserted where it is decided. PG16 is the sole primary lane
@@ -750,7 +761,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for job in dispatch_only:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
         for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
-            pr_needs[job] = {"result": "success", "outputs": {}}
+            pr_needs[job] = {"result": "skipped", "outputs": {}}
         for job in plan["GATED_JOBS"]:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
         for job in plan["BAZEL_TEST_JOBS"]:

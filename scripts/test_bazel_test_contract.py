@@ -1020,16 +1020,30 @@ class BazelTestContractTests(unittest.TestCase):
         # `//:workspace_compile` a second time on its own critical path.
         # Remote execution needs the action result, not hundreds of MiB of
         # top-level binaries.
+        #
+        # A pull request tests only the affected selection the plan step
+        # emits: the fast board runs the dev-suite members of the touched
+        # packages and their `dev-deferred` labels, not the whole core
+        # suite. Merge groups and dispatches keep the broad run below.
+        pr_leg = job_step(
+            jobs["bazel-tests"], "Test the affected targets with shared cache"
+        )
+        self.assertEqual("github.event_name == 'pull_request'", pr_leg["if"])
+        self.assertIn("needs.plan.outputs.pr_test_labels", pr_leg["run"])
+        self.assertIn("needs.plan.outputs.pr_build_targets", pr_leg["run"])
         bazel_test = job_step(
             jobs["bazel-tests"], "Test the workspace core suite with shared cache"
         )
-        # One suite for every trusted event: cached results scope the run.
+        # One suite for every trusted non-PR event: cached results scope the
+        # run.
         self.assertIn("-- //:workspace_tests -//:workspace_tail_tests", bazel_test["run"])
         self.assertNotIn("GITHUB_EVENT_NAME", bazel_test["run"])
+        self.assertEqual("github.event_name != 'pull_request'", bazel_test["if"])
         self.assertEqual(
             ["Check out repository", "Configure shared build cache",
+             "Test the affected targets with shared cache",
              "Test the workspace core suite with shared cache"],
-            [step["name"] for step in jobs["bazel-tests"]["steps"][:3]],
+            [step["name"] for step in jobs["bazel-tests"]["steps"][:4]],
         )
         self.assertNotIn("//:workspace_compile", bazel_test["run"])
         self.assertNotIn("workspace_doctests", bazel_test["run"])
@@ -1145,8 +1159,14 @@ class BazelTestContractTests(unittest.TestCase):
         }
         for job in ci_plan.DISPATCH_ONLY_JOBS:
             needs[job]["result"] = "skipped"
-        # The feature lanes need the pool as much as the Bazel partition does.
-        for job in ci_plan.BAZEL_TEST_JOBS | {ci_plan.FEATURE_LANES_JOB}:
+        # The fast board runs no live suite on any pull request — trusted or
+        # not — and the feature lanes need the pool as much as the Bazel
+        # partition does, so an untrusted event skips them too.
+        for job in (
+            ci_plan.BAZEL_TEST_JOBS
+            | ci_plan.WORKERS_E2E_JOBS
+            | {ci_plan.FEATURE_LANES_JOB, "postgres-store"}
+        ):
             needs[job]["result"] = "skipped"
         self.assertEqual(
             [], ci_plan.evaluate_conclusion(needs, "pull_request", bazel_is_trusted=False)
