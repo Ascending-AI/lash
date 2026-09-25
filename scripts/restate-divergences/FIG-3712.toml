@@ -1,0 +1,18 @@
+# Replay-leg divergences held back under the ticket that brings them back:
+# `scripts/restate-divergences/<ticket>.toml`, one file per ticket, so a new
+# divergence never edits `scripts/restate-suites.toml`. Each entry is the
+# law's libtest name and the reason it is held, ending `(FIG-n)` -- the
+# shard's own ticket. The runner refuses an entry that names no test, and
+# `--include-divergent` runs them.
+
+[suites.effect-group.replay.divergent]
+# The turn's opener is suspended at every await on this leg, and a tool child
+# runs only against its opener's live in-process registration, so the tool
+# children never run and the turn waits on them for good.
+"tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes" = "a suspended turn strands its tool children: no executor routes them while the opener is suspended (FIG-3712)"
+# A suspension drops the turn's registration in the live opener registry, so
+# the turn's tool child finds no dispatch context to run in ("no executor
+# currently routes ... tool child 0") and the resumed turn waits for it.
+"tests::conformance_and_poison::a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate" = "a suspended turn strands its tool child: no executor routes it (FIG-3712)"
+"tests::conformance_and_poison::public_signal_intent_wakes_parked_process" = "a suspended turn strands its tool child: no executor routes it (FIG-3712)"
+"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "a suspended turn strands its tool child: no executor routes it (FIG-3712)"

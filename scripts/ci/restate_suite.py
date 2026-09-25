@@ -25,8 +25,9 @@ tests are driven. It follows the recipe Restate's own SDK test suites use
   process state cannot leak into the next law.
 
 The suites themselves -- the Bazel label of the test binary, the filters, the
-endpoints each shard binds, the redelivery laws and the replay leg's known
-divergences -- live in `scripts/restate-suites.toml`.
+endpoints each shard binds and the redelivery laws -- live in
+`scripts/restate-suites.toml`; the replay leg's known divergences live one
+ticket per file under `scripts/restate-divergences/`.
 
 Usage:
   restate_suite.py suite <name> --leg live|replay [--artifacts DIR]
@@ -70,6 +71,9 @@ from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "scripts" / "restate-suites.toml"
+# The replay leg's known divergences, sharded one file per ticket that brings
+# its laws back, so two changes never queue on restate-suites.toml.
+DIVERGENCE_DIR = ROOT / "scripts" / "restate-divergences"
 
 # ---------------------------------------------------------------------------
 # The pinned server. The version matches the `restatedev/restate` image the
@@ -374,9 +378,51 @@ class Suite:
     report_only: dict[str, str]
 
 
+def merge_divergent_shard(suites: dict[str, dict], shard: Path) -> None:
+    """Fold one per-ticket divergence shard into the suite registry.
+
+    A shard is named for the ticket that brings its laws back
+    (``FIG-<n>.toml``) and carries only ``[suites.<name>.replay.divergent]``
+    tables: a law the replay leg holds back, and the reason -- ending in the
+    shard's own ticket -- it is held. A new known divergence is a new file or
+    one line in its ticket's shard, never an edit to restate-suites.toml.
+    """
+    overlay = tomllib.loads(shard.read_text(encoding="utf-8")).get("suites", {})
+    where = f"{DIVERGENCE_DIR.name}/{shard.name}"
+    for name, suite_overlay in overlay.items():
+        if name not in suites:
+            raise SystemExit(
+                f"{where} holds back laws of suite `{name}`, which "
+                f"{REGISTRY.name} does not register"
+            )
+        for leg, leg_overlay in suite_overlay.items():
+            if leg != "replay" or set(leg_overlay) != {"divergent"}:
+                raise SystemExit(
+                    f"{where}: a divergence shard carries only "
+                    f"[suites.<name>.replay.divergent] tables"
+                )
+            divergent = suites[name].setdefault(leg, {}).setdefault("divergent", {})
+            for law, reason in leg_overlay["divergent"].items():
+                if law in divergent:
+                    raise SystemExit(
+                        f"{where}: `{law}` is already held back -- a divergence "
+                        "names one ticket and one shard"
+                    )
+                if not reason.rstrip().endswith(f"({shard.stem})"):
+                    raise SystemExit(
+                        f"{where}: `{law}` must name {shard.stem}, the ticket "
+                        "that brings it back, as the reason's `(FIG-n)` suffix"
+                    )
+                divergent[law] = reason
+
+
 def load_registry() -> dict[str, dict]:
     with REGISTRY.open("rb") as handle:
-        return tomllib.load(handle)["suites"]
+        suites = tomllib.load(handle)["suites"]
+    if DIVERGENCE_DIR.is_dir():
+        for shard in sorted(DIVERGENCE_DIR.glob("*.toml")):
+            merge_divergent_shard(suites, shard)
+    return suites
 
 
 def load_suite(name: str) -> Suite:
