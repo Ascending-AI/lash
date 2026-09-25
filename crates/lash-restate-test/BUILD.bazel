@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -18,7 +24,7 @@ lash_rust_library(
     crate_features = [],
     crate_name = "lash_restate_test",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "lash_restate_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-restate-test",
     package_name = "lash-internal-restate-test",
@@ -28,7 +34,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-restate-test__doc",
     crate = ":lash-restate-test",
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "lash_restate_test"),
     testonly = True,
 )
 
@@ -39,7 +45,7 @@ lash_rust_unit_test(
     crate_name = "lash_restate_test",
     crate_root = "src/lib.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "lash_restate_test", "//crates/lash-restate-test:lash-restate-test__unit_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-restate-test",
     package_name = "lash-internal-restate-test",
@@ -53,7 +59,7 @@ lash_rust_integration_test(
     crate_name = "drop",
     crate_root = "tests/drop.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "drop", "//crates/lash-restate-test:drop__test"),
     extra_compile_data = [],
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
@@ -70,7 +76,7 @@ lash_rust_integration_test(
     crate_name = "server_semantics",
     crate_root = "tests/server_semantics.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "server_semantics", "//crates/lash-restate-test:server_semantics__test"),
     extra_compile_data = [],
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
@@ -87,7 +93,7 @@ lash_rust_integration_test(
     crate_name = "start_gate_peek",
     crate_root = "tests/start_gate_peek.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "start_gate_peek", "//crates/lash-restate-test:start_gate_peek__test"),
     extra_compile_data = [],
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
@@ -104,7 +110,7 @@ lash_rust_integration_test(
     crate_name = "suspended_turn",
     crate_root = "tests/suspended_turn.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "suspended_turn", "//crates/lash-restate-test:suspended_turn__test"),
     extra_compile_data = [],
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
@@ -121,7 +127,7 @@ lash_rust_integration_test(
     crate_name = "tool_child_drift",
     crate_root = "tests/tool_child_drift.rs",
     declared_features = [],
-    exec_properties = {"test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "tool_child_drift", "//crates/lash-restate-test:tool_child_drift__test"),
     extra_compile_data = [],
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
@@ -138,7 +144,7 @@ lash_rust_integration_test(
     crate_name = "turn_crash_replay",
     crate_root = "tests/turn_crash_replay.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "turn_crash_replay", "//crates/lash-restate-test:turn_crash_replay__test"),
     extra_compile_data = [],
     library = ":lash-restate-test",
     library_crate_name = "lash_restate_test",
@@ -153,9 +159,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 2,
+    budget = test_batch_budget("//crates/lash-restate-test:test_batch"),
     jobs = 2,
-    memory_kb = 1048576,
     tests = [
         ":drop__test",
         ":lash-restate-test__unit_test",
@@ -191,7 +196,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lash_restate_test",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "lash_restate_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-restate-test",
     package_name = "lash-internal-restate-test",
@@ -209,7 +214,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lash_restate_test",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "lash_restate_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-restate-test",
     package_name = "lash-internal-restate-test",
@@ -227,7 +232,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lash_restate_test",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "lash_restate_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-restate-test",
     package_name = "lash-internal-restate-test",
@@ -245,7 +250,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lash_restate_test",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "lash_restate_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-restate-test",
     package_name = "lash-internal-restate-test",

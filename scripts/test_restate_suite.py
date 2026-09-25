@@ -103,6 +103,78 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual("kill", MODULE.RETRIES_BOUNDED["RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS"])
 
 
+class DivergenceShardTests(unittest.TestCase):
+    """Per-ticket shards fold into the registry; a malformed shard is refused."""
+
+    REGISTRY = """\
+[suites.fake]
+label = "//fake:fake"
+cwd = "."
+filters = ["tests::"]
+"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._tmp.name)
+        self._old_registry = MODULE.REGISTRY
+        self._old_dir = MODULE.DIVERGENCE_DIR
+        MODULE.REGISTRY = self.root / "restate-suites.toml"
+        MODULE.REGISTRY.write_text(self.REGISTRY, encoding="utf-8")
+        MODULE.DIVERGENCE_DIR = self.root / "restate-divergences"
+        MODULE.DIVERGENCE_DIR.mkdir()
+
+    def tearDown(self) -> None:
+        MODULE.REGISTRY = self._old_registry
+        MODULE.DIVERGENCE_DIR = self._old_dir
+        self._tmp.cleanup()
+
+    def shard(self, name: str, text: str) -> None:
+        (MODULE.DIVERGENCE_DIR / name).write_text(text, encoding="utf-8")
+
+    def test_a_ticket_shard_folds_into_its_suite(self) -> None:
+        self.shard(
+            "FIG-9.toml",
+            '[suites.fake.replay.divergent]\n"tests::held" = "why (FIG-9)"\n',
+        )
+        self.assertEqual(
+            MODULE.load_suite("fake").replay_divergent,
+            {"tests::held": "why (FIG-9)"},
+        )
+
+    def test_a_shard_naming_a_suite_the_registry_lacks_is_refused(self) -> None:
+        self.shard(
+            "FIG-9.toml",
+            '[suites.gone.replay.divergent]\n"tests::held" = "why (FIG-9)"\n',
+        )
+        with self.assertRaises(SystemExit):
+            MODULE.load_registry()
+
+    def test_a_duplicate_divergence_is_refused(self) -> None:
+        for shard in ("FIG-8.toml", "FIG-9.toml"):
+            self.shard(
+                shard,
+                f'[suites.fake.replay.divergent]\n"tests::held" = "why ({shard.removesuffix(".toml")})"\n',
+            )
+        with self.assertRaises(SystemExit):
+            MODULE.load_registry()
+
+    def test_a_reason_must_name_its_shard_ticket(self) -> None:
+        self.shard(
+            "FIG-9.toml",
+            '[suites.fake.replay.divergent]\n"tests::held" = "why (FIG-8)"\n',
+        )
+        with self.assertRaises(SystemExit):
+            MODULE.load_registry()
+
+    def test_a_shard_carries_only_divergent_tables(self) -> None:
+        self.shard(
+            "FIG-9.toml",
+            '[suites.fake.replay]\nreport_only = "sneaky (FIG-9)"\n',
+        )
+        with self.assertRaises(SystemExit):
+            MODULE.load_registry()
+
+
 class StageBinariesTests(unittest.TestCase):
     def test_the_workers_package_stages_every_cargo_binary(self) -> None:
         import tomllib

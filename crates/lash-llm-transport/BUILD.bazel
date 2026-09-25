@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -24,7 +30,7 @@ lash_rust_library(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-transport",
     package_name = "lash-internal-llm-transport",
@@ -34,7 +40,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-llm-transport__doc",
     crate = ":lash-llm-transport",
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport"),
     testonly = True,
 )
 
@@ -51,7 +57,7 @@ lash_rust_unit_test(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport", "//crates/lash-llm-transport:lash-llm-transport__unit_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-transport",
     package_name = "lash-internal-llm-transport",
@@ -71,7 +77,7 @@ lash_rust_integration_test(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "property", "//crates/lash-llm-transport:property__test"),
     extra_compile_data = [],
     library = ":lash-llm-transport",
     library_crate_name = "lash_llm_transport",
@@ -86,9 +92,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 2,
+    budget = test_batch_budget("//crates/lash-llm-transport:test_batch"),
     jobs = 2,
-    memory_kb = 1048576,
     tests = [
         ":lash-llm-transport__unit_test",
         ":property__test",
@@ -125,7 +130,7 @@ lash_rust_feature_library(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-transport",
     package_name = "lash-internal-llm-transport",
@@ -148,7 +153,7 @@ lash_rust_feature_library(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-transport",
     package_name = "lash-internal-llm-transport",
@@ -169,7 +174,7 @@ lash_rust_feature_library(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-transport",
     package_name = "lash-internal-llm-transport",
@@ -193,7 +198,7 @@ lash_rust_feature_library(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-transport",
     package_name = "lash-internal-llm-transport",
@@ -214,7 +219,7 @@ lash_rust_feature_library(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-transport",
     package_name = "lash-internal-llm-transport",
@@ -237,7 +242,7 @@ lash_rust_feature_library(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-transport",
     package_name = "lash-internal-llm-transport",
@@ -265,7 +270,7 @@ lash_rust_feature_test(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "lash_llm_transport", "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_55598223"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-transport",
     package_name = "lash-internal-llm-transport",
@@ -292,7 +297,7 @@ lash_rust_feature_test(
         "proptest-support",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-llm-transport", "property", "//crates/lash-llm-transport:property__test__fv_55598223"),
     extra_compile_data = [],
     library = "//crates/lash-llm-transport:lash-llm-transport__fv_55598223",
     library_crate_name = "lash_llm_transport",

@@ -1,0 +1,11 @@
+# Replay-leg divergences held back under the ticket that brings them back:
+# `scripts/restate-divergences/<ticket>.toml`, one file per ticket, so a new
+# divergence never edits `scripts/restate-suites.toml`. Each entry is the
+# law's libtest name and the reason it is held, ending `(FIG-n)` -- the
+# shard's own ticket. The runner refuses an entry that names no test, and
+# `--include-divergent` runs them.
+
+[suites.agent-workbench.replay.divergent]
+# A replayed provider retry publishes its observation again: the transcript
+# keeps two copies of the retry prose.
+"tests::restate_recovery_tests::live_restate_rate_limit_retry_converges_observers_to_one_copy" = "observations are not deduplicated across replay, so the retry prose is kept twice (FIG-3753)"

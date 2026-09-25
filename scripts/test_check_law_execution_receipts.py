@@ -440,7 +440,7 @@ macro_rules! suite_b_tests {
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         self._old_root = MODULE.ROOT
-        self._old_manifest = MODULE.DEFERRED_MANIFEST
+        self._old_dir = MODULE.DEFERRED_DIR
         MODULE.ROOT = self.root
         crate = self.root / "crates" / "fakepkg"
         (crate / "src").mkdir(parents=True)
@@ -452,8 +452,9 @@ macro_rules! suite_b_tests {
             'suite_b_tests!(#[ignore = "deferred"] { f });\n',
             encoding="utf-8",
         )
-        MODULE.DEFERRED_MANIFEST = self.root / "deferred.toml"
-        MODULE.DEFERRED_MANIFEST.write_text(
+        MODULE.DEFERRED_DIR = self.root / "deferred-laws"
+        MODULE.DEFERRED_DIR.mkdir()
+        (MODULE.DEFERRED_DIR / "deferred-e2e.toml").write_text(
             """\
 [[deferred]]
 file = "crates/fakepkg/src/lib.rs"
@@ -472,7 +473,7 @@ recipe = "deferred-e2e"
 
     def tearDown(self) -> None:
         MODULE.ROOT = self._old_root
-        MODULE.DEFERRED_MANIFEST = self._old_manifest
+        MODULE.DEFERRED_DIR = self._old_dir
         self._tmp.cleanup()
 
     def deferred_expected(self) -> dict[str, Counter]:
@@ -523,9 +524,9 @@ class ParkedEntryTests(unittest.TestCase):
             skips,
             [
                 "--skip",
-                "tests::turn_crash_on_the_double::turn_crash_after_commit_redrive_replays_the_committed_receipt",
-                "--skip",
                 "tests::turn_crash_on_the_double::turn_cancel_closure_recovers_from_a_crash_at_every_cut",
+                "--skip",
+                "tests::turn_crash_on_the_double::turn_crash_after_commit_redrive_replays_the_committed_receipt",
             ],
         )
         self.assertEqual(MODULE.parked_skips("no_such_crate", MODULE.load_macros()), [])
@@ -641,7 +642,20 @@ class RealTreeTests(unittest.TestCase):
         errors: list[str] = []
         manifest_set = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
-        self.assertEqual(len(manifest_set), 15)
+        # The manifest's cardinality is derived, not pinned: it is exactly the
+        # ignored `*_tests!` invocations the workspace's crates declare, so
+        # parking or unparking a law touches no test.
+        ignored = {
+            (
+                invocation.file.relative_to(MODULE.ROOT).as_posix(),
+                invocation.claimant,
+                invocation.suite,
+            )
+            for crate in MODULE.workspace_package_dirs()
+            for invocation in MODULE.invocations_in_crate(crate)
+            if invocation.ignored
+        }
+        self.assertEqual(set(manifest_set), ignored)
         self.assertIn(
             (
                 "crates/lash-restate/src/tests/conformance_and_poison.rs",
@@ -652,10 +666,10 @@ class RealTreeTests(unittest.TestCase):
         )
 
     def test_the_real_deferred_recipe_owes_every_manifest_suite(self) -> None:
-        """A receipts file covering all eleven manifest suites passes, and
-        dropping one suite's rows fails naming that suite's laws -- the
-        entries share one file and claimant, so this pins the deferred
-        claim resolving each entry to its own real invocation."""
+        """A receipts file covering every suite the recipe's manifest rows
+        name passes, and dropping one suite's rows fails naming that suite's
+        laws -- the entries share one file and claimant, so this pins the
+        deferred claim resolving each entry to its own real invocation."""
         macros = MODULE.load_macros()
         errors: list[str] = []
         index = MODULE.manifest_check(errors)
@@ -664,7 +678,12 @@ class RealTreeTests(unittest.TestCase):
             "effect-group-conformance-e2e", index
         )
         self.assertIsNone(error)
-        self.assertEqual(len(invocations), 11)
+        rows = [
+            entry
+            for entry in MODULE.deferred_manifest()
+            if entry.get("recipe") == "effect-group-conformance-e2e"
+        ]
+        self.assertEqual(len(invocations), len(rows))
         expected = MODULE.expected_from_invocations(invocations, macros)
         observed: dict[str, Counter] = {
             claimant: Counter(pairs) for claimant, pairs in expected.items()

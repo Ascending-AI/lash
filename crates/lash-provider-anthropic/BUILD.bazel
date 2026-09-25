@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -24,7 +30,7 @@ lash_rust_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "lash_provider_anthropic"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-provider-anthropic",
     package_name = "lash-internal-provider-anthropic",
@@ -34,7 +40,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-provider-anthropic__doc",
     crate = ":lash-provider-anthropic",
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "lash_provider_anthropic"),
     testonly = True,
 )
 
@@ -51,7 +57,7 @@ lash_rust_unit_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "lash_provider_anthropic", "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-provider-anthropic",
     package_name = "lash-internal-provider-anthropic",
@@ -71,7 +77,7 @@ lash_rust_integration_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "charge_safety", "//crates/lash-provider-anthropic:charge_safety__test"),
     extra_compile_data = [],
     library = ":lash-provider-anthropic",
     library_crate_name = "lash_provider_anthropic",
@@ -94,7 +100,7 @@ lash_rust_integration_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "property", "//crates/lash-provider-anthropic:property__test"),
     extra_compile_data = [],
     library = ":lash-provider-anthropic",
     library_crate_name = "lash_provider_anthropic",
@@ -109,9 +115,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 2,
+    budget = test_batch_budget("//crates/lash-provider-anthropic:test_batch"),
     jobs = 2,
-    memory_kb = 1048576,
     tests = [
         ":charge_safety__test",
         ":lash-provider-anthropic__unit_test",
@@ -153,7 +158,7 @@ lash_rust_feature_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "charge_safety", "//crates/lash-provider-anthropic:charge_safety__test__fv_0e80edc8"),
     extra_compile_data = [],
     library = "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_0e80edc8",
     library_crate_name = "lash_provider_anthropic",
@@ -180,7 +185,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "lash_provider_anthropic"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-provider-anthropic",
     package_name = "lash-internal-provider-anthropic",
@@ -204,7 +209,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "lash_provider_anthropic"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-provider-anthropic",
     package_name = "lash-internal-provider-anthropic",
@@ -227,7 +232,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "lash_provider_anthropic"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-provider-anthropic",
     package_name = "lash-internal-provider-anthropic",
@@ -250,7 +255,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "lash_provider_anthropic"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-provider-anthropic",
     package_name = "lash-internal-provider-anthropic",
@@ -271,7 +276,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "lash_provider_anthropic"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-provider-anthropic",
     package_name = "lash-internal-provider-anthropic",
@@ -299,7 +304,7 @@ lash_rust_feature_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "lash_provider_anthropic", "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_0e80edc8"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-provider-anthropic",
     package_name = "lash-internal-provider-anthropic",
@@ -326,7 +331,7 @@ lash_rust_feature_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-provider-anthropic", "property", "//crates/lash-provider-anthropic:property__test__fv_0e80edc8"),
     extra_compile_data = [],
     library = "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_0e80edc8",
     library_crate_name = "lash_provider_anthropic",

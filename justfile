@@ -172,8 +172,9 @@ agent-workbench-restate-e2e:
 # `--ignored` tests only, which `scripts/check_service_gate_pinning.py` pins)
 # beside pinned `restate-server`s, one law per process, and then runs the same
 # laws again with every await suspended and replayed (the replay leg). The
-# suite's filters, redelivery laws and replay divergences are registered in
-# `scripts/restate-suites.toml`.
+# suite's filters and redelivery laws are registered in
+# `scripts/restate-suites.toml`, its replay divergences in
+# `scripts/restate-divergences/`.
 effect-group-conformance-e2e:
   #!/usr/bin/env bash
   set -euo pipefail

@@ -1,0 +1,14 @@
+# Replay-leg divergences held back under the ticket that brings them back:
+# `scripts/restate-divergences/<ticket>.toml`, one file per ticket, so a new
+# divergence never edits `scripts/restate-suites.toml`. Each entry is the
+# law's libtest name and the reason it is held, ending `(FIG-n)` -- the
+# shard's own ticket. The runner refuses an entry that names no test, and
+# `--include-divergent` runs them.
+
+[suites.agent-workbench.replay.divergent]
+# The process drive's own divergence (3e, a LashProcessWorkflow journal
+# mismatch) is fixed by FIG-3673 and is not held.
+# The queued run reads the store unjournaled at start, so its replay issues
+# another `call` at index 3.
+"tests::live_restate_cron_queued_turn_sync_cancel_path_end_to_end" = "the queued run's unjournaled store read at start diverges on replay; FIG-3600 S5 fixes it (FIG-3748)"
+"tests::restate_recovery_tests::live_restate_turn_input_ingress_delivers_once_and_queues_after_settle" = "the queued run's unjournaled store read at start diverges on replay; FIG-3600 S5 fixes it (FIG-3748)"

@@ -32,11 +32,13 @@ receipts, exactly:
 * a claimant with receipts but no expectation fails too.
 
 ``#[ignore]``d invocations are deferred laws, not exemptions: every ignored
-invocation must be named by ``scripts/deferred-law-invocations.toml`` with the
+invocation must be named by a ``scripts/deferred-laws/*.toml`` shard with the
 recipe, CI job, and receipt artifact that owns its execution, and every
 manifest entry must name a real ignored invocation (a stale entry fails the
-same way a missing one does).  ``--deferred <recipe>`` censuses a deferred
-lane's receipts against the manifest's entries for that recipe.
+same way a missing one does).  The manifest is sharded -- one file per recipe,
+or per ``FIG-n`` ticket for a parked invocation -- so two changes never queue
+on one file.  ``--deferred <recipe>`` censuses a deferred lane's receipts
+against the manifest's entries for that recipe.
 
 Claims are passed explicitly so each CI job asserts exactly the coverage it
 executes:
@@ -79,7 +81,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MACROS = ROOT / "crates/lash-conformance/src/macros.rs"
 CONFORMANCE_SRC = ROOT / "crates/lash-conformance/src"
 WORKSPACE_TARGETS = ROOT / "tools/bazel/workspace_targets.bzl"
-DEFERRED_MANIFEST = ROOT / "scripts/deferred-law-invocations.toml"
+DEFERRED_DIR = ROOT / "scripts" / "deferred-laws"
+LEGACY_DEFERRED_MANIFEST = ROOT / "scripts" / "deferred-law-invocations.toml"
 RECEIPT_NAME = "law-receipts.txt"
 
 CATALOGUE_ROW = re.compile(r"\(\s*([a-z_][a-z0-9_]*)\s*,\s*\"([^\"]*)\"")
@@ -543,13 +546,46 @@ def resolve_label(label: str) -> list[tuple[str, Path]]:
     return resolve_bazel_label(ROOT / package.removeprefix("//"), target)
 
 
+def _deferred_entries() -> list[tuple[str, dict[str, str]]]:
+    """Every ``[[deferred]]`` row of every shard, paired with its shard name.
+
+    The manifest is one ``scripts/deferred-laws/<recipe-or-ticket>.toml`` per
+    owning recipe or parking ticket, so two deferred-law changes never edit
+    the same lines. A key -- ``(file, claimant, suite)`` -- is one obligation;
+    two shards declaring it is always an error, not a merge.
+    """
+    if LEGACY_DEFERRED_MANIFEST.is_file():
+        raise SystemExit(
+            "the deferred-law manifest moved: split "
+            "scripts/deferred-law-invocations.toml into "
+            "scripts/deferred-laws/<recipe-or-ticket>.toml shards"
+        )
+    entries: list[tuple[str, dict[str, str]]] = []
+    if not DEFERRED_DIR.is_dir():
+        return entries
+    origins: dict[tuple[str, str, str], str] = {}
+    for shard in sorted(DEFERRED_DIR.glob("*.toml")):
+        data = tomllib.loads(shard.read_text(encoding="utf-8"))
+        for entry in data.get("deferred", []):
+            key = (
+                entry.get("file", ""),
+                entry.get("claimant", ""),
+                entry.get("suite", ""),
+            )
+            if key in origins:
+                raise SystemExit(
+                    f"deferred-law manifest entry {key} is declared by both "
+                    f"{origins[key]} and {shard.name} -- keep one shard"
+                )
+            origins[key] = shard.name
+            entries.append((shard.name, entry))
+    return entries
+
+
 def deferred_manifest() -> list[dict[str, str]]:
     """The checked deferred-law manifest: one ``[[deferred]]`` row per
     ``#[ignore]``d invocation, naming the recipe and CI lane that owns it."""
-    if not DEFERRED_MANIFEST.is_file():
-        return []
-    data = tomllib.loads(DEFERRED_MANIFEST.read_text(encoding="utf-8"))
-    return list(data.get("deferred", []))
+    return [entry for _shard, entry in _deferred_entries()]
 
 
 PARKED_RECIPE = "parked"
@@ -657,8 +693,8 @@ def check_ignored(
         if (rel, inv.claimant, inv.suite) not in manifest_set:
             errors.append(
                 f"#[ignore]d invocation {inv.suite} at {rel}:{inv.line} "
-                f"(claimant `{inv.claimant}`) is not in "
-                "scripts/deferred-law-invocations.toml -- a deferred law "
+                f"(claimant `{inv.claimant}`) names no "
+                "scripts/deferred-laws/ shard entry -- a deferred law "
                 "needs a manifest entry naming the recipe that runs it"
             )
 
