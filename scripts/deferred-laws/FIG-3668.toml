@@ -1,0 +1,24 @@
+# Deferred conformance laws (FIG-3472), sharded so two changes never queue on
+# one file. The checker merges every `*.toml` in `scripts/deferred-laws/`; a
+# new deferred invocation adds a shard named for the recipe that runs it, or
+# for the ticket that brings a parked invocation back (`FIG-<n>.toml`).
+#
+# A row whose recipe is "parked" runs nowhere yet: it must name the `ticket`
+# (FIG-n) that brings the invocation back and the `reason` it is parked, and
+# no other row may carry either field.
+
+[[deferred]]
+file = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+claimant = "conformance::suite"
+suite = "turn_crash_level_1_tests"
+recipe = "parked"
+ticket = "FIG-3668"
+reason = "the level-one matrix crashes in process, and the journaled SQLite engine's crashed attempt keeps renewing its effect lease; the native host it ran on is deleted, and the SIGKILL matrix covers this engine"
+
+[[deferred]]
+file = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+claimant = "conformance_memory::suite"
+suite = "turn_crash_level_1_tests"
+recipe = "parked"
+ticket = "FIG-3668"
+reason = "the level-one matrix crashes in process, and the journaled SQLite engine's crashed attempt keeps renewing its effect lease; the native host it ran on is deleted, and the SIGKILL matrix covers this engine"

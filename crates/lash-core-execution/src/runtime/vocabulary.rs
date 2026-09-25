@@ -502,9 +502,9 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// Required, with no default, like [`Self::count_unsettled_turns`].
     async fn turn_park_feed(
         &self,
-        after: crate::store::TurnParkFeedCursor,
+        after: crate::store::ParkFeedCursor,
         limit: std::num::NonZeroUsize,
-    ) -> Result<crate::store::TurnParkFeedPage, crate::StoreError>;
+    ) -> Result<crate::store::ParkFeedPage<crate::store::TurnParkTarget>, crate::StoreError>;
 
     /// Compact the turn park feed: events at or below `through` are removed
     /// and the cursor horizon advances to it. Host-gated — the feed's
@@ -513,7 +513,7 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// Required, with no default, like [`Self::count_unsettled_turns`].
     async fn compact_turn_park_feed(
         &self,
-        through: crate::store::TurnParkFeedCursor,
+        through: crate::store::ParkFeedCursor,
     ) -> Result<(), crate::StoreError>;
 
     /// Open an existing session when only its durable routing identity is

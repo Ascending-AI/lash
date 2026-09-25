@@ -126,6 +126,7 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         caused_by: None,
         external_ref: None,
         wait: None,
+        park: None,
         child_session_id: None,
     }
 }

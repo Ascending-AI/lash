@@ -124,15 +124,18 @@ impl SessionStoreFactory for CountingSessionStoreFactory {
 
     async fn turn_park_feed(
         &self,
-        after: lash_core::store::TurnParkFeedCursor,
+        after: lash_core::store::ParkFeedCursor,
         limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+    ) -> std::result::Result<
+        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
+        lash_core::StoreError,
+    > {
         self.inner.turn_park_feed(after, limit).await
     }
 
     async fn compact_turn_park_feed(
         &self,
-        through: lash_core::store::TurnParkFeedCursor,
+        through: lash_core::store::ParkFeedCursor,
     ) -> std::result::Result<(), lash_core::StoreError> {
         self.inner.compact_turn_park_feed(through).await
     }
@@ -982,15 +985,18 @@ impl SessionStoreFactory for NoByIdLookupFactory {
 
     async fn turn_park_feed(
         &self,
-        after: lash_core::store::TurnParkFeedCursor,
+        after: lash_core::store::ParkFeedCursor,
         limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+    ) -> std::result::Result<
+        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
+        lash_core::StoreError,
+    > {
         self.inner.turn_park_feed(after, limit).await
     }
 
     async fn compact_turn_park_feed(
         &self,
-        through: lash_core::store::TurnParkFeedCursor,
+        through: lash_core::store::ParkFeedCursor,
     ) -> std::result::Result<(), lash_core::StoreError> {
         self.inner.compact_turn_park_feed(through).await
     }

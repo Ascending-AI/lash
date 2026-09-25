@@ -204,6 +204,13 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
+    async fn compact_process_park_feed(
+        &self,
+        through: lash_core_execution::store::ParkFeedCursor,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        super::park_feed::compact_process_park_feed(self, through).await
+    }
+
     async fn prune_terminal_processes(
         &self,
         cutoff_epoch_ms: u64,

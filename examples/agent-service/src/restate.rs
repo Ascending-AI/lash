@@ -956,7 +956,6 @@ finish("done via Restate E2E");
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
             backend.as_ref(),

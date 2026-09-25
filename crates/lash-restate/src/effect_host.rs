@@ -289,7 +289,7 @@ impl EffectHost for RestateEffectHost {
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    RuntimeErrorCode::RestateAwaitEventPeek,
+                    RuntimeErrorCode::EngineAwaitEventPeek,
                     format!("failed to list outstanding Restate await-events: {err}"),
                 )
             })?;
@@ -713,7 +713,7 @@ fn ingress_group_error(
     let service_unregistered = error.is_service_unregistered();
     let message = format!("Restate effect-group operation {operation} failed: {error}");
     if service_unregistered {
-        RuntimeEffectControllerError::new(RuntimeErrorCode::RestateServiceUnregistered, message)
+        RuntimeEffectControllerError::new(RuntimeErrorCode::EngineServiceUnregistered, message)
     } else {
         group_shape_error(message)
     }
@@ -796,7 +796,7 @@ impl AwaitEventResolver for RestateEffectHostController {
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateAwaitEventPeek,
+                    lash_core::RuntimeErrorCode::EngineAwaitEventPeek,
                     err.to_string(),
                 )
             })
@@ -867,7 +867,7 @@ impl AwaitEventResolver for RestateEffectHostController {
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                    lash_core::RuntimeErrorCode::EngineAwaitEventSessionUpdate,
                     err.to_string(),
                 )
             })
@@ -935,7 +935,7 @@ impl RestateEffectHostController {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                    RuntimeErrorCode::EngineAwaitEventSessionUpdate,
                     error.to_string(),
                 )
             })?;
@@ -975,7 +975,7 @@ impl RestateEffectHostController {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                    RuntimeErrorCode::EngineAwaitEventSessionUpdate,
                     error.to_string(),
                 )
             })
@@ -1025,7 +1025,7 @@ impl RestateEffectHostController {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateAwaitEventRevocationRead,
+                    lash_core::RuntimeErrorCode::EngineAwaitEventRevocationRead,
                     format!("process registry read-through failed: {error}"),
                 )
             })
@@ -1050,7 +1050,7 @@ impl RestateEffectHostController {
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                    lash_core::RuntimeErrorCode::EngineAwaitEventSessionUpdate,
                     err.to_string(),
                 )
             })
@@ -1657,7 +1657,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             return Ok(RuntimeEffectOutcome::AwaitEvent { resolution });
         }
         Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
+            RuntimeErrorCode::EngineEffectHostRequiresHandlerScope,
             format!(
                 "effect `{}` must enter a Restate handler and use RestateRuntimeEffectController::scoped_effect_controller",
                 envelope.invocation.effect_id()
@@ -1684,7 +1684,7 @@ mod tests {
     fn effect_group_ingress_404_is_restate_service_unregistered() {
         let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(404));
 
-        assert_eq!(error.code, RuntimeErrorCode::RestateServiceUnregistered);
+        assert_eq!(error.code, RuntimeErrorCode::EngineServiceUnregistered);
         assert!(error.message.contains("EffectGroupIndex/probe"));
     }
 

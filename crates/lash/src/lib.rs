@@ -44,6 +44,7 @@ mod core;
 mod durable_session;
 mod error;
 pub mod formats;
+mod parked_work;
 mod plugin_binding;
 pub mod preflight;
 pub(crate) mod process_admin;
@@ -79,6 +80,11 @@ pub use crate::admin::{
 pub use crate::core::{DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteReport};
 pub use crate::durable_session::{DurableSession, EnqueueTurnBuilder};
 pub use crate::error::{EmbedError, Result, SelectedQueuedWorkDrainRefusalCause};
+pub use crate::parked_work::{
+    ParkedKinds, ParkedWork, ParkedWorkCursor, ParkedWorkEvent, ParkedWorkEventPage,
+    ParkedWorkEventsCursor, ParkedWorkPage, ParkedWorkQuery, ParkedWorkRecord, ParkedWorkRef,
+    ParkedWorkSummary,
+};
 pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
 pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
@@ -354,15 +360,15 @@ pub mod persistence {
     pub use lash_core::store::{
         AppendRequestIdentity, BeginQueuedRun, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
-        OrphanedTurnInputScope, ParkCancelCause, ParkId, ParkReason, ParkReasonCode,
-        PersistedSessionRead, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember,
-        QueuedRunPosition, QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal, RuntimeCommit,
-        RuntimeCommitReceipt, RuntimePersistenceDecorator, RuntimeTurnCommitStamp,
+        OrphanedTurnInputScope, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent,
+        ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkSummary, PersistedSessionRead,
+        ProcessPark, ProcessParkKey, ProcessParkQuery, QueuedRunAdmission, QueuedRunCommit,
+        QueuedRunMember, QueuedRunPosition, QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal,
+        RuntimeCommit, RuntimeCommitReceipt, RuntimePersistenceDecorator, RuntimeTurnCommitStamp,
         RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SelectedQueuedRun, SemanticBoundaryOperation,
         SessionCheckpoint, SessionHead, SessionHeadMeta, SessionHeadPayload, TurnPark,
-        TurnParkEventKind, TurnParkFeedCursor, TurnParkFeedEvent, TurnParkFeedPage, TurnParkQuery,
-        TurnParkWrite, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
-        load_persisted_session_state,
+        TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause, UnsettledTurnCounts,
+        commit_runtime_state_verified, load_persisted_session_state,
     };
     /// Test-only store hooks and the conformance-suite handle types that
     /// carry them (`testing` feature only; no production trait requires them).
@@ -635,7 +641,7 @@ pub mod remote {
             RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter,
             RemoteDeclaredProcessIdentity, RemoteEffectOpener, RemoteLeaseOwnerIdentity,
             RemoteObservedProcess, RemoteObservedProcessEvent, RemoteObservedProcessFailure,
-            RemoteObservedWorkItemState, RemoteOnParentEnd, RemoteParentScope,
+            RemoteObservedWorkItemState, RemoteOnParentEnd, RemoteParentScope, RemoteParkReason,
             RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
             RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
             RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
@@ -646,12 +652,12 @@ pub mod remote {
             RemoteProcessHandleView, RemoteProcessIdentity, RemoteProcessInput,
             RemoteProcessLifecyclePolicy, RemoteProcessListFilter, RemoteProcessListResponse,
             RemoteProcessModelLimits, RemoteProcessModelSpec, RemoteProcessObserverBy,
-            RemoteProcessOriginator, RemoteProcessOriginatorFilter, RemoteProcessPluginOptions,
-            RemoteProcessProvenance, RemoteProcessRecord, RemoteProcessRef,
-            RemoteProcessResumeRefusal, RemoteProcessSignalReceipt, RemoteProcessSignalRequest,
-            RemoteProcessSignature, RemoteProcessStartReceipt, RemoteProcessStartRequest,
-            RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
-            RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
+            RemoteProcessOriginator, RemoteProcessOriginatorFilter, RemoteProcessPark,
+            RemoteProcessPluginOptions, RemoteProcessProvenance, RemoteProcessRecord,
+            RemoteProcessRef, RemoteProcessResumeRefusal, RemoteProcessSignalReceipt,
+            RemoteProcessSignalRequest, RemoteProcessSignature, RemoteProcessStartReceipt,
+            RemoteProcessStartRequest, RemoteProcessStarted, RemoteProcessStatus,
+            RemoteProcessStatusFilter, RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
             RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
             RemoteProcessToolCancellation, RemoteProcessToolFailure,
             RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,

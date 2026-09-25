@@ -310,8 +310,8 @@
           }
         },
         {
-          "source": "const it = 'a'.matchAll(/a/g);\n",
-          "reject": "TS_REGEX_ITERATOR_POSITION",
+          "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
+          "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -1899,8 +1899,8 @@
           }
         },
         {
-          "source": "const d = new Date(0); d.setUTCHours(1);\n",
-          "reject": "TS_DATE_IMMUTABLE",
+          "source": "const c = 1; c = 2; // tsc TS2588\n",
+          "reject": "TS_ASSIGN_CONST",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -3363,8 +3363,8 @@
           }
         },
         {
-          "source": "const m = import('mod');\n",
-          "reject": "TS_DYNAMIC_IMPORT_UNSUPPORTED",
+          "source": "const o = { m() { super.x; } };\n",
+          "reject": "TS_SUPER_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -3538,8 +3538,8 @@
           }
         },
         {
-          "source": "class A { static { } }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "eval('1');\n",
+          "reject": "TS_EVAL_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5014,8 +5014,8 @@
           }
         },
         {
-          "source": "const r = new RegExp(null);\n",
-          "reject": "TS_NEW_UNSUPPORTED",
+          "source": "class A { x = 1; }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5349,8 +5349,8 @@
           }
         },
         {
-          "source": "Uint8Array.fromBase64('AAA=');\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "const x = arguments;\n",
+          "reject": "TS_ARGUMENTS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5619,8 +5619,8 @@
           }
         },
         {
-          "source": "'a'.isWellFormed();\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "class A { static #m() { } }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5688,8 +5688,8 @@
           }
         },
         {
-          "source": "const o: any = {}; o.__proto__ = {};\n",
-          "reject": "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
+          "source": "Error.isError(new Error('x'));\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -6501,8 +6501,8 @@
           }
         },
         {
-          "source": "Uint8Array.fromBase64('AAA=');\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
+          "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -7951,8 +7951,8 @@
           }
         },
         {
-          "source": "import data from 'data.json' with { type: 'json' };\n",
-          "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
+          "source": "outer: while (true) { break outer; }\n",
+          "reject": "TS_LABEL_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8594,8 +8594,8 @@
           }
         },
         {
-          "source": "class A { #m() { } }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "const c = 1; c = 2; // tsc TS2588\n",
+          "reject": "TS_ASSIGN_CONST",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8989,8 +8989,8 @@
           }
         },
         {
-          "source": "const s = String.raw`a`;\n",
-          "reject": "TS_TAGGED_TEMPLATE_UNSUPPORTED",
+          "source": "import defer * as ns from 'mod';\n",
+          "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9449,8 +9449,8 @@
           }
         },
         {
-          "source": "async function f() { return 1; } f();\n",
-          "reject": "TS_AWAIT_REQUIRED",
+          "source": "isNaN(1, 2);\n",
+          "reject": "TS_EXPRESSION_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9541,7 +9541,7 @@
           }
         },
         {
-          "source": "RegExp.escape('a');\n",
+          "source": "const x = Math.extra();\n",
           "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
@@ -10002,8 +10002,8 @@
           }
         },
         {
-          "source": "import text from 'mod' with { type: 'text' };\n",
-          "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
+          "source": "const b = delete 1;\n",
+          "reject": "TS_DELETE_NON_REFERENCE_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],

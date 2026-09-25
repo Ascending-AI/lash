@@ -85,3 +85,10 @@
 "String.fromCharCode(0xD800)"	runtime-reject	TS_LONE_SURROGATE_UNSUPPORTED
 "decodeURI(String.fromCharCode(0xD800))"	runtime-reject	TS_LONE_SURROGATE_UNSUPPORTED
 "encodeURI(String.fromCharCode(0xD800))"	runtime-reject	TS_LONE_SURROGATE_UNSUPPORTED
+# FIG-3708: the arguments object outside a non-arrow function refuses with
+# its own code; inside one the materialized arguments object is supported.
+"arguments"	reject	TS_ARGUMENTS_UNSUPPORTED
+"arguments.length"	reject	TS_ARGUMENTS_UNSUPPORTED
+"typeof arguments"	reject	TS_ARGUMENTS_UNSUPPORTED
+"(() => arguments.length)()"	open-defect	arrow-arguments-argv
+"(function () { return (() => arguments.length)(); })(1, 2)"	open-defect	arrow-arguments-argv

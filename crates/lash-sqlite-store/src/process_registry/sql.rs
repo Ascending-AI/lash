@@ -21,10 +21,10 @@ use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
     artifact_cleanup::ArtifactCleanupStatements, definitions::DefinitionStatements,
     events::EventStatements, leases::LeaseStatements, observers::ObserverStatements,
-    parent_end_plans::ParentEndPlanStatements, processes::ProcessStatements,
-    segment_handovers::SegmentHandoverStatements, tombstones::TombstoneStatements,
-    wake_allocation_floors::WakeAllocationFloorStatements, wake_deliveries::WakeDeliveryStatements,
-    wake_redelivery_fences::WakeRedeliveryFenceStatements,
+    parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
+    processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
+    tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
+    wake_deliveries::WakeDeliveryStatements, wake_redelivery_fences::WakeRedeliveryFenceStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -119,6 +119,19 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 lash_store_sql::statements! {
     /// `processes` statements only SQLite issues.
     pub(crate) struct ProcessSqliteStatements @ "process" {
+        /// The deployment's parked processes as a `?1`-row page in
+        /// `(parked_since_ms, process_id)` order over the parked projection's
+        /// partial index: only parks at or before `?2`, strictly after keyset
+        /// `?3`/`?4`, reason codes drawn from the JSON array `?5` (`NULL`
+        /// means all).
+        list_parked = "SELECT record_json FROM processes INDEXED BY idx_processes_parked
+             WHERE parked_since_ms IS NOT NULL
+               AND (?2 IS NULL OR parked_since_ms <= ?2)
+               AND (?3 IS NULL OR parked_since_ms > ?3 OR (parked_since_ms = ?3 AND process_id > ?4))
+               AND (?5 IS NULL OR parked_reason_code IN (SELECT value FROM json_each(?5)))
+             ORDER BY parked_since_ms, process_id
+             LIMIT ?1";
+
         /// No conflict clause: the row was read as absent under the same
         /// `BEGIN IMMEDIATE` lock, so a conflict is a defect and the
         /// constraint error is the right report. PostgreSQL cannot hold that
@@ -690,6 +703,33 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
+    /// `process_park_clock` statements only SQLite issues (FIG-3659 NOW-B).
+    ///
+    /// The same fork as the change clock's: the singleton flag, and the
+    /// bump-then-read pair PostgreSQL folds into one `RETURNING`.
+    pub(crate) struct ProcessParkClockSqliteStatements @ "process_park_clock" {
+        /// Allocate one feed sequence. The write transaction's lock orders
+        /// writers, so the allocated order is commit order.
+        bump = "UPDATE process_park_clock SET current_seq = current_seq + 1
+             WHERE singleton = 1";
+
+        /// The sequence the last `bump` allocated.
+        select_current = "SELECT current_seq FROM process_park_clock
+             WHERE singleton = 1";
+
+        /// The cursor below which a feed read is refused
+        /// `ProcessParkFeedCursorCompacted`.
+        select_compaction_horizon = "SELECT compaction_horizon FROM process_park_clock
+             WHERE singleton = 1";
+
+        /// Raise the compaction horizon to `?1` when it is higher.
+        raise_compaction_horizon = "UPDATE process_park_clock
+             SET compaction_horizon = MAX(compaction_horizon, ?1)
+             WHERE singleton = 1";
+    }
+}
+
+lash_store_sql::statements! {
     /// `process_tombstones` statements only SQLite issues.
     pub(crate) struct TombstoneSqliteStatements @ "process_tombstone" {
         /// Tombstone every process named by the JSON id array `?1`, stamped
@@ -967,6 +1007,10 @@ pub(crate) struct ProcessSql {
     pub(crate) wake_sqlite: WakeDeliverySqliteStatements,
     /// `process_change_clock` statements, all of them SQLite's own.
     pub(crate) clock_sqlite: ChangeClockSqliteStatements,
+    /// `process_park_events` statements both backends issue verbatim.
+    pub(crate) park_event: ProcessParkEventStatements,
+    /// `process_park_clock` statements, all of them SQLite's own.
+    pub(crate) park_clock_sqlite: ProcessParkClockSqliteStatements,
     /// `process_artifact_cleanup` statements both backends issue verbatim.
     pub(crate) cleanup: ArtifactCleanupStatements,
     /// `process_artifact_cleanup` statements only SQLite issues.
@@ -1006,6 +1050,8 @@ impl ProcessSql {
             wake: WakeDeliveryStatements::render(dialect),
             wake_sqlite: WakeDeliverySqliteStatements::render(dialect),
             clock_sqlite: ChangeClockSqliteStatements::render(dialect),
+            park_event: ProcessParkEventStatements::render(dialect),
+            park_clock_sqlite: ProcessParkClockSqliteStatements::render(dialect),
             cleanup: ArtifactCleanupStatements::render(dialect),
             cleanup_sqlite: ArtifactCleanupSqliteStatements::render(dialect),
             plan: ParentEndPlanStatements::render(dialect),

@@ -395,7 +395,13 @@ impl HarnessAdmin {
     }
 
     /// Kills the open invocation of workflow `service`'s `run` handler under
-    /// `key`, as an operator does, and returns its id.
+    /// `key`, as an operator does, and returns its id once the killed
+    /// execution can run no more work: an abort only stops an attempt's task
+    /// at its next yield, so on the in-process server this waits for the
+    /// killed attempt's task to end — a caller that serves a resubmission
+    /// next must not be overtaken by the killed poll still in flight. A
+    /// live server cannot report its deployment-side tasks, so there the
+    /// kill's own acknowledgement is all there is.
     pub(super) async fn kill_workflow_run(&self, service: &str, key: &str) -> String {
         match self {
             Self::InProcess { server } => {
@@ -406,7 +412,7 @@ impl HarnessAdmin {
                     .find(|view| view.target == target && view.status != "completed")
                     .unwrap_or_else(|| panic!("an open invocation of `{target}`"));
                 assert_eq!(
-                    server.kill(&open.id),
+                    server.kill_and_await(&open.id).await,
                     Some(true),
                     "kill the open invocation of `{target}`"
                 );
@@ -839,7 +845,7 @@ impl LiveConformanceHarness {
             .expect("an over-budget group open must give up");
         assert_eq!(
             refused.code,
-            RuntimeErrorCode::RestateJournaledEffectPoisoned,
+            RuntimeErrorCode::EngineJournaledEffectPoisoned,
             "the group open must give up with the process-command arm's typed failure: {}",
             refused.message
         );
@@ -2100,7 +2106,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
         .unwrap_or_else(|| panic!("the refusal is typed: {refused}"));
     assert_eq!(
         typed.code,
-        RuntimeErrorCode::RestateEffectGroupProtocolRetired
+        RuntimeErrorCode::EngineEffectGroupProtocolRetired
     );
     println!("EFFECT_GROUP_WITNESS o stale-protocol-refused-typed PASS");
 }

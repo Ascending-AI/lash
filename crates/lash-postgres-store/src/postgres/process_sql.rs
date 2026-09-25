@@ -16,10 +16,10 @@ use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
     artifact_cleanup::ArtifactCleanupStatements, definitions::DefinitionStatements,
     events::EventStatements, leases::LeaseStatements, observers::ObserverStatements,
-    parent_end_plans::ParentEndPlanStatements, processes::ProcessStatements,
-    segment_handovers::SegmentHandoverStatements, tombstones::TombstoneStatements,
-    wake_allocation_floors::WakeAllocationFloorStatements, wake_deliveries::WakeDeliveryStatements,
-    wake_redelivery_fences::WakeRedeliveryFenceStatements,
+    parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
+    processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
+    tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
+    wake_deliveries::WakeDeliveryStatements, wake_redelivery_fences::WakeRedeliveryFenceStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -106,6 +106,19 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 lash_store_sql::statements! {
     /// `processes` statements only PostgreSQL issues.
     pub(crate) struct ProcessPostgresStatements @ "process" {
+        /// The deployment's parked processes as a `?1`-row page in
+        /// `(parked_since_ms, process_id)` order over the parked projection's
+        /// partial index: only parks at or before `?2`, strictly after keyset
+        /// `?3`/`?4`, reason codes drawn from the text array `?5` (`NULL`
+        /// means all).
+        list_parked = "SELECT record_json FROM processes
+             WHERE parked_since_ms IS NOT NULL
+               AND (?2 IS NULL OR parked_since_ms <= ?2)
+               AND (?3 IS NULL OR parked_since_ms > ?3 OR (parked_since_ms = ?3 AND process_id > ?4))
+               AND (?5 IS NULL OR parked_reason_code = ANY(?5))
+             ORDER BY parked_since_ms, process_id
+             LIMIT ?1";
+
         /// The stored record for `?1`, under its write lock.
         ///
         /// `FOR UPDATE` is the fork: every decision this store makes about a
@@ -801,6 +814,43 @@ lash_store_sql::statements! {
     }
 }
 
+lash_store_sql::statements! {
+    /// `process_park_clock` statements only PostgreSQL issues (FIG-3659
+    /// NOW-B): the singleton flag, and the bump reporting its value through
+    /// `RETURNING` in the round trip that takes the row lock.
+    pub(crate) struct ProcessParkClockPostgresStatements @ "process_park_clock" {
+        /// Allocate one feed sequence and report it. The row lock the update
+        /// takes orders writers, so the allocated order is commit order.
+        bump_returning = "UPDATE process_park_clock
+             SET current_seq = current_seq + 1
+             WHERE singleton = TRUE
+             RETURNING current_seq";
+
+        /// The cursor below which a feed read is refused
+        /// `ProcessParkFeedCursorCompacted`, under a share lock: a compaction
+        /// that is still committing must not let a read at a stale cursor
+        /// pass unrefused while its events are already gone.
+        select_compaction_horizon_for_share = "SELECT compaction_horizon
+             FROM process_park_clock
+             WHERE singleton = TRUE
+             FOR SHARE";
+
+        /// The allocated sequence under a row lock, read before compaction:
+        /// locking the clock first serializes against concurrent bumps, and
+        /// clamping `through` to it keeps the horizon from rising past events
+        /// the feed has not yet committed.
+        select_current_for_update = "SELECT current_seq
+             FROM process_park_clock
+             WHERE singleton = TRUE
+             FOR UPDATE";
+
+        /// Raise the compaction horizon to `?1`, never lowering it.
+        raise_compaction_horizon = "UPDATE process_park_clock
+             SET compaction_horizon = GREATEST(compaction_horizon, ?1)
+             WHERE singleton = TRUE";
+    }
+}
+
 /// Every process-family statement, rendered for PostgreSQL.
 pub(crate) struct ProcessSql {
     /// `processes` statements both backends issue verbatim.
@@ -835,6 +885,10 @@ pub(crate) struct ProcessSql {
     pub(crate) wake_postgres: WakeDeliveryPostgresStatements,
     /// `process_change_clock` statements, all of them PostgreSQL's own.
     pub(crate) clock_postgres: ChangeClockPostgresStatements,
+    /// `process_park_events` statements both backends issue verbatim.
+    pub(crate) park_event: ProcessParkEventStatements,
+    /// `process_park_clock` statements, all of them PostgreSQL's own.
+    pub(crate) park_clock_postgres: ProcessParkClockPostgresStatements,
     /// `process_artifact_cleanup` statements both backends issue verbatim.
     pub(crate) cleanup: ArtifactCleanupStatements,
     /// `process_artifact_cleanup` statements only PostgreSQL issues.
@@ -872,6 +926,8 @@ static PROCESS_SQL: LazyLock<ProcessSql> = LazyLock::new(|| {
         wake: WakeDeliveryStatements::render(dialect),
         wake_postgres: WakeDeliveryPostgresStatements::render(dialect),
         clock_postgres: ChangeClockPostgresStatements::render(dialect),
+        park_event: ProcessParkEventStatements::render(dialect),
+        park_clock_postgres: ProcessParkClockPostgresStatements::render(dialect),
         cleanup: ArtifactCleanupStatements::render(dialect),
         cleanup_postgres: ArtifactCleanupPostgresStatements::render(dialect),
         plan: ParentEndPlanStatements::render(dialect),

@@ -40,8 +40,8 @@ pub use plugin::{
     LashlangModuleCompileError, LashlangModuleCompileRequest, MemoryBound, ModuleCompileOutput,
     RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmLanguageFeatures, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
-    UnsetBound, UnsetChannel, WallClockBound, apply_rlm_session_config_if_unset,
-    rlm_lashlang_surface, rlm_protocol_config, rlm_session_config, rlm_session_config_options,
+    UnsetBound, UnsetChannel, apply_rlm_session_config_if_unset, rlm_lashlang_surface,
+    rlm_protocol_config, rlm_session_config, rlm_session_config_options,
 };
 pub use projection::{
     ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,

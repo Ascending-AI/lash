@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -18,7 +24,7 @@ lash_rust_library(
     crate_features = [],
     crate_name = "lash_plugin_tool_output_budget",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-plugin-tool-output-budget", "lash_plugin_tool_output_budget"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-plugin-tool-output-budget",
     package_name = "lash-internal-plugin-tool-output-budget",
@@ -28,7 +34,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-plugin-tool-output-budget__doc",
     crate = ":lash-plugin-tool-output-budget",
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-plugin-tool-output-budget", "lash_plugin_tool_output_budget"),
     testonly = True,
 )
 
@@ -39,7 +45,7 @@ lash_rust_unit_test(
     crate_name = "lash_plugin_tool_output_budget",
     crate_root = "src/lib.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-plugin-tool-output-budget", "lash_plugin_tool_output_budget", "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__unit_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-plugin-tool-output-budget",
     package_name = "lash-internal-plugin-tool-output-budget",
@@ -71,7 +77,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lash_plugin_tool_output_budget",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-plugin-tool-output-budget", "lash_plugin_tool_output_budget"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-plugin-tool-output-budget",
     package_name = "lash-internal-plugin-tool-output-budget",
@@ -89,7 +95,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lash_plugin_tool_output_budget",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-plugin-tool-output-budget", "lash_plugin_tool_output_budget"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-plugin-tool-output-budget",
     package_name = "lash-internal-plugin-tool-output-budget",
@@ -107,7 +113,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lash_plugin_tool_output_budget",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-plugin-tool-output-budget", "lash_plugin_tool_output_budget"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-plugin-tool-output-budget",
     package_name = "lash-internal-plugin-tool-output-budget",

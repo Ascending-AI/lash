@@ -428,6 +428,31 @@ async fn a_missing_seed_row_is_rejected() {
     .await;
 }
 
+/// The catalog identity is a data precondition rather than a shape, so
+/// `SchemaCheck::WarnOnly` cannot relax it: without the row there is no identity
+/// to hand the session catalogs open builds.
+#[tokio::test]
+async fn a_missing_catalog_identity_is_fatal_in_every_mode() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping catalog-identity precondition: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch.apply("DELETE FROM lash_catalog_identity").await;
+    for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
+        let error = scratch
+            .open_host_provisioned(check)
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("{check:?} must not open without a catalog identity"));
+        assert!(
+            error.to_string().contains("lash_catalog_identity"),
+            "the error must name the table carrying the identity: {error}"
+        );
+    }
+    scratch.cleanup().await;
+}
+
 /// A dropped table.
 #[tokio::test]
 async fn a_missing_table_is_rejected() {

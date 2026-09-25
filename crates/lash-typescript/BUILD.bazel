@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -22,7 +28,7 @@ lash_rust_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "lash_typescript"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -32,7 +38,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-typescript__doc",
     crate = ":lash-typescript",
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "lash_typescript"),
     testonly = True,
 )
 
@@ -47,7 +53,7 @@ lash_rust_unit_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "lash_typescript", "//crates/lash-typescript:lash-typescript__unit_test"),
     data_exclude = [
         "tests/test262/test/**/*.js",
     ],
@@ -71,7 +77,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/test262/test/**/*.js",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "3", "test.memory_kb": "12058624"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "integration", "//crates/lash-typescript:integration__test"),
     extra_compile_data = [
         "//examples:codemode_parity_cells",
         "//:workflow_graph_schema",
@@ -101,7 +107,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/test262/test/**/*.js",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "race_any_runtime", "//crates/lash-typescript:race_any_runtime__test"),
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -127,7 +133,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/test262/test/**/*.js",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "carrier_laws", "//crates/lash-typescript:carrier_laws__test"),
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -150,7 +156,7 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "corpus_laws", "//crates/lash-typescript:corpus_laws__test"),
     extra_compile_data = [
         "//examples:codemode_parity_cells",
     ],
@@ -178,7 +184,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/test262/test/**/*.js",
     ],
-    exec_properties = {"test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "fuel_law", "//crates/lash-typescript:fuel_law__test"),
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -199,7 +205,7 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "test262", "//crates/lash-typescript:test262__test"),
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -220,7 +226,7 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "8", "test.memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "test262_full", "//crates/lash-typescript:test262_full__test"),
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -247,9 +253,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 4,
+    budget = test_batch_budget("//crates/lash-typescript:test_batch"),
     jobs = 2,
-    memory_kb = 1048576,
     tests = [
         ":fuel_law__test",
         ":lash-typescript__unit_test",
@@ -283,7 +288,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "lash_typescript"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -305,7 +310,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "lash_typescript"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -325,7 +330,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "lash_typescript"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -345,7 +350,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-typescript", "lash_typescript"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",

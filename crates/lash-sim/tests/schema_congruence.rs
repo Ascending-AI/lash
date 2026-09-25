@@ -106,6 +106,14 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("runtime_turn_commits", "lash_runtime_turn_commits"),
     TablePair {
         sqlite_table: None,
+        postgres_table: Some("lash_catalog_identity"),
+        parity: Parity::OneBackendOnly {
+            side: Backend::Postgres,
+            reason: "a PostgreSQL catalog's random identity; a SQLite catalog is named by its file",
+        },
+    },
+    TablePair {
+        sqlite_table: None,
         postgres_table: Some("lash_schema_versions"),
         parity: Parity::OneBackendOnly {
             side: Backend::Postgres,
@@ -145,6 +153,8 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("turn_parks", "lash_turn_parks"),
     pair("turn_park_clock", "lash_turn_park_clock"),
     pair("turn_park_events", "lash_turn_park_events"),
+    pair("process_park_clock", "lash_process_park_clock"),
+    pair("process_park_events", "lash_process_park_events"),
     TablePair {
         sqlite_table: Some("turn_cancel_requests"),
         postgres_table: Some("lash_turn_cancel_requests"),

@@ -410,4 +410,69 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
+
+    async fn park_process_with_authority(
+        &self,
+        process_id: &ProcessId,
+        reason: lash_core_execution::store::ParkReason,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, PluginError> {
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut record = require_process_tx(&mut tx, process_id).await?;
+        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
+            .await?;
+        let request = match lash_core_execution::runtime::prepare_process_transition(
+            &record,
+            ProcessTransition::Park(reason),
+        )? {
+            ProcessTransitionPlan::Unchanged => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(record);
+            }
+            ProcessTransitionPlan::Append(request) => *request,
+        };
+        append_process_event_tx(
+            &mut tx,
+            &mut record,
+            request,
+            now,
+            self.wake_delivery_config,
+        )
+        .await?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(record)
+    }
+
+    async fn begin_parked_rerun_with_authority(
+        &self,
+        process_id: &ProcessId,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, PluginError> {
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut record = require_process_tx(&mut tx, process_id).await?;
+        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
+            .await?;
+        let request = match lash_core_execution::runtime::prepare_process_transition(
+            &record,
+            ProcessTransition::BeginParkedRerun,
+        )? {
+            ProcessTransitionPlan::Unchanged => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(record);
+            }
+            ProcessTransitionPlan::Append(request) => *request,
+        };
+        append_process_event_tx(
+            &mut tx,
+            &mut record,
+            request,
+            now,
+            self.wake_delivery_config,
+        )
+        .await?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(record)
+    }
 }

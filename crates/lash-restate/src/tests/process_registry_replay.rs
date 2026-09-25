@@ -653,7 +653,7 @@ pub(super) async fn restate_cancel_replay_refuses_journaled_command_identity_dri
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateProcessJournalIdentityDrift
+        lash_core::RuntimeErrorCode::EngineProcessJournalIdentityDrift
     );
     assert!(
         registry
@@ -726,7 +726,7 @@ pub(super) async fn restate_cancel_replay_refuses_incompatible_journal_payloads(
             .expect_err("incompatible journal payload must be refused");
         assert_eq!(
             error.code,
-            lash_core::RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
+            lash_core::RuntimeErrorCode::EngineProcessJournalPayloadIncompatible,
             "{mutation}"
         );
         assert_eq!(
@@ -884,7 +884,7 @@ impl RestateProcessRunner for TerminalFailureRunner {
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
         Err(PluginError::Runtime(lash_core::RuntimeError::new(
-            lash_core::RuntimeErrorCode::RestateServiceUnregistered,
+            lash_core::RuntimeErrorCode::EngineServiceUnregistered,
             "no deployment binds the child worker",
         )))
     }

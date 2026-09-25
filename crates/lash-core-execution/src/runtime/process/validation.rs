@@ -36,7 +36,11 @@ pub fn validate_generic_process_event_append(
     }
     if matches!(
         request.event_type.as_str(),
-        "process.observer_added" | "process.observer_removed" | "process.subscription_retargeted"
+        "process.observer_added"
+            | "process.observer_removed"
+            | "process.subscription_retargeted"
+            | "process.parked"
+            | "process.park_rerun_began"
     ) {
         return Err(PluginError::ReservedProcessEvent {
             event_type: request.event_type.clone(),
@@ -84,6 +88,16 @@ pub enum ProcessTransition {
     /// Enter a durable wait state.
     EnterWait(WaitState),
     ClearWait,
+    /// Park the process: its body refused to replay its journal (NOW-B). A
+    /// first refusal opens the park; a rerun's refusal re-parks it, keeping
+    /// `since_ms` and `park_id` and counting the attempt. A park whose latest
+    /// run already refused is unchanged, so a retried write never counts one
+    /// refusal twice.
+    Park(crate::store::ParkReason),
+    /// A rerun of a parked process began: the park stays, and stops
+    /// exempting the process's starts from the attempt budget until the
+    /// rerun refuses again. Unchanged on a process with no refusing park.
+    BeginParkedRerun,
 }
 
 /// The store action selected for a registry-owned lifecycle transition.
@@ -178,10 +192,7 @@ pub fn prepare_process_start(
     // A parked process (FIG-3586) re-runs to find out whether the build now
     // serving it can replay its journal; those runs refuse with nothing
     // dispatched, so they do not spend its attempt budget.
-    let parked = record
-        .wait
-        .as_ref()
-        .is_some_and(super::model::WaitState::is_parked);
+    let parked = record.is_refusing_park();
     if let Some(max_attempts) = record.max_attempts
         && started.attempt > max_attempts
         && !parked
@@ -287,6 +298,27 @@ pub fn prepare_process_transition(
             };
             ProcessEventAppendRequest::wait_cleared(&record.id, wait)
         }
+        ProcessTransition::Park(reason) => {
+            if record.is_refusing_park() {
+                return Ok(ProcessTransitionPlan::Unchanged);
+            }
+            let mut append =
+                ProcessEventAppendRequest::parked(&record.id, &reason, record.last_event_sequence);
+            if record.is_terminal() || record.status == ProcessStatus::CallerDeparted {
+                route_transition_refusal_to_fold(&mut append)?;
+            }
+            append
+        }
+        ProcessTransition::BeginParkedRerun => {
+            let Some(park) = record.park.as_deref().filter(|park| park.refusing) else {
+                return Ok(ProcessTransitionPlan::Unchanged);
+            };
+            ProcessEventAppendRequest::park_rerun_began(
+                &record.id,
+                park.park_id,
+                record.last_event_sequence,
+            )
+        }
     };
     Ok(ProcessTransitionPlan::Append(Box::new(append)))
 }
@@ -316,6 +348,7 @@ pub fn apply_process_status_projection(
     record.status = status;
     if record.status.is_terminal() {
         record.wait = None;
+        record.park = None;
     }
     record.updated_at_ms = updated_at_ms;
 }
@@ -380,7 +413,8 @@ pub fn apply_process_event_projection(
         )));
     }
 
-    match ProcessEventKind::from_event_type(&event.event_type) {
+    let kind = ProcessEventKind::from_event_type(&event.event_type);
+    match kind {
         ProcessEventKind::FirstStarted => {
             let started = lifecycle_payload(event, "started")?;
             let resumed_from_handover = event
@@ -513,6 +547,39 @@ pub fn apply_process_event_projection(
         ProcessEventKind::CallerDeparted => {
             apply_caller_departure(record)?;
         }
+        ProcessEventKind::Parked => {
+            if record.is_terminal() || record.status == ProcessStatus::CallerDeparted {
+                return Err(PluginError::Session(format!(
+                    "process `{}` cannot park from `{}`",
+                    record.id,
+                    record.status.label()
+                )));
+            }
+            let reason: crate::store::ParkReason = lifecycle_payload(event, "reason")?;
+            match record.park.as_deref_mut() {
+                Some(park) => {
+                    park.reason = reason;
+                    park.last_refused_ms = event.occurred_at;
+                    park.attempts = park.attempts.saturating_add(1);
+                    park.refusing = true;
+                }
+                None => {
+                    record.park = Some(Box::new(crate::store::ProcessPark {
+                        reason,
+                        park_id: crate::store::ParkId::from_feed_sequence(event.sequence),
+                        since_ms: event.occurred_at,
+                        last_refused_ms: event.occurred_at,
+                        attempts: 1,
+                        refusing: true,
+                    }));
+                }
+            }
+        }
+        ProcessEventKind::ParkRerunBegan => {
+            if let Some(park) = record.park.as_deref_mut() {
+                park.refusing = false;
+            }
+        }
         ProcessEventKind::ObserverAdded
         | ProcessEventKind::ObserverRemoved
         | ProcessEventKind::SubscriptionRetargeted
@@ -526,6 +593,21 @@ pub fn apply_process_event_projection(
         }
     }
 
+    // The first fact of the process's own execution past a refusal ends its
+    // park (NOW-B): the run got past replay. Registry-side facts — a start
+    // marker, a cancel or abandon request, observer edges — say nothing about
+    // whether the body can replay, so the park outlives them.
+    if matches!(
+        kind,
+        ProcessEventKind::EffectOutcome
+            | ProcessEventKind::EffectOmissions
+            | ProcessEventKind::Waiting
+            | ProcessEventKind::Resumed
+            | ProcessEventKind::Custom
+    ) {
+        record.park = None;
+    }
+
     if let Some(terminal) = event.semantics.terminal.clone() {
         if record.is_terminal() {
             return Ok(());
@@ -537,6 +619,57 @@ pub fn apply_process_event_projection(
     }
     record.last_event_sequence = event.sequence;
     Ok(())
+}
+
+/// The park feed transitions one appended event made to a process record
+/// (NOW-B), given the record's park before the append and the projected
+/// record after it. Every process store appends exactly these, in order, to
+/// its process park feed inside the event's own transaction: a first park is
+/// `Parked`, a re-park and a rerun's start are no transition at all, and the
+/// fact that ends a park closes it as `Unparked` or `Cancelled`.
+pub fn process_park_transitions(
+    before: Option<&crate::store::ProcessPark>,
+    after: &ProcessRecord,
+) -> Vec<(crate::store::ParkId, crate::store::ParkEventKind)> {
+    use crate::store::{ParkCancelCause, ParkEventKind, UnparkCause};
+    let closing = |park: &crate::store::ProcessPark| {
+        let kind = if after.status == ProcessStatus::Cancelled {
+            ParkEventKind::Cancelled {
+                cause: ParkCancelCause::ProcessCancelled {
+                    origin: after
+                        .cancel_request
+                        .as_deref()
+                        .map(|request| request.origin),
+                },
+            }
+        } else if after.is_terminal() {
+            ParkEventKind::Unparked {
+                cause: UnparkCause::ProcessTerminal {
+                    status: after.status,
+                },
+            }
+        } else {
+            ParkEventKind::Unparked {
+                cause: UnparkCause::ProcessProgressed,
+            }
+        };
+        (park.park_id, kind)
+    };
+    let opening = |park: &crate::store::ProcessPark| {
+        (
+            park.park_id,
+            ParkEventKind::Parked {
+                reason: park.reason.clone(),
+            },
+        )
+    };
+    match (before, after.park.as_deref()) {
+        (None, None) => Vec::new(),
+        (None, Some(opened)) => vec![opening(opened)],
+        (Some(closed), None) => vec![closing(closed)],
+        (Some(previous), Some(current)) if previous.park_id == current.park_id => Vec::new(),
+        (Some(previous), Some(current)) => vec![closing(previous), opening(current)],
+    }
 }
 
 /// Rebuild a process record by folding its persisted events in sequence order.
@@ -1177,6 +1310,8 @@ pub fn require_event_replay(
                 | "process.resumed"
                 | "process.external_ref_set"
                 | "process.abandon_requested"
+                | "process.parked"
+                | "process.park_rerun_began"
                 | "process.observer_added"
                 | "process.observer_removed"
                 | "process.subscription_retargeted"

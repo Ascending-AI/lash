@@ -278,7 +278,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(rlm_channel)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-            .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),

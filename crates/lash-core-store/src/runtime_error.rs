@@ -216,14 +216,14 @@ pub enum RuntimeErrorCode {
     ProcessRegistryUnavailable,
     ProcessSignalWaitCancelled,
     ProcessSignalWaitTimeout,
-    RestateAwaitEventAwait,
-    RestateAwaitEventCancel,
-    RestateAwaitEventPeek,
-    RestateAwaitEventResolve,
-    RestateAwaitEventRevocationRead,
-    RestateAwaitEventRevoke,
-    RestateAwaitEventSessionUpdate,
-    RestateEffectController,
+    EngineAwaitEventAwait,
+    EngineAwaitEventCancel,
+    EngineAwaitEventPeek,
+    EngineAwaitEventResolve,
+    EngineAwaitEventRevocationRead,
+    EngineAwaitEventRevoke,
+    EngineAwaitEventSessionUpdate,
+    EngineEffectController,
     /// Replay found a retired tool-intent v1 key; re-execution under v2 could
     /// duplicate or diverge from the committed command, so it is refused.
     ToolIntentReplayKeyFormatCutover,
@@ -255,36 +255,36 @@ pub enum RuntimeErrorCode {
     /// dispatched; the turn parks and the engine keeps the journal until an
     /// operator redeploys the build that wrote it, cancels, or forks.
     EffectReplayDivergence,
-    RestateEffectHostRequiresHandlerScope,
+    EngineEffectHostRequiresHandlerScope,
     /// A journaled Restate effect produced an unacceptable outcome and became
     /// terminal rather than failing every enclosing-turn redrive.
-    RestateJournaledEffectPoisoned,
-    RestateProcessAwait,
-    RestateProcessCancel,
+    EngineJournaledEffectPoisoned,
+    EngineProcessAwait,
+    EngineProcessCancel,
     /// A Restate DirectProcess redrive addressed an existing journal entry
     /// with a different canonical process-command identity.
-    RestateProcessJournalIdentityDrift,
+    EngineProcessJournalIdentityDrift,
     /// A Restate DirectProcess journal entry has an unsupported version or a
     /// shape this build cannot decode exactly.
-    RestateProcessJournalPayloadIncompatible,
+    EngineProcessJournalPayloadIncompatible,
     /// A Restate effect-group index holds state written under another
     /// effect-group protocol version; the index refuses it at handler entry,
     /// before any effect.
-    RestateEffectGroupProtocolRetired,
-    RestateProcessIngressSubmit,
+    EngineEffectGroupProtocolRetired,
+    EngineProcessIngressSubmit,
     /// The ingress target names an unbound service; retry cannot change that
     /// deployment fact, so this code is terminal.
-    RestateServiceUnregistered,
-    RestateProcessAwaitAfterTurnCancel,
-    RestateProcessTurnCancelContextMissing,
-    RestateProcessTerminalEncode,
-    RestateTurnTerminalAttach,
+    EngineServiceUnregistered,
+    EngineProcessAwaitAfterTurnCancel,
+    EngineProcessTurnCancelContextMissing,
+    EngineProcessTerminalEncode,
+    EngineTurnTerminalAttach,
     /// A Restate terminal attachment elapsed; re-attaching is safe.
-    RestateTurnTerminalAttachCeilingElapsed,
-    RestateTurnTerminalDecode,
-    RestateTurnTerminalInvalidResolution,
-    RestateTurnCancelScopeMismatch,
-    RestateTurnCancelScopeMissing,
+    EngineTurnTerminalAttachCeilingElapsed,
+    EngineTurnTerminalDecode,
+    EngineTurnTerminalInvalidResolution,
+    EngineTurnCancelScopeMismatch,
+    EngineTurnCancelScopeMissing,
     /// A journaled response hook retries derivation without paying again (FIG-1276).
     RuntimeEffectAssistantResponseHook,
     RuntimeEffectAttachmentStore,
@@ -589,48 +589,46 @@ impl RuntimeErrorCode {
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
             Self::ProcessSignalWaitTimeout => "process_signal_wait_timeout",
-            Self::RestateAwaitEventAwait => "restate_await_event_await",
-            Self::RestateAwaitEventCancel => "restate_await_event_cancel",
-            Self::RestateAwaitEventPeek => "restate_await_event_peek",
-            Self::RestateAwaitEventResolve => "restate_await_event_resolve",
-            Self::RestateAwaitEventRevocationRead => "restate_await_event_revocation_read",
-            Self::RestateAwaitEventRevoke => "restate_await_event_revoke",
-            Self::RestateAwaitEventSessionUpdate => "restate_await_event_session_update",
-            Self::RestateEffectController => "restate_effect_controller",
+            Self::EngineAwaitEventAwait => "engine_await_event_await",
+            Self::EngineAwaitEventCancel => "engine_await_event_cancel",
+            Self::EngineAwaitEventPeek => "engine_await_event_peek",
+            Self::EngineAwaitEventResolve => "engine_await_event_resolve",
+            Self::EngineAwaitEventRevocationRead => "engine_await_event_revocation_read",
+            Self::EngineAwaitEventRevoke => "engine_await_event_revoke",
+            Self::EngineAwaitEventSessionUpdate => "engine_await_event_session_update",
+            Self::EngineEffectController => "engine_effect_controller",
             Self::ToolIntentReplayKeyFormatCutover => "tool_intent_replay_key_format_cutover",
             Self::LashlangCellReplayDivergence => "lashlang_cell_replay_divergence",
             Self::LashlangCellReplayKeyFormatCutover => "lashlang_cell_replay_key_format_cutover",
             Self::LashlangCellBindingDrift => "lashlang_cell_binding_drift",
             Self::RecordedJournalReadUnsupported => "recorded_journal_read_unsupported",
             Self::EffectReplayDivergence => "effect_replay_divergence",
-            Self::RestateJournaledEffectPoisoned => "restate_journaled_effect_poisoned",
-            Self::RestateEffectHostRequiresHandlerScope => {
-                "restate_effect_host_requires_handler_scope"
+            Self::EngineJournaledEffectPoisoned => "engine_journaled_effect_poisoned",
+            Self::EngineEffectHostRequiresHandlerScope => {
+                "engine_effect_host_requires_handler_scope"
             }
-            Self::RestateProcessAwait => "restate_process_await",
-            Self::RestateProcessCancel => "restate_process_cancel",
-            Self::RestateProcessJournalIdentityDrift => "restate_process_journal_identity_drift",
-            Self::RestateProcessJournalPayloadIncompatible => {
-                "restate_process_journal_payload_incompatible"
+            Self::EngineProcessAwait => "engine_process_await",
+            Self::EngineProcessCancel => "engine_process_cancel",
+            Self::EngineProcessJournalIdentityDrift => "engine_process_journal_identity_drift",
+            Self::EngineProcessJournalPayloadIncompatible => {
+                "engine_process_journal_payload_incompatible"
             }
-            Self::RestateEffectGroupProtocolRetired => "restate_effect_group_protocol_retired",
-            Self::RestateProcessIngressSubmit => "restate_process_ingress_submit",
-            Self::RestateServiceUnregistered => "restate_service_unregistered",
-            Self::RestateProcessAwaitAfterTurnCancel => "restate_process_await_after_turn_cancel",
-            Self::RestateProcessTurnCancelContextMissing => {
-                "restate_process_turn_cancel_context_missing"
+            Self::EngineEffectGroupProtocolRetired => "engine_effect_group_protocol_retired",
+            Self::EngineProcessIngressSubmit => "engine_process_ingress_submit",
+            Self::EngineServiceUnregistered => "engine_service_unregistered",
+            Self::EngineProcessAwaitAfterTurnCancel => "engine_process_await_after_turn_cancel",
+            Self::EngineProcessTurnCancelContextMissing => {
+                "engine_process_turn_cancel_context_missing"
             }
-            Self::RestateProcessTerminalEncode => "restate_process_terminal_encode",
-            Self::RestateTurnTerminalAttach => "restate_turn_terminal_attach",
-            Self::RestateTurnTerminalAttachCeilingElapsed => {
-                "restate_turn_terminal_attach_ceiling_elapsed"
+            Self::EngineProcessTerminalEncode => "engine_process_terminal_encode",
+            Self::EngineTurnTerminalAttach => "engine_turn_terminal_attach",
+            Self::EngineTurnTerminalAttachCeilingElapsed => {
+                "engine_turn_terminal_attach_ceiling_elapsed"
             }
-            Self::RestateTurnTerminalDecode => "restate_turn_terminal_decode",
-            Self::RestateTurnTerminalInvalidResolution => {
-                "restate_turn_terminal_invalid_resolution"
-            }
-            Self::RestateTurnCancelScopeMismatch => "restate_turn_cancel_scope_mismatch",
-            Self::RestateTurnCancelScopeMissing => "restate_turn_cancel_scope_missing",
+            Self::EngineTurnTerminalDecode => "engine_turn_terminal_decode",
+            Self::EngineTurnTerminalInvalidResolution => "engine_turn_terminal_invalid_resolution",
+            Self::EngineTurnCancelScopeMismatch => "engine_turn_cancel_scope_mismatch",
+            Self::EngineTurnCancelScopeMissing => "engine_turn_cancel_scope_missing",
             Self::RuntimeEffectAttachmentStore => "runtime_effect_attachment_store",
             Self::RuntimeEffectAssistantResponseHook => "runtime_effect_assistant_response_hook",
             Self::RuntimeEffectEnvelopeCanonicalDecode => {
@@ -744,7 +742,7 @@ impl RuntimeErrorCode {
         matches!(
             self,
             Self::SqliteEffectReplayHashConflict
-                | Self::RestateProcessJournalIdentityDrift
+                | Self::EngineProcessJournalIdentityDrift
                 | Self::EffectReplayDivergence
                 | Self::ToolIntentReplayKeyFormatCutover
                 | Self::LashlangCellReplayDivergence
@@ -849,38 +847,38 @@ impl RuntimeErrorCode {
         Self::ProcessRegistryUnavailable,
         Self::ProcessSignalWaitCancelled,
         Self::ProcessSignalWaitTimeout,
-        Self::RestateAwaitEventAwait,
-        Self::RestateAwaitEventCancel,
-        Self::RestateAwaitEventPeek,
-        Self::RestateAwaitEventResolve,
-        Self::RestateAwaitEventRevocationRead,
-        Self::RestateAwaitEventRevoke,
-        Self::RestateAwaitEventSessionUpdate,
-        Self::RestateEffectController,
+        Self::EngineAwaitEventAwait,
+        Self::EngineAwaitEventCancel,
+        Self::EngineAwaitEventPeek,
+        Self::EngineAwaitEventResolve,
+        Self::EngineAwaitEventRevocationRead,
+        Self::EngineAwaitEventRevoke,
+        Self::EngineAwaitEventSessionUpdate,
+        Self::EngineEffectController,
         Self::EffectReplayDivergence,
         Self::ToolIntentReplayKeyFormatCutover,
         Self::LashlangCellReplayDivergence,
         Self::LashlangCellReplayKeyFormatCutover,
         Self::LashlangCellBindingDrift,
         Self::RecordedJournalReadUnsupported,
-        Self::RestateEffectHostRequiresHandlerScope,
-        Self::RestateJournaledEffectPoisoned,
-        Self::RestateProcessAwait,
-        Self::RestateProcessCancel,
-        Self::RestateProcessJournalIdentityDrift,
-        Self::RestateProcessJournalPayloadIncompatible,
-        Self::RestateEffectGroupProtocolRetired,
-        Self::RestateProcessIngressSubmit,
-        Self::RestateServiceUnregistered,
-        Self::RestateProcessAwaitAfterTurnCancel,
-        Self::RestateProcessTurnCancelContextMissing,
-        Self::RestateProcessTerminalEncode,
-        Self::RestateTurnTerminalAttach,
-        Self::RestateTurnTerminalAttachCeilingElapsed,
-        Self::RestateTurnTerminalDecode,
-        Self::RestateTurnTerminalInvalidResolution,
-        Self::RestateTurnCancelScopeMismatch,
-        Self::RestateTurnCancelScopeMissing,
+        Self::EngineEffectHostRequiresHandlerScope,
+        Self::EngineJournaledEffectPoisoned,
+        Self::EngineProcessAwait,
+        Self::EngineProcessCancel,
+        Self::EngineProcessJournalIdentityDrift,
+        Self::EngineProcessJournalPayloadIncompatible,
+        Self::EngineEffectGroupProtocolRetired,
+        Self::EngineProcessIngressSubmit,
+        Self::EngineServiceUnregistered,
+        Self::EngineProcessAwaitAfterTurnCancel,
+        Self::EngineProcessTurnCancelContextMissing,
+        Self::EngineProcessTerminalEncode,
+        Self::EngineTurnTerminalAttach,
+        Self::EngineTurnTerminalAttachCeilingElapsed,
+        Self::EngineTurnTerminalDecode,
+        Self::EngineTurnTerminalInvalidResolution,
+        Self::EngineTurnCancelScopeMismatch,
+        Self::EngineTurnCancelScopeMissing,
         Self::RuntimeEffectAttachmentStore,
         Self::RuntimeEffectEnvelopeCanonicalDecode,
         Self::RuntimeEffectEnvelopeCanonicalHashInvariant,
@@ -1045,48 +1043,46 @@ impl RuntimeErrorCode {
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,
             "process_signal_wait_timeout" => Self::ProcessSignalWaitTimeout,
-            "restate_await_event_await" => Self::RestateAwaitEventAwait,
-            "restate_await_event_cancel" => Self::RestateAwaitEventCancel,
-            "restate_await_event_peek" => Self::RestateAwaitEventPeek,
-            "restate_await_event_resolve" => Self::RestateAwaitEventResolve,
-            "restate_await_event_revocation_read" => Self::RestateAwaitEventRevocationRead,
-            "restate_await_event_revoke" => Self::RestateAwaitEventRevoke,
-            "restate_await_event_session_update" => Self::RestateAwaitEventSessionUpdate,
-            "restate_effect_controller" => Self::RestateEffectController,
+            "engine_await_event_await" => Self::EngineAwaitEventAwait,
+            "engine_await_event_cancel" => Self::EngineAwaitEventCancel,
+            "engine_await_event_peek" => Self::EngineAwaitEventPeek,
+            "engine_await_event_resolve" => Self::EngineAwaitEventResolve,
+            "engine_await_event_revocation_read" => Self::EngineAwaitEventRevocationRead,
+            "engine_await_event_revoke" => Self::EngineAwaitEventRevoke,
+            "engine_await_event_session_update" => Self::EngineAwaitEventSessionUpdate,
+            "engine_effect_controller" => Self::EngineEffectController,
             "tool_intent_replay_key_format_cutover" => Self::ToolIntentReplayKeyFormatCutover,
             "lashlang_cell_replay_divergence" => Self::LashlangCellReplayDivergence,
             "lashlang_cell_replay_key_format_cutover" => Self::LashlangCellReplayKeyFormatCutover,
             "lashlang_cell_binding_drift" => Self::LashlangCellBindingDrift,
             "recorded_journal_read_unsupported" => Self::RecordedJournalReadUnsupported,
             "effect_replay_divergence" => Self::EffectReplayDivergence,
-            "restate_effect_host_requires_handler_scope" => {
-                Self::RestateEffectHostRequiresHandlerScope
+            "engine_effect_host_requires_handler_scope" => {
+                Self::EngineEffectHostRequiresHandlerScope
             }
-            "restate_journaled_effect_poisoned" => Self::RestateJournaledEffectPoisoned,
-            "restate_process_await" => Self::RestateProcessAwait,
-            "restate_process_cancel" => Self::RestateProcessCancel,
-            "restate_process_journal_identity_drift" => Self::RestateProcessJournalIdentityDrift,
-            "restate_process_journal_payload_incompatible" => {
-                Self::RestateProcessJournalPayloadIncompatible
+            "engine_journaled_effect_poisoned" => Self::EngineJournaledEffectPoisoned,
+            "engine_process_await" => Self::EngineProcessAwait,
+            "engine_process_cancel" => Self::EngineProcessCancel,
+            "engine_process_journal_identity_drift" => Self::EngineProcessJournalIdentityDrift,
+            "engine_process_journal_payload_incompatible" => {
+                Self::EngineProcessJournalPayloadIncompatible
             }
-            "restate_effect_group_protocol_retired" => Self::RestateEffectGroupProtocolRetired,
-            "restate_process_ingress_submit" => Self::RestateProcessIngressSubmit,
-            "restate_service_unregistered" => Self::RestateServiceUnregistered,
-            "restate_process_await_after_turn_cancel" => Self::RestateProcessAwaitAfterTurnCancel,
-            "restate_process_turn_cancel_context_missing" => {
-                Self::RestateProcessTurnCancelContextMissing
+            "engine_effect_group_protocol_retired" => Self::EngineEffectGroupProtocolRetired,
+            "engine_process_ingress_submit" => Self::EngineProcessIngressSubmit,
+            "engine_service_unregistered" => Self::EngineServiceUnregistered,
+            "engine_process_await_after_turn_cancel" => Self::EngineProcessAwaitAfterTurnCancel,
+            "engine_process_turn_cancel_context_missing" => {
+                Self::EngineProcessTurnCancelContextMissing
             }
-            "restate_process_terminal_encode" => Self::RestateProcessTerminalEncode,
-            "restate_turn_terminal_attach" => Self::RestateTurnTerminalAttach,
-            "restate_turn_terminal_attach_ceiling_elapsed" => {
-                Self::RestateTurnTerminalAttachCeilingElapsed
+            "engine_process_terminal_encode" => Self::EngineProcessTerminalEncode,
+            "engine_turn_terminal_attach" => Self::EngineTurnTerminalAttach,
+            "engine_turn_terminal_attach_ceiling_elapsed" => {
+                Self::EngineTurnTerminalAttachCeilingElapsed
             }
-            "restate_turn_terminal_decode" => Self::RestateTurnTerminalDecode,
-            "restate_turn_terminal_invalid_resolution" => {
-                Self::RestateTurnTerminalInvalidResolution
-            }
-            "restate_turn_cancel_scope_mismatch" => Self::RestateTurnCancelScopeMismatch,
-            "restate_turn_cancel_scope_missing" => Self::RestateTurnCancelScopeMissing,
+            "engine_turn_terminal_decode" => Self::EngineTurnTerminalDecode,
+            "engine_turn_terminal_invalid_resolution" => Self::EngineTurnTerminalInvalidResolution,
+            "engine_turn_cancel_scope_mismatch" => Self::EngineTurnCancelScopeMismatch,
+            "engine_turn_cancel_scope_missing" => Self::EngineTurnCancelScopeMissing,
             "runtime_effect_attachment_store" => Self::RuntimeEffectAttachmentStore,
             "runtime_effect_envelope_canonical_decode" => {
                 Self::RuntimeEffectEnvelopeCanonicalDecode

@@ -151,9 +151,10 @@ mod tests {
 
         async fn turn_park_feed(
             &self,
-            _after: crate::store::TurnParkFeedCursor,
+            _after: crate::store::ParkFeedCursor,
             _limit: std::num::NonZeroUsize,
-        ) -> Result<crate::store::TurnParkFeedPage, crate::StoreError> {
+        ) -> Result<crate::store::ParkFeedPage<crate::store::TurnParkTarget>, crate::StoreError>
+        {
             Err(crate::StoreError::UnsupportedStoreOperation {
                 operation: "SessionStoreFactory::turn_park_feed",
             })
@@ -161,7 +162,7 @@ mod tests {
 
         async fn compact_turn_park_feed(
             &self,
-            _through: crate::store::TurnParkFeedCursor,
+            _through: crate::store::ParkFeedCursor,
         ) -> Result<(), crate::StoreError> {
             Err(crate::StoreError::UnsupportedStoreOperation {
                 operation: "SessionStoreFactory::compact_turn_park_feed",

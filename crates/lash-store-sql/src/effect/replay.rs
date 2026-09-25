@@ -83,17 +83,8 @@ pub const CLAIM_DRAIN_COLUMNS: &str = "envelope_hash, envelope_json, status, out
 /// [`CHILD_COMMIT_COLUMNS`] plus `group_key` so a caller holding a journal
 /// address — a claim checking the §4 fence on a new admission's minting
 /// parent, a host asking whether an emission is cancel-decided — can tell
-/// "group child" from "ungrouped" and "no row" apart. PostgreSQL's locked
-/// claim-fence variant reads the identical projection under `FOR UPDATE`.
+/// "group child" from "ungrouped" and "no row" apart.
 pub const ARBITRATION_COLUMNS: &str = "commit_state, commit_seq, group_key";
-
-/// [`ARBITRATION_COLUMNS`] plus `drain_input`.
-///
-/// PostgreSQL's locked claim-fence variant of the same read: the claim that
-/// must wait out an in-flight `decide_cancel` also answers the §4 boundary's
-/// read-back of the committed row's sealed drain input, so the locked
-/// projection carries it too.
-pub const ARBITRATION_DRAIN_COLUMNS: &str = "commit_state, commit_seq, group_key, drain_input";
 
 /// What a settled group member reports to a caller consuming ranks.
 ///
@@ -103,7 +94,7 @@ pub const ARBITRATION_DRAIN_COLUMNS: &str = "commit_state, commit_seq, group_key
 pub const SETTLEMENT_COLUMNS: &str = "settlement_seq, replay_key, status, outcome_json, error_json";
 
 crate::statements! {
-    /// `runtime_effect_replay` statements both backends issue verbatim.
+    /// `runtime_effect_replay` statements SQLite's effect journal issues.
     pub struct ReplayStatements @ "effect_replay" {
         /// Whether a replay row exists for `?1` (scope) / `?2` (replay key),
         /// without reading any of it.
@@ -126,10 +117,9 @@ crate::statements! {
         /// The recorded-frontier read (FIG-3586): a lashlang run reads its
         /// own key namespace once, so a redrive knows which ordinals the
         /// journal already holds before it lets any command leave live. The
-        /// range and the order are bytewise on both backends — SQLite's
-        /// default `BINARY` collation, and the `COLLATE "C"` PostgreSQL's
-        /// `replay_key` column carries — so a namespace's closing sentinel
-        /// sorts after every ordinal on either.
+        /// range and the order are bytewise under SQLite's default `BINARY`
+        /// collation, so a namespace's closing sentinel sorts after every
+        /// ordinal.
         select_keys_in_range = "SELECT replay_key FROM runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
              ORDER BY replay_key";
@@ -143,7 +133,7 @@ crate::statements! {
         /// Take an expired lease over: `?1` scope, `?2` replay key, `?3`
         /// owner, `?4` lease token, `?5` expiry, `?6` due-at, `?7` now.
         ///
-        /// Unfenced by design on both backends: the decision to take over was
+        /// Unfenced by design: the decision to take over was
         /// made from the row read under its write lock in the same
         /// transaction, and `decide_effect_claim` owns it.
         take_over_lease = "UPDATE runtime_effect_replay

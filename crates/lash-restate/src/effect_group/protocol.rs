@@ -83,7 +83,7 @@ pub(crate) fn protocol_retired_error(
         |v| format!("protocol version {v}"),
     );
     RuntimeEffectControllerError::new(
-        RuntimeErrorCode::RestateEffectGroupProtocolRetired,
+        RuntimeErrorCode::EngineEffectGroupProtocolRetired,
         format!(
             "effect group {group_key} index state carries {found}; this deployment speaks \
              effect-group protocol version {EFFECT_GROUP_INDEX_PROTOCOL_VERSION} and refuses it \
@@ -97,7 +97,7 @@ pub(crate) fn protocol_retired_error(
 pub(crate) fn protocol_refusal_in(message: &str) -> Option<RuntimeEffectControllerError> {
     serde_json::from_str::<RuntimeEffectControllerError>(message)
         .ok()
-        .filter(|error| error.code == RuntimeErrorCode::RestateEffectGroupProtocolRetired)
+        .filter(|error| error.code == RuntimeErrorCode::EngineEffectGroupProtocolRetired)
 }
 
 #[cfg(test)]
@@ -147,7 +147,7 @@ mod tests {
                 .expect("the refusal carries the typed protocol error");
             assert_eq!(
                 typed.code,
-                RuntimeErrorCode::RestateEffectGroupProtocolRetired
+                RuntimeErrorCode::EngineEffectGroupProtocolRetired
             );
             assert!(
                 typed.code.is_terminal(),

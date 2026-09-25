@@ -1370,7 +1370,6 @@ pub(super) async fn execute_with_host_environment(
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::new(
             lashlang::ExecutionBound::instructions(1_000_000),
-            lashlang::ExecutionBound::secs(30),
             lashlang::ExecutionBound::Unbounded,
         ),
     )
@@ -1400,7 +1399,6 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
             lashlang::ExecutionBounds::new(
                 lashlang::ExecutionBound::instructions(1),
                 lashlang::ExecutionBound::Unbounded,
-                lashlang::ExecutionBound::Unbounded,
             ),
         )
         .await;
@@ -1429,7 +1427,6 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::new(
                 lashlang::ExecutionBound::instructions(1),
-                lashlang::ExecutionBound::Unbounded,
                 lashlang::ExecutionBound::Unbounded,
             ),
         )

@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -40,7 +46,7 @@ lash_rust_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -50,7 +56,7 @@ lash_rust_library(
 rust_doc(
     name = "lash__doc",
     crate = ":lash",
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     testonly = True,
 )
 
@@ -83,7 +89,7 @@ lash_rust_unit_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -134,7 +140,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test"),
     extra_compile_data = [],
     library = ":lash",
     library_crate_name = "lash",
@@ -180,7 +186,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test"),
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-remote-protocol:rust_sources",
@@ -231,7 +237,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test"),
     extra_compile_data = [],
     library = ":lash",
     library_crate_name = "lash",
@@ -276,7 +282,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test"),
     extra_compile_data = [],
     library = ":lash",
     library_crate_name = "lash",
@@ -321,7 +327,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test"),
     extra_compile_data = [],
     library = ":lash",
     library_crate_name = "lash",
@@ -366,7 +372,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test"),
     extra_compile_data = [],
     library = ":lash",
     library_crate_name = "lash",
@@ -411,7 +417,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test"),
     extra_compile_data = [],
     library = ":lash",
     library_crate_name = "lash",
@@ -456,7 +462,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test"),
     extra_compile_data = [],
     library = ":lash",
     library_crate_name = "lash",
@@ -501,7 +507,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/ui/*",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test"),
     extra_compile_data = [],
     library = ":lash",
     library_crate_name = "lash",
@@ -544,7 +550,7 @@ lash_rust_integration_test(
         "tests/ui.rs",
         "tests/ui/*.rs",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test"),
     extra_compile_data = [],
     library = ":lash",
     library_crate_name = "lash",
@@ -665,9 +671,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 4,
+    budget = test_batch_budget("//crates/lash:test_batch"),
     jobs = 2,
-    memory_kb = 1048576,
     tests = [
         ":attachments_evidence__test",
         ":integration__test",
@@ -724,7 +729,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_01266018"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -766,7 +771,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_13e4de86"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -808,7 +813,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_15005b34"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -851,7 +856,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_3efe9f14"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -894,7 +899,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_4b9e51e5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -936,7 +941,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_6c8897c1"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -978,7 +983,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_6d3c1b7e"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1020,7 +1025,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_709f8da8"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1062,7 +1067,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_764a4c4d"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1105,7 +1110,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_84f76885"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1147,7 +1152,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_8738280f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1188,7 +1193,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_8d8059a5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1230,7 +1235,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_9a15893f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1272,7 +1277,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "attachments_evidence", "//crates/lash:attachments_evidence__test__fv_f1f3d888"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1315,7 +1320,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_01266018"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1363,7 +1368,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_13e4de86"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1411,7 +1416,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_15005b34"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1460,7 +1465,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_3efe9f14"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1509,7 +1514,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_4b9e51e5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1557,7 +1562,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_6c8897c1"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1605,7 +1610,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_6d3c1b7e"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1653,7 +1658,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_709f8da8"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1701,7 +1706,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_764a4c4d"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1750,7 +1755,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_84f76885"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1798,7 +1803,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_8738280f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1845,7 +1850,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_8d8059a5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1893,7 +1898,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_9a15893f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1941,7 +1946,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "integration", "//crates/lash:integration__test__fv_f1f3d888"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -1990,7 +1995,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2029,7 +2034,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2063,7 +2068,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2100,7 +2105,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2136,7 +2141,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2174,7 +2179,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2210,7 +2215,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2247,7 +2252,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2284,7 +2289,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2320,7 +2325,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2357,7 +2362,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2394,7 +2399,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2431,7 +2436,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2469,7 +2474,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2505,7 +2510,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2542,7 +2547,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2579,7 +2584,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2615,7 +2620,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2652,7 +2657,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2690,7 +2695,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2726,7 +2731,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2762,7 +2767,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2799,7 +2804,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2834,7 +2839,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2872,7 +2877,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2908,7 +2913,7 @@ lash_rust_feature_library(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash"),
     extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
@@ -2946,7 +2951,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_01266018"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -2992,7 +2997,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_13e4de86"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3038,7 +3043,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_15005b34"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3085,7 +3090,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_3efe9f14"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3132,7 +3137,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_4b9e51e5"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3178,7 +3183,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_6c8897c1"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3224,7 +3229,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_6d3c1b7e"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3270,7 +3275,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_709f8da8"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3316,7 +3321,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_764a4c4d"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3363,7 +3368,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_84f76885"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3409,7 +3414,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_8738280f"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3454,7 +3459,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_8d8059a5"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3500,7 +3505,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_9a15893f"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3546,7 +3551,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "6", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "lash", "//crates/lash:lash__unit_test__fv_f1f3d888"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -3592,7 +3597,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_01266018"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -3634,7 +3639,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_13e4de86"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -3676,7 +3681,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_15005b34"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -3719,7 +3724,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_3efe9f14"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -3762,7 +3767,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_4b9e51e5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -3804,7 +3809,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_6c8897c1"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -3846,7 +3851,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_6d3c1b7e"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -3888,7 +3893,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_709f8da8"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -3930,7 +3935,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_764a4c4d"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -3973,7 +3978,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_84f76885"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4015,7 +4020,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_8738280f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4056,7 +4061,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_8d8059a5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4098,7 +4103,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_9a15893f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4140,7 +4145,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "observation_admin_evidence", "//crates/lash:observation_admin_evidence__test__fv_f1f3d888"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4183,7 +4188,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_01266018"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4225,7 +4230,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_13e4de86"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4267,7 +4272,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_15005b34"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4310,7 +4315,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_3efe9f14"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4353,7 +4358,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_4b9e51e5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4395,7 +4400,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_6c8897c1"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4437,7 +4442,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_6d3c1b7e"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4479,7 +4484,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_709f8da8"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4521,7 +4526,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_764a4c4d"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4564,7 +4569,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_84f76885"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4606,7 +4611,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_8738280f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4647,7 +4652,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_8d8059a5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4689,7 +4694,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_9a15893f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4731,7 +4736,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "otel_trace_evidence", "//crates/lash:otel_trace_evidence__test__fv_f1f3d888"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4774,7 +4779,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_01266018"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4816,7 +4821,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_13e4de86"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4858,7 +4863,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_15005b34"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4901,7 +4906,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_3efe9f14"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4944,7 +4949,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_4b9e51e5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -4986,7 +4991,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_6c8897c1"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5028,7 +5033,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_6d3c1b7e"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5070,7 +5075,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_709f8da8"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5112,7 +5117,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_764a4c4d"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5155,7 +5160,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_84f76885"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5197,7 +5202,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_8738280f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5238,7 +5243,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_8d8059a5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5280,7 +5285,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_9a15893f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5322,7 +5327,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence", "//crates/lash:processes_evidence__test__fv_f1f3d888"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5365,7 +5370,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_01266018"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5407,7 +5412,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_13e4de86"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5449,7 +5454,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_15005b34"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5492,7 +5497,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_3efe9f14"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5535,7 +5540,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_4b9e51e5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5577,7 +5582,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_6c8897c1"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5619,7 +5624,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_6d3c1b7e"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5661,7 +5666,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_709f8da8"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5703,7 +5708,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_764a4c4d"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5746,7 +5751,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_84f76885"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5788,7 +5793,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_8738280f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5829,7 +5834,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_8d8059a5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5871,7 +5876,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_9a15893f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5913,7 +5918,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "processes_evidence_b", "//crates/lash:processes_evidence_b__test__fv_f1f3d888"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5956,7 +5961,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_01266018"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -5998,7 +6003,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_13e4de86"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6040,7 +6045,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_15005b34"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6083,7 +6088,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_3efe9f14"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6126,7 +6131,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_4b9e51e5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6168,7 +6173,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_6c8897c1"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6210,7 +6215,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_6d3c1b7e"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6252,7 +6257,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_709f8da8"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6294,7 +6299,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_764a4c4d"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6337,7 +6342,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_84f76885"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6379,7 +6384,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_8738280f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6420,7 +6425,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_8d8059a5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6462,7 +6467,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_9a15893f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6504,7 +6509,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "protocol_evidence", "//crates/lash:protocol_evidence__test__fv_f1f3d888"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6547,7 +6552,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_01266018"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6589,7 +6594,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_13e4de86"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6631,7 +6636,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_15005b34"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6674,7 +6679,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_3efe9f14"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6717,7 +6722,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_4b9e51e5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6759,7 +6764,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_6c8897c1"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6801,7 +6806,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_6d3c1b7e"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6843,7 +6848,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_709f8da8"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6885,7 +6890,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_764a4c4d"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6928,7 +6933,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_84f76885"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -6970,7 +6975,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_8738280f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7011,7 +7016,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_8d8059a5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7053,7 +7058,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_9a15893f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7095,7 +7100,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "sessions_evidence", "//crates/lash:sessions_evidence__test__fv_f1f3d888"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7138,7 +7143,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_01266018"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7180,7 +7185,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_13e4de86"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7222,7 +7227,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_15005b34"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7265,7 +7270,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_3efe9f14"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7308,7 +7313,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_4b9e51e5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7350,7 +7355,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_6c8897c1"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7392,7 +7397,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_6d3c1b7e"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7434,7 +7439,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_709f8da8"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7476,7 +7481,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_764a4c4d"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7519,7 +7524,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_84f76885"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7561,7 +7566,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_8738280f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7602,7 +7607,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_8d8059a5"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7644,7 +7649,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_9a15893f"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7686,7 +7691,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "triggers_evidence", "//crates/lash:triggers_evidence__test__fv_f1f3d888"),
     data_exclude = [
         "tests/ui/*",
     ],
@@ -7729,7 +7734,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_01266018"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_2f0df850",
     library_crate_name = "lash",
@@ -7768,7 +7773,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_13e4de86"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_8c7e9792",
     library_crate_name = "lash",
@@ -7807,7 +7812,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_15005b34"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_f8b6e40f",
     library_crate_name = "lash",
@@ -7847,7 +7852,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_3efe9f14"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_c6c7c7c9",
     library_crate_name = "lash",
@@ -7887,7 +7892,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_4b9e51e5"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_3444d48f",
     library_crate_name = "lash",
@@ -7926,7 +7931,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_6c8897c1"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_5e9510eb",
     library_crate_name = "lash",
@@ -7965,7 +7970,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_6d3c1b7e"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_2b3c9542",
     library_crate_name = "lash",
@@ -8004,7 +8009,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_709f8da8"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_4b2aa215",
     library_crate_name = "lash",
@@ -8043,7 +8048,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_764a4c4d"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_08800a94",
     library_crate_name = "lash",
@@ -8083,7 +8088,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_84f76885"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_452eb8d1",
     library_crate_name = "lash",
@@ -8122,7 +8127,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_8738280f"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_829caa3e",
     library_crate_name = "lash",
@@ -8160,7 +8165,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_8d8059a5"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_09246f0a",
     library_crate_name = "lash",
@@ -8199,7 +8204,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_9a15893f"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_436e23b6",
     library_crate_name = "lash",
@@ -8238,7 +8243,7 @@ lash_rust_feature_test(
         "testing",
         "typescript",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-runtime", "ui", "//crates/lash:ui__test__fv_f1f3d888"),
     extra_compile_data = [],
     library = "//crates/lash:lash__fv_658fa524",
     library_crate_name = "lash",

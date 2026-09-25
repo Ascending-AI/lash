@@ -51,11 +51,36 @@ pub(super) struct NodeOracle {
 }
 
 impl NodeOracle {
-    /// Starts the oracle under `LASH_NODE`, or the `node` on `PATH`. The
+    /// The pinned Node binary: `LASH_NODE` when set, else the mise install
+    /// `~/.local/share/mise/installs/node/<pinned>/bin/node` when present
+    /// (FIG-3812: `kiln run`'s Bazel environment has no `node` on `PATH`),
+    /// else `node` from `PATH`, which is how CI jobs provision it
+    /// (`actions/setup-node`). The oracle refuses any Node other than the
+    /// pinned one, so a wrong `PATH` node fails loudly rather than drifting.
+    #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the live Node oracle is a test host capability.
+    fn node_program() -> PathBuf {
+        if let Some(node) = std::env::var_os("LASH_NODE") {
+            return PathBuf::from(node);
+        }
+        let suffix = format!(
+            ".local/share/mise/installs/node/{}/bin/node",
+            super::PINNED_NODE.trim_start_matches('v')
+        );
+        let mise = std::env::var_os("HOME").map_or_else(
+            || PathBuf::from("~").join(&suffix),
+            |home| PathBuf::from(home).join(&suffix),
+        );
+        if mise.is_file() {
+            return mise;
+        }
+        PathBuf::from("node")
+    }
+
+    /// Starts the oracle under [`Self::node_program`]'s resolution. The
     /// service itself refuses any Node other than the pinned one.
     #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the live Node oracle is a test host capability.
     pub(super) fn start() -> Self {
-        let node = std::env::var_os("LASH_NODE").unwrap_or_else(|| "node".into());
+        let node = Self::node_program();
         let script = sessions_directory().join("oracle.mjs");
         let mut child = Command::new(&node)
             .arg(&script)
@@ -65,9 +90,11 @@ impl NodeOracle {
             .spawn()
             .unwrap_or_else(|error| {
                 panic!(
-                    "start the Node session oracle ({} {}): {error}",
-                    node.to_string_lossy(),
-                    script.display()
+                    "start the Node session oracle ({} {}): {error}; it needs Node {}: set \
+                     LASH_NODE, install it with mise, or put it on PATH",
+                    node.display(),
+                    script.display(),
+                    super::PINNED_NODE
                 )
             });
         let stdin = child.stdin.take().expect("the oracle's stdin is piped");
@@ -92,7 +119,7 @@ impl NodeOracle {
             .expect("read the Node oracle's answer");
         assert!(
             read > 0,
-            "the Node oracle exited without answering (is Node {} on PATH or in LASH_NODE?)",
+            "the Node oracle exited without answering (it needs Node {} from LASH_NODE, mise or PATH — see node_program)",
             super::PINNED_NODE
         );
         serde_json::from_str(&answer).expect("the Node oracle answers in the observation shape")

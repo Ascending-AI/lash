@@ -21,7 +21,7 @@ fn restate_turn_cancel_wait_request(
     };
     let Some(scope) = turn_cancel_scope else {
         return Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateTurnCancelScopeMissing,
+            RuntimeErrorCode::EngineTurnCancelScopeMissing,
             "turn effects that observe cancellation require a durable turn-cancel scope",
         ));
     };
@@ -30,7 +30,7 @@ fn restate_turn_cancel_wait_request(
     }
     let scope @ ExecutionScope::Turn { .. } = scope else {
         return Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateTurnCancelScopeMismatch,
+            RuntimeErrorCode::EngineTurnCancelScopeMismatch,
             "turn-cancel scope must be a matching turn scope or an explicit process scope",
         ));
     };
@@ -41,7 +41,7 @@ fn restate_turn_cancel_wait_request(
         || scope.turn_id() != Some(turn_id)
     {
         return Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateTurnCancelScopeMismatch,
+            RuntimeErrorCode::EngineTurnCancelScopeMismatch,
             "turn-cancel scope must match the runtime effect invocation",
         ));
     }

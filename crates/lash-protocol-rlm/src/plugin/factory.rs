@@ -459,13 +459,12 @@ impl SessionPlugin for RlmProtocolPlugin {
 #[cfg(test)]
 mod label_annotation_tests {
     use super::{rlm_lashlang_surface, rlm_protocol_config};
-    use crate::plugin::{InstructionBound, MemoryBound, RlmProtocolPluginConfig, WallClockBound};
+    use crate::plugin::{InstructionBound, MemoryBound, RlmProtocolPluginConfig};
 
     fn base_config() -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
             .instruction_limit(InstructionBound::instructions(1_000_000))
-            .wall_clock(WallClockBound::secs(30))
             .memory_limit(MemoryBound::mebibytes(64))
             .build()
     }
@@ -531,7 +530,6 @@ mod label_annotation_tests {
                 crate::RlmProtocolPluginConfig::builder()
                     .channel(crate::RlmChannel::Cell)
                     .instruction_limit(crate::InstructionBound::instructions(1_000_000))
-                    .wall_clock(crate::WallClockBound::secs(30))
                     .memory_limit(crate::MemoryBound::mebibytes(64))
                     .build(),
                 &crate::testing::memory_backend().await,
@@ -570,7 +568,6 @@ mod label_annotation_tests {
         let config: RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
             "channel": "cell",
             "instruction_limit": { "bounded": 1_000_000 },
-            "wall_clock": { "bounded": 30_000 },
             "memory_limit": { "bounded": 67_108_864 }
         }))
         .expect("rlm config");
@@ -579,7 +576,6 @@ mod label_annotation_tests {
         let config: RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
             "channel": "cell",
             "instruction_limit": { "bounded": 1_000_000 },
-            "wall_clock": { "bounded": 30_000 },
             "memory_limit": { "bounded": 67_108_864 },
             "lashlang_language_features": { "label_annotations": false }
         }))

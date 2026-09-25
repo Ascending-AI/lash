@@ -55,7 +55,6 @@ impl ExecutionHost for BudgetHost {
     fn execution_bounds(&self) -> ExecutionBounds {
         ExecutionBounds::new(
             ExecutionBound::instructions(BUDGET),
-            ExecutionBound::Unbounded,
             ExecutionBounds::memory_bounded_default().memory_limit,
         )
     }

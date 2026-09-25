@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -18,7 +24,7 @@ lash_rust_library(
     crate_features = [],
     crate_name = "lash_restate_postgres_workers_e2e",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_restate_postgres_workers_e2e"),
     extra_compile_data = [],
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
@@ -28,7 +34,7 @@ lash_rust_library(
 rust_doc(
     name = "restate-postgres-workers__doc",
     crate = ":restate-postgres-workers",
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_restate_postgres_workers_e2e"),
     testonly = True,
 )
 
@@ -39,7 +45,7 @@ lash_rust_unit_test(
     crate_name = "lash_restate_postgres_workers_e2e",
     crate_root = "src/lib.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_restate_postgres_workers_e2e", "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test"),
     extra_compile_data = [],
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
@@ -53,7 +59,7 @@ lash_rust_binary(
     crate_name = "lash_e2e_await_event_helper",
     crate_root = "src/bin/await_event_helper.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_await_event_helper"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":restate-postgres-workers",
@@ -71,7 +77,7 @@ lash_rust_binary(
     crate_name = "lash_e2e_context_overflow_recovery",
     crate_root = "src/bin/context_overflow_recovery.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_context_overflow_recovery"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":restate-postgres-workers",
@@ -89,7 +95,7 @@ lash_rust_binary(
     crate_name = "lash_e2e_mock_provider",
     crate_root = "src/bin/mock_provider.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_mock_provider"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":restate-postgres-workers",
@@ -107,7 +113,7 @@ lash_rust_unit_test(
     crate_name = "lash_e2e_mock_provider",
     crate_root = "src/bin/mock_provider.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_mock_provider", "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test"),
     library = ":restate-postgres-workers",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
@@ -122,7 +128,7 @@ lash_rust_binary(
     crate_name = "lash_e2e_process_operations_worker",
     crate_root = "src/bin/process_operations_worker.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_process_operations_worker"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":restate-postgres-workers",
@@ -140,7 +146,7 @@ lash_rust_binary(
     crate_name = "lash_e2e_runner",
     crate_root = "src/bin/runner.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_runner"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":restate-postgres-workers",
@@ -158,7 +164,7 @@ lash_rust_unit_test(
     crate_name = "lash_e2e_runner",
     crate_root = "src/bin/runner.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_runner", "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test"),
     library = ":restate-postgres-workers",
     library_crate_name = "lash_restate_postgres_workers_e2e",
     manifest_dir = "runbooks/restate-postgres-workers",
@@ -173,7 +179,7 @@ lash_rust_binary(
     crate_name = "lash_e2e_session_lease_triage",
     crate_root = "src/bin/session_lease_triage.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_session_lease_triage"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":restate-postgres-workers",
@@ -191,7 +197,7 @@ lash_rust_binary(
     crate_name = "lash_e2e_version_bump",
     crate_root = "src/bin/version_bump.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_version_bump"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":restate-postgres-workers",
@@ -209,7 +215,7 @@ lash_rust_binary(
     crate_name = "lash_e2e_worker",
     crate_root = "src/bin/worker.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    exec_properties = sized_exec_properties("lash-restate-postgres-workers-e2e", "lash_e2e_worker"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":restate-postgres-workers",
@@ -225,9 +231,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 1,
+    budget = test_batch_budget("//runbooks/restate-postgres-workers:test_batch"),
     jobs = 2,
-    memory_kb = 1048576,
     tests = [
         ":lash-e2e-mock-provider__bin__unit_test",
         ":lash-e2e-runner__bin__unit_test",

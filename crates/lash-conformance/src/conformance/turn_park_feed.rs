@@ -295,7 +295,7 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
     assert_eq!(reparked.reason, drift("again"));
 
     let page = factory
-        .turn_park_feed(crate::store::TurnParkFeedCursor::initial(), limit(10))
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(10))
         .await
         .expect("read the feed");
     assert_eq!(
@@ -305,7 +305,7 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
     );
     assert!(matches!(
         page.events[0].kind,
-        crate::store::TurnParkEventKind::Parked { .. }
+        crate::store::ParkEventKind::Parked { .. }
     ));
     assert_eq!(page.events[0].park_id, first.park_id);
 
@@ -334,7 +334,7 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
     );
 
     let page = factory
-        .turn_park_feed(crate::store::TurnParkFeedCursor::initial(), limit(10))
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(10))
         .await
         .expect("read the feed after supersession");
     assert_eq!(
@@ -344,12 +344,12 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
     );
     assert_eq!(
         page.events[1].kind,
-        crate::store::TurnParkEventKind::Unparked {
+        crate::store::ParkEventKind::Unparked {
             cause: crate::store::UnparkCause::Superseded,
         },
         "the superseded park closes as superseded"
     );
-    assert_eq!(page.events[1].turn_id, TurnId::from("turn-a"));
+    assert_eq!(page.events[1].target.turn_id, TurnId::from("turn-a"));
     assert_eq!(
         page.events[1].park_id, first.park_id,
         "the close event names the park it closed"
@@ -357,13 +357,13 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
     assert!(
         matches!(
             &page.events[2].kind,
-            crate::store::TurnParkEventKind::Parked { reason } if reason.code()
+            crate::store::ParkEventKind::Parked { reason } if reason.code()
                 == crate::store::ParkReasonCode::KeyFormatCutover
         ),
         "the new park opens with its reason: {:?}",
         page.events[2]
     );
-    assert_eq!(page.events[2].turn_id, TurnId::from("turn-b"));
+    assert_eq!(page.events[2].target.turn_id, TurnId::from("turn-b"));
     assert_eq!(page.events[2].park_id, second.park_id);
     assert_eq!(
         page.events[2].seq,
@@ -408,14 +408,14 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         .await
         .expect("park turn-2");
     let feed_before = factory
-        .turn_park_feed(crate::store::TurnParkFeedCursor::initial(), limit(100))
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(100))
         .await
         .expect("read the feed before the other commit");
     commit_turn(&other_store, &other_session, "turn-other", 0, "other-owner")
         .await
         .expect("another turn's commit lands");
     let feed_after = factory
-        .turn_park_feed(crate::store::TurnParkFeedCursor::initial(), limit(100))
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(100))
         .await
         .expect("read the feed after the other commit");
     assert_eq!(
@@ -615,13 +615,13 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         .expect("delete the parked session");
 
     let page = factory
-        .turn_park_feed(crate::store::TurnParkFeedCursor::initial(), limit(100))
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(100))
         .await
         .expect("read the whole feed");
-    let kinds: Vec<&crate::store::TurnParkEventKind> =
+    let kinds: Vec<&crate::store::ParkEventKind> =
         page.events.iter().map(|event| &event.kind).collect();
     use crate::store::ParkCancelCause as Cancel;
-    use crate::store::TurnParkEventKind as Kind;
+    use crate::store::ParkEventKind as Kind;
     use crate::store::UnparkCause as Unpark;
     let expected = [
         Kind::Parked {
@@ -673,7 +673,10 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     );
     let named = |index: usize| {
         let event = &page.events[index];
-        (event.session_id.clone(), event.turn_id.clone())
+        (
+            event.target.session_id.clone(),
+            event.target.turn_id.clone(),
+        )
     };
     assert_eq!(named(0), (commit_session.clone(), TurnId::from("turn-1")));
     assert_eq!(named(1), (commit_session.clone(), TurnId::from("turn-1")));
@@ -683,7 +686,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     assert_eq!(named(10), (delete_session.clone(), TurnId::from("turn-5")));
 
     // A resume from a mid-feed cursor returns exactly the suffix.
-    let mid = crate::store::TurnParkFeedCursor::from_store_sequence(page.events[4].seq);
+    let mid = crate::store::ParkFeedCursor::from_store_sequence(page.events[4].seq);
     let suffix = factory
         .turn_park_feed(mid, limit(100))
         .await
@@ -695,7 +698,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     );
     assert_eq!(
         suffix.next,
-        crate::store::TurnParkFeedCursor::from_store_sequence(
+        crate::store::ParkFeedCursor::from_store_sequence(
             page.events.last().expect("the feed is not empty").seq
         ),
         "the resumed page advances the cursor to the last event"
@@ -721,7 +724,7 @@ pub async fn a_rolled_back_commit_leaves_park_and_feed_unchanged(
         .await
         .expect("an unrelated turn advances the head");
     let feed_before = factory
-        .turn_park_feed(crate::store::TurnParkFeedCursor::initial(), limit(100))
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(100))
         .await
         .expect("read the feed before the conflicted commit");
 
@@ -739,7 +742,7 @@ pub async fn a_rolled_back_commit_leaves_park_and_feed_unchanged(
         "the rolled-back commit leaves the park row untouched"
     );
     let feed_after = factory
-        .turn_park_feed(crate::store::TurnParkFeedCursor::initial(), limit(100))
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(100))
         .await
         .expect("read the feed after the rollback");
     assert_eq!(
@@ -765,27 +768,27 @@ pub async fn a_compacted_feed_cursor_is_refused_typed(
         .expect("park turn-7");
     let parked_seq = parked.park_id.feed_sequence();
     factory
-        .compact_turn_park_feed(crate::store::TurnParkFeedCursor::from_store_sequence(
+        .compact_turn_park_feed(crate::store::ParkFeedCursor::from_store_sequence(
             parked_seq,
         ))
         .await
         .expect("compact the feed through the first event");
 
     let compacted = factory
-        .turn_park_feed(crate::store::TurnParkFeedCursor::initial(), limit(10))
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(10))
         .await;
     let Err(crate::StoreError::ParkFeedCursorCompacted { horizon }) = compacted else {
         panic!("a cursor below the horizon is refused typed: {compacted:?}");
     };
     assert_eq!(
         horizon,
-        crate::store::TurnParkFeedCursor::from_store_sequence(parked_seq),
+        crate::store::ParkFeedCursor::from_store_sequence(parked_seq),
         "the error carries the compaction horizon"
     );
 
     let live = factory
         .turn_park_feed(
-            crate::store::TurnParkFeedCursor::from_store_sequence(parked_seq),
+            crate::store::ParkFeedCursor::from_store_sequence(parked_seq),
             limit(10),
         )
         .await
@@ -805,7 +808,7 @@ pub async fn a_compacted_feed_cursor_is_refused_typed(
         .expect("park another session's turn");
     let tail = factory
         .turn_park_feed(
-            crate::store::TurnParkFeedCursor::from_store_sequence(parked_seq),
+            crate::store::ParkFeedCursor::from_store_sequence(parked_seq),
             limit(10),
         )
         .await
@@ -818,8 +821,8 @@ pub async fn a_compacted_feed_cursor_is_refused_typed(
     assert!(
         matches!(
             tail.events[0].kind,
-            crate::store::TurnParkEventKind::Parked { .. }
-        ) && tail.events[0].session_id == other_session,
+            crate::store::ParkEventKind::Parked { .. }
+        ) && tail.events[0].target.session_id == other_session,
         "the surviving event is the later park: {:?}",
         tail.events[0]
     );
@@ -834,23 +837,21 @@ pub async fn a_compacted_feed_cursor_is_refused_typed(
         .expect("the feed has the second park's event")
         .seq;
     factory
-        .compact_turn_park_feed(crate::store::TurnParkFeedCursor::from_store_sequence(
-            head + 10,
-        ))
+        .compact_turn_park_feed(crate::store::ParkFeedCursor::from_store_sequence(head + 10))
         .await
         .expect("compact through a cursor past the clock");
     // The clamped horizon is recoverable from the typed refusal.
     let Err(crate::StoreError::ParkFeedCursorCompacted {
         horizon: clamped_horizon,
     }) = factory
-        .turn_park_feed(crate::store::TurnParkFeedCursor::initial(), limit(10))
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(10))
         .await
     else {
         panic!("a cursor below the clamped horizon is refused typed");
     };
     assert_eq!(
         clamped_horizon,
-        crate::store::TurnParkFeedCursor::from_store_sequence(head),
+        crate::store::ParkFeedCursor::from_store_sequence(head),
         "compaction clamps the horizon to the allocated sequence"
     );
     let third_session = SessionId::from("park-feed-compacted-third");
@@ -876,8 +877,8 @@ pub async fn a_compacted_feed_cursor_is_refused_typed(
     assert!(
         matches!(
             after_clamp.events[0].kind,
-            crate::store::TurnParkEventKind::Parked { .. }
-        ) && after_clamp.events[0].session_id == third_session,
+            crate::store::ParkEventKind::Parked { .. }
+        ) && after_clamp.events[0].target.session_id == third_session,
         "the reachable event is the newest park: {:?}",
         after_clamp.events[0]
     );

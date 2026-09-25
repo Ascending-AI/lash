@@ -397,7 +397,6 @@ fn process_test_builder(backend: Arc<dyn lash_core::Backend>) -> crate::core::La
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
         backend.as_ref(),
@@ -1434,10 +1433,7 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
 
     let first_wait = wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
     let lash_core::WaitKind::Signal { ordinal, .. } =
-        first_wait.wait.expect("first wait facet").kind
-    else {
-        panic!("the first wait is a signal wait");
-    };
+        first_wait.wait.expect("first wait facet").kind;
     assert_eq!(ordinal, 1, "first wait must use ordinal 1");
     core.processes()
         .signal(
@@ -1468,10 +1464,7 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     .await;
     let lash_core::WaitKind::Signal {
         key: second_key, ..
-    } = second_wait.wait.expect("second wait facet").kind
-    else {
-        panic!("the second wait is a signal wait");
-    };
+    } = second_wait.wait.expect("second wait facet").kind;
     assert!(
         second_key.ends_with(":2"),
         "second wait key must carry ordinal 2: {second_key}"
@@ -1957,7 +1950,6 @@ async fn durable_admission_core(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
         &backend,

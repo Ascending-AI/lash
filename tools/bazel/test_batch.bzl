@@ -91,23 +91,23 @@ _lash_batch_test = rule(
     test = True,
 )
 
-def lash_batch_test(name, tests, jobs, cpu_count, memory_kb, **kwargs):
+def lash_batch_test(name, tests, jobs, budget, **kwargs):
     """A package's plain test binaries, run `jobs` at a time.
 
     Args:
       name: the batch label.
       tests: the member `rust_test` targets.
       jobs: members the runner starts at once.
-      cpu_count: the test-run CPU reservation, the sum of the `jobs` largest
-        member requests.
-      memory_kb: the test-run memory reservation, likewise.
+      budget: the test-run reservation from generated
+        `//tools/bazel:exec_sizes.bzl`'s `test_batch_budget(<label>)` -- the
+        sum of the `jobs` largest member requests as `cpu_count`/`memory_kb`.
       **kwargs: forwarded to the rule.
     """
     _lash_batch_test(
         name = name,
         exec_properties = {
-            "test.cpu_count": str(cpu_count),
-            "test.memory_kb": str(memory_kb),
+            "test.cpu_count": str(budget["cpu_count"]),
+            "test.memory_kb": str(budget["memory_kb"]),
         },
         jobs = jobs,
         tests = tests,

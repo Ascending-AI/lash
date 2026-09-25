@@ -172,8 +172,9 @@ agent-workbench-restate-e2e:
 # `--ignored` tests only, which `scripts/check_service_gate_pinning.py` pins)
 # beside pinned `restate-server`s, one law per process, and then runs the same
 # laws again with every await suspended and replayed (the replay leg). The
-# suite's filters, redelivery laws and replay divergences are registered in
-# `scripts/restate-suites.toml`.
+# suite's filters and redelivery laws are registered in
+# `scripts/restate-suites.toml`, its replay divergences in
+# `scripts/restate-divergences/`.
 effect-group-conformance-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -249,8 +250,6 @@ gate-stale-trace-regression:
 
 session-lease-triage-e2e:
   bash "{{repo}}/scripts/session-lease-triage-e2e.sh"
-
-
 
 context-overflow-recovery-e2e:
   bash "{{repo}}/scripts/context-overflow-recovery-e2e.sh"
@@ -336,6 +335,7 @@ floor:
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
     'python3 scripts/check_format_registry.py' \
+    'python3 scripts/check_upgrade_paths.py' \
     'python3 scripts/check_checkpoint_component_flatten.py' \
     | scripts/gate-table.sh
 
@@ -351,6 +351,7 @@ bump-check:
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
     'python3 scripts/check_format_registry.py' \
+    'python3 scripts/check_upgrade_paths.py' \
     'python3 scripts/check-store-sql-ownership.py' \
     'kiln test //crates/lash-sim:schema_congruence__test //crates/lash-core-store:lash-core-store__unit_test' \
     | scripts/gate-table.sh

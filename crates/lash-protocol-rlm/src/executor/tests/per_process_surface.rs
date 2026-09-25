@@ -113,7 +113,6 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         crate::RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
             .instruction_limit(crate::InstructionBound::instructions(1_000_000))
-            .wall_clock(crate::WallClockBound::secs(30))
             .memory_limit(crate::MemoryBound::mebibytes(64))
             .build(),
         &backend,

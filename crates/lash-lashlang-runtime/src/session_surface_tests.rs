@@ -753,9 +753,10 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         let _ = worker_b.drive_pending_processes().await;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    // A sweep's re-run lifts the park and records it again when it refuses,
-    // and the last sweep's re-run may still be in flight once driving stops:
-    // read the record once that re-run has settled back into its park.
+    // The park stays on the record across every sweep's re-run (FIG-3659
+    // NOW-B): a re-run only stops it refusing until it refuses again. The
+    // last sweep's re-run may still be in flight once driving stops: read the
+    // record once that re-run has refused again.
     let settle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let record = loop {
         let record = registry
@@ -763,11 +764,10 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
             .await
             .expect("read the refused process")
             .expect("the process is still registered");
-        let parked = record
-            .wait
-            .as_ref()
-            .is_some_and(lash_core::WaitState::is_parked);
-        if parked || record.is_terminal() || std::time::Instant::now() >= settle_deadline {
+        if record.is_refusing_park()
+            || record.is_terminal()
+            || std::time::Instant::now() >= settle_deadline
+        {
             break record;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -776,12 +776,34 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         !record.is_terminal(),
         "a refused body is parked, never settled: {record:?}"
     );
+    let park = record
+        .park
+        .as_deref()
+        .expect("the refusal is recorded as the process's park");
+    assert!(park.refusing, "the settled re-run refused again: {park:?}");
     assert!(
-        record
-            .wait
-            .as_ref()
-            .is_some_and(lash_core::WaitState::is_parked),
-        "the refusal is recorded as the process's park: {record:?}"
+        park.attempts >= 2,
+        "every refused sweep re-parks the same park and counts it: {park:?}"
+    );
+    // One park, however many sweeps refused: the feed opened it once and
+    // never closed it, so there is no clear-then-rewrite flicker.
+    let feed = registry
+        .process_park_feed(
+            lash_core::store::ParkFeedCursor::initial(),
+            std::num::NonZeroUsize::new(64).expect("non-zero"),
+        )
+        .await
+        .expect("read the process park feed");
+    let transitions = feed
+        .events
+        .iter()
+        .filter(|event| event.target == process_id)
+        .map(|event| (event.park_id, event.kind.kind_code()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        transitions,
+        vec![(park.park_id, "parked")],
+        "a re-parked process writes exactly one `Parked` event"
     );
     let attempt = record
         .first_started

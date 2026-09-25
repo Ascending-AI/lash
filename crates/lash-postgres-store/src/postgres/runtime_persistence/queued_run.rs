@@ -305,7 +305,7 @@ impl PostgresSessionStore {
                 &fence.session_id,
                 &released_turn_id,
                 released_park_id,
-                &lash_core_execution::store::TurnParkEventKind::Unparked {
+                &lash_core_execution::store::ParkEventKind::Unparked {
                     cause: lash_core_execution::store::UnparkCause::RunSettled,
                 },
                 at_ms,

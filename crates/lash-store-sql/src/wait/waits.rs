@@ -63,7 +63,7 @@ impl WaitRow {
 }
 
 crate::statements! {
-    /// `await_event_waits` statements both backends issue verbatim.
+    /// `await_event_waits` statements SQLite's await-event journal issues.
     pub struct WaitStatements @ "await_event_wait" {
         /// The row stored under key `?1`.
         select_by_key = "SELECT scope_json, wait_json, session_id, turn_control, terminal_json

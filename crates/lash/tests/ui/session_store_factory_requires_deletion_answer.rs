@@ -13,7 +13,7 @@ use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
     AttachmentRootSet, RuntimePersistence, SessionStoreCreateRequest, SessionStoreFactory,
-    StoreError, TurnPark, TurnParkFeedCursor, TurnParkFeedPage, TurnParkQuery, UnsettledTurnCounts,
+    StoreError, TurnPark, ParkFeedCursor, ParkFeedPage, TurnParkQuery, TurnParkTarget, UnsettledTurnCounts,
 };
 
 struct SilentFactory {
@@ -72,15 +72,15 @@ impl SessionStoreFactory for SilentFactory {
 
     async fn turn_park_feed(
         &self,
-        after: TurnParkFeedCursor,
+        after: ParkFeedCursor,
         limit: std::num::NonZeroUsize,
-    ) -> Result<TurnParkFeedPage, StoreError> {
+    ) -> Result<ParkFeedPage<TurnParkTarget>, StoreError> {
         self.inner.turn_park_feed(after, limit).await
     }
 
     async fn compact_turn_park_feed(
         &self,
-        through: TurnParkFeedCursor,
+        through: ParkFeedCursor,
     ) -> Result<(), StoreError> {
         self.inner.compact_turn_park_feed(through).await
     }

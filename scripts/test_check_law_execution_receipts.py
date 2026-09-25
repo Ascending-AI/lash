@@ -322,6 +322,64 @@ mod sqlite {
         self.assertEqual(twice, {"laws": Counter(PLAIN_SUITE_ROWS)})
 
 
+class AutodiscoveryTests(unittest.TestCase):
+    """``autotests``/``autobins`` decide which files are compilation roots.
+
+    With ``autotests = false`` a ``tests/*.rs`` file is a module of whatever
+    declared ``[[test]]`` binary includes it, so its invocations claim under
+    that binary's module prefix (``integration::laws``), never under the
+    file's own stem -- the claimant shape the pg-store cargo-mode census
+    missed (FIG-3813).
+    """
+
+    def fixture(self, tmp: str) -> Path:
+        crate = Path(tmp) / "fakepkg"
+        (crate / "tests").mkdir(parents=True)
+        (crate / "Cargo.toml").write_text(
+            '[package]\nname = "fakepkg"\nautobins = false\nautotests = false\n'
+            '[[test]]\nname = "integration"\npath = "tests/main.rs"\n',
+            encoding="utf-8",
+        )
+        (crate / "tests" / "main.rs").write_text(
+            '#[path = "laws.rs"]\nmod laws;\n', encoding="utf-8"
+        )
+        (crate / "tests" / "laws.rs").write_text(
+            "plain_suite_tests!({ fixture });\n", encoding="utf-8"
+        )
+        return crate
+
+    def test_module_files_claim_under_the_declared_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            crate = self.fixture(tmp)
+            invocations = MODULE.invocations_in_crate(crate)
+        self.assertEqual(
+            [(inv.suite, inv.claimant) for inv in invocations],
+            [("plain_suite_tests", "integration::laws")],
+        )
+
+    def test_the_prefixed_claimants_receipts_satisfy_the_census(self) -> None:
+        macros = MODULE.macro_blocks(MACROS)
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = MODULE.expected_from_invocations(
+                MODULE.invocations_in_crate(self.fixture(tmp)), macros
+            )
+        observed = full_receipts("integration::laws")
+        self.assertEqual(MODULE.census_compare(expected, observed, ""), [])
+
+    def test_autobins_false_drops_src_main_rs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            crate = self.fixture(tmp)
+            (crate / "src").mkdir()
+            (crate / "src" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+            roots = dict(MODULE.crate_roots(crate))
+        self.assertEqual(roots, {"integration": crate / "tests" / "main.rs"})
+
+    def test_a_stem_label_stays_unresolvable_under_autotests_false(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            crate = self.fixture(tmp)
+            self.assertEqual(MODULE.cargo_test_paths(crate), {"integration": crate / "tests" / "main.rs"})
+
+
 class BazelLabelResolutionTests(unittest.TestCase):
     def test_unit_test_label_excludes_tests_main_integration_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -440,7 +498,7 @@ macro_rules! suite_b_tests {
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         self._old_root = MODULE.ROOT
-        self._old_manifest = MODULE.DEFERRED_MANIFEST
+        self._old_dir = MODULE.DEFERRED_DIR
         MODULE.ROOT = self.root
         crate = self.root / "crates" / "fakepkg"
         (crate / "src").mkdir(parents=True)
@@ -452,8 +510,9 @@ macro_rules! suite_b_tests {
             'suite_b_tests!(#[ignore = "deferred"] { f });\n',
             encoding="utf-8",
         )
-        MODULE.DEFERRED_MANIFEST = self.root / "deferred.toml"
-        MODULE.DEFERRED_MANIFEST.write_text(
+        MODULE.DEFERRED_DIR = self.root / "deferred-laws"
+        MODULE.DEFERRED_DIR.mkdir()
+        (MODULE.DEFERRED_DIR / "deferred-e2e.toml").write_text(
             """\
 [[deferred]]
 file = "crates/fakepkg/src/lib.rs"
@@ -472,7 +531,7 @@ recipe = "deferred-e2e"
 
     def tearDown(self) -> None:
         MODULE.ROOT = self._old_root
-        MODULE.DEFERRED_MANIFEST = self._old_manifest
+        MODULE.DEFERRED_DIR = self._old_dir
         self._tmp.cleanup()
 
     def deferred_expected(self) -> dict[str, Counter]:
@@ -523,9 +582,9 @@ class ParkedEntryTests(unittest.TestCase):
             skips,
             [
                 "--skip",
-                "tests::turn_crash_on_the_double::turn_crash_after_commit_redrive_replays_the_committed_receipt",
-                "--skip",
                 "tests::turn_crash_on_the_double::turn_cancel_closure_recovers_from_a_crash_at_every_cut",
+                "--skip",
+                "tests::turn_crash_on_the_double::turn_crash_after_commit_redrive_replays_the_committed_receipt",
             ],
         )
         self.assertEqual(MODULE.parked_skips("no_such_crate", MODULE.load_macros()), [])
@@ -641,7 +700,20 @@ class RealTreeTests(unittest.TestCase):
         errors: list[str] = []
         manifest_set = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
-        self.assertEqual(len(manifest_set), 15)
+        # The manifest's cardinality is derived, not pinned: it is exactly the
+        # ignored `*_tests!` invocations the workspace's crates declare, so
+        # parking or unparking a law touches no test.
+        ignored = {
+            (
+                invocation.file.relative_to(MODULE.ROOT).as_posix(),
+                invocation.claimant,
+                invocation.suite,
+            )
+            for crate in MODULE.workspace_package_dirs()
+            for invocation in MODULE.invocations_in_crate(crate)
+            if invocation.ignored
+        }
+        self.assertEqual(set(manifest_set), ignored)
         self.assertIn(
             (
                 "crates/lash-restate/src/tests/conformance_and_poison.rs",
@@ -652,10 +724,10 @@ class RealTreeTests(unittest.TestCase):
         )
 
     def test_the_real_deferred_recipe_owes_every_manifest_suite(self) -> None:
-        """A receipts file covering all eleven manifest suites passes, and
-        dropping one suite's rows fails naming that suite's laws -- the
-        entries share one file and claimant, so this pins the deferred
-        claim resolving each entry to its own real invocation."""
+        """A receipts file covering every suite the recipe's manifest rows
+        name passes, and dropping one suite's rows fails naming that suite's
+        laws -- the entries share one file and claimant, so this pins the
+        deferred claim resolving each entry to its own real invocation."""
         macros = MODULE.load_macros()
         errors: list[str] = []
         index = MODULE.manifest_check(errors)
@@ -664,7 +736,12 @@ class RealTreeTests(unittest.TestCase):
             "effect-group-conformance-e2e", index
         )
         self.assertIsNone(error)
-        self.assertEqual(len(invocations), 11)
+        rows = [
+            entry
+            for entry in MODULE.deferred_manifest()
+            if entry.get("recipe") == "effect-group-conformance-e2e"
+        ]
+        self.assertEqual(len(invocations), len(rows))
         expected = MODULE.expected_from_invocations(invocations, macros)
         observed: dict[str, Counter] = {
             claimant: Counter(pairs) for claimant, pairs in expected.items()
@@ -686,6 +763,25 @@ class RealTreeTests(unittest.TestCase):
             f"dropping {dropped_suite} rows must fail naming its laws: "
             f"{census_errors}",
         )
+
+    def test_autotests_off_modules_claim_under_the_declared_binary(self) -> None:
+        """FIG-3813: ``autotests = false`` keeps ``tests/*.rs`` modules out of
+        the claimant set -- the pg-store ``integration`` binary's module files
+        owe ``integration::<mod>`` receipts, so their own stems must not be
+        claimants (``process_prune_reclaim`` alone would report 0 receipts)."""
+        claimants = {
+            invocation.claimant
+            for invocation in MODULE.invocations_in_crate(
+                MODULE.ROOT / "crates/lash-postgres-store"
+            )
+        }
+        for module in (
+            "postgres_clock_contract",
+            "process_prune_reclaim",
+            "session_execution_lease_renewal",
+        ):
+            self.assertIn(f"integration::{module}", claimants)
+            self.assertNotIn(module, claimants)
 
 
 def recipe_block(justfile: str, recipe: str) -> str:

@@ -41,7 +41,6 @@ fn continuation_runtime_error_wire_variants_are_pinned() {
                     "GuestCoercionPending",
                     "InstructionBudgetExceeded",
                     "RegExpBudgetExceeded",
-                    "ExecutionDeadlineExceeded",
                     "MemoryLimitExceeded",
                     "HostCancelled",
                     "DanglingHeapReference",

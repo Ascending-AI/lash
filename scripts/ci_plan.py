@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import enum
 from functools import lru_cache
 import json
@@ -40,6 +40,7 @@ FAMILIES = (
     "functional_e2e",
     "workers_e2e",
     "restate_suites",
+    "feature_lanes",
     "workbench",
     "regress",
     "schema",
@@ -279,12 +280,15 @@ GATED_JOBS = {
     "unicode-tests": "regress",
 }
 
-# `feature-lanes` runs on every trusted event (FIG-3572): #1979 merged a
-# feature variant that did not compile because the lane graph was
-# dispatch-only. It needs the pool's cache credentials, so an untrusted pull
-# request skips it and the merge group, which is always trusted, proves every
-# variant before anything lands. `lashlang-git-consumer` stays dispatch-only,
-# where the cut to the minimum PR board left it.
+# `feature-lanes` runs on every trusted non-PR event and on a pull request
+# whose diff touches feature-gated code (the `feature_lanes` family;
+# `_is_feature_gate_path` holds the rule): #1979 merged a feature variant
+# that did not compile because the lane graph was dispatch-only, and the
+# fast PR board keeps it only where the diff can move a lane build. It needs
+# the pool's cache credentials, so an untrusted pull request skips it; the
+# merge group is always trusted and proves every variant before anything
+# lands. `lashlang-git-consumer` stays dispatch-only, where the cut to the
+# minimum PR board left it.
 FEATURE_LANES_JOB = "feature-lanes"
 
 
@@ -293,13 +297,11 @@ FEATURE_LANES_JOB = "feature-lanes"
 # There is no automatic trunk run to carry them any more — an automatic push to
 # main triggers no CI at all — so a dispatch is their sole home, and it is the
 # profile release.yml certifies against.
-# postgres-store is intentionally absent: every `lash-postgres-store` test
-# binary runs on pull requests and merge groups, while its simulator,
-# pool-wait and cross-backend steps remain dispatch-only.
-# functional-e2e and functional-e2e-process-operations are the exception: a
-# trusted pull request whose diff selects `restate_suites` runs their live
-# Restate legs, so the conclusion accepts their success on that event alone
-# (RESTATE_SUITE_JOBS). The merge group still skips them.
+# postgres-store is intentionally absent: it is not dispatch-only but it is no
+# longer pull-request work either. The merge group and the dispatch run every
+# selected `lash-postgres-store` test binary while its simulator, pool-wait
+# and cross-backend steps remain dispatch-only; a pull request runs the
+# suite's input changes through the affected Bazel targets only.
 DISPATCH_ONLY_JOBS = {
     "heavy-tests",
     "stack-budget",
@@ -318,8 +320,7 @@ DEFERRED_EVENTS = {"pull_request", "merge_group"}
 # The PostgreSQL majors. One `postgres-store` job builds the store binaries
 # once and runs every selected major against its own container, so a second
 # major costs a container and a test run, not another runner and Bazel client.
-# PG16 is the sole primary lane and the only major a
-# pull request runs: a PR gets fast signal. PG14/PG18 compare catalog shape
+# PG16 is the sole primary lane. PG14/PG18 compare catalog shape
 # only; they are merge-group breadth when the diff touches a durable schema
 # crate, and part of the full profile on workflow_dispatch (weekly/release
 # certification). Weekly confidence backends remain the compatibility witness
@@ -355,10 +356,9 @@ WORKERS_E2E_JOBS = {
     "restate-postgres-workers-summary",
 }
 
-# The dispatch-only jobs a trusted, restate-selected pull request runs: the
-# functional-e2e legs that host the live Restate suites. The workers board is
-# not listed here because it is not dispatch-only -- its pull-request gate is
-# the `ci:workers` label, to which `restate_suites` is a second opt-in.
+# The functional-e2e legs that host the live Restate suites. They run on the
+# full-profile dispatch only: a pull request no longer runs any E2E leg, so
+# the set is a name for the matrix flags, not a conclusion exception.
 RESTATE_SUITE_JOBS = frozenset(
     {"functional-e2e", "functional-e2e-process-operations"}
 )
@@ -526,10 +526,20 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
 }
 
+# Directories a CI script reads whole, one file per change -- the deferred-law
+# shards, the replay-divergence shards. Name matching cannot see the glob, so
+# each directory declares its reader here: every tracked file under the key is
+# consumed by the value, which passes its own families on transitively.
+SHARD_DIR_READERS: Mapping[str, str] = {
+    "scripts/deferred-laws": "scripts/check_law_execution_receipts.py",
+    "scripts/restate-divergences": "scripts/ci/restate_suite.py",
+}
+
 # The plan outputs a `ci.yml` job may read that are not families. A job's
 # families are the family outputs it reads (`_job_families`); an output in
 # neither set counts as every family. `postgres_compatibility` is the schema
-# family's PG14/PG18 selection; `pr_tail_labels` is a label list, not a gate.
+# family's PG14/PG18 selection; `pr_tail_labels`, `pr_test_labels` and
+# `pr_build_targets` are label lists, not gates.
 PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     **{family: frozenset({family}) for family in FAMILIES},
     "postgres_compatibility": frozenset({"schema"}),
@@ -539,6 +549,8 @@ PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     "reason": frozenset(),
     "postgres_primary": frozenset(),
     "pr_tail_labels": frozenset(),
+    "pr_test_labels": frozenset(),
+    "pr_build_targets": frozenset(),
 }
 _PLAN_OUTPUT = re.compile(r"needs\.plan\.outputs\.([A-Za-z0-9_]+)")
 
@@ -787,6 +799,17 @@ def ci_machinery_families(root: str | None = None) -> Mapping[str, frozenset[str
         if owner is not None:
             edges.setdefault(owner, set()).update(targets)
 
+    # A shard directory's files are all read by its declared reader's glob.
+    for directory, reader in SHARD_DIR_READERS.items():
+        reader_node = _ci_machinery_node(reader)
+        if reader_node not in nodes:
+            continue
+        for path in tracked:
+            if path.startswith(directory + "/"):
+                node = _ci_machinery_node(path)
+                named.add(node)
+                edges.setdefault(reader_node, set()).add(node)
+
     # Close transitively: a consumer passes on what its own consumers run it for.
     changed = True
     while changed:
@@ -1032,6 +1055,127 @@ def _is_facade_path(path: str) -> bool:
 # resolution and dependency-boundary checks read every package manifest).
 def _is_tooling_class(path_class: PathClass) -> bool:
     return path_class.kind in {PathKind.SHARED, PathKind.TOOLING} or path_class.manifest
+
+
+# `feature_lanes` gates the `feature-lanes` job on a pull request. Merge
+# groups and dispatches run it on every Rust diff; the fast PR board pays for
+# it only when the diff touches feature-gated code, and the rule for that is
+# deliberately narrower than lane membership -- the generated lanes cover
+# nearly every package directory, so "the diff touched a lane package" would
+# run them on almost every diff. A path is feature-relevant when it is:
+#
+# * the lane spec itself (`tools/bazel/feature_lanes.bzl`), the coverage
+#   registry (`scripts/feature-coverage.toml`), or Bazel machinery the lanes
+#   resolve through (`tools/bazel/`, the module and root build files);
+# * a lane-covered package's own manifest, where its `[features]` table and
+#   `dep:` entries live;
+# * any other file inside a lane-covered package that carries a
+#   `cfg(feature = ...)`-style predicate -- the definition of feature-gated
+#   source. A file that cannot be read (a deletion of gated code is a
+#   feature change) is conservatively feature-relevant;
+# * a runtime data or doc input, because a lane test may read it.
+#
+# Anything else -- a file in a package no lane compiles, or a lane-covered
+# package's ungated source -- cannot move a lane build or test.
+FEATURE_LANES_SPEC = "tools/bazel/feature_lanes.bzl"
+FEATURE_COVERAGE_PLAN = "scripts/feature-coverage.toml"
+
+# The Bazel configuration that feeds lane resolution: the generator, the lane
+# spec, the module graph and the workspace-wide Bazel inputs. Other tooling
+# (kiln, pre-commit config) cannot move a lane compile.
+_FEATURE_LANE_TOOLING_PREFIX = "tools/bazel/"
+_FEATURE_LANE_TOOLING_FILES = frozenset(
+    {"BUILD.bazel", ".bazelrc", ".bazelversion", "clippy.toml"}
+)
+
+
+@lru_cache(maxsize=None)
+def feature_lane_package_dirs(root: str | None = None) -> frozenset[str]:
+    """The package directories the generated feature lanes compile or test.
+
+    The `FEATURE_LANE_*` tables in the generated lane spec name every label
+    the lanes build, test or lint; their package prefixes are the directories
+    a feature-lane resolution can reach. A diff outside every one of them
+    cannot move a lane build.
+    """
+
+    def collect(value: object, labels: set[str]) -> None:
+        if isinstance(value, str):
+            labels.add(value)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item, labels)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                collect(key, labels)
+                collect(item, labels)
+
+    base = Path(root) if root is not None else REPO_ROOT
+    tree = ast.parse((base / FEATURE_LANES_SPEC).read_text(encoding="utf-8"))
+    labels: set[str] = set()
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id.startswith("FEATURE_LANE_")
+        ):
+            collect(ast.literal_eval(node.value), labels)
+    return frozenset(
+        label[2:].split(":", 1)[0] for label in labels if label.startswith("//")
+    )
+
+
+_CFG_HEAD = re.compile(r"\bcfg(?:_attr)?\s*\(")
+_FEATURE_ATOM = re.compile(r"\bfeature\b")
+
+
+def _declares_feature_cfg(text: str) -> bool:
+    """Whether the source carries a `cfg`/`cfg_attr` predicate naming `feature`.
+
+    `feature` must appear inside the attribute's parentheses: `target_feature`
+    never counts, while `cfg(all(unix, feature = "x"))` does because the scan
+    walks to the matching close paren rather than a fixed shape.
+    """
+
+    for match in _CFG_HEAD.finditer(text):
+        depth = 1
+        index = match.end()
+        while index < len(text) and depth:
+            if text[index] == "(":
+                depth += 1
+            elif text[index] == ")":
+                depth -= 1
+            index += 1
+        if _FEATURE_ATOM.search(text, match.end(), index):
+            return True
+    return False
+
+
+def _is_feature_gate_path(
+    path: str, path_class: PathClass, lane_dirs: frozenset[str]
+) -> bool:
+    """Whether `path` can change what a feature lane compiles or runs."""
+
+    if path == FEATURE_COVERAGE_PLAN:
+        return True
+    if path_class.kind is PathKind.TOOLING:
+        return path.startswith(_FEATURE_LANE_TOOLING_PREFIX) or path.startswith(
+            "MODULE.bazel"
+        ) or path in _FEATURE_LANE_TOOLING_FILES
+    if path_class.kind in {PathKind.DOC_INPUT, PathKind.DATA}:
+        # A lane test may read it.
+        return True
+    if path_class.kind is not PathKind.PACKAGE or path_class.package not in lane_dirs:
+        return False
+    if path_class.manifest:
+        # The [features] table and dep: entries live in the manifest.
+        return True
+    try:
+        text = (REPO_ROOT / path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        # A deleted or unreadable file: removing gated code is a feature change.
+        return True
+    return _declares_feature_cfg(text)
 
 
 # The push gate's projection of `classify_path` (`scripts/push-gate.sh`).
@@ -1349,6 +1493,105 @@ def pr_tail_labels(paths: list[str], root: Path | None = None) -> list[str]:
     return sorted(selected)
 
 
+def dev_test_inventory(root: Path | None = None) -> tuple[set[str], dict[str, list[str]]]:
+    """The generated Bazel dev-suite members and their test batches.
+
+    `WORKSPACE_DEV_TEST_TARGETS` is every deterministic, service-free label
+    `//:dev_tests` expands to; `WORKSPACE_TEST_BATCHES` folds a package's
+    small tests into its one `:test_batch` action, so a package selection
+    names the batch rather than its members.
+    """
+
+    wanted = {"WORKSPACE_DEV_TEST_TARGETS", "WORKSPACE_TEST_BATCHES"}
+    values = {}
+    base = root if root is not None else REPO_ROOT
+    tree = ast.parse((base / "tools/bazel/workspace_targets.bzl").read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            if name in wanted:
+                values[name] = ast.literal_eval(node.value)
+    return set(values["WORKSPACE_DEV_TEST_TARGETS"]), values["WORKSPACE_TEST_BATCHES"]
+
+
+def batch_labels(members: set[str], batches: dict[str, list[str]]) -> list[str]:
+    labels = set(members)
+    for batch, children in batches.items():
+        # Partial reverse-dependency selections must not widen to other members.
+        if set(children) <= members:
+            labels.difference_update(children)
+            labels.add(batch)
+    return sorted(labels)
+
+
+def affected_bazel_labels(
+    scope: DevTestScope,
+    members: set[str],
+    tail: list[str],
+    batches: Mapping[str, list[str]],
+) -> tuple[list[str], list[str]]:
+    """The (`bazel test`, `bazel build`) label lists one dev-test scope selects.
+
+    This is the single affected-target selection: `scripts/dev-test.py` runs
+    it locally and the pull-request leg of `bazel-tests` runs it in CI.
+    `members` is the dev-inventory labels the caller selected (the touched
+    packages', or a reverse-dependency query's); `tail` is the touched
+    packages' `dev-deferred` labels (`pr_tail_labels`) -- merge groups are the
+    only events that run the tail job, so a pull request runs them itself, and
+    the rule holds on a broad plan too: a package manifest widens the
+    selection but is still a deferred test's input (#2109's corpus
+    expectations file went red on main otherwise). A broad scope means the
+    whole `//:dev_tests` suite; the facade seal rides a facade diff; a touched
+    package no selected label covers gets a `:all` compile; and
+    `//:schema_checks` rides whichever invocation is non-empty.
+    """
+
+    members = set(members) | set(tail)
+    labels = ["//:dev_tests", *tail] if scope.broad else batch_labels(members, batches)
+    if scope.facade:
+        labels.append("//crates/lash:ui_fixtures")
+    uncovered = [
+        package
+        for package in scope.packages
+        if not any(label.split(":")[0] == package for label in members)
+    ]
+    # Service-only and compile-only packages still need compilation proof,
+    # including mixed diffs that also select tests in another package.
+    builds = [f"{package}:all" for package in uncovered] if uncovered and not scope.broad else []
+    if labels:
+        labels.append("//:schema_checks")
+    if builds:
+        builds.append("//:schema_checks")
+    return labels, builds
+
+
+def pr_affected_targets(
+    paths: list[str],
+    root: Path | None = None,
+    broad: bool = False,
+    tail: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """The (`bazel test`, `bazel build`) label lists a pull request runs.
+
+    The same selection `scripts/dev-test.py` computes for the diff: the
+    package members of `dev_test_scope`, the touched packages' deferred
+    labels, and the shared assembly in `affected_bazel_labels`. The script
+    self-test inventory does not participate -- CI runs those proofs in
+    `repo-gates`, not in the Bazel partition. `broad` and `tail` let
+    `classify` widen a run-everything diff to the whole dev suite and the
+    whole deferred set.
+    """
+
+    scope = dev_test_scope(paths, root or REPO_ROOT, frozenset())
+    if broad and not scope.broad:
+        scope = replace(scope, broad=True)
+    allowed, batches = dev_test_inventory(root)
+    members = {label for label in allowed if label.split(":")[0] in scope.packages}
+    if tail is None:
+        tail = pr_tail_labels(paths, root)
+    return affected_bazel_labels(scope, members, tail, batches)
+
+
 def fail_open(reason: str) -> dict[str, str]:
     # An unclassifiable diff can touch any package, so its PR leg re-adds every
     # dev-deferred label. If the inventory itself cannot be read, the suite
@@ -1362,6 +1605,13 @@ def fail_open(reason: str) -> dict[str, str]:
         "fail_open": "true",
         "reason": reason,
         "pr_tail_labels": tail,
+        # The pull-request leg runs the whole fast suite plus the deferred
+        # tail: what the tail job would run on a trusted event. The facade
+        # seal target is a cheap no-op when it is not an input.
+        "pr_test_labels": (
+            f"//:dev_tests {tail} //crates/lash:ui_fixtures //:schema_checks"
+        ),
+        "pr_build_targets": "",
     }
     outputs.update({family: "true" for family in FAMILIES})
     return outputs
@@ -1373,6 +1623,7 @@ def classify(
     workbench_dirs: frozenset[str] | None = None,
     store_dirs: frozenset[str] | None = None,
     restate_dirs: frozenset[str] | None = None,
+    lane_dirs: frozenset[str] | None = None,
 ) -> dict[str, str]:
     if not changes:
         raise PlanError("the changed path set was empty")
@@ -1391,6 +1642,11 @@ def classify(
             restate_dirs = restate_suite_dirs()
         except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
             return fail_open(f"Restate suite registry is underivable: {error}")
+    if lane_dirs is None:
+        try:
+            lane_dirs = feature_lane_package_dirs()
+        except (OSError, ValueError, SyntaxError, KeyError) as error:
+            return fail_open(f"feature lane inventory is underivable: {error}")
     unknown_statuses = sorted({status for status, _ in changes if status not in CHANGE_STATUSES})
     if unknown_statuses:
         statuses = ", ".join(repr(status) for status in unknown_statuses)
@@ -1447,6 +1703,11 @@ def classify(
         # docs-only diff can name none; a diff that runs everything can touch
         # any package, so it re-adds the whole dev-deferred set.
         "pr_tail_labels": " ".join(pr_tail_labels(paths)),
+        # The Bazel labels the pull-request leg of `bazel-tests` runs: the
+        # affected-target selection `scripts/dev-test.py` computes for the
+        # same diff. Empty on a docs-only diff, which runs no Bazel leg.
+        "pr_test_labels": "",
+        "pr_build_targets": "",
     }
     if docs_only:
         outputs.update({family: "false" for family in FAMILIES})
@@ -1454,13 +1715,31 @@ def classify(
         return outputs
     if run_everything:
         outputs.update({family: "true" for family in FAMILIES})
-        outputs["pr_tail_labels"] = " ".join(_all_dev_deferred_labels())
+        # A run-everything diff can move any package, so its PR leg runs the
+        # whole dev suite and re-adds every dev-deferred label -- the same
+        # breadth `pr_tail_labels` reports for it.
+        all_deferred = _all_dev_deferred_labels()
+        outputs["pr_tail_labels"] = " ".join(all_deferred)
+        try:
+            pr_tests, pr_builds = pr_affected_targets(
+                paths, broad=True, tail=all_deferred
+            )
+        except (OSError, ValueError, KeyError) as error:
+            return fail_open(f"affected Bazel targets are underivable: {error}")
+        outputs["pr_test_labels"] = " ".join(pr_tests)
+        outputs["pr_build_targets"] = " ".join(pr_builds)
         return outputs
     # `rust` gates the Bazel partition, which owns every agent-workbench unit
     # case, including browser projection with a pinned Node interpreter. The
     # breadth families stay off a workbench-only diff: the workbench is an
     # example host, not a store or a worker.
     breadth = bool(build) and not only_workbench
+    try:
+        pr_tests, pr_builds = pr_affected_targets(paths)
+    except (OSError, ValueError, KeyError) as error:
+        return fail_open(f"affected Bazel targets are underivable: {error}")
+    outputs["pr_test_labels"] = " ".join(pr_tests)
+    outputs["pr_build_targets"] = " ".join(pr_builds)
     selected = {
         "rust": bool(build),
         "functional_e2e": breadth,
@@ -1471,13 +1750,17 @@ def classify(
             _is_restate_suite_path(path, classes[path], restate_dirs)
             for path in build
         ),
+        "feature_lanes": any(
+            _is_feature_gate_path(path, classes[path], lane_dirs) for path in build
+        ),
         "schema": any(_is_schema_path(path) for path in build),
         "facade": any(_is_facade_path(path) for path in build),
         "tooling": any(_is_tooling_class(classes[path]) for path in build),
         # `stores` follows the Postgres store closure (see _is_stores_path);
         # `functional_e2e` and `workers_e2e` keep the breadth flag because
-        # their jobs are dispatch/label-only anyway. `restate_suites` is the
-        # one E2E selection a pull request acts on, so it is a real path rule.
+        # their jobs are dispatch/label-only anyway. `restate_suites` stays a
+        # real path rule even though a pull request no longer acts on it:
+        # merge groups and the full profile still consume the selection.
         "stores": any(
             _is_stores_path(path, classes[path], store_dirs) for path in build
         ),
@@ -1536,16 +1819,9 @@ def evaluate_conclusion(
         # `tooling`: a non-docs plan that selects nothing is a classifier fault.
         problems.append("plan selects no family for a non-docs diff")
 
-    # A trusted pull request whose diff touches the Restate execution path
-    # runs the live Restate suites: the functional-e2e Restate legs and the
-    # workers board. An untrusted event cannot stage the suite binaries from
-    # the shared cache, and a merge group keeps its old board either way.
-    restate_pr = (
-        event_name == "pull_request"
-        and bazel_is_trusted
-        and plan_outputs.get("restate_suites") == "true"
-    )
-
+    # A pull request runs no E2E leg and no live-suite board: the whole set
+    # is dispatch- or merge-group-only on the fast board, and a skipped
+    # result is the expected one whatever the diff selected.
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
         if job in BAZEL_TEST_JOBS:
@@ -1563,27 +1839,36 @@ def evaluate_conclusion(
                     f" expected {wanted}"
                 )
             continue
-        if job in WORKERS_E2E_JOBS and not workers_e2e_enabled and not restate_pr:
+        if job in WORKERS_E2E_JOBS and (
+            event_name == "pull_request" or not workers_e2e_enabled
+        ):
             if result != "skipped":
                 problems.append(
-                    f"workers E2E job {job} ended with {result!r} while disabled, expected skipped"
+                    f"workers E2E job {job} ended with {result!r} on a"
+                    f" {event_name} event that does not run it, expected skipped"
                 )
             continue
         if job in DISPATCH_ONLY_JOBS and event_name in DEFERRED_EVENTS:
-            wanted = (
-                "success"
-                if restate_pr and job in RESTATE_SUITE_JOBS
-                else "skipped"
-            )
-            if result != wanted:
+            if result != "skipped":
                 problems.append(
                     f"dispatch-only job {job} ended with {result!r} on a"
-                    f" {event_name} event, expected {wanted}"
+                    f" {event_name} event, expected skipped"
                 )
             continue
         if job == FEATURE_LANES_JOB:
             rust_on = plan_outputs.get("rust") == "true"
-            wanted = "success" if bazel_is_trusted and rust_on else "skipped"
+            # The fast PR board runs the lanes only for feature-gated code;
+            # every other trusted event keeps the full lane board.
+            wanted = (
+                "success"
+                if bazel_is_trusted
+                and rust_on
+                and (
+                    event_name != "pull_request"
+                    or plan_outputs.get("feature_lanes") == "true"
+                )
+                else "skipped"
+            )
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} for a"
@@ -1605,7 +1890,14 @@ def evaluate_conclusion(
                 )
             continue
         if job == "postgres-store" and event_name in DEFERRED_EVENTS:
-            wanted = "success" if plan_outputs.get("stores") == "true" else "skipped"
+            # The merge group keeps the store suite; a pull request covers a
+            # store diff through its affected Bazel labels alone.
+            wanted = (
+                "success"
+                if event_name == "merge_group"
+                and plan_outputs.get("stores") == "true"
+                else "skipped"
+            )
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} on a {event_name} event, expected {wanted}"

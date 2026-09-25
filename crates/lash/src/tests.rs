@@ -905,9 +905,12 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
 
     async fn turn_park_feed(
         &self,
-        _after: lash_core::store::TurnParkFeedCursor,
+        _after: lash_core::store::ParkFeedCursor,
         _limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+    ) -> std::result::Result<
+        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
+        lash_core::StoreError,
+    > {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "SessionStoreFactory::turn_park_feed",
         })
@@ -915,7 +918,7 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
 
     async fn compact_turn_park_feed(
         &self,
-        _through: lash_core::store::TurnParkFeedCursor,
+        _through: lash_core::store::ParkFeedCursor,
     ) -> std::result::Result<(), lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "SessionStoreFactory::compact_turn_park_feed",
@@ -1342,9 +1345,12 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
 
     async fn turn_park_feed(
         &self,
-        _after: lash_core::store::TurnParkFeedCursor,
+        _after: lash_core::store::ParkFeedCursor,
         _limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+    ) -> std::result::Result<
+        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
+        lash_core::StoreError,
+    > {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "SessionStoreFactory::turn_park_feed",
         })
@@ -1352,7 +1358,7 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
 
     async fn compact_turn_park_feed(
         &self,
-        _through: lash_core::store::TurnParkFeedCursor,
+        _through: lash_core::store::ParkFeedCursor,
     ) -> std::result::Result<(), lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "SessionStoreFactory::compact_turn_park_feed",
@@ -1493,9 +1499,12 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
 
     async fn turn_park_feed(
         &self,
-        _after: lash_core::store::TurnParkFeedCursor,
+        _after: lash_core::store::ParkFeedCursor,
         _limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<lash_core::store::TurnParkFeedPage, lash_core::StoreError> {
+    ) -> std::result::Result<
+        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
+        lash_core::StoreError,
+    > {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "SessionStoreFactory::turn_park_feed",
         })
@@ -1503,7 +1512,7 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
 
     async fn compact_turn_park_feed(
         &self,
-        _through: lash_core::store::TurnParkFeedCursor,
+        _through: lash_core::store::ParkFeedCursor,
     ) -> std::result::Result<(), lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "SessionStoreFactory::compact_turn_park_feed",
@@ -2369,7 +2378,6 @@ fn rlm_factory(backend: &dyn lash_core::Backend) -> lash_protocol_rlm::RlmProtoc
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
         backend,

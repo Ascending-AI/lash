@@ -2,13 +2,6 @@
 //! faults and stale wake deliveries, holds a worklist page at a known point,
 //! and counts point and lease reads, over any backend.
 
-// The delegation macros take each forwarding hook as a block, and these hooks
-// only forward.
-#![expect(
-    unused_braces,
-    reason = "the registry delegation macros require a block hook; these forward unchanged"
-)]
-
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -59,6 +52,23 @@ struct ReadFaultPlan {
     worklist_page_reads: Vec<WorklistPageRead>,
     worklist_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
     worklist_page_pause: Option<WorklistPagePause>,
+    registration_hold: Option<RegistrationHold>,
+}
+
+/// Where a held registration stops: before it reaches the wrapped registry,
+/// or once the wrapped registry committed it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegistrationHoldPoint {
+    BeforeRegistering,
+    AfterRegistering,
+}
+
+/// One armed registration hold: where it stops the next registration, and
+/// what it tells the test when it gets there.
+#[derive(Clone)]
+struct RegistrationHold {
+    point: RegistrationHoldPoint,
+    reached: Arc<dyn Fn() + Send + Sync>,
 }
 
 /// One worklist-page read the decorator saw: the page limit and the
@@ -200,6 +210,19 @@ impl ProcessRegistryFaults {
     /// Every worklist-page read that reached the decorator, in order.
     pub fn worklist_page_reads(&self) -> Vec<WorklistPageRead> {
         self.faults.lock_recover().worklist_page_reads.clone()
+    }
+
+    /// The next registration through this decorator stops at `point` and
+    /// never returns, after calling `reached`, once: the point where a test
+    /// kills the registering attempt, as a crash between the registry write
+    /// and what follows it would. Every later registration forwards
+    /// unchanged.
+    pub fn hold_next_registration(
+        &self,
+        point: RegistrationHoldPoint,
+        reached: Arc<dyn Fn() + Send + Sync>,
+    ) {
+        self.faults.lock_recover().registration_hold = Some(RegistrationHold { point, reached });
     }
 
     /// Hold the next worklist-page read until the returned handle resumes it.
@@ -366,14 +389,49 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
     async fn count_non_terminal_processes(&self) -> Result<usize, crate::PluginError> {
         self.inner.count_non_terminal_processes().await
     }
+
+    async fn list_parked_processes(
+        &self,
+        query: &crate::store::ProcessParkQuery,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        self.inner.list_parked_processes(query).await
+    }
+
+    async fn process_park_feed(
+        &self,
+        after: crate::store::ParkFeedCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<crate::store::ParkFeedPage<crate::store::ProcessParkKey>, crate::PluginError> {
+        self.inner.process_park_feed(after, limit).await
+    }
+
+    async fn summarize_parked_processes(
+        &self,
+    ) -> Result<crate::store::ParkSummary, crate::PluginError> {
+        self.inner.summarize_parked_processes().await
+    }
 }
 
 delegate_process_registrar!(
     ProcessRegistryFaults,
     inner,
-    registration | _faults,
+    registration | faults,
     _process_id,
-    forwarded | { forwarded.await },
+    forwarded | {
+        let hold = faults.faults.lock_recover().registration_hold.take();
+        match hold {
+            None => forwarded.await,
+            Some(hold) => {
+                if hold.point == RegistrationHoldPoint::AfterRegistering {
+                    forwarded.await?;
+                } else {
+                    drop(forwarded);
+                }
+                (hold.reached)();
+                std::future::pending().await
+            }
+        }
+    },
     event | faults,
     _process_id,
     forwarded | {
@@ -629,6 +687,27 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.inner
             .clear_process_wait_with_authority(process_id, authority)
+            .await
+    }
+
+    async fn park_process_with_authority(
+        &self,
+        process_id: &ProcessId,
+        reason: crate::store::ParkReason,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .park_process_with_authority(process_id, reason, authority)
+            .await
+    }
+
+    async fn begin_parked_rerun_with_authority(
+        &self,
+        process_id: &ProcessId,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .begin_parked_rerun_with_authority(process_id, authority)
             .await
     }
 }

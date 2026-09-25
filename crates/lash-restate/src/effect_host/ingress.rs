@@ -28,7 +28,7 @@ pub(super) async fn resolve_restate_await_event_via_ingress(
     outcome
         .map_err(|err| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateAwaitEventResolve,
+                lash_core::RuntimeErrorCode::EngineAwaitEventResolve,
                 err.to_string(),
             )
         })?
@@ -51,7 +51,7 @@ pub(super) async fn update_restate_session_waits_via_ingress(
         .await
         .map_err(|err| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                lash_core::RuntimeErrorCode::EngineAwaitEventSessionUpdate,
                 err.to_string(),
             )
         })
@@ -75,7 +75,7 @@ pub(super) async fn restate_index_is_revoked_via_ingress(
         .await
         .map_err(|err| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateAwaitEventRevocationRead,
+                lash_core::RuntimeErrorCode::EngineAwaitEventRevocationRead,
                 err.to_string(),
             )
         })
@@ -121,7 +121,7 @@ pub(super) async fn update_restate_scope_waits_via_ingress(
         .await
         .map_err(|err| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                lash_core::RuntimeErrorCode::EngineAwaitEventSessionUpdate,
                 err.to_string(),
             )
         })
@@ -149,7 +149,7 @@ pub(super) async fn retire_restate_scope_via_ingress(
         .await
         .map_err(|error| {
             RuntimeError::new(
-                RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                RuntimeErrorCode::EngineAwaitEventSessionUpdate,
                 error.to_string(),
             )
         })?;
@@ -206,7 +206,7 @@ pub(super) async fn await_restate_await_event_via_ingress(
                 ).await,
             }
         } => result.map_err(|err| {
-            RuntimeError::new(lash_core::RuntimeErrorCode::RestateAwaitEventAwait, err.to_string())
+            RuntimeError::new(lash_core::RuntimeErrorCode::EngineAwaitEventAwait, err.to_string())
         }),
         _ = cancel.cancelled() => {
             let outcome = resolve_restate_await_event_via_ingress(

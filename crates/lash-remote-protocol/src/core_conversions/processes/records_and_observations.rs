@@ -183,6 +183,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             abandon_request,
             cancel_request,
             wait,
+            park,
             status,
             outcome,
         } = value;
@@ -209,6 +210,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             abandon_request: abandon_request.map(|request| (*request).into()),
             cancel_request: cancel_request.map(|request| *request),
             wait: wait.map(Into::into),
+            park: park.map(|park| (*park).try_into()).transpose()?,
             status: status.into(),
             outcome: outcome.map(TryInto::try_into).transpose()?,
         })
@@ -239,6 +241,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             abandon_request,
             cancel_request,
             wait,
+            park,
             status,
             outcome,
         } = value;
@@ -284,6 +287,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
         record.abandon_request = abandon_request.map(|request| Box::new(request.into()));
         record.cancel_request = cancel_request.map(Box::new);
         record.wait = wait.map(Into::into);
+        record.park = park.map(|park| park.try_into().map(Box::new)).transpose()?;
         record.status = status.into();
         record.outcome = outcome.map(TryInto::try_into).transpose()?;
         Ok(record)
@@ -317,6 +321,7 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             caused_by,
             external_ref,
             wait,
+            park,
             child_session_id,
         } = value;
         Ok(Self {
@@ -344,6 +349,7 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             caused_by: caused_by.map(Into::into),
             external_ref: external_ref.map(Into::into),
             wait: wait.map(Into::into),
+            park: park.map(TryInto::try_into).transpose()?,
             child_session_id,
         })
     }
@@ -377,6 +383,7 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             caused_by,
             external_ref,
             wait,
+            park,
             child_session_id,
         } = value;
         Ok(Self {
@@ -404,6 +411,7 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             caused_by: caused_by.map(Into::into),
             external_ref: external_ref.map(Into::into),
             wait: wait.map(Into::into),
+            park: park.map(TryInto::try_into).transpose()?,
             child_session_id,
         })
     }

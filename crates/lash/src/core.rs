@@ -147,34 +147,36 @@ impl LashCore {
     pub async fn drain_status(&self, accepting_new_work: bool) -> Result<DeploymentDrainStatus> {
         let remaining_invocations = self.process_registry.count_non_terminal_processes().await?;
         let turns = self.store_factory.count_unsettled_turns().await?;
+        let processes = self.process_registry.summarize_parked_processes().await?;
         let checked_at = self.env.core.clock.timestamp_ms();
-        for reason in lash_core::store::ParkReasonCode::ALL {
-            let count = turns
-                .parked_by_reason
-                .get(reason)
-                .copied()
-                .unwrap_or_default();
-            lash_core::operational_metrics::record_parked_work_count(
-                "turn",
-                reason.as_str(),
-                u64::try_from(count).unwrap_or(u64::MAX),
-            );
-        }
-        lash_core::operational_metrics::record_parked_work_oldest_age(
-            "turn",
-            turns
-                .oldest_parked_since_ms
-                .map(|since| checked_at.saturating_sub(since))
-                .unwrap_or_default(),
-        );
+        let parked = crate::parked_work::ParkedWorkSummary {
+            turns: lash_core::store::ParkSummary {
+                by_reason: turns.parked_by_reason.clone(),
+                oldest_since_ms: turns.oldest_parked_since_ms,
+            },
+            processes,
+        };
+        crate::parked_work::record_park_gauges(&parked, checked_at);
         Ok(DeploymentDrainStatus {
             accepting_new_work,
             remaining_invocations,
             in_flight_turns: turns.in_flight_turns,
             parked_turns: turns.parked_turns,
-            oldest_parked_since_ms: turns.oldest_parked_since_ms,
+            parked_processes: parked.processes.total(),
+            oldest_parked_since_ms: parked.oldest_since_ms(),
             checked_at,
         })
+    }
+
+    /// The deployment's parked work — turns and processes whose redrive
+    /// refuses to replay their journals — to list, summarize and follow
+    /// (FIG-3659).
+    pub fn parked_work(&self) -> crate::parked_work::ParkedWork {
+        crate::parked_work::ParkedWork {
+            store_factory: Arc::clone(&self.store_factory),
+            process_registry: Arc::clone(&self.process_registry),
+            clock: Arc::clone(&self.env.core.clock),
+        }
     }
 
     /// Sugar entry point: a [`LashCoreBuilder`] pre-seeded with a

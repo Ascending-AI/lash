@@ -16,10 +16,11 @@
 #
 # Two legs. `live` is Restate's defaults. `replay` sets the invoker's
 # inactivity timeout to zero, so every await suspends and every resumption
-# replays the journal from the start. `[<suite>.replay.divergent]` holds back
-# the laws that do not yet hold under replay, each with the reason and the
-# ticket that brings it back (the list only shrinks); the runner
-# refuses an entry that names no test, and `--include-divergent` runs them.
+# replays the journal from the start. `scripts/restate-divergences/<ticket>.toml`
+# holds back the laws that do not yet hold under replay, one file per ticket
+# that brings them back (the list only shrinks), so two divergences never
+# queue on this file; the runner refuses an entry that names no test, and
+# `--include-divergent` runs them.
 # A leg table may carry `report_only = "<reason>"`: its failures are printed
 # and annotated but do not fail the run, and the reason says why it does not
 # gate yet.
@@ -28,7 +29,7 @@
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"
 filters = ["live_effect_group_sdk_preconditions", "tests::conformance_and_poison::"]
-# Parked deferred-law invocations (scripts/deferred-law-invocations.toml).
+# Parked deferred-law invocations (scripts/deferred-laws/*.toml).
 parked_crate = "lash_restate"
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 shards = 3
@@ -54,32 +55,10 @@ redelivery_laws = [
 # wall-clock `command.duration_ms` reaches journaled identities (its effect
 # hash and the replay key of the child's follow-on call), so any tool-child
 # law can diverge on replay when two measurements differ by a millisecond.
-# The laws below diverge on every run or have been seen to; the rest pass
-# unless that measurement drifts. Gate it once the measurement leaves them.
+# The laws held back under replay diverge on every run or have been seen to
+# (scripts/restate-divergences/); the rest pass unless that measurement
+# drifts. Gate it once the measurement leaves them.
 report_only = "tool-result durations reach journaled identities (FIG-3672); see scripts/restate-suites.toml"
-
-[suites.effect-group.replay.divergent]
-# The turn's opener is suspended at every await on this leg, and a tool child
-# runs only against its opener's live in-process registration, so the tool
-# children never run and the turn waits on them for good.
-"tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes" = "a suspended turn strands its tool children: no executor routes them while the opener is suspended (FIG-3712)"
-# The presented tool result's effect hash covers the tool's measured
-# `command.duration_ms`, so a replay that re-measures it parks the turn
-# (`effect_replay_divergence ... divergent_paths=[command.duration_ms]`)
-# whenever the two measurements differ by a millisecond.
-"tests::conformance_and_poison::a_retained_full_output_is_a_durable_artifact_not_a_path" = "present_tool_result hash covers the wall-clock command.duration_ms, so a replay diverges (FIG-3672)"
-# The same measurement reaches the replay key of the child's follow-on call
-# (`Call[14]`: `x-lash-replay-key` differs between executions), so the child
-# is refused on replay and its rank's settlement never arrives.
-"tests::conformance_and_poison::the_oracle_and_the_budget_plugin_coexist" = "the child's follow-on call replay key diverges on replay; rank 0 never settles (FIG-3672)"
-"tests::conformance_and_poison::a_same_name_process_incarnation_is_not_the_recorded_opener" = "the child's follow-on call replay key diverges on replay; rank 3 never settles (FIG-3672)"
-"tests::conformance_and_poison::tool_children_run_through_the_invocation_driver" = "the child's follow-on call replay key diverges on replay; rank 1 never settles (FIG-3672)"
-# A suspension drops the turn's registration in the live opener registry, so
-# the turn's tool child finds no dispatch context to run in ("no executor
-# currently routes ... tool child 0") and the resumed turn waits for it.
-"tests::conformance_and_poison::a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate" = "a suspended turn strands its tool child: no executor routes it (FIG-3712)"
-"tests::conformance_and_poison::public_signal_intent_wakes_parked_process" = "a suspended turn strands its tool child: no executor routes it (FIG-3712)"
-"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "a suspended turn strands its tool child: no executor routes it (FIG-3712)"
 
 [suites.agent-workbench]
 label = "//examples/agent-workbench:agent-workbench__unit_test"
@@ -100,20 +79,9 @@ redelivery_laws = [
   "tests::restate_recovery_tests::live_restate_ingress_owner_restart_resumes_and_remains_cancellable",
 ]
 
-[suites.agent-workbench.replay.divergent]
-# Each law below is held back from the replay leg under the ticket that
-# brings it back. The process drive's own divergence (3e, a LashProcessWorkflow
-# journal mismatch) is fixed by FIG-3673 and is not held.
-# The queued run reads the store unjournaled at start, so its replay issues
-# another `call` at index 3.
-"tests::live_restate_cron_queued_turn_sync_cancel_path_end_to_end" = "the queued run's unjournaled store read at start diverges on replay; FIG-3600 S5 fixes it (FIG-3748)"
-"tests::restate_recovery_tests::live_restate_turn_input_ingress_delivers_once_and_queues_after_settle" = "the queued run's unjournaled store read at start diverges on replay; FIG-3600 S5 fixes it (FIG-3748)"
-# A replayed provider retry publishes its observation again: the transcript
-# keeps two copies of the retry prose.
-"tests::restate_recovery_tests::live_restate_rate_limit_retry_converges_observers_to_one_copy" = "observations are not deduplicated across replay, so the retry prose is kept twice (FIG-3753)"
-# The replacement owner cannot supersede the dead owner's SQL session-execution
-# lease within the law's window.
-"tests::restate_recovery_tests::live_restate_ingress_owner_restart_resumes_and_remains_cancellable" = "the SQL session-execution lease does not supersede on replay; S8's drive_epoch replaces it (FIG-3540)"
+# The replay leg's held-back laws live in scripts/restate-divergences/
+# (FIG-3540, FIG-3748, FIG-3753). The process drive's own divergence (3e, a
+# LashProcessWorkflow journal mismatch) is fixed by FIG-3673 and is not held.
 
 [suites.agent-workbench.env]
 # `scripts/agent-workbench-restate-e2e.sh` runs the suite inside

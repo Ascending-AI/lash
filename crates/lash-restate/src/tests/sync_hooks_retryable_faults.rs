@@ -53,7 +53,7 @@ fn live_session_fault() -> RuntimeEffectControllerError {
 /// recorded sync refusal produces.
 fn deterministic_fault() -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(
-        lash_core::RuntimeErrorCode::RestateEffectController,
+        lash_core::RuntimeErrorCode::EngineEffectController,
         "fig3726: deterministic failure",
     )
 }

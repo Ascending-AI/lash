@@ -477,7 +477,10 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     parent_scope_id TEXT COLLATE "C",
     on_parent_end TEXT NOT NULL,
     cancel_requested_at_ms BIGINT,
+    parked_since_ms BIGINT,
+    parked_reason_code TEXT,
     record_json TEXT NOT NULL,
+    CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
     CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')),
     CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'queue_drain', 'process') AND parent_scope_id IS NOT NULL)),
@@ -523,6 +526,30 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_parent_end_pending
     WHERE on_parent_end = 'cancel'
       AND cancel_requested_at_ms IS NULL
       AND status IN ('running', 'waiting');
+
+-- The parked projection (FIG-3659 NOW-B): the parked-process list and the
+-- park summary read only parked rows, in `(since, process)` keyset order.
+CREATE INDEX IF NOT EXISTS idx_lash_processes_parked
+    ON lash_processes(parked_since_ms, process_id)
+    WHERE parked_since_ms IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS lash_process_park_clock (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    current_seq BIGINT NOT NULL DEFAULT 0,
+    compaction_horizon BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT ck_process_park_clock_singleton CHECK (singleton)
+);
+
+CREATE TABLE IF NOT EXISTS lash_process_park_events (
+    seq BIGINT PRIMARY KEY,
+    process_id TEXT COLLATE "C" NOT NULL,
+    park_id BIGINT NOT NULL,
+    kind TEXT NOT NULL CONSTRAINT ck_process_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled')),
+    cause TEXT,
+    reason_json TEXT,
+    at_ms BIGINT NOT NULL,
+    CONSTRAINT ck_process_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
+);
 
 CREATE TABLE IF NOT EXISTS lash_process_events (
     process_id TEXT COLLATE "C" NOT NULL,
@@ -776,8 +803,19 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
     CONSTRAINT ck_release_stamp_singleton CHECK (singleton)
 );
 
--- Seed rows. Every open mode requires them: the component version stamp and
--- the transactional clock rows.
+-- The identity of this catalog: what a session catalog registers under with
+-- its turn-cancel-closure owner. Random per install, so two installations
+-- that share a database and schema name are still two catalogs. One row, like
+-- the other deployment-scoped singletons above.
+CREATE TABLE IF NOT EXISTS lash_catalog_identity (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    catalog_id TEXT NOT NULL,
+    CONSTRAINT ck_catalog_identity_singleton CHECK (singleton)
+);
+
+-- Seed rows. Every open mode requires them: the component version stamp, the
+-- transactional clock rows, and the catalog identity. `gen_random_uuid()` is
+-- core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version)
 VALUES ('lash-postgres-store', 132)
 ON CONFLICT (component) DO NOTHING;
@@ -787,7 +825,16 @@ INSERT INTO lash_process_change_clock (
 ) VALUES (TRUE, 0, 0)
 ON CONFLICT (singleton) DO NOTHING;
 
+INSERT INTO lash_process_park_clock (
+    singleton, current_seq, compaction_horizon
+) VALUES (TRUE, 0, 0)
+ON CONFLICT (singleton) DO NOTHING;
+
 INSERT INTO lash_turn_park_clock (
     singleton, current_seq, compaction_horizon
 ) VALUES (TRUE, 0, 0)
+ON CONFLICT (singleton) DO NOTHING;
+
+INSERT INTO lash_catalog_identity (singleton, catalog_id)
+VALUES (TRUE, gen_random_uuid()::text)
 ON CONFLICT (singleton) DO NOTHING;

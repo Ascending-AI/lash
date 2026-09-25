@@ -557,7 +557,11 @@ pub(super) async fn restate_controller_routes_sleep_only_through_timer() {
 
     assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
     assert_eq!(context.sleeps.lock_recover().as_slice(), &[42]);
-    assert!(context.runs.lock_recover().is_empty());
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        &["lash:session:turn:1:0:sleep:sleep:frontier".to_string()],
+        "the only run a sleep journals is its frontier marker (FIG-3779)"
+    );
 }
 
 #[tokio::test]
@@ -576,7 +580,7 @@ pub(super) async fn restate_turn_wait_rejects_missing_cancel_scope() {
         )
         .await
         .expect_err("turn sleep must not silently disable durable cancellation");
-    assert_eq!(error.code.as_str(), "restate_turn_cancel_scope_missing");
+    assert_eq!(error.code.as_str(), "engine_turn_cancel_scope_missing");
 }
 
 /// FIG-3672 P9: a Restate timer races only the turn's durable gate. The

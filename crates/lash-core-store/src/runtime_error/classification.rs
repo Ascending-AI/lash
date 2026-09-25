@@ -217,21 +217,21 @@ impl RuntimeErrorCode {
             // the durable signal wait settled timed out.
             Self::ProcessSignalWaitTimeout => Terminal,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateAwaitEventAwait => Retryable,
+            Self::EngineAwaitEventAwait => Retryable,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateAwaitEventCancel => Retryable,
+            Self::EngineAwaitEventCancel => Retryable,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateAwaitEventPeek => Retryable,
+            Self::EngineAwaitEventPeek => Retryable,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateAwaitEventResolve => Retryable,
+            Self::EngineAwaitEventResolve => Retryable,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateAwaitEventRevocationRead => Retryable,
+            Self::EngineAwaitEventRevocationRead => Retryable,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateAwaitEventRevoke => Retryable,
+            Self::EngineAwaitEventRevoke => Retryable,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateAwaitEventSessionUpdate => Retryable,
+            Self::EngineAwaitEventSessionUpdate => Retryable,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateEffectController => Redrivable,
+            Self::EngineEffectController => Redrivable,
             // the redrive diverged from the engine's journal; only the build that wrote it serves it.
             Self::EffectReplayDivergence => Parked,
             // replay met a retired key format; a redrive meets it again.
@@ -245,42 +245,42 @@ impl RuntimeErrorCode {
             // the controller cannot answer the frontier read; wiring, not the attempt.
             Self::RecordedJournalReadUnsupported => Terminal,
             // the host runs outside a handler scope; wiring, not the attempt.
-            Self::RestateEffectHostRequiresHandlerScope => Terminal,
+            Self::EngineEffectHostRequiresHandlerScope => Terminal,
             // the give-up is journaled, so replay reproduces it.
-            Self::RestateJournaledEffectPoisoned => Terminal,
+            Self::EngineJournaledEffectPoisoned => Terminal,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateProcessAwait => Redrivable,
+            Self::EngineProcessAwait => Redrivable,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateProcessCancel => Retryable,
+            Self::EngineProcessCancel => Retryable,
             // the live command diverged from its journal entry; a redrive diverges the same way.
-            Self::RestateProcessJournalIdentityDrift => Terminal,
+            Self::EngineProcessJournalIdentityDrift => Terminal,
             // the journal entry does not decode in this build.
-            Self::RestateProcessJournalPayloadIncompatible => Terminal,
+            Self::EngineProcessJournalPayloadIncompatible => Terminal,
             // the index state was written under another protocol version; a
             // redrive meets the same state.
-            Self::RestateEffectGroupProtocolRetired => Terminal,
+            Self::EngineEffectGroupProtocolRetired => Terminal,
             // engine interaction failed; the engine redrives the invocation.
-            Self::RestateProcessIngressSubmit => Retryable,
+            Self::EngineProcessIngressSubmit => Retryable,
             // a deployment fact: the service is not bound.
-            Self::RestateServiceUnregistered => Terminal,
+            Self::EngineServiceUnregistered => Terminal,
             // the turn is durably cancelled before the await.
-            Self::RestateProcessAwaitAfterTurnCancel => Terminal,
+            Self::EngineProcessAwaitAfterTurnCancel => Terminal,
             // the cancel context is not wired.
-            Self::RestateProcessTurnCancelContextMissing => Terminal,
+            Self::EngineProcessTurnCancelContextMissing => Terminal,
             // the same terminal fails to encode again.
-            Self::RestateProcessTerminalEncode => Terminal,
+            Self::EngineProcessTerminalEncode => Terminal,
             // engine interaction failed; re-attaching is safe.
-            Self::RestateTurnTerminalAttach => Retryable,
+            Self::EngineTurnTerminalAttach => Retryable,
             // the attach ceiling elapsed; re-attaching is safe.
-            Self::RestateTurnTerminalAttachCeilingElapsed => Retryable,
+            Self::EngineTurnTerminalAttachCeilingElapsed => Retryable,
             // the terminal does not decode.
-            Self::RestateTurnTerminalDecode => Terminal,
+            Self::EngineTurnTerminalDecode => Terminal,
             // the terminal resolution is invalid.
-            Self::RestateTurnTerminalInvalidResolution => Terminal,
+            Self::EngineTurnTerminalInvalidResolution => Terminal,
             // the cancel names another scope; wiring, not the attempt.
-            Self::RestateTurnCancelScopeMismatch => Terminal,
+            Self::EngineTurnCancelScopeMismatch => Terminal,
             // the cancel names no scope; wiring, not the attempt.
-            Self::RestateTurnCancelScopeMissing => Terminal,
+            Self::EngineTurnCancelScopeMissing => Terminal,
             // attachment store I/O failed before the effect ran.
             Self::RuntimeEffectAttachmentStore => Redrivable,
             // the envelope does not decode canonically.

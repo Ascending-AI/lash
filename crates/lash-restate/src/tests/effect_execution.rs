@@ -1254,7 +1254,7 @@ pub(super) async fn restate_turn_attach_preserves_re_attach_code_on_ceiling() {
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed
+        lash_core::RuntimeErrorCode::EngineTurnTerminalAttachCeilingElapsed
     );
     assert!(error.is_retryable());
 }
@@ -1752,7 +1752,7 @@ pub(super) async fn scope_retirement_and_mint_consult_restate_rather_than_answer
         .expect_err("retirement without a reachable Restate is a typed failure");
     assert_eq!(
         retirement.code,
-        lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate
+        lash_core::RuntimeErrorCode::EngineAwaitEventSessionUpdate
     );
     let mint = host
         .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("late"))
@@ -1760,7 +1760,7 @@ pub(super) async fn scope_retirement_and_mint_consult_restate_rather_than_answer
         .expect_err("a session-free mint reads the durable fence first");
     assert_eq!(
         mint.code,
-        lash_core::RuntimeErrorCode::RestateAwaitEventRevocationRead
+        lash_core::RuntimeErrorCode::EngineAwaitEventRevocationRead
     );
     let reinstate = host
         .reinstate_effect_scope(&lash_core::ExecutionScope::process("unreachable-process"))
@@ -1768,7 +1768,7 @@ pub(super) async fn scope_retirement_and_mint_consult_restate_rather_than_answer
         .expect_err("reinstatement without a reachable Restate is a typed failure");
     assert_eq!(
         reinstate.code,
-        lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate
+        lash_core::RuntimeErrorCode::EngineAwaitEventSessionUpdate
     );
     let session = host
         .reinstate_effect_scope(&lash_core::ExecutionScope::turn("s", "t"))

@@ -138,7 +138,6 @@ fn every_string_growth_path_is_bounded_before_allocation() {
         .expect("large array-like source compiles without allocating");
     let environment = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::Unbounded,
-        ExecutionBound::Unbounded,
         ExecutionBound::logical_bytes(16 * 1024 * 1024),
     ));
     assert!(matches!(

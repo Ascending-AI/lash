@@ -727,7 +727,7 @@ impl TurnInputStore for PostgresSessionStore {
                 session_id,
                 &released_turn_id,
                 released_park_id,
-                &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                &lash_core_execution::store::ParkEventKind::Cancelled {
                     cause: lash_core_execution::store::ParkCancelCause::InputWithdrawn,
                 },
                 now,
@@ -807,7 +807,7 @@ impl TurnInputStore for PostgresSessionStore {
                 session_id,
                 &released_turn_id,
                 released_park_id,
-                &lash_core_execution::store::TurnParkEventKind::Cancelled {
+                &lash_core_execution::store::ParkEventKind::Cancelled {
                     cause: lash_core_execution::store::ParkCancelCause::InputWithdrawn,
                 },
                 now,

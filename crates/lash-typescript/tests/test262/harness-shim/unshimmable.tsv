@@ -9,3 +9,4 @@ nativeFunctionMatcher.js	a NativeFunction-grammar parser whose identifier classe
 wellKnownIntrinsicObjects.js	each intrinsic is reached by evaluating its source text with the Function constructor (TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED)
 program-size	running the harness as its own Script before the test; the runner prepends it to the test in one cell, and a test that alone fits the 64 KiB cell limit (TS_SOURCE_TOO_LARGE) can exceed it with the harness
 host-effects	a host that answers tool calls and every other host effect; the runner answers only print, finish and the journaled clock and random reads
+binding-collision	harness bindings a test may redeclare; upstream binds them as var-scoped declarations in a separate Script, while the shims bind them lexically, so a test's own `var`, `let`, `const` or `function` of the same name makes the concatenated cell an early error

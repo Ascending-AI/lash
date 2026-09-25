@@ -3,12 +3,14 @@
 
 `tools/bazel/action_sizes_from_log.py` turns the pool's usage logs into the
 measured compile and test-run tables; `tools/bazel/generate_build_files.py`
-turns them into `exec_properties` and sizes each `:test_batch` from its members,
-and `tools/bazel/test_batch.bzl` reserves what it is given.
+resolves them into `tools/bazel/exec_sizes.bzl`, which generated BUILD files
+look up through `sized_exec_properties` / `test_batch_budget`, and
+`tools/bazel/test_batch.bzl` reserves what it is given.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import pathlib
 import re
@@ -70,9 +72,44 @@ def generated_blocks():
             yield path, block
 
 
+def exec_sizes() -> dict[str, dict[str, dict[str, int]]]:
+    """The generated `exec_sizes.bzl` tables, exactly as BUILD files see them."""
+    text = (ROOT / "tools/bazel/exec_sizes.bzl").read_text(encoding="utf-8")
+    return {
+        name: ast.literal_eval(re.search(rf"{name} = (\{{.*?\n\}})", text, re.S).group(1))
+        for name in (
+            "COMPILE_REQUESTS",
+            "TEST_RUN_REQUESTS",
+            "BATCH_BUDGETS",
+            "DEFAULT_TEST_RUN",
+            "DEFAULT_BATCH_BUDGET",
+        )
+    }
+
+
 def properties_of(block: str) -> dict[str, str]:
-    match = re.search(r"exec_properties = (\{[^}]*\})", block)
-    return json.loads(match.group(1)) if match else {}
+    """The `exec_properties` a generated block resolves through exec_sizes.bzl."""
+    match = re.search(r"exec_properties = sized_exec_properties\(([^)]*)\)", block)
+    if not match:
+        return {}
+    arguments = [json.loads(argument) for argument in match.group(1).split(", ")]
+    tables = exec_sizes()
+    properties = {
+        key: str(value)
+        for key, value in tables["COMPILE_REQUESTS"]
+        .get(f"{arguments[0]}/{arguments[1]}", {})
+        .items()
+    }
+    if len(arguments) == 3:
+        run = tables["TEST_RUN_REQUESTS"].get(
+            arguments[2],
+            tables["TEST_RUN_REQUESTS"].get(
+                arguments[2].split("__fv_", 1)[0], tables["DEFAULT_TEST_RUN"]
+            ),
+        )
+        properties["test.cpu_count"] = str(run["cpu_count"])
+        properties["test.memory_kb"] = str(run["memory_kb"])
+    return properties
 
 
 class CollectTest(unittest.TestCase):
@@ -541,6 +578,77 @@ class TestRunRequestTest(unittest.TestCase):
                     )
 
 
+class ExecSizesFallbackTest(unittest.TestCase):
+    """A label `exec_sizes.bzl` predates resolves the default, not a failure.
+
+    Two PRs that each add a target merge into BUILD files whose labels the
+    checked-in table does not carry; the lookups fall back so main's
+    analysis survives the window, and `--check` -- which regenerates and
+    byte-compares every generated file -- is what catches the drift in CI.
+    """
+
+    def test_a_missing_run_label_resolves_the_unmeasured_default(self) -> None:
+        tables = exec_sizes()
+        self.assertEqual(tables["DEFAULT_TEST_RUN"], generator.UNMEASURED_TEST_RUN)
+        label = "//no/such:never_generated__test"
+        self.assertNotIn(label, tables["TEST_RUN_REQUESTS"])
+        properties = properties_of(
+            "lash_rust_unit_test(\n"
+            '    exec_properties = sized_exec_properties("no-such-package", '
+            f'"no_such_crate", {json.dumps(label)}),\n'
+            ")"
+        )
+        self.assertEqual(
+            properties,
+            {
+                "test.cpu_count": str(generator.UNMEASURED_TEST_RUN["cpu_count"]),
+                "test.memory_kb": str(generator.UNMEASURED_TEST_RUN["memory_kb"]),
+            },
+        )
+
+    def test_a_missing_variant_label_inherits_its_base_row(self) -> None:
+        # The generator resolves a `__fv_` variant through its base label;
+        # the fallback keeps that rule for a variant the table predates.
+        tables = exec_sizes()
+        base = next(
+            label for label in tables["TEST_RUN_REQUESTS"] if "__fv_" not in label
+        )
+        row = tables["TEST_RUN_REQUESTS"][base]
+        variant = f"{base}__fv_deadbeef"
+        self.assertNotIn(variant, tables["TEST_RUN_REQUESTS"])
+        properties = properties_of(
+            "lash_rust_feature_test(\n"
+            '    exec_properties = sized_exec_properties("pkg", "crate", '
+            f"{json.dumps(variant)}),\n"
+            ")"
+        )
+        self.assertEqual(properties["test.cpu_count"], str(row["cpu_count"]))
+        self.assertEqual(properties["test.memory_kb"], str(row["memory_kb"]))
+
+    def test_a_missing_batch_label_reserves_the_unmeasured_batch_default(self) -> None:
+        # The generator's default for an unmeasured batch: its largest
+        # BATCH_JOBS members side by side, each at the unmeasured request.
+        self.assertEqual(
+            exec_sizes()["DEFAULT_BATCH_BUDGET"],
+            {
+                field: generator.BATCH_JOBS * generator.UNMEASURED_TEST_RUN[field]
+                for field in ("cpu_count", "memory_kb")
+            },
+        )
+
+    def test_the_emitted_lookups_fall_back_instead_of_indexing(self) -> None:
+        bzl = (ROOT / "tools/bazel/exec_sizes.bzl").read_text(encoding="utf-8")
+        self.assertNotIn("TEST_RUN_REQUESTS[test_label]", bzl)
+        self.assertNotIn("BATCH_BUDGETS[batch_label]", bzl)
+        self.assertIn("TEST_RUN_REQUESTS.get(", bzl)
+        self.assertIn("BATCH_BUDGETS.get(batch_label, DEFAULT_BATCH_BUDGET)", bzl)
+
+    def test_check_still_fails_on_a_stale_table(self) -> None:
+        path = ROOT / "tools/bazel/exec_sizes.bzl"
+        self.assertEqual(generator.check({path: "# not the generated content\n"}), 1)
+        self.assertEqual(generator.check({path: path.read_text(encoding="utf-8")}), 0)
+
+
 class BatchBudgetTest(unittest.TestCase):
     """A batch reserves what it runs, and runs no more than it reserves."""
 
@@ -621,10 +729,14 @@ class BatchBudgetTest(unittest.TestCase):
             seen += 1
             with self.subTest(path=str(path)):
                 self.assertIn(f"    jobs = {generator.BATCH_JOBS},\n", block)
-                cpu = int(re.search(r"    cpu_count = (\d+),", block).group(1))
-                memory_kb = int(re.search(r"    memory_kb = (\d+),", block).group(1))
+                label = json.loads(
+                    re.search(r"budget = test_batch_budget\(([^)]*)\)", block).group(1)
+                )
+                budget = exec_sizes()["BATCH_BUDGETS"][label]
+                cpu = budget["cpu_count"]
+                memory_kb = budget["memory_kb"]
                 package = path.parent.relative_to(ROOT).as_posix()
-                label = f"//{package}:test_batch"
+                self.assertEqual(label, f"//{package}:test_batch")
                 row = generator.TEST_RUN_SIZES.get(label) or generator.PINNED_TEST_RUNS.get(label)
                 if row is not None:
                     # A priced batch reserves its row or pin, lifted only by
@@ -639,8 +751,8 @@ class BatchBudgetTest(unittest.TestCase):
 
     def test_the_rule_reserves_what_it_is_given_and_runs_jobs_at_once(self) -> None:
         bzl = (ROOT / "tools/bazel/test_batch.bzl").read_text(encoding="utf-8")
-        self.assertIn('"test.cpu_count": str(cpu_count)', bzl)
-        self.assertIn('"test.memory_kb": str(memory_kb)', bzl)
+        self.assertIn('"test.cpu_count": str(budget["cpu_count"])', bzl)
+        self.assertIn('"test.memory_kb": str(budget["memory_kb"])', bzl)
         self.assertIn("jobs = jobs", bzl)
         self.assertIn("export LASH_BATCH_JOBS={jobs}", bzl)
         runner = (ROOT / "tools/bazel/test_batch_runner.sh").read_text(encoding="utf-8")

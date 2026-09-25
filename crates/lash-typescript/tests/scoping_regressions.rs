@@ -58,7 +58,7 @@ fn unresolved_reads_and_arguments_reject_before_execution() {
         .expect_err("top-level arguments must direct authors to rest parameters");
     assert_eq!(
         arguments.code,
-        lash_typescript::DiagnosticCode::ThisUnsupported
+        lash_typescript::DiagnosticCode::ArgumentsUnsupported
     );
     assert!(arguments.to_string().contains("...rest"), "{arguments}");
 }

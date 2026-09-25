@@ -272,7 +272,6 @@ fn base_builder(backend: &Arc<dyn lash_core::Backend>) -> LashCoreBuilder {
         crate::rlm::RlmProtocolPluginConfig::builder()
             .channel(crate::rlm::RlmChannel::Cell)
             .instruction_limit(crate::rlm::InstructionBound::instructions(1_000_000))
-            .wall_clock(crate::rlm::WallClockBound::secs(30))
             .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(rebuild_abilities()),

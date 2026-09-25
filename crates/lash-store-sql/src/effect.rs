@@ -11,7 +11,8 @@ pub mod replay;
 pub mod scope_retirement;
 
 crate::statements! {
-    /// Journal-wide reads both backends issue verbatim.
+    /// Journal-wide reads SQLite's effect journal issues (PostgreSQL journals
+    /// no effects, ADR 0104).
     ///
     /// [`EffectJournalStatements::scope_is_quiescent`] also reads
     /// [`crate::wait::waits`]: quiescence is the one question whose answer

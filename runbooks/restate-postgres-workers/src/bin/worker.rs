@@ -423,7 +423,7 @@ impl AppState {
     }
 
     /// The frame-switch turn killed before its switch commits and recovered by
-    /// Restate redelivery: the worker exits once, as the switched turn enters
+    /// Restate redelivery: the worker exits once, as the original turn enters
     /// its effect loop, and the redelivered invocation replays what the
     /// journal holds and runs on, so the provider sees each physical turn
     /// once. The kill after the switch commits is parked on FIG-3788: a
@@ -926,9 +926,9 @@ fn prompt_for_request(request: &TurnRequest) -> String {
     }
 }
 
-/// Exits the worker once, as the switched turn enters its effect loop: the
-/// first effect loop of the invocation, before any commit. A redelivered
-/// invocation finds the exit taken and runs through.
+/// Exits the worker once, at the invocation's first effect loop: the
+/// original turn's, before the switch commits. A redelivered invocation finds
+/// the exit taken and runs through.
 struct FrameCrashProbe {
     pool: sqlx::PgPool,
     workflow_id: String,

@@ -462,7 +462,15 @@ impl SqliteProcessRegistry {
                 process_status_label(record),
                 record.last_event_sequence as i64,
                 cancel_requested_at_ms(record),
-                process_encode_json(record)?
+                process_encode_json(record)?,
+                record
+                    .park
+                    .as_deref()
+                    .map(|park| crate::clamp_epoch_ms(park.since_ms)),
+                record
+                    .park
+                    .as_deref()
+                    .map(|park| park.reason.code().as_str())
             ],
         )
         .map_err(process_sqlite_error)?;
@@ -623,8 +631,21 @@ impl SqliteProcessRegistry {
                     ],
                 )
                 .map_err(process_sqlite_error)?;
+                let park_transitions = lash_core_execution::runtime::process_park_transitions(
+                    record.park.as_deref(),
+                    &projected_record,
+                );
                 *record = projected_record;
                 Self::save_process_conn(conn, record)?;
+                // The park feed rides the event's own transaction (FIG-3659
+                // NOW-B): a park that opened or closed here is durable in the
+                // feed exactly when the fact that moved it is.
+                super::park_feed::log_process_park_transitions_conn(
+                    conn,
+                    &record.park_key(),
+                    &park_transitions,
+                    occurred_at_ms,
+                )?;
                 // A process that just reached a terminal status is an ended
                 // parent scope: its ledger row rides the same transaction as
                 // the terminal append, so no child can be stranded by a crash

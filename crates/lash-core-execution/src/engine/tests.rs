@@ -133,10 +133,6 @@ macro_rules! test_engine {
                 $op::now(Ok(EpochMs(0)))
             }
 
-            fn version(&self, _change: &'static ChangeId, supported: VersionRange) -> Self::Op<'_, u32> {
-                $op::now(Ok(supported.max()))
-            }
-
             fn observe(&self, observation: DriveObservation) {
                 self.with(|script| script.log.push(format!("observe:{}", observation.key)));
             }
@@ -592,17 +588,6 @@ fn the_revoked_session_cancels_the_step() {
 
     assert_eq!(settled, Settled::Revoked);
     assert_eq!(cx.log(), ["step:step-1", "dispose:CancelRequested"]);
-}
-
-#[test]
-fn version_decisions_record_the_newest_supported_version() {
-    static CHANGE: ChangeId = ChangeId::new("engine-contract-test");
-    const RANGE: VersionRange = VersionRange::new(1, 3);
-
-    let cx = LocalTestCx::new(Script::default());
-    assert_eq!(run(cx.version(&CHANGE, RANGE)), Ok(3));
-    assert!(RANGE.contains(2));
-    assert!(!RANGE.contains(4));
 }
 
 #[test]

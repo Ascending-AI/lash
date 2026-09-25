@@ -832,14 +832,23 @@ async fn registration_reinstates_every_bound_host(kind: Kind) {
     let Some(backend) = backend(kind).await else {
         return;
     };
-    let _core = core_over(Arc::clone(&backend.backend));
+    reinstates_every_bound_host(Arc::clone(&backend.backend), backend.registry).await;
+}
+
+/// A registration lifts the fence of every host bound to the registry,
+/// including one whose fence lives outside the registry's store.
+async fn reinstates_every_bound_host(
+    backend: Arc<dyn lash::Backend>,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+) {
+    let _core = core_over(backend);
     // A host whose fence lives outside this registry's store: another
     // backend's journal, bound to the registry by hand.
     let other_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("another memory backend");
     let other: Arc<dyn EffectHost> = other_backend.effect_host();
-    backend.registry.bind_effect_host(&other);
+    registry.bind_effect_host(&other);
     let process_id = "reused-across-hosts";
     other
         .retire_effect_journal(lash::durability::EffectJournalRetirement::process(
@@ -856,14 +865,13 @@ async fn registration_reinstates_every_bound_host(kind: Kind) {
         .await,
         Err(lash_core::RuntimeErrorCode::EffectScopeRetired)
     );
-    backend
-        .registry
+    registry
         .register_process(external_registration(&ProcessId::from(process_id)))
         .await
         .expect("register the id");
     admission(
         other.as_ref(),
-        &record_admission(backend.registry.as_ref(), &ProcessId::from(process_id)).await,
+        &record_admission(registry.as_ref(), &ProcessId::from(process_id)).await,
         "after-registration",
     )
     .await

@@ -107,7 +107,12 @@ pub struct LiveAttempt {
     /// polls the endpoint.
     start_gate: Option<oneshot::Sender<()>>,
     pub probe: Arc<InputProbe>,
-    pub abort: Option<tokio::task::AbortHandle>,
+    /// The attempt's task: aborted to stop it, joined to know it stopped.
+    /// Tokio drops an aborted task only at its next yield, so a poll in
+    /// flight — a replay, say, that resolves every step inline — runs to
+    /// its end first; callers that must not be overtaken by that last poll
+    /// take the handle and await it.
+    pub task: Option<tokio::task::JoinHandle<()>>,
     /// The journal index of the first notification stored after the input
     /// closed: from there on, the attempt has not seen the journal.
     pub unseen_from: Option<usize>,
@@ -124,7 +129,7 @@ impl LiveAttempt {
         number: u32,
         input: Option<mpsc::UnboundedSender<Bytes>>,
         probe: Arc<InputProbe>,
-        abort: tokio::task::AbortHandle,
+        task: tokio::task::JoinHandle<()>,
         start_gate: Option<oneshot::Sender<()>>,
     ) -> Self {
         Self {
@@ -135,7 +140,7 @@ impl LiveAttempt {
             held: Vec::new(),
             start_gate,
             probe,
-            abort: Some(abort),
+            task: Some(task),
             unseen_from: None,
             starved_since_ms: None,
         }

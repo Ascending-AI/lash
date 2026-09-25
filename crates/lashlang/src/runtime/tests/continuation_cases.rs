@@ -466,7 +466,6 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
         profile: None,
         pending_error_span: None,
         instructions_executed: 0,
-        active_execution_elapsed: std::time::Duration::ZERO,
         heap: VmHeapContinuation::default(),
     };
     let host = Host;
@@ -749,7 +748,7 @@ impl ExecutionHost for BoundedContinuationHost {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn continuation_resume_accounts_for_pre_park_instruction_and_time_meters() {
+async fn continuation_resume_accounts_for_the_pre_park_instruction_meter() {
     // `i = 0` / `while i < 5000 { i = i + 1 }` / `finish i`
     let program = compile_program_for_tests(long_counting_loop_program());
     let host = Host;
@@ -762,30 +761,13 @@ async fn continuation_resume_accounts_for_pre_park_instruction_and_time_meters()
     );
     let continuation = vm.suspend().expect("continuation should capture");
     assert_eq!(continuation.instructions_executed, 1204);
-    assert!(continuation.active_execution_elapsed > std::time::Duration::ZERO);
 
     let instruction_host = BoundedContinuationHost {
-        bounds: ExecutionBounds::new(
-            ExecutionBound::instructions(602),
-            ExecutionBound::Unbounded,
-            ExecutionBound::Unbounded,
-        ),
+        bounds: ExecutionBounds::new(ExecutionBound::instructions(602), ExecutionBound::Unbounded),
     };
     assert!(matches!(
-        Vm::resume_from(continuation.clone(), &program, &instruction_host),
+        Vm::resume_from(continuation, &program, &instruction_host),
         Err(ContinuationError::InstructionBudgetExceeded { limit: 602 })
-    ));
-
-    let deadline_host = BoundedContinuationHost {
-        bounds: ExecutionBounds::new(
-            ExecutionBound::Unbounded,
-            ExecutionBound::millis(0),
-            ExecutionBound::Unbounded,
-        ),
-    };
-    assert!(matches!(
-        Vm::resume_from(continuation, &program, &deadline_host),
-        Err(ContinuationError::ExecutionDeadlineExceeded { limit_ms: 0 })
     ));
 }
 
@@ -1206,10 +1188,7 @@ async fn determinism_process_probe() {
     let mut vm = Vm::from_state(&program, &mut state, &host).expect("state should install");
     let outcome = vm.run_for_mode().await.expect("probe should execute");
     assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
-    let mut continuation = vm.suspend().expect("probe should suspend");
-    // Active wall time is intentionally nondeterministic (ADR-0055); normalize
-    // only that field so the cross-process probe compares the VM/heap wire.
-    continuation.active_execution_elapsed = std::time::Duration::ZERO;
+    let continuation = vm.suspend().expect("probe should suspend");
     assert!(continuation.heap.allocation_counter() > 1_024);
     assert!(continuation.heap.live_object_count() > 3);
     assert!(continuation.heap.swept_object_count() > 0);

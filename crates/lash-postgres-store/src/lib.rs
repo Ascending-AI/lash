@@ -535,8 +535,9 @@ const SCHEMA_VERSION: i32 = 132;
 #[derive(Clone)]
 pub struct PostgresStorage {
     pool: PgPool,
-    /// The catalog this storage opened: `<database>.<schema>`, the identity a
-    /// session catalog registers under with its turn-cancel-closure owner.
+    /// The random identity of the catalog this storage opened, from
+    /// `lash_catalog_identity`: what a session catalog registers under with
+    /// its turn-cancel-closure owner.
     catalog_id: Arc<str>,
 }
 
@@ -766,8 +767,8 @@ impl PostgresStorage {
     ///
     /// This testing-only seam exists so the performance harness can subtract the
     /// structural catalog gate from an otherwise identical open. It still checks
-    /// the unconditional component-version boundary; only structural
-    /// verification is skipped.
+    /// the unconditional component-version boundary and the catalog-identity
+    /// data precondition; only structural verification is skipped.
     #[cfg(feature = "testing")]
     pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
         let found_version: Option<i32> =
@@ -781,7 +782,8 @@ impl PostgresStorage {
         }
         let catalog_id = crate::schema::read_catalog_id(&pool)
             .await
-            .map_err(store_sqlx_error)?;
+            .map_err(store_sqlx_error)?
+            .ok_or_else(crate::schema::missing_catalog_identity_error)?;
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
@@ -801,11 +803,15 @@ impl PostgresStorage {
         SCHEMA_DDL
     }
 
-    /// The DDL that drops every lash-owned object, committed verbatim as
-    /// `crates/lash-postgres-store/teardown.sql` — the counterpart a host
-    /// applies at the reject-and-recreate boundary when [`open`][Self::open]
-    /// refuses an incompatible component stamp and prescribes recreating the
-    /// schema.
+    /// The DDL that drops every object this build provisions, committed
+    /// verbatim as `crates/lash-postgres-store/teardown.sql`.
+    ///
+    /// It names this build's objects only. An older build's catalog can hold
+    /// tables this build no longer declares (component 132 retired the effect
+    /// engine's tables), so at the reject-and-recreate boundary, when
+    /// [`open`][Self::open] refuses an incompatible component stamp, drop the
+    /// schema lash owns (`DROP SCHEMA ... CASCADE`) or recreate the database
+    /// rather than applying this to the older catalog.
     ///
     /// The file is generated from the same object list [`schema_ddl`][Self::schema_ddl]
     /// declares, so a future table, or a future non-table object, cannot be
@@ -850,13 +856,12 @@ impl PostgresStorage {
 
     /// Constructing a [`PostgresStorage`] is strictly harder than verifying one:
     /// open additionally insists on a matching component version stamp and a
-    /// usable await-event signing secret, and either of those can be exactly what
+    /// catalog identity row, and either of those can be exactly what
     /// a host's migration produced wrongly. A check reachable only through a
     /// successful open could therefore not describe the databases it exists to
     /// describe, so this form needs no receiver and no successful open — it
-    /// reports every version, structural, and seed-row finding, including a
-    /// signing secret seeded at the wrong width, and returns them rather than
-    /// failing.
+    /// reports every version, structural, and seed-row finding, and returns
+    /// them rather than failing.
     ///
     /// Acquires [`PostgresStorage::schema_advisory_lock_key`] in shared mode and
     /// then reads inside one `REPEATABLE READ` transaction, so every `pg_catalog`

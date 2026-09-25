@@ -727,6 +727,13 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     // prices heap objects under schedule 3 (FIG-3655 closure metadata).
     fixture["segment_state"]["vm"]["heap"]["size_schedule_version"] =
         serde_json::json!(lashlang::HEAP_SIZE_SCHEDULE_VERSION);
+    // The predecessor parked a wall-clock meter; the current envelope carries
+    // no deadline meter at all (FIG-3672), so the field is dead rather than
+    // re-valued.
+    fixture["segment_state"]["vm"]
+        .as_object_mut()
+        .expect("the parked VM is an object")
+        .remove("active_execution_elapsed");
     fixture["segment_state"]["effect_omissions"] = serde_json::json!({});
     // The predecessor held no effect group across its boundary; the current
     // envelope states that explicitly (ADR 0099 §9).

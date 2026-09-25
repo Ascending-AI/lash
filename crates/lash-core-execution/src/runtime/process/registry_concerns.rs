@@ -166,6 +166,30 @@ pub trait ProcessQuery: Send + Sync {
     /// drain read. Durable backends should override it with an indexed count
     /// over their authoritative status rows rather than hydrating records.
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError>;
+
+    /// The deployment's parked processes (FIG-3659 NOW-B) as one keyset page
+    /// in `(park since_ms, process key)` order, filtered by reason code and
+    /// age. Answered from the store's parked projection, never by decoding
+    /// every record.
+    async fn list_parked_processes(
+        &self,
+        query: &crate::store::ProcessParkQuery,
+    ) -> Result<Vec<ProcessRecord>, PluginError>;
+
+    /// The process park feed strictly after `after`, at most `limit` events
+    /// in commit order (FIG-3659 NOW-B): the durable transition ledger every
+    /// park, and every fact that ends one, appends to in the event's own
+    /// transaction. A cursor below the compaction horizon is refused
+    /// [`PluginError::ProcessParkFeedCursorCompacted`].
+    async fn process_park_feed(
+        &self,
+        after: crate::store::ParkFeedCursor,
+        limit: NonZeroUsize,
+    ) -> Result<crate::store::ParkFeedPage<crate::store::ProcessParkKey>, PluginError>;
+
+    /// Live process parks per reason code and the oldest one's `since_ms`,
+    /// for drain and the parked-work gauges.
+    async fn summarize_parked_processes(&self) -> Result<crate::store::ParkSummary, PluginError>;
 }
 
 /// Process admission: registration and the durable external backend reference.
@@ -698,6 +722,31 @@ pub trait ProcessLifecycle: Send + Sync {
         process_id: &ProcessId,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
+
+    /// Park the process whose body refused to replay its journal (FIG-3659
+    /// NOW-B, [`ProcessTransition::Park`](super::ProcessTransition::Park)):
+    /// non-terminal, no terminal evidence, holding what it holds. A first
+    /// refusal opens the park and appends `Parked` to the process park feed
+    /// in the same transaction; a rerun's refusal re-parks it (`attempts +=
+    /// 1`, `since_ms` and `park_id` kept) with no feed event; a park whose
+    /// latest run already refused is returned unchanged.
+    async fn park_process_with_authority(
+        &self,
+        process_id: &ProcessId,
+        reason: crate::store::ParkReason,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, PluginError>;
+
+    /// Record that a rerun of the parked process began
+    /// ([`ProcessTransition::BeginParkedRerun`](super::ProcessTransition::BeginParkedRerun)):
+    /// the park stays listed and writes no feed event, but no longer exempts
+    /// the process's next start from its attempt budget. Unchanged when the
+    /// process has no refusing park.
+    async fn begin_parked_rerun_with_authority(
+        &self,
+        process_id: &ProcessId,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, PluginError>;
 }
 
 /// Durable tool-intent submission admission and settlement.
@@ -898,6 +947,15 @@ pub trait ProcessRetention: Send + Sync {
         trigger_store: Option<&dyn crate::TriggerStore>,
     ) -> Result<usize, PluginError>;
 
+    /// Drop process park feed events at or below `through` and raise the
+    /// feed's compaction horizon to it, so a later read from a cursor below
+    /// it is refused typed rather than silently partial. Host-gated, like
+    /// tombstone compaction.
+    async fn compact_process_park_feed(
+        &self,
+        through: crate::store::ParkFeedCursor,
+    ) -> Result<(), PluginError>;
+
     /// Physically delete terminal process rows whose `updated_at_ms` is older
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
     /// process change sequence allowed by the caller's explicit projection
@@ -1040,6 +1098,24 @@ pub trait ProcessClockRebind: Send + Sync {
 ///         unimplemented!()
 ///     }
 ///     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn list_parked_processes(
+///         &self,
+///         _: &lash_core::store::ProcessParkQuery,
+///     ) -> Result<Vec<ProcessRecord>, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn process_park_feed(
+///         &self,
+///         _: lash_core::store::ParkFeedCursor,
+///         _: NonZeroUsize,
+///     ) -> Result<lash_core::store::ParkFeedPage<lash_core::store::ProcessParkKey>, PluginError> {
+///         unimplemented!()
+///     }
+///     async fn summarize_parked_processes(
+///         &self,
+///     ) -> Result<lash_core::store::ParkSummary, PluginError> {
 ///         unimplemented!()
 ///     }
 /// }

@@ -243,7 +243,7 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
     let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
         panic!("awaiting parent must receive the child's typed failure")
     };
-    assert_eq!(failure.code, "restate_service_unregistered");
+    assert_eq!(failure.code, "engine_service_unregistered");
     assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     assert_eq!(
         registry
@@ -394,7 +394,7 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
 pub(super) fn runtime_handler_error_classification_keeps_restate_ingress_retryable() {
     let error = handler_error_from_plugin(lash_core::PluginError::Runtime(
         lash_core::RuntimeError::new(
-            lash_core::RuntimeErrorCode::RestateProcessIngressSubmit,
+            lash_core::RuntimeErrorCode::EngineProcessIngressSubmit,
             "process workflow ingress is temporarily unavailable",
         ),
     ));
@@ -420,7 +420,7 @@ pub(super) fn ingress_submit_maps_an_unregistered_service_to_the_terminal_code()
     };
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateServiceUnregistered
+        lash_core::RuntimeErrorCode::EngineServiceUnregistered
     );
     assert!(!error.code.is_retryable());
 
@@ -437,7 +437,7 @@ pub(super) fn ingress_submit_maps_an_unregistered_service_to_the_terminal_code()
     };
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateProcessIngressSubmit
+        lash_core::RuntimeErrorCode::EngineProcessIngressSubmit
     );
     assert!(error.code.is_retryable());
 }
@@ -449,7 +449,7 @@ pub(super) fn runtime_handler_error_classification_makes_unregistered_service_te
     // retryable ingress class above.
     let error = handler_error_from_plugin(lash_core::PluginError::Runtime(
         lash_core::RuntimeError::new(
-            lash_core::RuntimeErrorCode::RestateServiceUnregistered,
+            lash_core::RuntimeErrorCode::EngineServiceUnregistered,
             "no deployment binds LashProcessWorkflow/run",
         ),
     ));

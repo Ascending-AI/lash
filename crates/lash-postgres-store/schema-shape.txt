@@ -59,6 +59,10 @@ table lash_blobs
   column content bytea not-null
   column hash text not-null
   primary-key (hash)
+table lash_catalog_identity
+  column catalog_id text not-null
+  column singleton boolean not-null default
+  primary-key (singleton)
 table lash_checkpoint_blob_refs
   column blob_ref text not-null
   column checkpoint_ref text not-null
@@ -179,6 +183,71 @@ table lash_process_observers
   column session_id text not-null
   primary-key (session_id, process_id, process_incarnation)
   foreign-key (process_id, process_incarnation) references lash_processes (process_id, incarnation) on delete cascade
+table lash_process_park_clock
+  column compaction_horizon bigint not-null default
+  column current_seq bigint not-null default
+  column singleton boolean not-null default
+  primary-key (singleton)
+table lash_process_park_events
+  column at_ms bigint not-null
+  column cause text nullable
+  column kind text not-null
+  column park_id bigint not-null
+  column process_id text not-null
+  column reason_json text nullable
+  payload-shape lash_process_park_events.reason_json ParkReason
+    shape /oneOf/tag:type=string:%22binding_drift%22/branch schema
+    shape /oneOf/tag:type=string:%22binding_drift%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22binding_drift%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22binding_drift%22/properties/type/enum-values ["binding_drift"]
+    shape /oneOf/tag:type=string:%22binding_drift%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22binding_drift%22/required/message field
+    shape /oneOf/tag:type=string:%22binding_drift%22/required/type field
+    shape /oneOf/tag:type=string:%22binding_drift%22/type object
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/branch schema
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/effect_kind/type string
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/enum-values ["effect_replay_divergence"]
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/effect_kind field
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
+    shape /oneOf/tag:type=string:%22effect_replay_divergence%22/type object
+    shape /oneOf/tag:type=string:%22key_format_cutover%22/branch schema
+    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-values ["key_format_cutover"]
+    shape /oneOf/tag:type=string:%22key_format_cutover%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22key_format_cutover%22/required/message field
+    shape /oneOf/tag:type=string:%22key_format_cutover%22/required/type field
+    shape /oneOf/tag:type=string:%22key_format_cutover%22/type object
+    shape /oneOf/tag:type=string:%22replay_divergence%22/branch schema
+    shape /oneOf/tag:type=string:%22replay_divergence%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-values ["replay_divergence"]
+    shape /oneOf/tag:type=string:%22replay_divergence%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22replay_divergence%22/required/message field
+    shape /oneOf/tag:type=string:%22replay_divergence%22/required/type field
+    shape /oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/branch schema
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/format "uint32"
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/minimum 0.0
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/type integer
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/found/format "uint32"
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/found/minimum 0.0
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/found/type integer
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/message/type string
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/type/enum-values ["session_state_generation_refused"]
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/required/current field
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/required/found field
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/required/message field
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/required/type field
+    shape /oneOf/tag:type=string:%22session_state_generation_refused%22/type object
+  column seq bigint not-null
+  primary-key (seq)
 table lash_process_segment_handovers
   column handover_json text not-null
   column process_id text not-null
@@ -221,6 +290,8 @@ table lash_processes
   column originator_id text not-null
   column parent_scope_id text nullable
   column parent_scope_kind text not-null
+  column parked_reason_code text nullable
+  column parked_since_ms bigint nullable
   column process_id text not-null
   column record_json text not-null
   column registration_fingerprint text not-null
@@ -3027,6 +3098,57 @@ table lash_turn_parks
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/required/message field
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/required/type field
     shape /oneOf/tag:type=string:%22session_state_generation_refused%22/type object
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/branch schema
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/message/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/type/enum-types string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/type/enum-values ["binding_drift"]
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/type/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/required/message field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/required/type field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/type object
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/branch schema
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/effect_kind/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/message/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/enum-types string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/enum-values ["effect_replay_divergence"]
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/properties/type/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/effect_kind field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/message field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/required/type field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22effect_replay_divergence%22/type object
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/branch schema
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/message/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-types string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/enum-values ["key_format_cutover"]
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/properties/type/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/message field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/required/type field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22key_format_cutover%22/type object
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/branch schema
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/message/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-types string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/type/enum-values ["replay_divergence"]
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/properties/type/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/message field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/required/type field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22replay_divergence%22/type object
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/branch schema
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/format "uint32"
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/minimum 0.0
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/current/type integer
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/found/format "uint32"
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/found/minimum 0.0
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/found/type integer
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/message/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/type/enum-types string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/type/enum-values ["session_state_generation_refused"]
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/properties/type/type string
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/required/current field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/required/found field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/required/message field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/required/type field
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/oneOf/tag:type=string:%22session_state_generation_refused%22/type object
+    shape /persisted-by/postgres/lash_process_park_events.reason_json/rust-type ParkReason
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/branch schema
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/message/type string
     shape /persisted-by/postgres/lash_turn_park_events.reason_json/oneOf/tag:type=string:%22binding_drift%22/properties/type/enum-types string

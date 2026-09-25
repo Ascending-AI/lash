@@ -154,6 +154,176 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
     }
 }
 
+/// FIG-3659 NOW-B: `parked_work()` lists parked turns and parked processes
+/// as one oldest-first page set, summarizes both kinds, follows both feeds
+/// through one cursor, and `drain_status` counts the parked processes.
+#[tokio::test]
+async fn parked_work_merges_parked_turns_and_processes() {
+    let backend: Arc<dyn lash_core::Backend> = memory_backend().await;
+    let factory = backend.session_store_factory();
+    let registry = backend.process_registry();
+    let core = explicit_ephemeral_facets(
+        LashCore::standard_builder(Arc::clone(&backend), crate::TurnBudget::Unbounded)
+            .model(mock_model_spec()),
+    )
+    .build(crate::testing::runtime_lease_owner())
+    .expect("build core");
+
+    let process_id = ProcessId::from("parked-work-process");
+    registry
+        .register_process(lash_core::ProcessRegistration::new(
+            process_id.clone(),
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::Rerunnable,
+            lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        ))
+        .await
+        .expect("register the process");
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+        process_id.as_str(),
+        "parked-work-process-run",
+    )
+    .bind_attempt(1);
+    let started = authority
+        .invocation_started()
+        .expect("attempt-bound invocation has a start fact");
+    registry
+        .record_first_started_with_authority(&process_id, started, &authority)
+        .await
+        .expect("record the process start");
+    let parked_process = registry
+        .park_process_with_authority(
+            &process_id,
+            lash_core::store::ParkReason::EffectReplayDivergence {
+                effect_kind: "llm_call".to_string(),
+                message: "diverged".to_string(),
+            },
+            &authority,
+        )
+        .await
+        .expect("park the process");
+    let process_park = parked_process.park.as_deref().cloned().expect("parked");
+
+    let session_id = lash_core::SessionId::from("parked-work-turn");
+    let mut policy = lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    policy.session_id = Some(session_id.clone());
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: lash_core::SessionRelation::default(),
+            policy,
+        })
+        .await
+        .expect("create the session store");
+    // Parked at epoch 1, so the turn is the older park.
+    let turn_park = store
+        .record_turn_park(&lash_core::store::TurnParkWrite {
+            session_id: session_id.clone(),
+            turn_id: lash_core::TurnId::from("parked-turn"),
+            reason: lash_core::store::ParkReason::ReplayDivergence {
+                message: "diverged".to_string(),
+            },
+            at_ms: 1,
+        })
+        .await
+        .expect("park the turn");
+
+    let parked = core.parked_work();
+    let limit = std::num::NonZeroUsize::new(1).expect("non-zero");
+    let first = parked
+        .list(&crate::ParkedWorkQuery::all(limit))
+        .await
+        .expect("list the first page");
+    assert_eq!(
+        first
+            .records
+            .iter()
+            .map(|record| record.target.clone())
+            .collect::<Vec<_>>(),
+        vec![crate::ParkedWorkRef::Turn {
+            session_id: session_id.clone(),
+            turn_id: lash_core::TurnId::from("parked-turn"),
+        }],
+        "the older park comes first"
+    );
+    assert_eq!(first.records[0].park_id, turn_park.park_id);
+    let mut next = crate::ParkedWorkQuery::all(limit);
+    next.after = Some(first.next.clone().expect("a second page follows"));
+    let second = parked.list(&next).await.expect("list the second page");
+    assert_eq!(
+        second
+            .records
+            .iter()
+            .map(|record| (record.target.clone(), record.park_id, record.attempts))
+            .collect::<Vec<_>>(),
+        vec![(
+            crate::ParkedWorkRef::Process {
+                process_id: process_id.clone(),
+            },
+            process_park.park_id,
+            1,
+        )]
+    );
+    assert_eq!(second.next, None, "nothing follows the last park");
+
+    let summary = parked.summary().await.expect("summarize parked work");
+    assert_eq!((summary.turns.total(), summary.processes.total()), (1, 1));
+    assert_eq!(summary.oldest_since_ms(), Some(1));
+
+    let events = parked
+        .events(
+            &crate::ParkedWorkEventsCursor::initial(),
+            std::num::NonZeroUsize::new(16).expect("non-zero"),
+        )
+        .await
+        .expect("follow both park feeds");
+    assert_eq!(
+        events
+            .events
+            .iter()
+            .map(|event| (event.target.clone(), event.kind.kind_code()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                crate::ParkedWorkRef::Turn {
+                    session_id: session_id.clone(),
+                    turn_id: lash_core::TurnId::from("parked-turn"),
+                },
+                "parked"
+            ),
+            (
+                crate::ParkedWorkRef::Process {
+                    process_id: process_id.clone(),
+                },
+                "parked"
+            ),
+        ],
+        "both feeds merge by transition time"
+    );
+    let resumed = parked
+        .events(
+            &events.next,
+            std::num::NonZeroUsize::new(16).expect("non-zero"),
+        )
+        .await
+        .expect("resume both feeds");
+    assert!(resumed.events.is_empty(), "a resume repeats nothing");
+
+    let status = core.drain_status(false).await.expect("read drain status");
+    assert_eq!(status.parked_processes, 1);
+    assert_eq!(status.parked_turns, 1);
+    assert_eq!(status.oldest_parked_since_ms, Some(1));
+    let wire = serde_json::to_value(&status).expect("serialize drain status");
+    assert_eq!(wire["parked_processes"], 1);
+}
+
 #[tokio::test]
 async fn testing_facade_run_tool_executes_provider() {
     let outcome = crate::testing::run_tool(

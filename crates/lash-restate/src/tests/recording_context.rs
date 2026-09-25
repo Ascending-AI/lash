@@ -1146,9 +1146,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v13-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v13-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v13-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v14-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v14-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v14-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1194,6 +1194,7 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
     const GENERATION_FIVE: &str = "carries effect-journal generation 5;";
     const GENERATION_SIX: &str = "carries effect-journal generation 6;";
     const GENERATION_SEVEN: &str = "carries effect-journal generation 7;";
+    const GENERATION_EIGHT: &str = "carries effect-journal generation 8;";
     for (name, checked_in, refusal) in [
         (
             "v1-full-drain",
@@ -1375,6 +1376,24 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
                 .as_slice(),
             GENERATION_SEVEN,
         ),
+        (
+            "v13-mid-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v13-mid-drain.json")
+                .as_slice(),
+            GENERATION_EIGHT,
+        ),
+        (
+            "v13-mid-intent",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v13-mid-intent.json")
+                .as_slice(),
+            GENERATION_EIGHT,
+        ),
+        (
+            "v13-full-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v13-full-drain.json")
+                .as_slice(),
+            GENERATION_EIGHT,
+        ),
     ] {
         let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(checked_in)
             .expect("decode the checked-in endpoint corpus fixture");
@@ -1485,16 +1504,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v13-mid-drain",
+            "v14-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v13-mid-intent",
+            "v14-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v13-full-drain", "full_drain", full),
+        ("v14-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
@@ -1716,8 +1735,11 @@ impl ReplayableRecordingContext {
     }
 }
 
+/// A journaled step that is not a recorded effect: a process command's
+/// journaled fact, or the frontier marker a process start or a sleep
+/// journals before it acts (FIG-3779).
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
-    effect_name.ends_with(".process-cancel-admission:v1")
+    effect_name.ends_with(".process-cancel-admission:v1") || effect_name.ends_with(":frontier")
 }
 
 /// Decodes one journaled record into its recorded effect. A step whose engine

@@ -222,7 +222,6 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash_protocol_rlm::RlmChannel::Cell)
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
             &*RECOVERY_ARTIFACT_BACKEND,
@@ -1053,7 +1052,7 @@ pub(super) async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_t
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned
     );
     assert!(
         error.code.is_terminal(),
@@ -1097,7 +1096,7 @@ pub(super) async fn fig1464_over_budget_envelope_gives_up_with_a_fixed_size_pois
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned
     );
     assert!(
         error.code.is_terminal(),
@@ -1215,7 +1214,7 @@ pub(super) async fn fig1464_over_budget_group_open_gives_up_before_the_group_is_
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned,
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned,
         "the group open must give up with the process-command arm's typed failure: {}",
         error.message
     );
@@ -1265,7 +1264,7 @@ pub(super) async fn fig1464_over_budget_group_open_replay_under_a_larger_budget_
 
     assert_eq!(
         replayed.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned,
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned,
         "the replay must render the journaled give-up: {}",
         replayed.message
     );
@@ -1388,7 +1387,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             normalized_record,
-            r##"{"effect_journal_version":8,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_ref\":{\"process_id\":\"fig1767-proc\",\"incarnation\":1},\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"20d4cec599f2608d4d3b9257b9def351f9e4b193aff837496b293488474521a3"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"fig1767-proc","process_incarnation":1,"sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"fig1767-proc","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"fig1767-proc"}},"semantics":{},"occurred_at":0}}}}}"##,
+            r##"{"effect_journal_version":9,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_ref\":{\"process_id\":\"fig1767-proc\",\"incarnation\":1},\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"20d4cec599f2608d4d3b9257b9def351f9e4b193aff837496b293488474521a3"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"fig1767-proc","process_incarnation":1,"sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"fig1767-proc","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"fig1767-proc"}},"semantics":{},"occurred_at":0}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
@@ -1465,7 +1464,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
 
     assert_eq!(
         recorded_proc_err.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned
     );
 
     // Redrive process command under a larger budget — must read journaled verdict and execute nothing.
@@ -1504,7 +1503,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
 
     assert_eq!(
         replayed_proc_err.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+        lash_core::RuntimeErrorCode::EngineJournaledEffectPoisoned
     );
     assert!(
         !process_executed.load(Ordering::SeqCst),

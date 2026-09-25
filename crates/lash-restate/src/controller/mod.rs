@@ -217,7 +217,7 @@ impl From<RestateEffectError> for RuntimeEffectControllerError {
     fn from(error: RestateEffectError) -> Self {
         match error {
             RestateEffectError::Terminal { .. } => {
-                Self::new(RuntimeErrorCode::RestateEffectController, error.to_string())
+                Self::new(RuntimeErrorCode::EngineEffectController, error.to_string())
             }
             RestateEffectError::Refused(refusal) => refusal,
         }
@@ -240,7 +240,7 @@ where
         .await
         .map_err(|err| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::RestateEffectController,
+                lash_core::RuntimeErrorCode::EngineEffectController,
                 err.to_string(),
             )
         })?
@@ -416,7 +416,7 @@ where
                 .await
                 .map_err(|err| {
                     RuntimeError::new(
-                        lash_core::RuntimeErrorCode::RestateEffectController,
+                        lash_core::RuntimeErrorCode::EngineEffectController,
                         err.to_string(),
                     )
                 })?
@@ -497,7 +497,7 @@ where
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    lash_core::RuntimeErrorCode::EngineEffectController,
                     err.to_string(),
                 )
             })
@@ -519,7 +519,7 @@ where
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    lash_core::RuntimeErrorCode::EngineEffectController,
                     err.to_string(),
                 )
             })?;
@@ -528,7 +528,7 @@ where
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    lash_core::RuntimeErrorCode::EngineEffectController,
                     err.to_string(),
                 )
             })
@@ -543,7 +543,7 @@ where
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    lash_core::RuntimeErrorCode::EngineEffectController,
                     err.to_string(),
                 )
             })
@@ -558,7 +558,7 @@ where
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    lash_core::RuntimeErrorCode::EngineEffectController,
                     err.to_string(),
                 )
             })
@@ -974,7 +974,7 @@ where
                 .await
                 .map_err(|err| {
                     RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RestateProcessCancel,
+                        RuntimeErrorCode::EngineProcessCancel,
                         err.to_string(),
                     )
                 }),
@@ -1001,7 +1001,7 @@ where
             .await
             .map_err(|err| {
                 RuntimeEffectControllerError::new(
-                    RuntimeErrorCode::RestateEffectController,
+                    RuntimeErrorCode::EngineEffectController,
                     err.to_string(),
                 )
             })?;
@@ -1097,6 +1097,14 @@ where
                 local_executor.execute(envelope).await
             }
             RestateEffectExecution::Timer { invocation, spec } => {
+                // Every sleep journals its frontier marker first, so a
+                // served-only one answers there (FIG-3779).
+                live_frontier::pass_sleep_frontier(
+                    &self.context,
+                    &invocation,
+                    local_executor.served_only().as_ref(),
+                )
+                .await?;
                 let RuntimeSleepOptions {
                     cancellation: _,
                     observe_turn_cancel,
@@ -1160,7 +1168,7 @@ where
                         });
                         tracing_sleep_error(&invocation, &err);
                         return Err(RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::RestateEffectController,
+                            RuntimeErrorCode::EngineEffectController,
                             err.to_string(),
                         ));
                     }
@@ -1218,7 +1226,7 @@ where
                 .await
                 .map_err(|err| {
                     RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RestateEffectController,
+                        RuntimeErrorCode::EngineEffectController,
                         err.to_string(),
                     )
                 })?;
@@ -1283,7 +1291,7 @@ where
                             }
                         });
                         Err(RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::RestateEffectController,
+                            RuntimeErrorCode::EngineEffectController,
                             err.to_string(),
                         ))
                     }

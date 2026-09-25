@@ -19,6 +19,15 @@ pub const INSERT_COLUMNS: &str = "process_id, incarnation, registration_fingerpr
                 last_event_sequence, change_seq, status, parent_scope_kind, parent_scope_id,
                 on_parent_end, cancel_requested_at_ms, record_json";
 
+/// The parked projection's columns, written by every fold that changes the
+/// park and `NULL` at registration (FIG-3659 NOW-B).
+pub const PARKED_COLUMNS: &str = "parked_since_ms, parked_reason_code";
+
+/// The grouped read `summarize_parked` answers drain and the parked-work
+/// gauges from: each reason's live park count and its oldest `since_ms`, and
+/// none of the record's payload.
+pub const PARK_SUMMARY_COLUMNS: &str = "parked_reason_code, COUNT(*), MIN(parked_since_ms)";
+
 /// The key and the record: what a read reports when the caller needs both the
 /// row's identity and its contents.
 ///
@@ -71,10 +80,20 @@ crate::statements! {
 
         /// The identity columns are absent because none of them is mutable:
         /// a re-registration writes a new row rather than rewriting this one.
+        /// `?8`/`?9` are the parked projection: the live park's `since_ms`
+        /// and reason code, both `NULL` while the process is not parked.
         update_mutable_columns = "UPDATE processes
              SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
-                 last_event_sequence = ?5, cancel_requested_at_ms = ?6, record_json = ?7
+                 last_event_sequence = ?5, cancel_requested_at_ms = ?6, record_json = ?7,
+                 parked_since_ms = ?8, parked_reason_code = ?9
              WHERE process_id = ?1";
+
+        /// Live process parks per reason code, with each code's oldest
+        /// `since_ms`, over the parked projection's partial index.
+        summarize_parked = "SELECT parked_reason_code, COUNT(*), MIN(parked_since_ms)
+             FROM processes
+             WHERE parked_since_ms IS NOT NULL
+             GROUP BY parked_reason_code";
 
         /// Every live process, whole. The unpaged read behind the in-memory
         /// worklist rebuild; the paged worklist scans are dialect-only because

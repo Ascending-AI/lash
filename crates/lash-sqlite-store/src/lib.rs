@@ -1173,10 +1173,13 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
 
     async fn turn_park_feed(
         &self,
-        after: lash_core_execution::store::TurnParkFeedCursor,
+        after: lash_core_execution::store::ParkFeedCursor,
         limit: std::num::NonZeroUsize,
-    ) -> Result<lash_core_execution::store::TurnParkFeedPage, StoreError> {
-        let mut page = lash_core_execution::store::TurnParkFeedPage {
+    ) -> Result<
+        lash_core_execution::store::ParkFeedPage<lash_core_execution::store::TurnParkTarget>,
+        StoreError,
+    > {
+        let mut page = lash_core_execution::store::ParkFeedPage {
             events: Vec::new(),
             next: after,
         };
@@ -1208,7 +1211,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                     return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
                         StoreError::ParkFeedCursorCompacted {
                             horizon:
-                                lash_core_execution::store::TurnParkFeedCursor::from_store_sequence(
+                                lash_core_execution::store::ParkFeedCursor::from_store_sequence(
                                     u64::try_from(horizon).unwrap_or_default(),
                                 ),
                         },
@@ -1237,23 +1240,24 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .await
             .map_err(sqlite_error)?;
         for (seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms) in rows {
-            let kind = lash_core_execution::store::TurnParkEventKind::decode_columns(
+            let kind = lash_core_execution::store::ParkEventKind::decode_columns(
                 &kind,
                 cause.as_deref(),
                 reason_json.as_deref(),
             )?;
-            page.events
-                .push(lash_core_execution::store::TurnParkFeedEvent {
-                    seq: u64::try_from(seq).unwrap_or_default(),
-                    at_ms: u64::try_from(at_ms).unwrap_or_default(),
+            page.events.push(lash_core_execution::store::ParkFeedEvent {
+                seq: u64::try_from(seq).unwrap_or_default(),
+                at_ms: u64::try_from(at_ms).unwrap_or_default(),
+                target: lash_core_execution::store::TurnParkTarget {
                     session_id: SessionId::from(session_id),
                     turn_id: lash_sansio::TurnId::from(turn_id),
-                    park_id: lash_core_execution::store::ParkId::from_feed_sequence(
-                        u64::try_from(park_id).unwrap_or_default(),
-                    ),
-                    kind,
-                });
-            page.next = lash_core_execution::store::TurnParkFeedCursor::from_store_sequence(
+                },
+                park_id: lash_core_execution::store::ParkId::from_feed_sequence(
+                    u64::try_from(park_id).unwrap_or_default(),
+                ),
+                kind,
+            });
+            page.next = lash_core_execution::store::ParkFeedCursor::from_store_sequence(
                 u64::try_from(seq).unwrap_or_default(),
             );
         }
@@ -1262,7 +1266,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
 
     async fn compact_turn_park_feed(
         &self,
-        through: lash_core_execution::store::TurnParkFeedCursor,
+        through: lash_core_execution::store::ParkFeedCursor,
     ) -> Result<(), StoreError> {
         if !self.core.target().exists() {
             return Ok(());

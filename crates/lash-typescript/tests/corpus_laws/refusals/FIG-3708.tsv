@@ -1,0 +1,9 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+differential:FIG-3708:4	generated binding `__typescript_stdlib` has no authored TypeScript spelling	an `arguments` mention inside a non-arrow function lowers to the Lash.Arguments stdlib call, which the lens printer does not re-sugar
+differential:FIG-3708:5	generated binding `__typescript_stdlib` has no authored TypeScript spelling	an `arguments` mention inside a non-arrow function lowers to the Lash.Arguments stdlib call, which the lens printer does not re-sugar
+differential:FIG-3708:6	generated binding `__typescript_stdlib` has no authored TypeScript spelling	an `arguments` mention inside a non-arrow function lowers to the Lash.Arguments stdlib call, which the lens printer does not re-sugar
+differential:FIG-3708:7	generated binding `__typescript_stdlib` has no authored TypeScript spelling	an `arguments` mention inside an arrow lowers to the Lash.Arguments stdlib call, which the lens printer does not re-sugar

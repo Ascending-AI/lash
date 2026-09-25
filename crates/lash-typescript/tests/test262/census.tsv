@@ -215,6 +215,7 @@ flag	onlyStrict	accepted	-	-
 flag	raw	skip	ticket-ruling:FIG-3646:the dialect is strict-mode only (ADR 0062: every cell is one strict script), and Test262 runs a raw test once, in non-strict mode only	-
 typescript	accessors	rejected	TS_ACCESSOR_UNSUPPORTED	const o = { get x() { return 1; } };
 typescript	annotations	accepted	-	-
+typescript	arguments	rejected	TS_ARGUMENTS_UNSUPPORTED	const x = arguments;
 typescript	array-holes	rejected	TS_SPARSE_ARRAY_UNSUPPORTED	const a = [1]; a[3] = 9;
 typescript	array-index-delete	rejected	TS_DELETE_ARRAY_INDEX_UNSUPPORTED	const a = [1, 2]; delete a[0];
 typescript	array-literal-elisions	accepted	-	-

@@ -16,28 +16,32 @@ name: CI
 # CI had already seen.
 #
 # Pull requests get fast signal; the merge group gets breadth. A pull request
-# runs the core Bazel suite (`//:workspace_tests` minus its tail, plus the
-# API seal `//crates/lash:ui_fixtures` and the dev-deferred labels of every
-# package the diff touches), the workspace clippy, the feature
-# lanes (every feature variant of scripts/feature-coverage.toml compiled, plus
-# the executable lanes), the `lash-postgres-store` suites on one PostgreSQL
-# major (16) when the diff reaches that crate's closure, the live Restate
-# suites when the diff touches the Restate execution path (`restate_suites`;
-# see the selection rule in scripts/ci_plan.py), and the path-gated
-# script jobs. The merge group runs the same set on the combined tree plus
-# the test tail, the feature-lane clippy and, for a schema diff, the PG14/PG18
-# compatibility legs. Cached Bazel results mean a merge group re-executes
-# only what its combined tree changed. "CI conclusion" is the one required
-# check; scripts/ci/conclusion.py holds it to what the plan and event require.
+# runs the fast gates — lint, hygiene, the path-gated script jobs — plus the
+# Bazel targets the diff actually affects: the same label selection
+# `scripts/dev-test.py` makes locally (`scripts/ci_plan.py`
+# `pr_affected_targets`: the touched packages' dev-suite members, their
+# dev-deferred labels, the API seal `//crates/lash:ui_fixtures` on a facade
+# diff, `:all` compile proofs for packages with no selected test, and the
+# schema checks). The feature lanes join a pull request only when the diff
+# touches feature-gated code (`feature_lanes`; see the selection rule in
+# scripts/ci_plan.py). The merge group runs the full core partition, the test
+# tail, the feature-lane clippy and lanes, the selected Postgres store suites
+# and, for a schema diff, the PG14/PG18 compatibility legs. Cached Bazel
+# results mean a merge group re-executes only what its combined tree changed.
+# "CI conclusion" is the one required check; scripts/ci/conclusion.py holds
+# it to what the plan and event require.
 #
 # Manual-only gates run on `workflow_dispatch` alone, the full profile
 # release.yml certifies against, and why each stays there:
 #
-# * Test heavy suites, Test S3 store against Garage, the non-Restate
-#   Functional E2E legs, the stack budget and the PostgreSQL pool-wait,
+# * Test heavy suites, Test S3 store against Garage, every Functional E2E
+#   leg, the stack budget and the PostgreSQL pool-wait,
 #   simulator-backend-fault and cross-backend-differential steps of Test
 #   Postgres store: deferred by the 2026-08-25 CI-scope ruling for their
-#   runner cost, until the FIG-2169 test-prune sweep reassesses them.
+#   runner cost, until the FIG-2169 test-prune sweep reassesses them. The
+#   live Restate legs a pull request used to run are folded back into the
+#   dispatch: the fast board runs no E2E at all, and the affected Bazel
+#   labels cover the code paths those suites exercise.
 # * Fuzz smoke: a bounded libFuzzer run on the nightly toolchain, kept off
 #   the pull-request critical path by design (FIG-878).
 # * Test deferred Unicode suites: slow regress suites, excluded from the PR
@@ -45,8 +49,11 @@ name: CI
 # * Lashlang Git consumer: a compile configuration no other job resolves,
 #   carried by the release dispatch (FIG-2854).
 # * Worker release artifacts and the Restate + Postgres + S3 workers E2E:
-#   release builds and multi-service harnesses. A pull request opts in with
-#   the `ci:workers` label, or by touching the Restate execution path.
+#   release builds and multi-service harnesses. The `ci:workers` pull-request
+#   opt-in is retired with the rest of the PR board's breadth.
+# * Test Postgres store on a pull request: the merge group and the dispatch
+#   run every selected `lash-postgres-store` suite; a pull request covers a
+#   store diff through its affected Bazel labels instead.
 # * The PG14/PG18 compatibility legs on a non-schema diff: they compare
 #   catalog rendering, which only a schema diff can move.
 
@@ -146,6 +153,7 @@ jobs:
       functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
       restate_suites: ${{ steps.classify.outputs.restate_suites }}
+      feature_lanes: ${{ steps.classify.outputs.feature_lanes }}
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}
       facade: ${{ steps.classify.outputs.facade }}
@@ -155,6 +163,8 @@ jobs:
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
       pr_tail_labels: ${{ steps.classify.outputs.pr_tail_labels }}
+      pr_test_labels: ${{ steps.classify.outputs.pr_test_labels }}
+      pr_build_targets: ${{ steps.classify.outputs.pr_build_targets }}
       postgres_primary: ${{ steps.postgres-matrix.outputs.postgres_primary }}
       postgres_compatibility: ${{ steps.postgres-matrix.outputs.postgres_compatibility }}
       bazel_trusted: >-
@@ -238,7 +248,8 @@ jobs:
             --event "${GITHUB_EVENT_NAME}" \
             --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
 
-      # PG16 is the only major a pull request runs. PG14/PG18 run on a merge
+      # The pull-request board runs no `postgres-store` leg at all; PG16 is
+      # the primary major everywhere the job runs. PG14/PG18 run on a merge
       # group whose diff touches a durable schema crate, and on
       # workflow_dispatch. scripts/ci_plan.py owns the rule.
       - name: Resolve PostgreSQL matrix
@@ -503,6 +514,8 @@ jobs:
           python3 scripts/test_perf_duration_history_contract.py
           python3 scripts/test_ci_plan.py
           python3 scripts/test_ci_plan_hygiene.py
+          python3 scripts/test_check_upgrade_paths.py
+          python3 scripts/test_capture_release_fixtures.py
           python3 scripts/test_checkout_step.py
           python3 scripts/test_ci_workspace_cache.py
           python3 scripts/test_ci_artifact_provenance.py
@@ -604,9 +617,13 @@ jobs:
   # (`cargo tree`) and the cfg-predicate analysis are pure analysis over
   # `cargo metadata`; they cost seconds and stay where they are.
   #
-  # Every trusted event runs it, pull requests and merge groups included
-  # (FIG-3572): while it was dispatch-only, #1979 merged a feature variant
-  # that did not compile. It runs beside the Bazel partition on its own
+  # Every trusted non-PR event runs it (FIG-3572): while it was
+  # dispatch-only, #1979 merged a feature variant that did not compile. The
+  # fast pull-request board runs it only when the diff touches feature-gated
+  # code — `plan.feature_lanes`, selected by `_is_feature_gate_path` in
+  # scripts/ci_plan.py — because lane membership covers nearly the whole
+  # workspace and a lane compile proves nothing an ungated diff can move.
+  # It runs beside the Bazel partition on its own
   # runner, so it adds to a run's wall-clock only when it is the slowest job.
   # `//:feature_lanes` is the whole lane graph, so it also covers the runtime
   # OFF witness (FIG-3427) and the Restate release resolution (FIG-3610) that
@@ -618,7 +635,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: plan
-    if: needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'
+    if: >-
+      needs.plan.outputs.bazel_trusted == 'true'
+      && needs.plan.outputs.rust == 'true'
+      && (github.event_name != 'pull_request' || needs.plan.outputs.feature_lanes == 'true')
     environment: build-cache
     steps:
       - *checkout
@@ -698,10 +718,13 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
-  # The core of the deterministic/default-feature partition, on every trusted
-  # event: `//:workspace_tests` minus its long tail, plus the dev-deferred
-  # labels of the packages the diff touches. The merge group adds the
-  # tail on a parallel runner (`bazel-tests-tail`). The job
+  # The deterministic/default-feature partition, on every trusted event. A
+  # pull request runs only the targets its diff affects — the selection
+  # `scripts/dev-test.py` makes for the same diff, emitted by the plan as
+  # `pr_test_labels`/`pr_build_targets` — while the merge group and the
+  # dispatch run the core suite `//:workspace_tests` minus its long tail,
+  # plus the dev-deferred labels of the packages the diff touches. The merge
+  # group adds the tail on a parallel runner (`bazel-tests-tail`). The job
   # executes locally on a GitHub-hosted runner and only shares
   # action results with that exact runner image identity, never Kiln's executor
   # identity. Fork and Dependabot pull requests intentionally skip this
@@ -726,13 +749,49 @@ jobs:
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
+      # The pull-request leg runs the affected-target selection only: the
+      # dev-suite members of the touched packages, their `dev-deferred`
+      # labels (the tail job does not run on a pull request, so this leg is
+      # their only CI home -- #2109 changed `corpus_laws__test`'s
+      # expectations file and admin-merge carried it red), the API seal on a
+      # facade diff, a `:all` compile for each touched package with no
+      # selected test, and the schema checks. Both lists come from the plan
+      # step; a broad or fail-open plan widens them to the whole dev suite.
+      - name: Test the affected targets with shared cache
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          # shellcheck disable=SC2206
+          tests=( ${{ needs.plan.outputs.pr_test_labels }} )
+          # shellcheck disable=SC2206
+          builds=( ${{ needs.plan.outputs.pr_build_targets }} )
+          if (( ${#builds[@]} )); then
+            # shellcheck disable=SC2086
+            bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
+              ${BAZEL_SHARED_CACHE_FLAGS} \
+              --remote_download_outputs=minimal \
+              -- "${builds[@]}"
+          fi
+          if (( ${#tests[@]} )); then
+            # shellcheck disable=SC2086
+            bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
+              ${BAZEL_SHARED_CACHE_FLAGS} \
+              --remote_download_outputs=minimal \
+              --remote_download_regex='.*test\.outputs.*' \
+              --cache_test_results=yes --test_output=errors \
+              --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
+              --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
+              -- "${tests[@]}"
+          fi
+
       # Every label is deterministic and service-free; service-backed tests
-      # remain manual and scripts/ci/store-tests.sh runs them fresh. Pull
-      # requests and merge groups run the same core suite: cached test results
+      # remain manual and scripts/ci/store-tests.sh runs them fresh. Merge
+      # groups and dispatches run the whole core suite: cached test results
       # already scope a run to what the tree changed, so a reverse-dependency
       # selection saved no pool work and fell back to the full suite on four
-      # PR runs in five.
+      # runs in five.
       - name: Test the workspace core suite with shared cache
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           # The all-targets compile proof rides the Lint job instead:
@@ -1414,6 +1473,9 @@ jobs:
       - name: Check durable format registry
         run: python3 scripts/check_format_registry.py
 
+      - name: Check upgrade-path declarations
+        run: python3 scripts/check_upgrade_paths.py
+
   unicode-tests:
     name: Test deferred Unicode suites
     runs-on: ubuntu-24.04
@@ -1489,12 +1551,16 @@ jobs:
     # The stores family follows the first-party closure of
     # `lash-postgres-store` (scripts/ci_plan.py `_is_stores_path`): a diff
     # to any package its test binaries compile, to the root `fixtures/` they
-    # read, or to a SQL script runs this job; a package outside that closure
-    # (an example host, lash-sim, lash-perf) skips it. The hand list of store
+    # read, or to a SQL script selects it; a package outside that closure
+    # (an example host, lash-sim, lash-perf) does not. The hand list of store
     # crates it replaced hid FIG-3595 and FIG-3550, which were runtime
-    # changes. The simulator, pool-wait and cross-backend steps remain
-    # deferred to the manual full-profile dispatch, which runs the full matrix.
-    if: needs.plan.outputs.stores == 'true'
+    # changes. The fast pull-request board runs no live-service suite at all:
+    # a store diff's proof there is the affected Bazel labels (`bazel-tests`
+    # compiles the package and runs its service-free tests), and the merge
+    # group runs every selected suite before anything lands. The simulator,
+    # pool-wait and cross-backend steps remain deferred to the manual
+    # full-profile dispatch, which runs the full matrix.
+    if: needs.plan.outputs.stores == 'true' && github.event_name != 'pull_request'
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
     # compares the live catalog against a generated expectation artifact, so a
@@ -1562,8 +1628,9 @@ jobs:
       # process-per-test model would race the suites against each other.
       # Keep this package-wide: the integration and schema binaries are part of
       # this gate; narrowing to --test conformance would silently drop them.
-      # It runs on every event (FIG-3572): FIG-3595 and FIG-3550 broke these
-      # suites while they were dispatch-only. `integration__test` is one of
+      # It runs on the merge group and the dispatch (FIG-3572): FIG-3595 and
+      # FIG-3550 broke these suites while they were dispatch-only.
+      # `integration__test` is one of
       # its binaries, so it also covers the parent-end recovery and automatic
       # queued retry scenarios a narrower pull-request step used to filter.
       # Trusted events shard the conformance and integration binaries and run
@@ -1795,12 +1862,10 @@ jobs:
       artifact_id: ${{ steps.upload-worker-binaries.outputs.artifact-id }}
       artifact_name: ${{ steps.prepare-worker-binaries.outputs.artifact_name }}
       producer_attempt: ${{ steps.prepare-worker-binaries.outputs.producer_attempt }}
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
-      || (github.event_name == 'pull_request'
-          && needs.plan.outputs.bazel_trusted == 'true'
-          && needs.plan.outputs.restate_suites == 'true')
+    # Dispatch-only: the fast pull-request board runs no worker E2E at all,
+    # so nothing on it consumes the binaries (the retired `ci:workers` label
+    # opt-in included); the merge group never consumed them either.
+    if: github.event_name == 'workflow_dispatch'
     # Trusted events take the worker binaries from the shared build cache
     # (FIG-3666): the Cargo release build took 38 of this job's 40 minutes
     # and gated every workers and process-operations leg behind it. Untrusted
@@ -1808,7 +1873,7 @@ jobs:
     environment: build-cache
     env:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
-      RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
+      RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' }}
     steps:
       - name: Explain plan deferral
         if: env.RUN_WORKER_ARTIFACTS != 'true'
@@ -1935,25 +2000,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     needs: plan
-    # The non-Restate legs stay deferred to the manual full-profile dispatch
-    # per the 2026-08-25 CI-scope ruling; reassess after the FIG-2169
-    # test-prune sweep. A trusted pull request whose diff selects
-    # `restate_suites` runs the `restate` legs only (#2106, #2148 and #2085
-    # all reached main past a dispatch-only suite); the merge group keeps
-    # skipping the job.
-    if: >-
-      (github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true')
-      || (github.event_name == 'pull_request'
-          && needs.plan.outputs.bazel_trusted == 'true'
-          && needs.plan.outputs.restate_suites == 'true')
+    # Every leg is deferred to the manual full-profile dispatch per the
+    # 2026-08-25 CI-scope ruling; reassess after the FIG-2169
+    # test-prune sweep. The live Restate legs a trusted pull request used to
+    # run on a `restate_suites` diff (#2106, #2148 and #2085 all reached main
+    # past a dispatch-only suite) are folded back into this dispatch-only
+    # board: the pull request's proof is the affected Bazel labels, which
+    # compile the same execution path without a live service.
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
     # The live Restate suites (`restate: true`) build their test binaries from
     # the shared cache and run them here, beside pinned restate-servers that
     # scripts/ci/restate_suite.py starts (FIG-3666). A dispatch is always a
     # trusted event, so every leg may read the build-cache credentials.
     environment: build-cache
     env:
-      # A dispatch runs every leg; a pull request runs the live Restate legs.
-      RUN_FUNCTIONAL_E2E: ${{ github.event_name == 'workflow_dispatch' || matrix.restate }}
+      # A dispatch runs every leg.
+      RUN_FUNCTIONAL_E2E: 'true'
 
     strategy:
       fail-fast: false
@@ -2025,10 +2087,6 @@ jobs:
             runner: ubuntu-24.04
 
     steps:
-      - name: Explain plan deferral
-        if: env.RUN_FUNCTIONAL_E2E != 'true'
-        run: echo "This leg is not a live Restate suite; a pull request runs the Restate legs only."
-
       - name: Check out repository
         if: env.RUN_FUNCTIONAL_E2E == 'true'
         env:
@@ -2149,14 +2207,11 @@ jobs:
     timeout-minutes: 40
     needs: [plan, worker-artifacts]
     # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep — except on a
-    # trusted pull request whose diff selects `restate_suites`, which runs
-    # this leg because it drives the worker binaries on a Restate runbook.
-    if: >-
-      (github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true')
-      || (github.event_name == 'pull_request'
-          && needs.plan.outputs.bazel_trusted == 'true'
-          && needs.plan.outputs.restate_suites == 'true')
+    # ruling; reassess after the FIG-2169 test-prune sweep. The pull-request
+    # `restate_suites` exception is retired with the rest of the PR board's
+    # breadth: this leg drives the worker binaries on a Restate runbook, so
+    # it rides the same dispatch that produces them.
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
     # Its test binaries come from the shared build cache (FIG-3666); a
     # dispatch is always a trusted event.
     environment: build-cache
@@ -2256,12 +2311,10 @@ jobs:
   restate-postgres-workers:
     name: Restate + Postgres + S3 Workers (segment ${{ matrix.segment }})
     runs-on: ubuntu-24.04
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
-      || (github.event_name == 'pull_request'
-          && needs.plan.outputs.bazel_trusted == 'true'
-          && needs.plan.outputs.restate_suites == 'true')
+    # Dispatch-only: the fast pull-request board runs no workers E2E — neither
+    # the `ci:workers` label opt-in nor the `restate_suites` exception — and
+    # the merge group never ran it. The full profile is its only home.
+    if: github.event_name == 'workflow_dispatch'
     # The harness has grown to 24 workflows + turn-control gates; 30 minutes
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
     timeout-minutes: 75
@@ -2274,7 +2327,7 @@ jobs:
       segment_2_artifact_name: ${{ steps.prepare-segment-2.outputs.artifact_name }}
       segment_2_producer_attempt: ${{ steps.prepare-segment-2.outputs.producer_attempt }}
     env:
-      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
+      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -2282,12 +2335,8 @@ jobs:
 
     steps:
       - name: Explain dispatch plan deferral
-        if: github.event_name == 'workflow_dispatch' && env.RUN_WORKERS_E2E != 'true'
+        if: env.RUN_WORKERS_E2E != 'true'
         run: echo "Workers E2E execution is not required by the full-profile CI plan."
-
-      - name: Explain plan deferral
-        if: github.event_name != 'workflow_dispatch' && env.RUN_WORKERS_E2E != 'true'
-        run: echo "Workers E2E execution is not required by the CI plan."
 
       - name: Check out repository
         if: env.RUN_WORKERS_E2E == 'true'
@@ -2463,18 +2512,12 @@ jobs:
     name: Restate workers E2E coverage summary
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    if: >-
-      always()
-      && (github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
-      || (github.event_name == 'pull_request'
-          && needs.plan.outputs.bazel_trusted == 'true'
-          && needs.plan.outputs.restate_suites == 'true'))
+    if: always() && github.event_name == 'workflow_dispatch'
     needs:
       - plan
       - restate-postgres-workers
     env:
-      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
+      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' }}
 
     steps:
       - name: Check out repository
@@ -2818,5 +2861,5 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJson(needs) }}
           BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
-          WORKERS_E2E_ENABLED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
+          WORKERS_E2E_ENABLED: ${{ github.event_name == 'workflow_dispatch' }}
         run: python3 scripts/ci/conclusion.py conclusion

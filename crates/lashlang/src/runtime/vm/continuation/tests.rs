@@ -22,7 +22,6 @@ fn empty_continuation(heap: Heap) -> VmContinuation {
         profile: None,
         pending_error_span: None,
         instructions_executed: 0,
-        active_execution_elapsed: std::time::Duration::ZERO,
         heap: VmHeapContinuation::new(heap),
     }
 }

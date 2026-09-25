@@ -67,7 +67,7 @@ where
         Ok(invocation_id) => invocation_id,
         Err(failure) => {
             let submit_error = PluginError::Runtime(RuntimeError::new(
-                RuntimeErrorCode::RestateProcessIngressSubmit,
+                RuntimeErrorCode::EngineProcessIngressSubmit,
                 format!("Restate process workflow start failed: {}", failure.error()),
             ));
             // Registration already committed, so returning the error bare would

@@ -102,9 +102,6 @@ pub enum RuntimeError {
     /// RegExp execution consumed its deterministic bytecode/backtrack budget.
     #[error("regular expression execution budget of {limit} steps exceeded")]
     RegExpBudgetExceeded { limit: u64 },
-    /// Active VM execution exceeded its explicit deadline.
-    #[error("lashlang execution deadline of {limit_ms}ms exceeded")]
-    ExecutionDeadlineExceeded { limit_ms: u128 },
     /// Logical heap usage exceeded the versioned memory schedule limit.
     #[error(
         "lashlang logical memory limit of {limit} bytes exceeded (allocation would reach {attempted} bytes)"
@@ -598,7 +595,6 @@ impl RuntimeError {
             Self::GuestCoercionPending => ErrorTaxonomy::UncatchableTerminal,
             Self::InstructionBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::RegExpBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
-            Self::ExecutionDeadlineExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::MemoryLimitExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::HostCancelled => ErrorTaxonomy::UncatchableTerminal,
             Self::DanglingHeapReference { .. } => ErrorTaxonomy::Catchable,
@@ -738,7 +734,6 @@ impl RuntimeError {
             Self::GuestCoercionPending => "GuestCoercionPending",
             Self::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
             Self::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
-            Self::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
             Self::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
             Self::HostCancelled => "HostCancelled",
             Self::DanglingHeapReference { .. } => "DanglingHeapReference",
@@ -965,7 +960,6 @@ impl RuntimeError {
             self,
             Self::InstructionBudgetExceeded { .. }
                 | Self::RegExpBudgetExceeded { .. }
-                | Self::ExecutionDeadlineExceeded { .. }
                 | Self::MemoryLimitExceeded { .. }
                 | Self::FrameDepthExceeded { .. }
         )
@@ -1028,7 +1022,6 @@ mod tests {
             RuntimeError::GuestCoercionPending,
             RuntimeError::InstructionBudgetExceeded { limit: 10 },
             RuntimeError::RegExpBudgetExceeded { limit: 1_000_000 },
-            RuntimeError::ExecutionDeadlineExceeded { limit_ms: 20 },
             RuntimeError::UndefinedVariable {
                 name: "name".into(),
             },
@@ -1362,9 +1355,6 @@ mod tests {
                 RuntimeError::RegExpBudgetExceeded { .. } => {
                     "regular expression execution budget of 1000000 steps exceeded"
                 }
-                RuntimeError::ExecutionDeadlineExceeded { .. } => {
-                    "lashlang execution deadline of 20ms exceeded"
-                }
                 RuntimeError::MemoryLimitExceeded { .. } => {
                     "lashlang logical memory limit of 64 bytes exceeded (allocation would reach 128 bytes)"
                 }
@@ -1671,7 +1661,6 @@ mod tests {
     RuntimeError::GuestCoercionPending => "GuestCoercionPending",
     RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
     RuntimeError::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
-    RuntimeError::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
     RuntimeError::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
     RuntimeError::HostCancelled => "HostCancelled",
     RuntimeError::DanglingHeapReference { .. } => "DanglingHeapReference",

@@ -214,6 +214,7 @@ flag	onlyStrict
 flag	raw
 typescript	accessors
 typescript	annotations
+typescript	arguments
 typescript	array-holes
 typescript	array-index-delete
 typescript	array-literal-elisions

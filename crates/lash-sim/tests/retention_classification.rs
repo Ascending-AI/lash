@@ -71,6 +71,18 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
+        "process_park_clock",
+        PermanentlyExempt {
+            reason: "singleton monotone process park-feed sequence and compaction horizon",
+        },
+    ),
+    (
+        "process_park_events",
+        Bounded {
+            lever: "compact_process_park_feed",
+        },
+    ),
+    (
         "blobs",
         Bounded {
             lever: "gc_unreachable; session-owner blob reclaim",
@@ -387,6 +399,12 @@ const SQLITE_ONLY: &[(&str, RetentionClass)] = &[
 
 const POSTGRES_ONLY: &[(&str, RetentionClass)] = &[
     (
+        "catalog_identity",
+        PermanentlyExempt {
+            reason: "one random identity per install, which the session catalog registers under",
+        },
+    ),
+    (
         "lash_schema_versions",
         PermanentlyExempt {
             reason: "one current version per fixed component; not accumulating migration history",
@@ -441,7 +459,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 49, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 51, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

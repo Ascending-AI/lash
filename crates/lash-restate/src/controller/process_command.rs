@@ -44,7 +44,7 @@ fn process_command_journal_error(
     error: TerminalError,
 ) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(
-        RuntimeErrorCode::RestateEffectController,
+        RuntimeErrorCode::EngineEffectController,
         format!("Restate process {operation} journaling failed: {error}"),
     )
 }
@@ -67,7 +67,7 @@ fn decode_process_command_journal_payload<T: serde::de::DeserializeOwned>(
 ) -> Result<T, RuntimeEffectControllerError> {
     serde_json::from_value(value).map_err(|error| {
         RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
+            RuntimeErrorCode::EngineProcessJournalPayloadIncompatible,
             format!("incompatible Restate process {operation} journal payload: {error}"),
         )
     })
@@ -81,7 +81,7 @@ fn validate_process_command_journal_payload_version(
         return Ok(());
     }
     Err(RuntimeEffectControllerError::new(
-        RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
+        RuntimeErrorCode::EngineProcessJournalPayloadIncompatible,
         format!(
             "incompatible Restate process {operation} journal payload version {version}; expected {PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION}"
         ),
@@ -97,7 +97,7 @@ fn validate_process_command_journal_identity<T: PartialEq>(
         return Ok(());
     }
     Err(RuntimeEffectControllerError::new(
-        RuntimeErrorCode::RestateProcessJournalIdentityDrift,
+        RuntimeErrorCode::EngineProcessJournalIdentityDrift,
         format!("Restate process {operation} journal identity differs from the current command"),
     ))
 }
@@ -163,6 +163,9 @@ where
         }
         return Ok(outcome);
     }
+    // Read before the executor is taken apart: a start answers its served-only
+    // mark at its frontier marker (FIG-3779).
+    let served_only = local_executor.served_only();
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
     let process_env_store = execution.process_env_store;
@@ -175,6 +178,16 @@ where
             env_spec,
             execution_context,
         } => {
+            // The marker comes first, before anything the start writes: a
+            // start refused at its live frontier has acted on nothing.
+            super::live_frontier::pass_process_start_frontier(
+                context,
+                invocation,
+                &registration.id,
+                served_only.as_ref(),
+                registry.as_ref(),
+            )
+            .await?;
             let staging_owner = lash_core::ArtifactOwner::process_start(&registration.id);
             let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
                 let env_store = process_env_store.as_ref().ok_or_else(|| {
@@ -431,7 +444,7 @@ lash_core::TurnFailureCause::Outcome,
                 Err(err) => {
                     trace_resolve("process", lash_trace::TraceDurableWaitResolution::Failed);
                     return Err(RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RestateProcessAwait,
+                        RuntimeErrorCode::EngineProcessAwait,
                         err.to_string(),
                     ));
                 }
@@ -461,7 +474,7 @@ lash_core::TurnFailureCause::Outcome,
                     );
                     let Some(turn_cancellation) = turn_cancellation.as_ref() else {
                         return Err(RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::RestateProcessTurnCancelContextMissing,
+                            RuntimeErrorCode::EngineProcessTurnCancelContextMissing,
                             "process-await cancellation won without turn-cancellation context",
                         ));
                     };
@@ -506,7 +519,7 @@ lash_core::TurnFailureCause::Outcome,
                             .await
                             .map_err(|err| {
                                 PluginError::Runtime(RuntimeError::new(
-                                    RuntimeErrorCode::RestateProcessCancel,
+                                    RuntimeErrorCode::EngineProcessCancel,
                                     format!("Restate process cancellation failed: {err}"),
                                 ))
                             })?;
@@ -526,7 +539,7 @@ lash_core::TurnFailureCause::Outcome,
                                 lash_trace::TraceDurableWaitResolution::Failed,
                             );
                             return Err(RuntimeEffectControllerError::new(
-                                RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
+                                RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel,
                                 err.to_string(),
                             ));
                         }
@@ -559,7 +572,7 @@ lash_core::TurnFailureCause::Outcome,
                 .await
                 .map_err(|err| {
                     RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RestateProcessAwait,
+                        RuntimeErrorCode::EngineProcessAwait,
                         err.to_string(),
                     )
                 })?;
@@ -635,7 +648,7 @@ lash_core::TurnFailureCause::Outcome,
                 .await
                 .map_err(|err| {
                     RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RestateProcessCancel,
+                        RuntimeErrorCode::EngineProcessCancel,
                         format!("Restate process cancellation failed: {err}"),
                     )
                 })?;
@@ -683,7 +696,7 @@ lash_core::TurnFailureCause::Outcome,
                 .await
                 .map_err(|err| {
                     PluginError::Runtime(RuntimeError::new(
-                        RuntimeErrorCode::RestateAwaitEventResolve,
+                        RuntimeErrorCode::EngineAwaitEventResolve,
                         format!("Restate process signal resolution failed: {err}"),
                     ))
                 })?;

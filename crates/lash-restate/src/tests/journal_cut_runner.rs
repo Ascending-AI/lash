@@ -208,10 +208,65 @@ mod empty_orchestration_on_the_server_double {
     });
 }
 
-// FIG-3719 on the server double: a served-only effect that acts outside a
-// `ctx.run` closure — the process start a drifted orchestrating binding
-// (`agents.spawn`, for one) issues, or a retry sleep — refuses up front, so
-// the drifted command parks with no process started and no sleep journaled.
+// FIG-3779's served-process-start laws on the server double: a cell's
+// `agents.spawn` is cut at one point of its process start — past the start,
+// before its frontier marker, between the marker and the registry write,
+// between that write and the workflow send — and redriven under a drifted
+// binding; its child session runs in the endpoint's `LashProcessWorkflow` on
+// the law's worker.
+mod served_process_start_on_the_server_double {
+    use std::sync::Arc;
+
+    use super::super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+
+    /// The subagent plugin under a capability registry holding `names`.
+    fn subagents(names: &[&str]) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+        let registry = names.iter().fold(
+            lash_subagents::CapabilityRegistry::new(),
+            |registry, name| {
+                registry.with(Arc::new(lash_subagents::StaticCapability::new(
+                    *name,
+                    lash_core::facade_support::SessionSpec::inherit(),
+                )))
+            },
+        );
+        Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
+            registry,
+        )))
+    }
+
+    lash_conformance::served_process_start_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let server = harness
+            .server_double()
+            .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
+        let runner = super::JournalCutRunner::shared(harness.turn_runner(), server);
+        let host = harness.endpoint_host();
+        let prefix: &'static str =
+            Box::leak(format!("restate-spawn-{}", harness.run_nonce()).into_boxed_str());
+        let stores = harness.law_stores();
+        (
+            harness,
+            prefix,
+            host,
+            stores,
+            runner,
+            vec![super::super::conformance_and_poison::drift_law_rlm_factory()],
+            lash_conformance::SubagentFactories {
+                recorded: subagents(&["default"]),
+                // Another capability changes `spawn_agent`'s input schema:
+                // its capability enum, and `capability` becomes required.
+                drifted: subagents(&["default", "reviewer"]),
+            },
+        )
+    });
+}
+
+// FIG-3719 and FIG-3779 on the server double: a served-only process start or
+// sleep answers at its frontier marker. One the replay reaches live refuses,
+// so the drifted command parks with no process started and no sleep
+// journaled; one whose start and sleep were recorded is served.
 mod served_only_outside_a_run {
     use std::sync::Arc;
 
@@ -245,16 +300,123 @@ mod served_only_outside_a_run {
         }
     }
 
-    /// What the served-only effects answered: the process start's result, the
-    /// sleep's result, and the refusal the command's guard tripped on.
+    /// What the effects answered: the process start's result, the sleep's
+    /// result, and the refusal the command's guard tripped on.
     type Answers = (
         Result<(), RuntimeEffectControllerError>,
         Result<(), RuntimeEffectControllerError>,
         Option<RuntimeEffectControllerError>,
     );
 
+    /// One attempt of a command that starts a process and then sleeps: served
+    /// only when `served_only`, and crashing once both are recorded when
+    /// `crash_after`, so the next attempt replays them.
+    fn job(
+        registry: &Arc<dyn lash_core::ProcessRegistry>,
+        process_id: &ProcessId,
+        served_only: bool,
+        crash_after: bool,
+        answers: tokio::sync::mpsc::UnboundedSender<Answers>,
+    ) -> ConformanceTurnAttempt {
+        let registry = Arc::clone(registry);
+        let process_id = process_id.clone();
+        Arc::new(move |scoped| {
+            let registry = Arc::clone(&registry);
+            let process_id = process_id.clone();
+            let answers = answers.clone();
+            Box::pin(async move {
+                let scope = scoped.execution_scope().clone();
+                let namespace = format!("{}:exec:lk2", scope.id());
+                let mut guard = CommandJournalGuard::open();
+                if served_only {
+                    guard = guard.served_only(ServedOnlyRange {
+                        lower: format!("{namespace}:"),
+                        upper: format!("{namespace}:~seal"),
+                        refusal: RuntimeEffectControllerError::new(
+                            RuntimeErrorCode::LashlangCellBindingDrift,
+                            "code cell binding `agents.spawn` (tool `spawn_agent`) is \
+                             changed in the live tool registry",
+                        ),
+                    });
+                }
+                let guard = Arc::new(guard);
+                let guarded = scoped.with_journal_guard(Arc::clone(&guard));
+                let invocation = |key: String| {
+                    RuntimeEffectInvocation::new(
+                        EffectAddress::new(scope.clone(), key.clone())
+                            .unwrap_or_else(|error| panic!("address {key}: {error}")),
+                        RuntimeAttribution::none(),
+                        key,
+                    )
+                };
+                let registration = lash_core::ProcessRegistration::new(
+                    process_id.clone(),
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::json!({ "fixture": "served-only" }),
+                    },
+                    lash_core::RecoveryContract::ExternallyOwned,
+                    lash_core::ProcessProvenance::host(),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
+                );
+                let started = guarded
+                    .execute_effect(
+                        RuntimeEffectEnvelope::new(
+                            invocation(format!(
+                                "{namespace}:0000000000:process:start:{process_id}"
+                            )),
+                            RuntimeEffectCommand::Process {
+                                command: Box::new(ProcessCommand::Start {
+                                    registration,
+                                    observers: Vec::new(),
+                                    env_spec: None,
+                                    execution_context: Box::default(),
+                                }),
+                            },
+                        ),
+                        RuntimeEffectLocalExecutor::processes(registry, Arc::new(NoopProcessWork)),
+                    )
+                    .await
+                    .map(|_| ());
+                let slept = guarded
+                    .execute_effect(
+                        RuntimeEffectEnvelope::new(
+                            invocation(format!("{namespace}:0000000000:attempt:1:sleep")),
+                            RuntimeEffectCommand::Sleep {
+                                spec: lash_core::SleepSpec::For { duration_ms: 1 },
+                            },
+                        ),
+                        RuntimeEffectLocalExecutor::sleep(
+                            tokio_util::sync::CancellationToken::new(),
+                        ),
+                    )
+                    .await
+                    .map(|_| ());
+                if crash_after {
+                    panic!("the command crashes once its start and sleep are recorded");
+                }
+                let _ = answers.send((started, slept, guard.tripped()));
+                ConformanceTurnEnd::Settled
+            })
+        })
+    }
+
+    /// The process workflows the double was asked to run for `process_id`.
+    fn workflow_runs(
+        server: &lash_restate_test::RestateTestServer,
+        process_id: &ProcessId,
+    ) -> usize {
+        server
+            .invocations()
+            .iter()
+            .filter(|invocation| invocation.target.contains(process_id.as_str()))
+            .count()
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_drifted_process_start_or_sleep_parks_without_acting() {
+    async fn a_drifted_process_start_or_sleep_at_the_live_frontier_parks_without_acting() {
         let harness =
             LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
         let server = harness
@@ -266,100 +428,19 @@ mod served_only_outside_a_run {
         let turn_id = TurnId::from("served-only-turn");
         let process_id = ProcessId::from(format!("served-only-probe-{nonce}"));
         let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<Answers>();
-        let job: ConformanceTurnAttempt = {
-            let registry = Arc::clone(&registry);
-            let process_id = process_id.clone();
-            Arc::new(move |scoped| {
-                let registry = Arc::clone(&registry);
-                let process_id = process_id.clone();
-                let answers = answers.clone();
-                Box::pin(async move {
-                    let scope = scoped.execution_scope().clone();
-                    let namespace = format!("{}:exec:lk2", scope.id());
-                    let guard =
-                        Arc::new(CommandJournalGuard::open().served_only(ServedOnlyRange {
-                            lower: format!("{namespace}:"),
-                            upper: format!("{namespace}:~seal"),
-                            refusal: RuntimeEffectControllerError::new(
-                                RuntimeErrorCode::LashlangCellBindingDrift,
-                                "code cell binding `agents.spawn` (tool `spawn_agent`) is \
-                                 changed in the live tool registry",
-                            ),
-                        }));
-                    let guarded = scoped.with_journal_guard(Arc::clone(&guard));
-                    let invocation = |key: String| {
-                        RuntimeEffectInvocation::new(
-                            EffectAddress::new(scope.clone(), key.clone())
-                                .unwrap_or_else(|error| panic!("address {key}: {error}")),
-                            RuntimeAttribution::none(),
-                            key,
-                        )
-                    };
-                    let registration = lash_core::ProcessRegistration::new(
-                        process_id.clone(),
-                        lash_core::ProcessInput::External {
-                            metadata: serde_json::json!({ "fixture": "served-only" }),
-                        },
-                        lash_core::RecoveryContract::ExternallyOwned,
-                        lash_core::ProcessProvenance::host(),
-                        lash_core::ProcessLifecyclePolicy::new(
-                            lash_core::ParentScope::Host,
-                            lash_core::OnParentEnd::Abandon,
-                        ),
-                    );
-                    let started = guarded
-                        .execute_effect(
-                            RuntimeEffectEnvelope::new(
-                                invocation(format!(
-                                    "{namespace}:0000000000:process:start:{process_id}"
-                                )),
-                                RuntimeEffectCommand::Process {
-                                    command: Box::new(ProcessCommand::Start {
-                                        registration,
-                                        observers: Vec::new(),
-                                        env_spec: None,
-                                        execution_context: Box::default(),
-                                    }),
-                                },
-                            ),
-                            RuntimeEffectLocalExecutor::processes(
-                                registry,
-                                Arc::new(NoopProcessWork),
-                            ),
-                        )
-                        .await
-                        .map(|_| ());
-                    let slept = guarded
-                        .execute_effect(
-                            RuntimeEffectEnvelope::new(
-                                invocation(format!("{namespace}:0000000000:attempt:1:sleep")),
-                                RuntimeEffectCommand::Sleep {
-                                    spec: lash_core::SleepSpec::For {
-                                        duration_ms: 60_000,
-                                    },
-                                },
-                            ),
-                            RuntimeEffectLocalExecutor::sleep(
-                                tokio_util::sync::CancellationToken::new(),
-                            ),
-                        )
-                        .await
-                        .map(|_| ());
-                    let _ = answers.send((started, slept, guard.tripped()));
-                    ConformanceTurnEnd::Settled
-                })
-            })
-        };
         harness
             .turn_runner()
-            .run_turn(lash_core::AdmittedScope::turn(&session_id, &turn_id), job)
+            .run_turn(
+                lash_core::AdmittedScope::turn(&session_id, &turn_id),
+                job(&registry, &process_id, true, false, answers),
+            )
             .await;
         let (started, slept, tripped) = answered
             .recv()
             .await
             .unwrap_or_else(|| panic!("the served-only job ran"));
         for (effect, answer) in [("process start", started), ("sleep", slept)] {
-            let refusal = answer.expect_err("a served-only effect outside a run refuses");
+            let refusal = answer.expect_err("a served-only effect at the live frontier refuses");
             assert_eq!(
                 refusal.code,
                 RuntimeErrorCode::LashlangCellBindingDrift,
@@ -379,12 +460,54 @@ mod served_only_outside_a_run {
                 .is_none(),
             "the drifted command started no process"
         );
-        assert!(
-            server
-                .invocations()
-                .iter()
-                .all(|invocation| !invocation.target.contains(process_id.as_str())),
+        assert_eq!(
+            workflow_runs(&server, &process_id),
+            0,
             "the drifted command submitted no process workflow"
+        );
+        harness.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_drifted_process_start_and_sleep_that_were_recorded_are_served() {
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let server = harness
+            .server_double()
+            .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
+        let registry = harness.law_stores().process_registry();
+        let nonce = harness.run_nonce();
+        let session_id = SessionId::from(format!("served-recorded-{nonce}"));
+        let turn_id = TurnId::from("served-recorded-turn");
+        let process_id = ProcessId::from(format!("served-recorded-probe-{nonce}"));
+        let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<Answers>();
+        harness
+            .turn_runner()
+            .run_crashed_then_redriven_turn(
+                lash_core::AdmittedScope::turn(&session_id, &turn_id),
+                job(&registry, &process_id, false, true, answers.clone()),
+                job(&registry, &process_id, true, false, answers),
+            )
+            .await;
+        let (started, slept, tripped) = answered
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("the served-only redrive ran"));
+        started.unwrap_or_else(|refusal| panic!("the recorded start is served: {refusal:?}"));
+        slept.unwrap_or_else(|refusal| panic!("the recorded sleep is served: {refusal:?}"));
+        assert!(tripped.is_none(), "nothing refused: {tripped:?}");
+        assert!(
+            registry
+                .get_process(&process_id)
+                .await
+                .unwrap_or_else(|error| panic!("read the registry: {error}"))
+                .is_some(),
+            "the recorded start's row stands"
+        );
+        assert_eq!(
+            workflow_runs(&server, &process_id),
+            1,
+            "the start's workflow was submitted once, by the first attempt"
         );
         harness.finish().await;
     }

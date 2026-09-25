@@ -504,7 +504,7 @@ impl State {
             number,
             (!always_replay).then_some(sender),
             probe,
-            handle.abort_handle(),
+            handle,
             start_gate,
         ));
         self.make_ready((key, number));
@@ -1053,10 +1053,10 @@ impl State {
             return;
         }
         if let Status::Running(attempt) = &mut invocation.status
-            && let Some(abort) = attempt.abort.take()
+            && let Some(task) = attempt.task.take()
         {
             // The attempt reported its own end; its task stops by itself.
-            drop(abort);
+            drop(task);
         }
         invocation.status = Status::Completed(outcome.clone());
         let waiters = std::mem::take(&mut invocation.waiters);
@@ -1204,8 +1204,8 @@ impl State {
         let Status::Running(attempt) = &mut self.invocations[key.0].status else {
             return false;
         };
-        if let Some(abort) = attempt.abort.take() {
-            abort.abort();
+        if let Some(task) = attempt.task.take() {
+            task.abort();
         }
         let invocation = &mut self.invocations[key.0];
         invocation.retry.failures_since_last_entry += 1;
@@ -1258,21 +1258,32 @@ impl State {
     /// Kill `key`: stop it where it stands without consulting the SDK, end
     /// it as `409 killed`, and kill every invocation its journal called or
     /// sent — Restate's V4+ kill cascade.
-    pub fn kill(&mut self, sh: &Arc<Shared>, key: InvKey) -> ControlResult {
+    ///
+    /// Stopping is cooperative: the attempt's task is aborted, and Tokio
+    /// drops it only once its poll in flight returns. Its handle lands in
+    /// `tasks`, so a caller that must not be overtaken by that last poll
+    /// can join it.
+    pub fn kill(
+        &mut self,
+        sh: &Arc<Shared>,
+        key: InvKey,
+        tasks: &mut Vec<tokio::task::JoinHandle<()>>,
+    ) -> ControlResult {
         if self.invocations[key.0].status.is_completed() {
             return ControlResult::AlreadyCompleted;
         }
         if let Status::Running(attempt) = &mut self.invocations[key.0].status
-            && let Some(abort) = attempt.abort.take()
+            && let Some(task) = attempt.task.take()
         {
-            abort.abort();
+            task.abort();
+            tasks.push(task);
         }
         self.remove_from_inbox(key);
         self.remove_timers_of(key);
         let children = self.invocations[key.0].children.clone();
         self.complete(sh, key, Outcome::failure(409, "killed"));
         for child in children {
-            self.kill(sh, child);
+            self.kill(sh, child, tasks);
         }
         ControlResult::Done
     }

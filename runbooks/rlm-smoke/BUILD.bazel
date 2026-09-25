@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_binary(
@@ -16,7 +22,7 @@ lash_rust_binary(
     crate_name = "rlm_smoke_host",
     crate_root = "src/main.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("rlm-smoke-host", "rlm_smoke_host"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = None,
@@ -34,7 +40,7 @@ lash_rust_unit_test(
     crate_name = "rlm_smoke_host",
     crate_root = "src/main.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("rlm-smoke-host", "rlm_smoke_host", "//runbooks/rlm-smoke:rlm-smoke__unit_test"),
     library = None,
     library_crate_name = None,
     manifest_dir = "runbooks/rlm-smoke",

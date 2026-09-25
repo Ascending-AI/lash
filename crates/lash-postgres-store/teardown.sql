@@ -76,6 +76,10 @@ DROP TABLE IF EXISTS lash_process_change_clock CASCADE;
 
 DROP TABLE IF EXISTS lash_processes CASCADE;
 
+DROP TABLE IF EXISTS lash_process_park_clock CASCADE;
+
+DROP TABLE IF EXISTS lash_process_park_events CASCADE;
+
 DROP TABLE IF EXISTS lash_process_events CASCADE;
 
 DROP TABLE IF EXISTS lash_wake_allocation_floors CASCADE;
@@ -113,3 +117,5 @@ DROP TABLE IF EXISTS lash_artifact_owners CASCADE;
 DROP TABLE IF EXISTS lash_artifact_owner_retirements CASCADE;
 
 DROP TABLE IF EXISTS lash_release_stamp CASCADE;
+
+DROP TABLE IF EXISTS lash_catalog_identity CASCADE;

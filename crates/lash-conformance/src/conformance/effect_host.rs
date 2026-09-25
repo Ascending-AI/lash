@@ -1682,7 +1682,7 @@ pub async fn effect_host_registered_wait_rejects_quiescent_retirement(
 ///
 /// A deployment-level host that runs no local executor of its own — the
 /// Restate host outside a handler answers every non-AwaitEvent effect with
-/// `restate_effect_host_requires_handler_scope` — cannot be held to this law
+/// `engine_effect_host_requires_handler_scope` — cannot be held to this law
 /// through this seam; its handler-side controller is held to it by the live
 /// end-to-end harness instead.
 #[expect(
@@ -1738,7 +1738,7 @@ pub(crate) async fn effect_host_when_quiescent_waits_for_executing_effects(
             let outcome = outcome.expect("the effect task joins");
             match outcome {
                 Err(error)
-                    if error.code == lash_core::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope =>
+                    if error.code == lash_core::RuntimeErrorCode::EngineEffectHostRequiresHandlerScope =>
                 {
                     // Not a local executor host: see the doc comment.
                     return;

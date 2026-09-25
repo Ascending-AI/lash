@@ -23,7 +23,9 @@ const SHARED_DATABASE_LOCK_KEY: i64 = 0x4c41_5348_5f50_4754;
 /// The truncate set derives from the live catalog rather than a
 /// hand-maintained table list: a new `lash_*` table can no longer silently
 /// bleed state between cases. `lash_schema_versions` is excluded — it holds
-/// the component schema version gate, not per-case fixture rows.
+/// the component schema version gate, not per-case fixture rows — and
+/// `lash_catalog_identity` holds the install's identity, likewise not fixture
+/// state.
 // Not every target that compiles this module calls it; the includers'
 // `#[allow(dead_code)]` on `mod support` predates it.
 #[allow(dead_code)]
@@ -32,7 +34,7 @@ pub async fn reset(pool: &PgPool) {
         "SELECT tablename FROM pg_tables
          WHERE schemaname = 'public'
            AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions')
+           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity')
          ORDER BY tablename",
     )
     .fetch_all(pool)
@@ -63,6 +65,14 @@ pub async fn reset(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("reset postgres turn park clock");
+    sqlx::query(
+        "INSERT INTO lash_process_park_clock (singleton, current_seq)
+         VALUES (TRUE, 0)
+         ON CONFLICT (singleton) DO UPDATE SET current_seq = EXCLUDED.current_seq",
+    )
+    .execute(pool)
+    .await
+    .expect("reset postgres process park clock");
 }
 
 pub fn database_url() -> Option<String> {

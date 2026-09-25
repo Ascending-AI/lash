@@ -343,12 +343,9 @@ async fn execution_terminals_bypass_a_surrounding_catch() {
         condition: Box::new(Expr::Bool(true)),
         body: Box::new(Expr::Null),
     };
-    let instruction_env =
-        ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
-            ExecutionBound::instructions(8),
-            ExecutionBound::Unbounded,
-            ExecutionBound::Unbounded,
-        ));
+    let instruction_env = ExecutionEnvironment::new(&Host).with_execution_bounds(
+        ExecutionBounds::new(ExecutionBound::instructions(8), ExecutionBound::Unbounded),
+    );
     assert!(matches!(
         run_exception_program(caught(loop_body.clone()), &instruction_env).await,
         Err(RuntimeError::InstructionBudgetExceeded { .. })
@@ -366,19 +363,7 @@ async fn execution_terminals_bypass_a_surrounding_catch() {
         Err(RuntimeError::InstructionBudgetExceeded { .. })
     ));
 
-    let deadline_env =
-        ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
-            ExecutionBound::Unbounded,
-            ExecutionBound::Bounded(std::time::Duration::from_nanos(1)),
-            ExecutionBound::Unbounded,
-        ));
-    assert!(matches!(
-        run_exception_program(caught(loop_body), &deadline_env).await,
-        Err(RuntimeError::ExecutionDeadlineExceeded { .. })
-    ));
-
     let memory_env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
-        ExecutionBound::Unbounded,
         ExecutionBound::Unbounded,
         ExecutionBound::logical_bytes(1),
     ));
@@ -646,8 +631,7 @@ async fn suspend_in_exceptional_finally<H: ExecutionHost>(
             .expect("finally effect should suspend"),
         ExecutionOutcome::Continued
     );
-    let mut continuation = vm.suspend().expect("finally continuation");
-    continuation.active_execution_elapsed = std::time::Duration::ZERO;
+    let continuation = vm.suspend().expect("finally continuation");
     assert!(matches!(
         continuation.finally_stack.as_slice(),
         [VmFinallyContinuation {
@@ -768,9 +752,7 @@ async fn exception_effect_checkpoint(
         vm.run_for_mode().await.expect("effect checkpoint runs"),
         ExecutionOutcome::Continued
     );
-    let mut continuation = vm.suspend().expect("effect checkpoint captures");
-    continuation.active_execution_elapsed = std::time::Duration::ZERO;
-    continuation
+    vm.suspend().expect("effect checkpoint captures")
 }
 
 async fn exception_determinism_dump() -> Vec<u8> {
