@@ -38,6 +38,7 @@ mod process_wrapper;
 mod regex;
 mod spans;
 mod spread_calls;
+mod statements;
 mod triggers;
 pub(crate) use attribute_update::attribute_update;
 use binding::*;
@@ -47,6 +48,7 @@ pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_work
 use graph::{shortest_cycle_through, strongly_connected_components};
 use param_types::process_param_type;
 pub(crate) use process_wrapper::{process_run_wrapper, wrapped_run_body};
+use statements::*;
 use triggers::is_trigger_registration_operation;
 
 pub(crate) fn accepts_instance_method(method: &str) -> bool {
