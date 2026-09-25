@@ -990,20 +990,19 @@ class BazelTestContractTests(unittest.TestCase):
         # The `e2e` feature is outside the resolved default graph, but it is no
         # longer outside Bazel: the feature-lane generator emits a variant of
         # every unit that resolution compiles, and `//:feature_lane_clippy`
-        # lints exactly those. The Cargo command stays for untrusted events,
-        # which have no cache credentials and so no pool. The feature-lane
-        # lint is merge-group breadth: a pull request lints only the
-        # workspace and builds the schema checks. That every feature variant
-        # compiles is the `feature-lanes` job's proof on every trusted event
-        # (FIG-3572), so Lint names no single lane unit.
+        # lints exactly those. It rides the `feature-lanes` job's compile
+        # invocation, which runs on every trusted event whose diff can move a
+        # Rust build -- a pull request gets the lane lint the merge group used
+        # to wait for (#2285's upstream API change broke gated code a path rule
+        # could not see). The Cargo command stays for untrusted events, which
+        # have no cache credentials and so no pool. Lint itself names no lane
+        # unit.
         self.assertIn(
-            "targets=(//:workspace_clippy //:schema_checks)", clippy_bazel["run"]
+            "-- //:workspace_clippy //:schema_checks", clippy_bazel["run"]
         )
-        self.assertIn(
-            'if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then\n'
-            "  targets+=(//:feature_lane_clippy)",
-            clippy_bazel["run"],
-        )
+        self.assertNotIn("feature_lane_clippy", clippy_bazel["run"])
+        lanes_compile = job_step(jobs["feature-lanes"], "Compile every feature lane")
+        self.assertIn("//:feature_lanes //:feature_lane_clippy", lanes_compile["run"])
 
         e2e = job_step(jobs["lint"], "Clippy (slack-clone e2e feature)")
         self.assertEqual(untrusted, e2e["if"])

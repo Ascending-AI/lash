@@ -22,12 +22,17 @@ name: CI
 # `pr_affected_targets`: the touched packages' dev-suite members, their
 # dev-deferred labels, the API seal `//crates/lash:ui_fixtures` on a facade
 # diff, `:all` compile proofs for packages with no selected test, and the
-# schema checks). The feature lanes join a pull request only when the diff
-# touches feature-gated code (`feature_lanes`; see the selection rule in
-# scripts/ci_plan.py). The merge group runs the full core partition, the test
-# tail, the feature-lane clippy and lanes, the selected Postgres store suites
-# and, for a schema diff, the PG14/PG18 compatibility legs. Cached Bazel
-# results mean a merge group re-executes only what its combined tree changed.
+# schema checks). A trusted pull request whose diff can move a Rust build
+# also compiles and lints the feature lanes: a lane break is caused by an API
+# change anywhere upstream, which the diff's own path set cannot see — #2285
+# changed a public engine API and broke the slack-clone live-E2E variant
+# while touching no feature-gated file. The lane TESTS still join a pull
+# request only when the diff touches feature-gated code (`feature_lanes`; see
+# the selection rule in scripts/ci_plan.py). The merge group runs the full
+# core partition, the test tail, the lane tests and the selected Postgres
+# store suites and, for a schema diff, the PG14/PG18 compatibility legs.
+# Cached Bazel results mean a merge group re-executes only what its combined
+# tree changed.
 # "CI conclusion" is the one required check; scripts/ci/conclusion.py holds
 # it to what the plan and event require.
 #
@@ -618,12 +623,15 @@ jobs:
   # `cargo metadata`; they cost seconds and stay where they are.
   #
   # Every trusted non-PR event runs it (FIG-3572): while it was
-  # dispatch-only, #1979 merged a feature variant that did not compile. The
-  # fast pull-request board runs it only when the diff touches feature-gated
-  # code — `plan.feature_lanes`, selected by `_is_feature_gate_path` in
-  # scripts/ci_plan.py — because lane membership covers nearly the whole
-  # workspace and a lane compile proves nothing an ungated diff can move.
-  # It runs beside the Bazel partition on its own
+  # dispatch-only, #1979 merged a feature variant that did not compile. A
+  # trusted pull request compiles the lanes too, on every diff that can move
+  # a Rust build: the break #2285 landed — a public engine API change that
+  # broke feature-gated example code while touching no gated file — is what
+  # a path rule can never see. The lane TESTS keep the path gate
+  # (`plan.feature_lanes`, selected by `_is_feature_gate_path` in
+  # scripts/ci_plan.py): lane membership covers nearly the whole workspace,
+  # so a lane test run on every diff pays for proof an ungated diff cannot
+  # move. It runs beside the Bazel partition on its own
   # runner, so it adds to a run's wall-clock only when it is the slowest job.
   # `//:feature_lanes` is the whole lane graph, so it also covers the runtime
   # OFF witness (FIG-3427) and the Restate release resolution (FIG-3610) that
@@ -638,7 +646,6 @@ jobs:
     if: >-
       needs.plan.outputs.bazel_trusted == 'true'
       && needs.plan.outputs.rust == 'true'
-      && (github.event_name != 'pull_request' || needs.plan.outputs.feature_lanes == 'true')
     environment: build-cache
     steps:
       - *checkout
@@ -655,7 +662,10 @@ jobs:
 
       # Every unit of every declared lane command, checked at that command's
       # own feature resolution: one metadata-only rustc action per unit, as
-      # `cargo check` runs it, with no codegen or link. The step name is
+      # `cargo check` runs it, with no codegen or link. `//:feature_lane_clippy`
+      # rides the same invocation — seven real clippy-driver actions over units
+      # the compile just built — so a pull request lints the lane variants the
+      # merge group used to wait for. The step name is
       # pinned by scripts/test_check_feature_coverage.py.
       - name: Compile every feature lane
         shell: bash
@@ -666,12 +676,17 @@ jobs:
             --remote_download_outputs=minimal \
             --profile="${RUNNER_TEMP}/bazel-feature-profile.json.gz" \
             --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-            //:feature_lanes
+            //:feature_lanes //:feature_lane_clippy
 
       # The lane commands that are `cargo test`, not `cargo check`. They are
       # service-free, so the pool executes them under the same feature
-      # resolution the compile above used.
+      # resolution the compile above used. A pull request runs them only when
+      # the diff touches feature-gated code; every other trusted event runs
+      # the whole lane board.
       - name: Run the executable feature lanes
+        if: >-
+          github.event_name != 'pull_request'
+          || needs.plan.outputs.feature_lanes == 'true'
         shell: bash
         run: |
           # shellcheck disable=SC2086
@@ -683,8 +698,12 @@ jobs:
       # The `default-off-tests` leg of the retired `Runtime feature boundary`
       # matrix counted the default build's test cases as well as running them.
       # Compiling a test binary proves it still builds; only the count proves
-      # it still tests anything.
+      # it still tests anything. Same pull-request gate as the lane tests it
+      # counts.
       - name: Hold the feature-lane test-case floors
+        if: >-
+          github.event_name != 'pull_request'
+          || needs.plan.outputs.feature_lanes == 'true'
         shell: bash
         run: python3 scripts/ci/check_feature_lane_test_floors.py
 
@@ -1331,26 +1350,21 @@ jobs:
       # and a trailing `-D warnings`, in the order Cargo emits them. See
       # `tools/bazel/clippy.bzl`.
       #
-      # Lint breadth rides the merge group and the dispatch only: on those
-      # events `//:feature_lane_clippy` lints the slack-clone `e2e` variant
-      # and the other feature-lane variants in the same invocation. That every
-      # feature variant compiles is the `feature-lanes` job's proof on every
-      # trusted event, pull requests included.
+      # `//:feature_lane_clippy` — the slack-clone `e2e` variant and the other
+      # feature-lane units — rides the `feature-lanes` job's own compile
+      # invocation, which runs on every trusted event whose diff can move a
+      # Rust build, pull requests included.
       - name: Clippy (workspace, all targets, shared cache)
         if: needs.plan.outputs.bazel_trusted == 'true'
         shell: bash
         run: |
-          targets=(//:workspace_clippy //:schema_checks)
-          if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
-            targets+=(//:feature_lane_clippy)
-          fi
           # shellcheck disable=SC2086
           bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
             --profile="${RUNNER_TEMP}/bazel-lint-profile.json.gz" \
             --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-            -- "${targets[@]}"
+            -- //:workspace_clippy //:schema_checks
 
       - name: Remove client credentials
         if: always()
@@ -1393,8 +1407,8 @@ jobs:
       # `slack-clone`'s `e2e` feature is outside the resolved default workspace
       # graph, so it used to have no Bazel label and this 106 s Cargo compile
       # ran on every event. It has one now: `//:feature_lane_clippy` lints the
-      # feature-lane variants of the same targets on trusted merge groups and
-      # dispatches, above. `slack-clone`
+      # feature-lane variants of the same targets inside the `feature-lanes`
+      # job's compile invocation on every trusted Rust event. `slack-clone`
       # declares no `default` feature, so the lane's `--no-default-features
       # --features e2e` resolution is the resolution this command used.
       # Untrusted events receive no cache credentials and keep the Cargo path.
