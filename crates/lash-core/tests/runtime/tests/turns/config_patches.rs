@@ -261,9 +261,10 @@ pub(super) async fn every_session_config_patch_emits_a_lifecycle_event() {
         })
         .await
         .expect("update model config");
+    serve_runtime_providers(&mut runtime, [alt_provider.clone()]);
     runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(alt_provider),
+            provider_id: Some(alt_provider.kind().to_string()),
             ..Default::default()
         })
         .await
@@ -280,9 +281,10 @@ pub(super) async fn every_session_config_patch_emits_a_lifecycle_event() {
         .context_window_tokens(234_567)
         .build()
         .expect("valid combined model spec");
+    serve_runtime_providers(&mut runtime, [combined_provider.clone()]);
     runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(combined_provider),
+            provider_id: Some(combined_provider.kind().to_string()),
             model: Some(combined_model.clone()),
             ..Default::default()
         })

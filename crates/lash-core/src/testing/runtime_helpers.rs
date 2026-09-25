@@ -280,6 +280,41 @@ pub fn set_runtime_provider(runtime: &mut LashRuntime, provider: crate::Provider
     runtime.state.policy.provider_id = provider.kind().to_string();
 }
 
+/// Serve `providers` beside the provider the runtime's resolver serves for
+/// its session, so a config command can route the session to any of them
+/// (D3 Q10). A provider under the session's own id replaces that one.
+#[expect(
+    clippy::expect_used,
+    reason = "test helper: a duplicate provider id is a fixture defect"
+)]
+pub fn serve_runtime_providers(
+    runtime: &mut LashRuntime,
+    providers: impl IntoIterator<Item = crate::ProviderHandle>,
+) {
+    let mut registry = crate::provider::ProviderRegistry::new();
+    let mut served = std::collections::BTreeSet::new();
+    for provider in providers {
+        served.insert(provider.kind().to_string());
+        registry = registry
+            .with(provider)
+            .expect("each served provider has its own id");
+    }
+    let current = runtime.state.policy.recorded_provider_id().to_string();
+    if !served.contains(&current)
+        && let Ok(binding) = runtime
+            .host
+            .core
+            .providers
+            .provider_resolver
+            .resolve_provider_binding(&current)
+    {
+        registry = registry
+            .with(binding.provider)
+            .expect("the session's provider registers once");
+    }
+    runtime.host.core.providers.provider_resolver = Arc::new(registry);
+}
+
 pub use crate::testing::standard_test_policy;
 
 /// A host over `backend` whose provider resolver answers with an empty mock

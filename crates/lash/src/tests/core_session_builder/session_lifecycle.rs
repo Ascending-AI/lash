@@ -692,7 +692,8 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
 }
 
 #[tokio::test]
-async fn provider_overrides_apply_at_core_session_turn_and_config_scopes() -> Result<()> {
+async fn provider_overrides_apply_at_core_and_session_scopes_and_a_config_route_must_be_served()
+-> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
@@ -714,32 +715,26 @@ async fn provider_overrides_apply_at_core_session_turn_and_config_scopes() -> Re
     let session_result = session.turn(TurnInput::text("hello")).run().await?;
     assert_eq!(assistant_prose(&session_result.activities), "session");
 
-    let turn_result = session
-        .turn(TurnInput::text("hello"))
-        .provider(text_provider("turn-provider", "turn-model", "turn"))
-        .run()
-        .await?;
-    assert_eq!(assistant_prose(&turn_result.activities), "turn");
-
-    let after_turn = session.turn(TurnInput::text("hello")).run().await?;
-    assert_eq!(assistant_prose(&after_turn.activities), "session");
-
-    session
+    // A config route is a provider id the host must already serve
+    // (FIG-3600 S6): an unserved one is refused when it is sent, and the
+    // session keeps its provider.
+    let refused = session
         .admin()
         .config()
         .update(SessionConfigPatch {
-            provider: Some(text_provider(
-                "updated-provider",
-                "updated-model",
-                "updated",
-            )),
+            provider_id: Some("updated-provider".to_string()),
             model: Some(model_spec("updated-model", None, 200_000)),
             ..SessionConfigPatch::default()
         })
-        .await?;
+        .await
+        .expect_err("a route no provider serves is refused at send");
+    assert!(
+        refused.to_string().contains("no provider serves the route"),
+        "the refusal names the unserved route: {refused}"
+    );
 
-    let updated = session.turn(TurnInput::text("hello")).run().await?;
-    assert_eq!(assistant_prose(&updated.activities), "updated");
+    let after_refusal = session.turn(TurnInput::text("hello")).run().await?;
+    assert_eq!(assistant_prose(&after_refusal.activities), "session");
     Ok(())
 }
 
@@ -777,49 +772,12 @@ async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> 
         .await?;
 
     session.turn(TurnInput::text("hello")).run().await?;
-    session
-        .turn(TurnInput::text("hello"))
-        .provider(recording_text_provider(
-            "turn-provider",
-            "turn-model",
-            Some("turn-variant"),
-            "turn",
-            Arc::clone(&seen),
-        ))
-        .run()
-        .await?;
-    session
-        .admin()
-        .config()
-        .update(SessionConfigPatch {
-            provider: Some(recording_text_provider(
-                "updated-provider",
-                "updated-model",
-                Some("updated-variant"),
-                "updated",
-                Arc::clone(&seen),
-            )),
-            ..SessionConfigPatch::default()
-        })
-        .await?;
-    session.turn(TurnInput::text("hello")).run().await?;
-
     assert_eq!(
         *seen.lock_recover(),
-        vec![
-            (
-                "core-model".to_string(),
-                lash_core::ReasoningSelection::Effort("core-variant".to_string()),
-            ),
-            (
-                "core-model".to_string(),
-                lash_core::ReasoningSelection::Effort("core-variant".to_string()),
-            ),
-            (
-                "core-model".to_string(),
-                lash_core::ReasoningSelection::Effort("core-variant".to_string()),
-            ),
-        ]
+        vec![(
+            "core-model".to_string(),
+            lash_core::ReasoningSelection::Effort("core-variant".to_string()),
+        )]
     );
     Ok(())
 }
@@ -1708,7 +1666,8 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
 /// the durable head's provider id, the next turn's refresh adopts it — the
 /// recorded provider id is a durable fact and the head wins. A host that has
 /// not registered the adopted provider gets an explicit typed refusal naming
-/// it, instead of silently running on a resident copy that masks the
+/// it (retryable: FIG-3600 S6, D3 Q3), instead of silently running on a
+/// resident copy that masks the
 /// stale-head race. (The adoption mapping itself is pinned by
 /// `resident_refresh_adopts_the_durable_head_provider_id` in lash-core; the
 /// failed turn does not commit, so this surface asserts the refusal.)
@@ -1748,8 +1707,8 @@ async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> 
         crate::EmbedError::Runtime(runtime_error) => {
             assert_eq!(
                 runtime_error.code,
-                lash_core::RuntimeErrorCode::LlmProvider,
-                "the refusal is the typed provider-resolution error"
+                lash_core::RuntimeErrorCode::ProviderBindingUnavailable,
+                "the refusal is the typed, retryable provider-binding error"
             );
             assert!(
                 runtime_error.message.contains("other-provider"),

@@ -383,11 +383,7 @@ impl LashRuntime {
             .await;
         let session_execution_fence =
             session_execution_lease.map(SessionExecutionLeaseGuard::fence);
-        let mut turn_policy = self.state.effective_policy().clone();
-        let turn_provider_override = turn_context.provider().cloned();
-        if let Some(provider) = turn_provider_override.as_ref() {
-            turn_policy.provider_id = provider.kind().to_string();
-        }
+        let turn_policy = self.state.effective_policy().clone();
         let session_protocol_turn_options = self.state.effective_protocol_turn_options().clone();
         let effective_protocol_turn_options = protocol_turn_options
             .clone()
@@ -468,22 +464,13 @@ impl LashRuntime {
             )
             .await
             .map_err(super::runtime_error_from_store_commit)?;
-        let resolved_turn_policy = if let Some(provider) = turn_provider_override {
-            RuntimeSessionPolicy::from_provider(
-                turn_policy.clone(),
-                provider.with_clock(Arc::clone(&self.host.core.clock)),
-            )
-            .map_err(|err| {
-                RuntimeError::new(crate::RuntimeErrorCode::LlmProvider, err.to_string())
-            })?
-        } else {
-            // The route is the turn's recorded config (D3 §2.1); it was
-            // validated when it was set, so a route this worker cannot bind
-            // is its deployment, retried and never the turn's outcome (Q3).
-            self.host
-                .resolve_session_policy(&self.state.session_id, turn_policy.clone())
-                .map_err(crate::runtime::drive::provider_binding_unavailable)?
-        };
+        // The route is the turn's recorded config (D3 §2.1); it was validated
+        // when it was set, so a route this worker cannot bind is its
+        // deployment, retried and never the turn's outcome (Q3).
+        let resolved_turn_policy = self
+            .host
+            .resolve_session_policy(&self.state.session_id, turn_policy.clone())
+            .map_err(crate::runtime::drive::provider_binding_unavailable)?;
         let manager = self
             .runtime_session_services_for_turn(session_execution_lease, &turn_graph_appends)
             .map_err(|err| {

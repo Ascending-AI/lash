@@ -168,11 +168,6 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
                 turn_context.live_plugin_input_ids()
             )));
         }
-        if turn_context.provider().is_some() {
-            return Err(RemoteProtocolError::NonRemoteSafeTurnInput(
-                "per-turn provider overrides cannot cross a remote boundary".to_string(),
-            ));
-        }
         let prompt_layer = (!turn_context.prompt_layer().is_empty())
             .then(|| RemotePromptLayer::from(turn_context.prompt_layer().clone()));
         Ok(Self {

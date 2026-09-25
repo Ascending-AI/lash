@@ -1,63 +1,6 @@
 use super::*;
 
 #[tokio::test]
-pub(super) async fn turn_provider_override_does_not_persist_into_session_policy_or_agent_frame() {
-    let backend = memory_backend().await;
-    let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    let alt_provider = TestProvider::builder()
-        .kind("alt")
-        .complete(|_| async {
-            Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text: "alt response".to_string(),
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            })
-        })
-        .build()
-        .into_handle();
-    let mut turn_context = lash_core::TurnContext::default();
-    turn_context.set_provider(alt_provider);
-
-    let turn = runtime
-        .run_turn_assembled(
-            TurnInput {
-                items: vec![InputItem::Text {
-                    text: "use override".to_string(),
-                }],
-                protocol_turn_options: None,
-                trace_turn_id: None,
-                protocol_extension: None,
-                turn_context,
-            },
-            CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("provider-override-turn"),
-            ),
-        )
-        .await
-        .expect("turn");
-
-    assert_eq!(turn.assistant_output.safe_text, "alt response");
-    assert_eq!(turn.state.policy.recorded_provider_id(), "mock");
-    assert_eq!(
-        runtime.state.effective_policy().recorded_provider_id(),
-        "mock"
-    );
-    assert!(
-        runtime.state.agent_frames.iter().all(|frame| frame
-            .assignment
-            .policy
-            .recorded_provider_id()
-            == "mock")
-    );
-}
-
-#[tokio::test]
 pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
     let backend = memory_backend().await;
     let plugin = Arc::new(RuntimeTestPluginFactory {

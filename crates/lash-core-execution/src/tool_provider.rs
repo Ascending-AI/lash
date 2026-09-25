@@ -150,7 +150,6 @@ pub struct AttemptContext<'run> {
     /// as the legacy [`ToolContext`] path does. Boxed because this context is
     /// captured by the deep tool-dispatch futures.
     parent_invocation: Option<Box<crate::RuntimeInvocation>>,
-    provider: Option<crate::ProviderHandle>,
     prepared_payload: serde_json::Value,
     tool_execution_binding: serde_json::Value,
     tool_call_id: Option<String>,
@@ -196,10 +195,6 @@ impl<'run> AttemptContext<'run> {
             .runtime_execution_context
             .as_ref()
             .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
-        let provider = context
-            .runtime_dispatch
-            .as_ref()
-            .and_then(|dispatch| dispatch.turn_context.provider().cloned());
         Self {
             parent_scope: context.effect_controller.scoped().admitted_scope().clone(),
             session_id: context.session_id.clone(),
@@ -218,7 +213,6 @@ impl<'run> AttemptContext<'run> {
             attachment_store: Arc::clone(&context.attachment_store),
             direct_completions: context.direct_completions.clone(),
             parent_invocation: context.parent_invocation.clone().map(Box::new),
-            provider,
             prepared_payload: context.prepared_payload.clone(),
             tool_execution_binding: context.tool_execution_binding.clone(),
             tool_call_id: context.tool_call_id.clone(),
@@ -292,10 +286,6 @@ impl<'run> AttemptContext<'run> {
             direct_completions: self.direct_completions.clone(),
             parent_invocation: self.parent_invocation.as_deref().cloned(),
         }
-    }
-    /// Integrator class 3 resolved model provider visible to the attempt host.
-    pub fn provider(&self) -> Option<&crate::ProviderHandle> {
-        self.provider.as_ref()
     }
     /// Integrator class 3 payload sealed by the provider's prepare phase.
     pub fn prepared_payload(&self) -> &serde_json::Value {

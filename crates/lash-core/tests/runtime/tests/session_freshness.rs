@@ -332,9 +332,10 @@ async fn resident_refresh_adopts_the_durable_head_provider_id() {
         .complete_error("provider must not be called by refresh")
         .build()
         .into_handle();
+    serve_runtime_providers(&mut runtime, [settled_provider.clone()]);
     runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(settled_provider),
+            provider_id: Some(settled_provider.kind().to_string()),
             ..Default::default()
         })
         .await

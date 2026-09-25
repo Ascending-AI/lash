@@ -1534,9 +1534,10 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
         .with_capability(capability);
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
+    serve_runtime_providers(&mut runtime, [provider.clone()]);
     runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(provider),
+            provider_id: Some(provider.kind().to_string()),
             model: Some(model),
             ..Default::default()
         })
@@ -1621,9 +1622,10 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
         .with_capability(capability);
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
+    serve_runtime_providers(&mut runtime, [provider.clone()]);
     runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(provider),
+            provider_id: Some(provider.kind().to_string()),
             model: Some(model),
             ..Default::default()
         })
@@ -1701,9 +1703,10 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
         .into_handle();
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
+    serve_runtime_providers(&mut runtime, [provider.clone()]);
     runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(provider),
+            provider_id: Some(provider.kind().to_string()),
             ..Default::default()
         })
         .await
@@ -1798,9 +1801,10 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
         .into_handle();
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
+    serve_runtime_providers(&mut runtime, [provider.clone()]);
     runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(provider),
+            provider_id: Some(provider.kind().to_string()),
             generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
                 lash_core::GenerationOptions {
                     output_token_cap: NonZeroUsize::new(128),
@@ -1895,9 +1899,10 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
         .into_handle();
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
+    serve_runtime_providers(&mut runtime, [provider.clone()]);
     runtime
         .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(provider),
+            provider_id: Some(provider.kind().to_string()),
             model: Some(
                 lash_core::ModelSpec::builder("small-output-model")
                     .context_window_tokens(200_000)

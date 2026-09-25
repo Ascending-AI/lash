@@ -817,7 +817,6 @@ impl LashSession {
             stop: lash_core::LocalTurnStop::default(),
             cancels: self.turn_cancels.clone(),
             protocol_turn_options: None,
-            provider: None,
             turn_id: None,
         }
     }
