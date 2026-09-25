@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -40,7 +46,7 @@ lash_rust_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
@@ -50,7 +56,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-protocol-rlm__doc",
     crate = ":lash-protocol-rlm",
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm"),
     testonly = True,
 )
 
@@ -67,7 +73,7 @@ lash_rust_unit_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm", "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test"),
     extra_compile_data = [
         "//crates/lash-typescript:session_oracle_corpus",
     ],
@@ -89,7 +95,7 @@ lash_rust_integration_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "cell_binding_drift", "//crates/lash-protocol-rlm:cell_binding_drift__test"),
     extra_compile_data = [],
     library = ":lash-protocol-rlm",
     library_crate_name = "lash_protocol_rlm",
@@ -112,7 +118,7 @@ lash_rust_integration_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "protocol_drivers", "//crates/lash-protocol-rlm:protocol_drivers__test"),
     extra_compile_data = [],
     library = ":lash-protocol-rlm",
     library_crate_name = "lash_protocol_rlm",
@@ -135,7 +141,7 @@ lash_rust_integration_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "tool_batch_parallelism", "//crates/lash-protocol-rlm:tool_batch_parallelism__test"),
     extra_compile_data = [],
     library = ":lash-protocol-rlm",
     library_crate_name = "lash_protocol_rlm",
@@ -150,9 +156,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 3,
+    budget = test_batch_budget("//crates/lash-protocol-rlm:test_batch"),
     jobs = 2,
-    memory_kb = 1572864,
     tests = [
         ":cell_binding_drift__test",
         ":lash-protocol-rlm__unit_test",
@@ -192,7 +197,7 @@ lash_rust_feature_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "cell_binding_drift", "//crates/lash-protocol-rlm:cell_binding_drift__test__fv_819d79aa"),
     extra_compile_data = [],
     library = "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_64581751",
     library_crate_name = "lash_protocol_rlm",
@@ -219,7 +224,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
@@ -240,7 +245,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
@@ -264,7 +269,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
@@ -288,7 +293,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
@@ -312,7 +317,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
@@ -335,7 +340,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
@@ -358,7 +363,7 @@ lash_rust_feature_library(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
@@ -383,7 +388,7 @@ lash_rust_feature_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm", "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_819d79aa"),
     extra_compile_data = [
         "//crates/lash-typescript:session_oracle_corpus",
     ],
@@ -409,7 +414,7 @@ lash_rust_feature_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "protocol_drivers", "//crates/lash-protocol-rlm:protocol_drivers__test__fv_819d79aa"),
     extra_compile_data = [],
     library = "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_64581751",
     library_crate_name = "lash_protocol_rlm",
@@ -436,7 +441,7 @@ lash_rust_feature_test(
         "default",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "tool_batch_parallelism", "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_819d79aa"),
     extra_compile_data = [],
     library = "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_64581751",
     library_crate_name = "lash_protocol_rlm",

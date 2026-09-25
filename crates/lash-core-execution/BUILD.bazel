@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -27,7 +33,7 @@ lash_rust_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -64,7 +70,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-core-execution__doc",
     crate = ":lash-core-execution",
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     testonly = True,
 )
 
@@ -84,7 +90,7 @@ lash_rust_unit_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution", "//crates/lash-core-execution:lash-core-execution__unit_test"),
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -111,7 +117,7 @@ lash_rust_binary(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "process_event_schema_generator"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":lash-core-execution",
@@ -138,7 +144,7 @@ lash_rust_unit_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "process_event_schema_generator", "//crates/lash-core-execution:process_event_schema_generator__bin__unit_test"),
     library = ":lash-core-execution",
     library_crate_name = "lash_core_execution",
     manifest_dir = "crates/lash-core-execution",
@@ -168,7 +174,7 @@ lash_rust_integration_test(
         "tests/runtime/effect/group.rs",
         "tests/runtime/effect/tool_child.rs",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "effect_model", "//crates/lash-core-execution:effect_model__test"),
     extra_compile_data = [],
     library = ":lash-core-execution",
     library_crate_name = "lash_core_execution",
@@ -199,7 +205,7 @@ lash_rust_integration_test(
         "tests/runtime/process/lease_serde_tests.rs",
         "tests/runtime/process/registry_transitions.rs",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "process_model", "//crates/lash-core-execution:process_model__test"),
     extra_compile_data = [],
     library = ":lash-core-execution",
     library_crate_name = "lash_core_execution",
@@ -229,7 +235,7 @@ lash_rust_integration_test(
         "tests/store_backed.rs",
         "tests/store_backed/**/*.rs",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "2", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "store_backed", "//crates/lash-core-execution:store_backed__test"),
     extra_compile_data = [],
     library = ":lash-core-execution",
     library_crate_name = "lash_core_execution",
@@ -244,9 +250,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 5,
+    budget = test_batch_budget("//crates/lash-core-execution:test_batch"),
     jobs = 2,
-    memory_kb = 1048576,
     tests = [
         ":effect_model__test",
         ":lash-core-execution__unit_test",
@@ -289,7 +294,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "effect_model", "//crates/lash-core-execution:effect_model__test__fv_981024b5"),
     extra_compile_data = [],
     library = "//crates/lash-core-execution:lash-core-execution__fv_ee24c6f8",
     library_crate_name = "lash_core_execution",
@@ -317,7 +322,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -370,7 +375,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -422,7 +427,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -474,7 +479,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -527,7 +532,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -580,7 +585,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -630,7 +635,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -684,7 +689,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -736,7 +741,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "lash_core_execution"),
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -788,7 +793,7 @@ lash_rust_feature_binary(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "process_event_schema_generator"),
     extra_compile_data = [],
     include_dev_deps = False,
     library = "//crates/lash-core-execution:lash-core-execution__fv_ee24c6f8",
@@ -817,7 +822,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-core-execution", "process_model", "//crates/lash-core-execution:process_model__test__fv_981024b5"),
     extra_compile_data = [],
     library = "//crates/lash-core-execution:lash-core-execution__fv_ee24c6f8",
     library_crate_name = "lash_core_execution",

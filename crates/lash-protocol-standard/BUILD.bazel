@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 load("@rules_rust//rust:defs.bzl", "rust_doc")
 
 package(default_visibility = ["//visibility:public"])
@@ -22,7 +28,7 @@ lash_rust_library(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "lash_protocol_standard"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",
@@ -32,7 +38,7 @@ lash_rust_library(
 rust_doc(
     name = "lash-protocol-standard__doc",
     crate = ":lash-protocol-standard",
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "lash_protocol_standard"),
     testonly = True,
 )
 
@@ -47,7 +53,7 @@ lash_rust_unit_test(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "lash_protocol_standard", "//crates/lash-protocol-standard:lash-protocol-standard__unit_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",
@@ -65,7 +71,7 @@ lash_rust_integration_test(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "embedded_builder", "//crates/lash-protocol-standard:embedded_builder__test"),
     extra_compile_data = [],
     library = ":lash-protocol-standard",
     library_crate_name = "lash_protocol_standard",
@@ -86,7 +92,7 @@ lash_rust_integration_test(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "native_tools", "//crates/lash-protocol-standard:native_tools__test"),
     extra_compile_data = [],
     library = ":lash-protocol-standard",
     library_crate_name = "lash_protocol_standard",
@@ -107,7 +113,7 @@ lash_rust_integration_test(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "protocol_scenarios", "//crates/lash-protocol-standard:protocol_scenarios__test"),
     extra_compile_data = [],
     library = ":lash-protocol-standard",
     library_crate_name = "lash_protocol_standard",
@@ -122,9 +128,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 1,
+    budget = test_batch_budget("//crates/lash-protocol-standard:test_batch"),
     jobs = 2,
-    memory_kb = 1048576,
     tests = [
         ":embedded_builder__test",
         ":lash-protocol-standard__unit_test",
@@ -161,7 +166,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "lash_protocol_standard"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",
@@ -183,7 +188,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "lash_protocol_standard"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",
@@ -205,7 +210,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "lash_protocol_standard"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",

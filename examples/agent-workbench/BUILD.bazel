@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_binary(
@@ -24,7 +30,7 @@ lash_rust_binary(
     compile_data_patterns = [
         "assets/index.html",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("agent-workbench", "agent_workbench"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -49,7 +55,7 @@ lash_rust_unit_test(
         "default",
         "provider-wire-fixtures",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("agent-workbench", "agent_workbench", "//examples/agent-workbench:agent-workbench__unit_test"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -93,7 +99,7 @@ lash_rust_feature_binary(
         "default",
         "provider-wire-fixtures",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("agent-workbench", "agent_workbench"),
     compile_data_patterns = [
         "assets/index.html",
     ],
@@ -126,7 +132,7 @@ lash_rust_feature_binary(
         "default",
         "provider-wire-fixtures",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592"},
+    exec_properties = sized_exec_properties("agent-workbench", "agent_workbench"),
     compile_data_patterns = [
         "assets/index.html",
     ],
@@ -158,7 +164,7 @@ lash_rust_feature_test(
         "default",
         "provider-wire-fixtures",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("agent-workbench", "agent_workbench", "//examples/agent-workbench:agent-workbench__unit_test__fv_782b5a81"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -189,7 +195,7 @@ lash_rust_feature_test(
         "default",
         "provider-wire-fixtures",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "4718592", "test.cpu_count": "4", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("agent-workbench", "agent_workbench", "//examples/agent-workbench:agent-workbench__unit_test__fv_bc4abf6c"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
         "//crates/lash-sim:package_files",

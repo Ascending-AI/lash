@@ -8,10 +8,12 @@ load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 
 # Every remote action carries a `memory_kb` and a `cpu_count` request. The
 # repository default in `.bazelrc` is the small action; a target that needs more
-# says so through `exec_properties` that `tools/bazel/generate_build_files.py`
-# writes into the generated BUILD file. Plain keys size the target's compile
-# actions (from the measured table in `tools/bazel/action-sizes.json`), and on a
-# test target `test.cpu_count` / `test.memory_kb` size its run: Bazel applies
+# says so through `exec_properties`, which a generated BUILD file resolves
+# through `sized_exec_properties` in `tools/bazel/exec_sizes.bzl` -- the
+# generated table carries the numbers, so a re-measured row never rewrites a
+# crate's file. Plain keys size the target's compile actions (from the
+# measured table in `tools/bazel/action-sizes.json`), and on a test target
+# `test.cpu_count` / `test.memory_kb` size its run: Bazel applies
 # `test.`-prefixed properties to the TestRunner spawn only. Per-target
 # properties merge with the remote defaults.
 

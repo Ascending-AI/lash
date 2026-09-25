@@ -8,6 +8,12 @@ load(
     "lash_rust_unit_test",
 )
 
+load(
+    "//tools/bazel:exec_sizes.bzl",
+    "sized_exec_properties",
+    "test_batch_budget",
+)
+
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_binary(
@@ -18,7 +24,7 @@ lash_rust_binary(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
+    exec_properties = sized_exec_properties("agent-service", "agent_service"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -40,7 +46,7 @@ lash_rust_unit_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("agent-service", "agent_service", "//examples/agent-service:agent-service__unit_test"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -60,7 +66,7 @@ lash_rust_integration_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("agent-service", "fresh_boot", "//examples/agent-service:fresh_boot__test"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":agent-service",
@@ -102,7 +108,7 @@ lash_rust_feature_binary(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
+    exec_properties = sized_exec_properties("agent-service", "agent_service"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -130,7 +136,7 @@ lash_rust_feature_binary(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
+    exec_properties = sized_exec_properties("agent-service", "agent_service"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -157,7 +163,7 @@ lash_rust_feature_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("agent-service", "agent_service", "//examples/agent-service:agent-service__unit_test__fv_49a9f56c"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -183,7 +189,7 @@ lash_rust_feature_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3145728", "test.cpu_count": "3", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("agent-service", "agent_service", "//examples/agent-service:agent-service__unit_test__fv_a7f26781"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -208,7 +214,7 @@ lash_rust_feature_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("agent-service", "fresh_boot", "//examples/agent-service:fresh_boot__test__fv_49a9f56c"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":agent-service__fv_49a9f56c",
@@ -238,7 +244,7 @@ lash_rust_feature_test(
     declared_features = [
         "restate",
     ],
-    exec_properties = {"test.cpu_count": "1", "test.memory_kb": "1048576"},
+    exec_properties = sized_exec_properties("agent-service", "fresh_boot", "//examples/agent-service:fresh_boot__test__fv_a7f26781"),
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":agent-service__fv_a7f26781",

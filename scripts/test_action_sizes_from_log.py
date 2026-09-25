@@ -3,12 +3,14 @@
 
 `tools/bazel/action_sizes_from_log.py` turns the pool's usage logs into the
 measured compile and test-run tables; `tools/bazel/generate_build_files.py`
-turns them into `exec_properties` and sizes each `:test_batch` from its members,
-and `tools/bazel/test_batch.bzl` reserves what it is given.
+resolves them into `tools/bazel/exec_sizes.bzl`, which generated BUILD files
+look up through `sized_exec_properties` / `test_batch_budget`, and
+`tools/bazel/test_batch.bzl` reserves what it is given.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import pathlib
 import re
@@ -70,9 +72,33 @@ def generated_blocks():
             yield path, block
 
 
+def exec_sizes() -> dict[str, dict[str, dict[str, int]]]:
+    """The generated `exec_sizes.bzl` tables, exactly as BUILD files see them."""
+    text = (ROOT / "tools/bazel/exec_sizes.bzl").read_text(encoding="utf-8")
+    return {
+        name: ast.literal_eval(re.search(rf"{name} = (\{{.*?\n\}})", text, re.S).group(1))
+        for name in ("COMPILE_REQUESTS", "TEST_RUN_REQUESTS", "BATCH_BUDGETS")
+    }
+
+
 def properties_of(block: str) -> dict[str, str]:
-    match = re.search(r"exec_properties = (\{[^}]*\})", block)
-    return json.loads(match.group(1)) if match else {}
+    """The `exec_properties` a generated block resolves through exec_sizes.bzl."""
+    match = re.search(r"exec_properties = sized_exec_properties\(([^)]*)\)", block)
+    if not match:
+        return {}
+    arguments = [json.loads(argument) for argument in match.group(1).split(", ")]
+    tables = exec_sizes()
+    properties = {
+        key: str(value)
+        for key, value in tables["COMPILE_REQUESTS"]
+        .get(f"{arguments[0]}/{arguments[1]}", {})
+        .items()
+    }
+    if len(arguments) == 3:
+        run = tables["TEST_RUN_REQUESTS"][arguments[2]]
+        properties["test.cpu_count"] = str(run["cpu_count"])
+        properties["test.memory_kb"] = str(run["memory_kb"])
+    return properties
 
 
 class CollectTest(unittest.TestCase):
@@ -621,10 +647,14 @@ class BatchBudgetTest(unittest.TestCase):
             seen += 1
             with self.subTest(path=str(path)):
                 self.assertIn(f"    jobs = {generator.BATCH_JOBS},\n", block)
-                cpu = int(re.search(r"    cpu_count = (\d+),", block).group(1))
-                memory_kb = int(re.search(r"    memory_kb = (\d+),", block).group(1))
+                label = json.loads(
+                    re.search(r"budget = test_batch_budget\(([^)]*)\)", block).group(1)
+                )
+                budget = exec_sizes()["BATCH_BUDGETS"][label]
+                cpu = budget["cpu_count"]
+                memory_kb = budget["memory_kb"]
                 package = path.parent.relative_to(ROOT).as_posix()
-                label = f"//{package}:test_batch"
+                self.assertEqual(label, f"//{package}:test_batch")
                 row = generator.TEST_RUN_SIZES.get(label) or generator.PINNED_TEST_RUNS.get(label)
                 if row is not None:
                     # A priced batch reserves its row or pin, lifted only by
@@ -639,8 +669,8 @@ class BatchBudgetTest(unittest.TestCase):
 
     def test_the_rule_reserves_what_it_is_given_and_runs_jobs_at_once(self) -> None:
         bzl = (ROOT / "tools/bazel/test_batch.bzl").read_text(encoding="utf-8")
-        self.assertIn('"test.cpu_count": str(cpu_count)', bzl)
-        self.assertIn('"test.memory_kb": str(memory_kb)', bzl)
+        self.assertIn('"test.cpu_count": str(budget["cpu_count"])', bzl)
+        self.assertIn('"test.memory_kb": str(budget["memory_kb"])', bzl)
         self.assertIn("jobs = jobs", bzl)
         self.assertIn("export LASH_BATCH_JOBS={jobs}", bzl)
         runner = (ROOT / "tools/bazel/test_batch_runner.sh").read_text(encoding="utf-8")
