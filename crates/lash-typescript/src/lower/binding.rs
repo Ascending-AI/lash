@@ -11,8 +11,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::captures::BindingId;
 use super::{
-    BinaryOp, CallArg, Expr, FunctionBody, MemberProperty, Pattern, Stmt, TsAssignTarget,
-    is_reserved_name, reserved_identifier,
+    BinaryOp, CallArg, Expr, FunctionBody, MemberProperty, Pattern, Stmt, TsAssignTarget, VarKind,
+    is_reserved_name, pattern_names, reserved_identifier,
 };
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -286,6 +286,16 @@ impl super::Lowerer {
         self.capture_ledger.write(binding, site);
     }
 
+    /// Records an assignment's store to `name` at the point it happens: after
+    /// its value, which may create a closure over `name` that the store then
+    /// makes stale. Resolving the target recorded the write at the point the
+    /// reference is taken, ahead of the value.
+    pub(super) fn record_store(&mut self, name: &str) -> Result<(), Diagnostic> {
+        let binding = self.binding(name)?.id;
+        self.record_write(binding);
+        Ok(())
+    }
+
     /// Records a `globalThis.name` write or delete, which lands on the root
     /// slot `name`. At the root that is an ordinary write; inside a function
     /// it runs whenever the function is called.
@@ -315,6 +325,95 @@ impl super::Lowerer {
             }
         }
     }
+}
+
+/// The `var` names a function body (or the script) declares at any depth,
+/// which the body's frame hoists.
+pub(super) fn function_var_names(statements: &[Stmt]) -> Vec<String> {
+    fn visit(statement: &Stmt, names: &mut Vec<String>) {
+        match statement {
+            Stmt::Spanned(_, stmt) | Stmt::Labeled { stmt, .. } => visit(stmt, names),
+            Stmt::Enum { name, .. } => names.push(name.clone()),
+            Stmt::Var {
+                kind: VarKind::Var,
+                declarations,
+            } => {
+                for declaration in declarations {
+                    pattern_names(&declaration.pattern, names);
+                }
+            }
+            Stmt::Block(statements) => statements.iter().for_each(|stmt| visit(stmt, names)),
+            Stmt::If {
+                consequent,
+                alternate,
+                ..
+            } => {
+                visit(consequent, names);
+                if let Some(alternate) = alternate {
+                    visit(alternate, names);
+                }
+            }
+            // A `var` loop head declares the enclosing function's (or the
+            // script's) one binding, which every iteration assigns.
+            Stmt::ForOf {
+                pattern,
+                kind: Some(VarKind::Var),
+                body,
+                ..
+            }
+            | Stmt::ForIn {
+                pattern,
+                kind: Some(VarKind::Var),
+                body,
+                ..
+            } => {
+                pattern_names(pattern, names);
+                visit(body, names);
+            }
+            // So does a classic `for` head's `var`.
+            Stmt::For { init, body, .. } => {
+                if let Some(init) = init {
+                    visit(init, names);
+                }
+                visit(body, names);
+            }
+            Stmt::While { body, .. }
+            | Stmt::DoWhile { body, .. }
+            | Stmt::ForOf { body, .. }
+            | Stmt::ForIn { body, .. } => visit(body, names),
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    case.consequent.iter().for_each(|stmt| visit(stmt, names));
+                }
+            }
+            Stmt::Try {
+                body,
+                catch,
+                finally,
+            } => {
+                body.iter().for_each(|stmt| visit(stmt, names));
+                if let Some(catch) = catch {
+                    catch.body.iter().for_each(|stmt| visit(stmt, names));
+                }
+                if let Some(finally) = finally {
+                    finally.iter().for_each(|stmt| visit(stmt, names));
+                }
+            }
+            Stmt::Function { .. }
+            | Stmt::Empty
+            | Stmt::Expr(_)
+            | Stmt::Return(_)
+            | Stmt::Break
+            | Stmt::Continue
+            | Stmt::Throw(_)
+            | Stmt::Var { .. } => {}
+        }
+    }
+    let mut names = Vec::new();
+    statements.iter().for_each(|stmt| visit(stmt, &mut names));
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// Every name the program addresses as `globalThis.name`: read, written,

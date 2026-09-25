@@ -225,7 +225,7 @@ typescript	binding-reassignment
 typescript	builtin-arity
 typescript	builtin-member-read
 typescript	builtin-member-write
-typescript	classic-for-forms
+typescript	classic-for-continue-across-finally
 typescript	closed-shape-field-guard
 typescript	comma-operator
 typescript	constructor-arity
