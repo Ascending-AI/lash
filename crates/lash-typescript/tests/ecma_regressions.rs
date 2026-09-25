@@ -70,6 +70,8 @@ mod fig_3706;
 mod fig_3707;
 #[path = "ecma_regressions/fig_3708.rs"]
 mod fig_3708;
+#[path = "ecma_regressions/fig_3714.rs"]
+mod fig_3714;
 #[path = "ecma_regressions/fig_3720.rs"]
 mod fig_3720;
 #[path = "ecma_regressions/fig_3722.rs"]

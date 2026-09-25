@@ -9,7 +9,7 @@ test/language/statements/switch/S12.11_A3_T2.js	pass	-
 test/language/statements/switch/S12.11_A3_T3.js	pass	-
 test/language/statements/switch/S12.11_A3_T4.js	pass	-
 test/language/statements/switch/S12.11_A3_T5.js	pass	-
-test/language/statements/switch/S12.11_A4_T1.js	fail	FIG-3714
+test/language/statements/switch/S12.11_A4_T1.js	pass	-
 test/language/statements/switch/cptn-a-abrupt-empty.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/switch/cptn-a-fall-thru-abrupt-empty.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/switch/cptn-a-fall-thru-nrml.js	refused	TS_EVAL_UNSUPPORTED
@@ -34,8 +34,8 @@ test/language/statements/switch/cptn-no-dflt-no-match.js	refused	TS_EVAL_UNSUPPO
 test/language/statements/switch/scope-lex-async-function.js	refused	TS_UNKNOWN_BINDING
 test/language/statements/switch/scope-lex-async-generator.js	refused	TS_GENERATOR_UNSUPPORTED
 test/language/statements/switch/scope-lex-class.js	refused	TS_CLASS_UNSUPPORTED
-test/language/statements/switch/scope-lex-close-case.js	fail	FIG-3714
-test/language/statements/switch/scope-lex-close-dflt.js	fail	FIG-3714
+test/language/statements/switch/scope-lex-close-case.js	pass	-
+test/language/statements/switch/scope-lex-close-dflt.js	pass	-
 test/language/statements/switch/scope-lex-const.js	refused	TS_UNKNOWN_BINDING
 test/language/statements/switch/scope-lex-generator.js	refused	TS_GENERATOR_UNSUPPORTED
 test/language/statements/switch/scope-lex-let.js	refused	TS_UNKNOWN_BINDING

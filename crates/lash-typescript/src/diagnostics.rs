@@ -759,6 +759,7 @@ mod tests {
                 "lower/spread_calls.rs",
                 include_str!("lower/spread_calls.rs"),
             ),
+            ("lower/statements.rs", include_str!("lower/statements.rs")),
             ("lower/array_map.rs", include_str!("lower/array_map.rs")),
             ("lower/arrays.rs", include_str!("lower/arrays.rs")),
             (
