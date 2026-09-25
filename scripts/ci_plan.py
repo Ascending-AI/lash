@@ -523,6 +523,7 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     ".github/dependabot.yml": "GitHub's Dependabot reads it; no CI job does",
     "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
     "scripts/perf_baseline.py": "run by hand to compare two lash-perf ledgers",
+    "scripts/profile_monty_comparison.sh": "run by hand to measure the TypeScript VM against Monty's published workloads",
     "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
 }
 
