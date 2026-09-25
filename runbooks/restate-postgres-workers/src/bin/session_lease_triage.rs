@@ -791,6 +791,8 @@ async fn commit_cas_livelock(
             session_id: state.session_id,
             expected_head_revision: state.head_revision,
             session_execution_lease_fence: Some(holder.fence()),
+            drive_fence: None,
+            root_terminal: None,
             release_session_execution_lease: None,
             config: state.config,
             current_frame_node_id: state.current_frame_node_id,

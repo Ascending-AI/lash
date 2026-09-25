@@ -630,3 +630,26 @@ mod tests {
         }
     }
 }
+
+/// The engine's own handle on parked work: what its redrive and release find
+/// the stopped execution by (an engine-owned, opaque id).
+///
+/// Opaque to lash: stored beside the park as the engine wrote it and handed
+/// back to the same engine, never parsed outside it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct EnginePark(String);
+
+impl EnginePark {
+    /// The engine's handle `value`.
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The handle as the engine wrote it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}

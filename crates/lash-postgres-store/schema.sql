@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     drive_epoch BIGINT NOT NULL DEFAULT 0,
     drive_admission_id TEXT,
     admission_base_checkpoint_ref TEXT,
+    closing_intent BIGINT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
     CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
@@ -253,7 +254,9 @@ CREATE TABLE IF NOT EXISTS lash_turn_parks (
     reason_json TEXT NOT NULL,
     since_ms BIGINT NOT NULL,
     last_refused_ms BIGINT NOT NULL,
-    attempts BIGINT NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1)
+    attempts BIGINT NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1),
+    engine_ref TEXT,
+    resume_intent BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_lash_turn_parks_since
     ON lash_turn_parks(since_ms, session_id);
@@ -270,7 +273,7 @@ CREATE TABLE IF NOT EXISTS lash_turn_park_events (
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,
     park_id BIGINT NOT NULL,
-    kind TEXT NOT NULL CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled')),
+    kind TEXT NOT NULL CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')),
     cause TEXT,
     reason_json TEXT,
     at_ms BIGINT NOT NULL,
@@ -411,6 +414,48 @@ CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_addressed
     ON lash_session_ingress(session_id, delivery_turn_id, enqueue_seq) WHERE delivery_turn_id IS NOT NULL AND state IN ('open', 'accepted');
 CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_claim
     ON lash_session_ingress(session_id, claim_id) WHERE claim_id IS NOT NULL;
+
+-- The logical-root family (FIG-3600 S7). `lash_session_roots` holds one row
+-- per (session, root) a drive admitted work under, with the root's terminal
+-- evidence once it has one: the `terminal_*` columns are set together,
+-- exactly once. `lash_session_root_inputs` binds each accepted input to the
+-- root that drives it. `lash_control_intents` records an operator's verb or a
+-- session's close; a `close_session` row outlives its session as the
+-- deletion tombstone.
+CREATE TABLE IF NOT EXISTS lash_session_roots (
+    session_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    terminal_kind TEXT,
+    terminal_cause_json TEXT,
+    terminal_head_revision BIGINT,
+    terminal_at_ms BIGINT,
+    PRIMARY KEY (session_id, root),
+    CONSTRAINT ck_session_roots_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS lash_session_root_inputs (
+    session_id TEXT NOT NULL,
+    input_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    PRIMARY KEY (session_id, input_id)
+);
+
+CREATE TABLE IF NOT EXISTS lash_control_intents (
+    intent_id BIGSERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    format BIGINT NOT NULL,
+    kind TEXT NOT NULL CONSTRAINT ck_control_intents_kind CHECK (kind IN ('redrive', 'cancel', 'fork', 'close_session')),
+    kind_json TEXT NOT NULL,
+    state TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged', 'superseded', 'failed_retryable', 'failed')),
+    state_json TEXT NOT NULL,
+    attempts BIGINT NOT NULL,
+    created_at_ms BIGINT NOT NULL,
+    engine_ref TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_lash_control_intents_open
+    ON lash_control_intents(intent_id) WHERE state IN ('pending', 'failed_retryable');
+CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
+    ON lash_control_intents(session_id, kind);
 
 CREATE TABLE IF NOT EXISTS lash_attachment_manifest (
     attachment_id TEXT NOT NULL,

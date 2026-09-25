@@ -139,6 +139,7 @@ mod schema_fragments;
 mod scope_fence;
 mod session_ingress;
 mod session_meta;
+mod session_roots;
 mod session_sql;
 #[cfg(test)]
 mod session_sql_tests;

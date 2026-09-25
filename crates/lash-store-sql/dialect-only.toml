@@ -153,6 +153,9 @@ touches = [
     "turn_parks",
     "wake_allocation_floors",
     "wake_redelivery_fences",
+    "session_roots",
+    "session_root_inputs",
+    "control_intents",
 ]
 reason = """
 The process prune deletes a batch of sessions' rows from every table a session
@@ -633,6 +636,33 @@ schema = [
     "crates/lash-postgres-store/src/postgres/schema_shape.rs",
     "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
 ]
+
+[families.session_roots]
+tables = ["session_roots", "session_root_inputs", "control_intents"]
+statement_prefixes = ["session_root", "session_root_input", "control_intent"]
+shared = [
+    "crates/lash-store-sql/src/session_roots.rs",
+    "crates/lash-store-sql/src/session_roots/control_intents.rs",
+    "crates/lash-store-sql/src/session_roots/root_inputs.rs",
+    "crates/lash-store-sql/src/session_roots/roots.rs",
+]
+# Every statement is shared: the family forks nothing.
+sqlite = ["crates/lash-sqlite-store/src/session_roots.rs"]
+postgres = ["crates/lash-postgres-store/src/postgres/session_roots.rs"]
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+[families.session_roots.table_modules]
+session_roots = "crates/lash-store-sql/src/session_roots/roots.rs"
+session_root_inputs = "crates/lash-store-sql/src/session_roots/root_inputs.rs"
+control_intents = "crates/lash-store-sql/src/session_roots/control_intents.rs"
 
 [families.session_ingress.table_modules]
 session_ingress = "crates/lash-store-sql/src/session_ingress.rs"

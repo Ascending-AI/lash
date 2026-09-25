@@ -909,6 +909,23 @@ lash_store_sql::statements! {
              DELETE FROM session_meta
              WHERE session_id = ANY(?1)
              RETURNING session_id
+         ),
+         deleted_session_roots AS (
+             DELETE FROM session_roots
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         deleted_session_root_inputs AS (
+             DELETE FROM session_root_inputs
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         -- A `close_session` intent outlives its session: it is the
+         -- deletion tombstone the session's roots answer from.
+         deleted_control_intents AS (
+             DELETE FROM control_intents
+             WHERE session_id = ANY(?1) AND kind <> 'close_session'
+             RETURNING session_id
          )
          SELECT (SELECT count(*) FROM deleted_graph_nodes)
               + (SELECT count(*) FROM deleted_queued_run_members)
@@ -923,7 +940,10 @@ lash_store_sql::statements! {
               + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
               + (SELECT count(*) FROM deleted_session_execution_leases)
               + (SELECT count(*) FROM deleted_fork_lineage)
-              + (SELECT count(*) FROM deleted_session_meta)";
+              + (SELECT count(*) FROM deleted_session_meta)
+              + (SELECT count(*) FROM deleted_session_roots)
+              + (SELECT count(*) FROM deleted_session_root_inputs)
+              + (SELECT count(*) FROM deleted_control_intents)";
     }
 }
 

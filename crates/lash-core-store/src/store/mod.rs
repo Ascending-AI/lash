@@ -116,7 +116,7 @@ pub use maintenance::{
     MaintenanceStop, MaintenanceSweep, SessionBlobReclaimReport, VacuumReport,
 };
 pub use park::{
-    ParkCancelCause, ParkId, ParkReason, ParkReasonCode, TurnPark, TurnParkEventKind,
+    EnginePark, ParkCancelCause, ParkId, ParkReason, ParkReasonCode, TurnPark, TurnParkEventKind,
     TurnParkFeedCursor, TurnParkFeedEvent, TurnParkFeedPage, TurnParkQuery, TurnParkWrite,
     UnparkCause, UnsettledTurnCounts,
 };
@@ -639,6 +639,8 @@ impl RuntimeCommit {
             session_id: _,
             expected_head_revision: _,
             session_execution_lease_fence: _,
+            drive_fence: _,
+            root_terminal,
             release_session_execution_lease: _,
             config: _,
             current_frame_node_id: _,
@@ -671,7 +673,8 @@ impl RuntimeCommit {
                 && turn_cancel_closure_settlement.is_none()
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
-                && committed_attachment_ids.is_empty(),
+                && committed_attachment_ids.is_empty()
+                && root_terminal.is_none(),
             "append-session-nodes constructor gained unrelated settlement side effects"
         );
     }
@@ -819,6 +822,8 @@ impl RuntimeCommit {
             session_id: state.session_id.clone(),
             expected_head_revision: state.head_revision,
             session_execution_lease_fence: None,
+            drive_fence: None,
+            root_terminal: None,
             release_session_execution_lease: None,
             config: persisted_session_config_from_state(state),
             current_frame_node_id,
@@ -2163,8 +2168,9 @@ pub trait StoreMaintenance: Send + Sync {
 /// attachment write-ahead manifest), [`TurnInputStore`] (pending turn-input
 /// lifecycle), [`QueuedWorkStore`] (queued-work ingress and claiming),
 /// [`SessionExecutionLeaseStore`] (single-writer execution lane),
-/// [`DriveEpochStore`] (the drive epoch a session drive's seal raises, FIG-3600)
-/// and [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
+/// [`DriveEpochStore`] (the drive epoch a session drive's seal raises, FIG-3600),
+/// [`RootStore`] (logical roots' terminal evidence and input bindings, FIG-3600
+/// S7) and [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
 /// domain: claims granted by the input and queue segments settle atomically in
 /// [`SessionCommitStore::commit_runtime_state`]. In-flight nondeterministic
 /// work belongs to the active [`EffectHost`](crate::EffectHost), not to the
@@ -2183,6 +2189,7 @@ pub trait RuntimePersistence:
     + SessionExecutionLeaseStore
     + QueuedWorkStore
     + DriveEpochStore
+    + RootStore
     + StoreMaintenance
 {
 }
@@ -2193,6 +2200,7 @@ impl<T> RuntimePersistence for T where
         + SessionExecutionLeaseStore
         + QueuedWorkStore
         + DriveEpochStore
+        + RootStore
         + StoreMaintenance
         + ?Sized
 {

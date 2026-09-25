@@ -95,14 +95,37 @@ impl SqliteSessionStoreFactory {
         Ok(page)
     }
 
-    /// [`SessionStoreFactory::root_terminal`] over the durable core.
+    /// [`SessionStoreFactory::root_terminal`] over the durable core: the
+    /// root's own evidence, else the session's `close_session` tombstone,
+    /// which answers every root of a deleted session.
     pub(crate) async fn read_root_terminal(
         &self,
         session_id: &SessionId,
         root: &lash_sansio::TurnId,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
-        let _ = (session_id, root);
-        Ok(None)
+        if !self.core.target().exists() {
+            return Ok(None);
+        }
+        let conn = SqliteConnection::open_readonly(self.core.target())
+            .await
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let session_id = session_id.clone();
+        let root = root.clone();
+        conn.read(move |conn| {
+            Ok((|| {
+                if let Some(terminal) =
+                    crate::session_roots::root_terminal_conn(conn, &session_id, &root)?
+                {
+                    return Ok(Some(terminal));
+                }
+                Ok(
+                    crate::session_roots::close_session_intent_conn(conn, &session_id)?
+                        .and_then(|intent| intent.session_deleted_terminal(&root)),
+                )
+            })())
+        })
+        .await
+        .map_err(sqlite_error)?
     }
 
     /// [`SessionStoreFactory::list_open_control_intents`] over the durable
@@ -112,7 +135,20 @@ impl SqliteSessionStoreFactory {
         after: Option<lash_core_execution::store::ControlIntentId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
-        let _ = (after, limit);
-        Ok(Vec::new())
+        if !self.core.target().exists() {
+            return Ok(Vec::new());
+        }
+        let conn = SqliteConnection::open_readonly(self.core.target())
+            .await
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        conn.read(move |conn| {
+            Ok(crate::session_roots::open_control_intents_conn(
+                conn,
+                after,
+                limit.get(),
+            ))
+        })
+        .await
+        .map_err(sqlite_error)?
     }
 }

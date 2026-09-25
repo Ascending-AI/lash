@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::ParkId;
+use super::{EnginePark, ParkId};
 use crate::{SessionId, TurnId};
 
 /// The registered durable format of a [`ControlIntent`] record.
@@ -130,6 +130,10 @@ pub struct ControlIntent {
     pub state: ControlIntentState,
     pub attempts: u32,
     pub created_at_ms: u64,
+    /// The engine's handle on the root's stopped execution, copied from its
+    /// park by a verb whose store half deletes the park (a cancel or a
+    /// fork), so the engine half can still find the execution to release.
+    pub engine: Option<EnginePark>,
 }
 
 impl ControlIntent {
@@ -150,6 +154,7 @@ impl ControlIntent {
 
     /// Decode the columns a backend stored, refusing a format this build
     /// does not read.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_stored(
         id: u64,
         session_id: SessionId,
@@ -158,6 +163,7 @@ impl ControlIntent {
         state_json: &str,
         attempts: u32,
         created_at_ms: u64,
+        engine: Option<String>,
     ) -> Result<Self, super::StoreError> {
         if format != CONTROL_INTENT_FORMAT {
             return Err(super::StoreError::UnsupportedRecordSchemaVersion {
@@ -180,6 +186,7 @@ impl ControlIntent {
                 .map_err(|error| corrupt(format!("control intent state: {error}")))?,
             attempts,
             created_at_ms,
+            engine: engine.map(EnginePark::new),
         })
     }
 }
