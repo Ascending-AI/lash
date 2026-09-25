@@ -22,6 +22,7 @@ mod javascript_json;
 mod javascript_number;
 mod javascript_operators;
 pub(crate) mod javascript_regexp;
+mod javascript_static;
 mod javascript_stdlib;
 mod javascript_string_regexp;
 mod javascript_substrate;
@@ -62,15 +63,17 @@ use super::{
     LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name,
     PersistedRoots, ProfileAccumulator, ProfileReport, ProjectedBindings, RegExpMatchObject,
     ResourceHandle, RuntimeError, State, Value, add_assign_index_number, add_values, as_number,
-    assign_path, eval_binary_values, eval_compare_values, eval_javascript_binary,
-    eval_javascript_unary, eval_number_binary_values, eval_number_compare_values,
-    eval_number_numeric_binary_value, execute_compiled_format, execute_compiled_format_direct,
+    assign_path, binary_op_work_units, charge_collection_work, deep_proportional_units,
+    eval_binary_values, eval_compare_values, eval_javascript_binary, eval_javascript_unary,
+    eval_number_binary_values, eval_number_compare_values, eval_number_numeric_binary_value,
+    execute_compiled_format, execute_compiled_format_direct,
     execute_compiled_format_one_number_compact_direct, execute_intrinsic,
     execute_push_builtin_async, heap_inherited_builtin, inline_inherited_builtin, is_truthy,
     is_truthy_async, iterable_values, javascript_join, javascript_split,
-    materialize_projected_async, materialize_value, range_bounds, range_bounds_async,
-    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
-    read_javascript_index_direct_with_key, regexp_string, unwrap_tool_result, unwrap_type_value,
+    materialize_projected_async, materialize_value, proportional_units, range_bounds,
+    range_bounds_async, read_javascript_field_direct, read_javascript_heap_field,
+    read_javascript_heap_index, read_javascript_index_direct_with_key, regexp_string, sorting_work,
+    unwrap_tool_result, unwrap_type_value,
 };
 
 #[derive(Clone)]
@@ -506,6 +509,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     Value::List(values) | Value::Tuple(values) => values.to_vec(),
                     value => {
                         let exported = self.heap.export_for_instruction(value)?;
+                        // Exporting reads the value's whole graph once.
+                        self.charge_intrinsic_work(deep_proportional_units(&exported));
                         let (Value::List(values) | Value::Tuple(values)) = exported else {
                             return Err(RuntimeError::ShapingListRequired {
                                 builtin: "map".into(),
@@ -515,19 +520,29 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         values.to_vec()
                     }
                 };
-                let items = items
-                    .iter()
-                    // Each callback receives the item itself: a heap
-                    // reference stays the object it names (ECMA identity), and
-                    // only an inline compound is given its own object.
-                    .map(|value| match value {
-                        Value::Ref(_) => Ok(value.clone()),
-                        value => self.heap.isolate_value(value),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                // Each callback receives the item itself: a heap
+                // reference stays the object it names (ECMA identity), and
+                // only an inline compound is given its own object.
+                let mut staged = 0usize;
+                let mut isolated_items = Vec::with_capacity(items.len());
+                for value in &items {
+                    match value {
+                        Value::Ref(_) => isolated_items.push(value.clone()),
+                        value => {
+                            let (value, work) = self.heap.isolate_value_with_work(value)?;
+                            staged = staged.saturating_add(work);
+                            isolated_items.push(value);
+                        }
+                    }
+                }
+                // Each isolation copy walks the graph it reaches once.
+                self.charge_intrinsic_work(staged);
+                let items = isolated_items;
                 if items.is_empty() {
                     self.stack.push(Value::List(Vec::new().into()));
                 } else {
+                    // The driver queues one call per element.
+                    self.charge_intrinsic_work(items.len());
                     self.begin_callback_driver(
                         function,
                         items.into_iter().map(|item| vec![item]).collect(),
@@ -593,14 +608,20 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let right = self.pop_stack()?;
                 let left = self.pop_stack()?;
                 let value = if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
-                    let equal = self.heap.structural_eq(&left, &right)?;
+                    let (equal, work) = self.heap.structural_eq_with_work(&left, &right)?;
+                    self.charge_intrinsic_work(work);
                     Value::Bool(if op == BinaryOp::Equal { equal } else { !equal })
                 } else {
                     match (left, right) {
                         (Value::Number(left), Value::Number(right)) if op != BinaryOp::In => {
                             eval_number_binary_values(left, op, right)
                         }
-                        (left, right) => eval_binary_values(left, op, right)?,
+                        (left, right) => {
+                            // `+` copies its result, `in` scans the haystack:
+                            // the operand sizes are the work.
+                            self.charge_intrinsic_work(binary_op_work_units(&left, op, &right));
+                            eval_binary_values(left, op, right)?
+                        }
                     }
                 };
                 self.stack.push(value);
@@ -631,23 +652,33 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(Value::Bool(nullish));
             }
             Instruction::SlotNumberBinary { slot, op, right } => {
-                let value = match self.load_slot(slot)? {
+                let value = match self.load_slot(slot)?.clone() {
                     Value::Projected(_) => return Ok(None),
                     Value::Number(left) => {
-                        Value::Number(eval_number_numeric_binary_value(*left, op, right))
+                        Value::Number(eval_number_numeric_binary_value(left, op, right))
                     }
-                    left => eval_binary_values(left.clone(), op, Value::Number(right))?,
+                    left => {
+                        self.charge_intrinsic_work(binary_op_work_units(
+                            &left,
+                            op,
+                            &Value::Number(right),
+                        ));
+                        eval_binary_values(left, op, Value::Number(right))?
+                    }
                 };
                 self.stack.push(value);
             }
             Instruction::SlotNumberCompare { slot, op, right } => {
-                let value = match self.load_slot(slot)? {
+                let value = match self.load_slot(slot)?.clone() {
                     Value::Projected(_) => return Ok(None),
-                    Value::Number(left) => {
-                        Value::Bool(eval_number_compare_values(*left, op, right))
-                    }
+                    Value::Number(left) => Value::Bool(eval_number_compare_values(left, op, right)),
                     left => {
-                        Value::Bool(eval_compare_values(left.clone(), op, Value::Number(right))?)
+                        self.charge_intrinsic_work(binary_op_work_units(
+                            &left,
+                            op,
+                            &Value::Number(right),
+                        ));
+                        Value::Bool(eval_compare_values(left, op, Value::Number(right))?)
                     }
                 };
                 self.stack.push(value);
@@ -659,19 +690,20 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 compare_op,
                 compare_right,
             } => {
-                let truthy = match self.load_slot(slot)? {
+                let truthy = match self.load_slot(slot)?.clone() {
                     Value::Projected(_) => return Ok(None),
                     Value::Number(left) => {
-                        let value =
-                            eval_number_numeric_binary_value(*left, binary_op, binary_right);
+                        let value = eval_number_numeric_binary_value(left, binary_op, binary_right);
                         eval_number_compare_values(value, compare_op, compare_right)
                     }
                     left => {
-                        let value = eval_binary_values(
-                            left.clone(),
+                        self.charge_intrinsic_work(binary_op_work_units(
+                            &left,
                             binary_op,
-                            Value::Number(binary_right),
-                        )?;
+                            &Value::Number(binary_right),
+                        ));
+                        let value =
+                            eval_binary_values(left, binary_op, Value::Number(binary_right))?;
                         eval_compare_values(value, compare_op, Value::Number(compare_right))?
                     }
                 };
@@ -722,6 +754,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 }
                 let right = self.pop_stack()?;
                 let left = self.pop_stack()?;
+                self.charge_intrinsic_work(binary_op_work_units(&left, op, &right));
                 if !eval_compare_values(left, op, right)? {
                     self.observe_branch_selection(
                         self.current_instruction_ip(),
@@ -741,10 +774,17 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 right,
                 target,
             } => {
-                let truthy = match self.load_slot(slot)? {
+                let truthy = match self.load_slot(slot)?.clone() {
                     Value::Projected(_) => return Ok(None),
-                    Value::Number(left) => eval_number_compare_values(*left, op, right),
-                    value => eval_compare_values(value.clone(), op, Value::Number(right))?,
+                    Value::Number(left) => eval_number_compare_values(left, op, right),
+                    value => {
+                        self.charge_intrinsic_work(binary_op_work_units(
+                            &value,
+                            op,
+                            &Value::Number(right),
+                        ));
+                        eval_compare_values(value, op, Value::Number(right))?
+                    }
                 };
                 if !truthy {
                     self.observe_branch_selection(
@@ -767,19 +807,20 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 compare_right,
                 target,
             } => {
-                let truthy = match self.load_slot(slot)? {
+                let truthy = match self.load_slot(slot)?.clone() {
                     Value::Projected(_) => return Ok(None),
                     Value::Number(left) => {
-                        let value =
-                            eval_number_numeric_binary_value(*left, binary_op, binary_right);
+                        let value = eval_number_numeric_binary_value(left, binary_op, binary_right);
                         eval_number_compare_values(value, compare_op, compare_right)
                     }
                     value => {
-                        let value = eval_binary_values(
-                            value.clone(),
+                        self.charge_intrinsic_work(binary_op_work_units(
+                            &value,
                             binary_op,
-                            Value::Number(binary_right),
-                        )?;
+                            &Value::Number(binary_right),
+                        ));
+                        let value =
+                            eval_binary_values(value, binary_op, Value::Number(binary_right))?;
                         eval_compare_values(value, compare_op, Value::Number(compare_right))?
                     }
                 };
@@ -928,11 +969,15 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let Some(iter_state) = self.iter_stack.last_mut() else {
                     return Err(RuntimeError::MissingLoopState);
                 };
-                let Some(value) = iter_state.cursor.next_value(&self.heap)? else {
+                let binding = iter_state.binding;
+                let mut work = 0usize;
+                let next = iter_state.cursor.next_value(&self.heap, &mut work)?;
+                self.charge_intrinsic_work(work);
+                let Some(value) = next else {
                     self.ip = jump_to;
                     return Ok(Some(VmStep::Continue));
                 };
-                self.slots.assign_loop_binding(iter_state.binding, value)?;
+                self.slots.assign_loop_binding(binding, value)?;
             }
             Instruction::EndIter => {
                 if let Some(iter_state) = self.iter_stack.pop() {
@@ -1107,7 +1152,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
                         self.heap.push_list(&list, item)?
                     }
-                    _ => execute_push_builtin_async(list, item).await?,
+                    _ => {
+                        // The fallback copies every element the list holds.
+                        self.charge_intrinsic_work(proportional_units(&list).saturating_add(1));
+                        execute_push_builtin_async(list, item).await?
+                    }
                 };
                 self.stack.push(value);
             }
@@ -1402,16 +1451,22 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;
                 let schema = materialize_projected_async(schema).await?;
-                let value = self
-                    .execute_dynamic_validate(materialize_projected_async(value).await?, &schema)?;
+                let value = materialize_projected_async(value).await?;
+                // A validation walks the schema and the value's members once.
+                self.charge_intrinsic_work(
+                    deep_proportional_units(&value)
+                        .saturating_add(deep_proportional_units(&schema)),
+                );
+                let value = self.execute_dynamic_validate(value, &schema)?;
                 self.stack.push(value);
             }
             IntrinsicOp::ValidateCompiled(schema) => {
                 let value = self.pop_stack()?;
-                let value = execute_validation_plan(
-                    materialize_projected_async(value).await?,
-                    &self.chunk.compiled_schemas[schema],
-                )?;
+                let value = materialize_projected_async(value).await?;
+                // A validation walks the schema and the value's members once;
+                // the compiled schema's size is fixed at compile time.
+                self.charge_intrinsic_work(deep_proportional_units(&value));
+                let value = execute_validation_plan(value, &self.chunk.compiled_schemas[schema])?;
                 self.stack.push(value);
             }
             IntrinsicOp::PushAssign(slot) => {
@@ -1450,6 +1505,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         self.last_value = Some(value);
                     } else {
                         let item = item.expect("push item should be available");
+                        // The fallback copies every element the list holds.
+                        self.charge_intrinsic_work(
+                            self.slots.get(slot).map_or(0, proportional_units),
+                        );
                         let current = self.slots.get_mut(slot).ok_or_else(|| {
                             RuntimeError::UndefinedVariable {
                                 name: slot_name.text.to_string(),
@@ -1481,6 +1540,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     execute_compiled_format_direct(template, values)?
                 };
                 self.stack.truncate(self.stack.len() - argc);
+                // Rendering writes each output byte once.
+                self.charge_intrinsic_work(value.len());
                 self.stack.push(Value::String(value.into()));
             }
             IntrinsicOp::FormatCompiledSlotNumber { template, slot } => {
@@ -1498,6 +1559,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         Value::String(value.into())
                     }
                 };
+                if let Value::String(text) = &value {
+                    self.charge_intrinsic_work(text.len());
+                }
                 self.stack.push(value);
             }
             IntrinsicOp::FormatCompiledSlotNumberBinary {
@@ -1517,6 +1581,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     ),
                     left => {
                         let left = materialize_projected_async(left.clone()).await?;
+                        self.charge_intrinsic_work(binary_op_work_units(
+                            &left,
+                            op,
+                            &Value::Number(right),
+                        ));
                         let value = eval_binary_values(left, op, Value::Number(right))?;
                         let value = if matches!(value, Value::Projected(_)) {
                             execute_compiled_format(template, &[value]).await?
@@ -1526,6 +1595,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         Value::String(value.into())
                     }
                 };
+                if let Value::String(text) = &value {
+                    self.charge_intrinsic_work(text.len());
+                }
                 self.stack.push(value);
             }
             _ => {
@@ -1556,116 +1628,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         }
         Ok(())
     }
-
-    fn pop_stack(&mut self) -> Result<Value, RuntimeError> {
-        self.stack.pop().ok_or(RuntimeError::VmStackUnderflow)
-    }
-
-    fn load_slot(&self, slot: usize) -> Result<&Value, RuntimeError> {
-        self.slots
-            .get(slot)
-            .ok_or_else(|| RuntimeError::UndefinedVariable {
-                name: slot_names_for(self.chunk, self.active_function)[slot]
-                    .text
-                    .to_string(),
-            })
-    }
-
-    fn drain_record_from_stack(&mut self, keys: usize) -> Result<Record, RuntimeError> {
-        let key_indices = &self.chunk.key_lists[keys];
-        let start = self.stack_drain_start(key_indices.len())?;
-        let mut record = record_with_capacity(key_indices.len());
-        for (key, value) in key_indices.iter().zip(self.stack.drain(start..)) {
-            let name_entry = &self.chunk.names[*key];
-            record.insert_symbolized(name_entry.symbol, name_entry.text.clone(), value);
-        }
-        Ok(record)
-    }
-
-    fn drain_receiver_call(&mut self, argc: usize) -> Result<(Value, Vec<Value>), RuntimeError> {
-        let start = self.stack_drain_start(argc + 1)?;
-        let mut values = self.stack.drain(start..).collect::<Vec<_>>();
-        let receiver = values.remove(0);
-        Ok((receiver, values))
-    }
-
-    fn pop_n(&mut self, len: usize) -> Result<Vec<Value>, RuntimeError> {
-        if self.stack.len() < len {
-            return Err(RuntimeError::VmStackUnderflow);
-        }
-        let start = self.stack.len() - len;
-        Ok(self.stack.split_off(start))
-    }
-
-    fn stack_tail(&self, len: usize) -> Result<&[Value], RuntimeError> {
-        if self.stack.len() < len {
-            return Err(RuntimeError::VmStackUnderflow);
-        }
-        Ok(&self.stack[self.stack.len() - len..])
-    }
-
-    fn stack_drain_start(&self, len: usize) -> Result<usize, RuntimeError> {
-        self.stack
-            .len()
-            .checked_sub(len)
-            .ok_or(RuntimeError::VmStackUnderflow)
-    }
-
-    fn unwind_iterators(&mut self) {
-        while let Some(iter_state) = self.iter_stack.pop() {
-            self.slots
-                .restore_temporary(iter_state.binding, iter_state.restore);
-        }
-    }
-
-    /// The host's projected-binding declaration when `self.slots` is the root
-    /// scope's — inside a function the active slot state holds the frame's
-    /// locals, which are never projected bindings and may collide with one's
-    /// name.
-    fn active_projected_bindings(&self) -> Option<&ProjectedBindings> {
-        self.active_function
-            .is_none()
-            .then_some(&self.projected_bindings)
-    }
-
-    /// Materializes host-visible globals, omitting any entire binding that
-    /// contains a function value at any depth.
-    pub fn into_globals(mut self) -> Result<Record, RuntimeError> {
-        let runtime_globals = self.slots.into_globals(
-            &self.chunk.slot_names,
-            &self.chunk.private_slots,
-            &self.projected_bindings,
-            None,
-        )?;
-        super::state::host_view(&runtime_globals, &mut self.heap)
-    }
-
-    pub(crate) fn into_state_parts(self) -> Result<(Record, Heap), RuntimeError> {
-        let globals = self.slots.into_globals(
-            &self.chunk.slot_names,
-            &self.chunk.private_slots,
-            &self.projected_bindings,
-            None,
-        )?;
-        Ok((globals, self.heap))
-    }
-
-    pub(crate) fn recycle_into_state_parts(
-        mut self,
-        scratch: &mut ExecutionScratch,
-    ) -> Result<(Record, Heap), RuntimeError> {
-        self.stack.clear();
-        self.iter_stack.clear();
-        scratch.stack = std::mem::take(&mut self.stack);
-        scratch.iter_stack = std::mem::take(&mut self.iter_stack);
-        let globals = self.slots.into_globals(
-            &self.chunk.slot_names,
-            &self.chunk.private_slots,
-            &self.projected_bindings,
-            Some(&mut scratch.slot_values),
-        )?;
-        Ok((globals, self.heap))
-    }
 }
 mod functions;
 use functions::*;
@@ -1678,5 +1640,6 @@ pub(crate) use iteration::*;
 mod observations;
 mod roots;
 use roots::*;
+mod stack;
 mod state_boundary;
 use state_boundary::*;

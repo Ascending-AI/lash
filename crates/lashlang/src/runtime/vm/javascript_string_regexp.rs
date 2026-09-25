@@ -46,6 +46,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         self.heap.set_regexp_last_index(receiver, 0)?;
         let units = bounded_utf16_input(&self.heap, input)?;
+        self.charge_intrinsic_work(units.len());
         let matches = self.regexp_matches(receiver, &units, 0, true, None)?;
         let mut values = Vec::new();
         let mut pending_bytes = 16_u64;
@@ -72,6 +73,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         receiver: HeapId,
     ) -> Result<i64, RuntimeError> {
         let units = bounded_utf16_input(&self.heap, input)?;
+        self.charge_intrinsic_work(units.len());
         // `search` preserves `lastIndex` — the stored value, not the coerced
         // `exec` view of it.
         let saved = self
@@ -105,6 +107,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             ));
         }
         let units = bounded_utf16_input(&self.heap, input)?;
+        self.charge_intrinsic_work(units.len());
         let fuel = self.grant_regexp_fuel();
         let program = self.regexp_program(receiver)?;
         if unicode && sticky {
@@ -181,6 +184,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             };
             values.push(self.allocate_match_result(input, units, &found)?);
         }
+        // Collecting writes one match object per match.
+        self.charge_intrinsic_work(values.len());
         Ok(Value::List(values.into()))
     }
 }

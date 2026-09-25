@@ -24,6 +24,7 @@ mod entry_points;
 mod error;
 pub use error::{EcmaErrorClass, ErrorTaxonomy, FormatError, RuntimeError};
 mod format;
+mod fuel;
 mod heap;
 mod host;
 mod instruction;
@@ -169,7 +170,11 @@ pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 /// v2 (FIG-3707): a captured, assigned binding compiles to `BindingCellNew`/
 /// `BindingCellGet`/`BindingCellSet` intrinsics instead of plain slot loads
 /// and stores, so the same program emits a different instruction stream.
-pub const INSTRUCTION_ACCOUNTING_VERSION: u32 = 2;
+/// v3 charges every intrinsic whose work grows with its input or output —
+/// string, collection, URL, codec, date, equality and callback-driven scans —
+/// where v2 charged only JSON text, collection sorts, regexp fuel and callback
+/// counts (FIG-3672 P2b).
+pub const INSTRUCTION_ACCOUNTING_VERSION: u32 = 3;
 
 /// Instructions before a run's first cancel checkpoint (FIG-3672 P9). The VM
 /// hands its host checkpoint `n` when its executed-instruction count reaches

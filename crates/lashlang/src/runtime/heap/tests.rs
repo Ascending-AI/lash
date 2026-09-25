@@ -187,7 +187,7 @@ fn child_mutation_invalidates_materialized_ancestor_cache() {
 #[test]
 fn map_and_set_use_same_value_zero_without_reordering_updates() {
     let mut heap = Heap::default();
-    let Value::Ref(map) = heap.allocate_map(Vec::new()).expect("Map") else {
+    let (Value::Ref(map), _) = heap.allocate_map(Vec::new()).expect("Map") else {
         unreachable!()
     };
     heap.map_set(map, Value::Number(f64::NAN), Value::String("first".into()))
@@ -209,7 +209,7 @@ fn map_and_set_use_same_value_zero_without_reordering_updates() {
     assert!(matches!(entries[1].0, Value::Number(value) if value.to_bits() == 0.0_f64.to_bits()));
     assert_eq!(entries[1].1, Value::String("same zero".into()));
 
-    let Value::Ref(set) = heap.allocate_set(Vec::new()).expect("Set") else {
+    let (Value::Ref(set), _) = heap.allocate_set(Vec::new()).expect("Set") else {
         unreachable!()
     };
     for value in [f64::NAN, f64::NAN, -0.0, 0.0] {
@@ -234,7 +234,7 @@ fn exotic_member_apis_import_inline_compounds_before_storage() {
         }))
     };
 
-    let Value::Ref(map) = heap
+    let (Value::Ref(map), _) = heap
         .allocate_map(vec![(inline_list(), inline_record())])
         .expect("Map imports constructor members")
     else {
@@ -252,7 +252,7 @@ fn exotic_member_apis_import_inline_compounds_before_storage() {
             .all(|(key, value)| matches!(key, Value::Ref(_)) && matches!(value, Value::Ref(_)))
     );
 
-    let Value::Ref(set) = heap
+    let (Value::Ref(set), _) = heap
         .allocate_set(vec![inline_list()])
         .expect("Set imports constructor values")
     else {
@@ -274,7 +274,7 @@ fn map_object_keys_compare_by_heap_identity() {
     let mut heap = Heap::default();
     let first = heap.allocate_list(Vec::new()).expect("first key");
     let second = heap.allocate_list(Vec::new()).expect("second key");
-    let Value::Ref(map) = heap.allocate_map(Vec::new()).expect("Map") else {
+    let (Value::Ref(map), _) = heap.allocate_map(Vec::new()).expect("Map") else {
         unreachable!()
     };
     heap.map_set(map, first.clone(), Value::Number(1.0))
@@ -349,8 +349,8 @@ fn exotic_host_boundary_errors_are_not_reported_as_function_values() {
     let values = [
         heap.allocate_regexp("a".to_string(), "g".to_string())
             .expect("RegExp"),
-        heap.allocate_map(Vec::new()).expect("Map"),
-        heap.allocate_set(Vec::new()).expect("Set"),
+        heap.allocate_map(Vec::new()).expect("Map").0,
+        heap.allocate_set(Vec::new()).expect("Set").0,
         heap.allocate_date(0.0).expect("Date"),
     ];
     for value in values {

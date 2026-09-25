@@ -46,6 +46,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 });
             }
         };
+        // The call copies every argument into the callee's slots.
+        self.charge_intrinsic_work(arguments.len());
         self.begin_function_call(
             function,
             receiver,
@@ -79,11 +81,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // the next. Every effect boundary remains resumable and journaled; WP-A
         // consumes the settled results in input order. This deterministic v1
         // policy differs from JavaScript's interleaving of async callbacks.
-        let calls = items
+        let calls: Vec<Vec<Value>> = items
             .into_iter()
             .enumerate()
             .map(|(index, value)| vec![value, Value::Number(index as f64), receiver.clone()])
             .collect();
+        // The driver queues one call per element.
+        self.charge_intrinsic_work(calls.len());
         self.begin_callback_driver(function, calls, true, true)
     }
 
@@ -106,9 +110,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         "AggregateError requires an errors iterable",
                     ));
                 };
-                let errors = self
-                    .heap
-                    .allocate_list(heap_sequence(&self.heap, errors)?)?;
+                let errors = heap_sequence(&self.heap, errors)?;
+                self.charge_intrinsic_work(errors.len());
+                let errors = self.heap.allocate_list(errors)?;
                 (Some(errors), 1)
             } else {
                 (None, 0)
@@ -134,16 +138,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
             ("URL", [input]) => {
                 let input = self.heap.javascript_to_string(input)?;
                 ensure_javascript_string_size(input.len())?;
+                // Parsing reads every byte of the input once.
+                self.charge_intrinsic_work(input.len());
                 self.heap.allocate_url(&input, None)?
             }
             ("URL", [input, base]) => {
                 let input = self.heap.javascript_to_string(input)?;
                 ensure_javascript_string_size(input.len())?;
                 if matches!(base, Value::Undefined) {
+                    self.charge_intrinsic_work(input.len());
                     self.heap.allocate_url(&input, None)?
                 } else {
                     let base = self.heap.javascript_to_string(base)?;
                     ensure_javascript_string_size(base.len())?;
+                    self.charge_intrinsic_work(input.len().saturating_add(base.len()));
                     self.heap.allocate_url(&input, Some(&base))?
                 }
             }
@@ -152,11 +160,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             ("URLSearchParams", [initial]) => {
                 let entries = url_search_params_initial(&self.heap, initial)?;
+                // The parse or copy writes each stored pair once.
+                self.charge_intrinsic_work(entries.iter().fold(
+                    entries.len(),
+                    |total, (name, value)| {
+                        total.saturating_add(name.len()).saturating_add(value.len())
+                    },
+                ));
                 self.heap.allocate_url_search_params(entries)?
             }
             ("RegExp", args) => self.construct_regexp(args)?,
             ("Map", []) | ("Map", [Value::Undefined | Value::Null]) => {
-                self.heap.allocate_map(Vec::new())?
+                self.heap.allocate_map(Vec::new())?.0
             }
             // A `Map` copies another's entries, as its iteration yields them.
             ("Map", [Value::Ref(source)])
@@ -166,7 +181,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     unreachable!("a Map source checked above")
                 };
                 let entries = map.entries.clone();
-                self.heap.allocate_map(entries)?
+                self.charge_intrinsic_work(entries.len());
+                let (value, scanned) = self.heap.allocate_map(entries)?;
+                // The dedup compares each entry against the ones already kept.
+                self.charge_intrinsic_work(scanned);
+                value
             }
             ("Map", [entries]) => {
                 let mut map_entries = Vec::new();
@@ -179,10 +198,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     }
                     map_entries.push((pair[0].clone(), pair[1].clone()));
                 }
-                self.heap.allocate_map(map_entries)?
+                self.charge_intrinsic_work(map_entries.len());
+                let (value, scanned) = self.heap.allocate_map(map_entries)?;
+                // The dedup compares each entry against the ones already kept.
+                self.charge_intrinsic_work(scanned);
+                value
             }
             ("Set", []) | ("Set", [Value::Undefined | Value::Null]) => {
-                self.heap.allocate_set(Vec::new())?
+                self.heap.allocate_set(Vec::new())?.0
             }
             // A `Set` of a `Map` holds its entries, each a fresh pair.
             ("Set", [Value::Ref(source)])
@@ -192,13 +215,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     unreachable!("a Map source checked above")
                 };
                 let entries = map.entries.clone();
+                self.charge_intrinsic_work(entries.len());
                 let mut pairs = Vec::with_capacity(entries.len());
                 for (key, value) in entries {
                     pairs.push(self.heap.allocate_list(vec![key, value])?);
                 }
-                self.heap.allocate_set(pairs)?
+                let (value, scanned) = self.heap.allocate_set(pairs)?;
+                // The dedup compares each member against the ones already kept.
+                self.charge_intrinsic_work(scanned);
+                value
             }
-            ("Set", [values]) => self.heap.allocate_set(heap_sequence(&self.heap, values)?)?,
+            ("Set", [values]) => {
+                let values = heap_sequence(&self.heap, values)?;
+                self.charge_intrinsic_work(values.len());
+                let (value, scanned) = self.heap.allocate_set(values)?;
+                // The dedup compares each member against the ones already kept.
+                self.charge_intrinsic_work(scanned);
+                value
+            }
             ("Date", values) => self.construct_javascript_date(values)?,
             _ => {
                 return Err(js_stdlib_error(format!(

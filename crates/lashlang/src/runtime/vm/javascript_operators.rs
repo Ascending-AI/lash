@@ -60,12 +60,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 if callable { "function" } else { "object" }.into(),
             ));
         } else if op.coerces_to_number() {
+            // ToNumber reads the operand's whole text.
+            self.charge_intrinsic_work(proportional_units(&value));
             let number = self.heap.javascript_to_number(&value)?;
             self.stack
                 .push(eval_javascript_unary(Value::Number(number), op)?);
         } else if op == JavaScriptUnaryOp::ToString {
             let text = self.heap.javascript_to_string_for_output(&value)?;
             ensure_javascript_string_size(text.len())?;
+            // Stringifying writes each output byte once.
+            self.charge_intrinsic_work(text.len());
             self.stack.push(Value::String(text.into()));
         } else if op == JavaScriptUnaryOp::Not && matches!(value, Value::Ref(_)) {
             self.stack.push(Value::Bool(false));
@@ -123,11 +127,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .checked_add(right.len())
                     .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
                 ensure_javascript_string_size(bytes)?;
+                // Concatenating writes the whole result once.
+                self.charge_intrinsic_work(bytes);
                 self.stack
                     .push(Value::String(StringValue::concatenated(&left, &right)));
                 return Ok(());
             }
         }
+        // ToNumber reads an operand's whole text, and loose `==` can run a
+        // deep ToPrimitive.
+        self.charge_intrinsic_work(javascript_binary_work_units(op, &left, &right));
         self.stack.push(eval_javascript_binary(left, op, right));
         Ok(())
     }
@@ -185,6 +194,33 @@ fn javascript_binary_hint(op: JavaScriptBinaryOp) -> PrimitiveHint {
         | JavaScriptBinaryOp::LooseEqual
         | JavaScriptBinaryOp::LooseNotEqual => PrimitiveHint::Default,
         _ => PrimitiveHint::Number,
+    }
+}
+
+/// The proportional work `eval_javascript_binary` performs for `op` on these
+/// operands, in `charge_intrinsic_work`'s units: loose `==` can run a deep
+/// ToPrimitive on an inline object, every arithmetic or bitwise operator runs
+/// ToNumber — which reads a text operand whole — and an ordering reads two
+/// texts until they differ.
+fn javascript_binary_work_units(op: JavaScriptBinaryOp, left: &Value, right: &Value) -> usize {
+    match op {
+        JavaScriptBinaryOp::LooseEqual | JavaScriptBinaryOp::LooseNotEqual => {
+            deep_proportional_units(left).saturating_add(deep_proportional_units(right))
+        }
+        JavaScriptBinaryOp::Less
+        | JavaScriptBinaryOp::LessEqual
+        | JavaScriptBinaryOp::Greater
+        | JavaScriptBinaryOp::GreaterEqual => match (left, right) {
+            (Value::String(left), Value::String(right)) => left.len().min(right.len()),
+            _ => proportional_units(left).saturating_add(proportional_units(right)),
+        },
+        JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual => {
+            match (left, right) {
+                (Value::String(left), Value::String(right)) => left.len().min(right.len()),
+                _ => 0,
+            }
+        }
+        _ => proportional_units(left).saturating_add(proportional_units(right)),
     }
 }
 

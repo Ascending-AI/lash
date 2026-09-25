@@ -225,6 +225,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let [Value::String(method), Value::Ref(receiver)] = values
             && let HeapObject::RegExpMatch(result) = self.heap.get(*receiver)?
         {
+            // Enumerating a match's members writes one result per item.
+            charge_collection_work(&mut self.instructions_executed, result.items.len());
             let value = match method.as_str() {
                 "Object.keys" => Some(Value::List(
                     result
@@ -277,8 +279,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let HeapObject::RegExpMatch(result) = self.heap.get(receiver)? else {
             return Ok(false);
         };
-        let value =
-            javascript_regexp_match_method(&self.heap, method, receiver, &result.items, args)?;
+        let value = javascript_regexp_match_method(
+            &self.heap,
+            method,
+            receiver,
+            &result.items,
+            args,
+            &mut self.instructions_executed,
+        )?;
         self.stack.push(value);
         Ok(true)
     }
@@ -335,6 +343,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             return Err(self.regexp_syntax_error(error, &pattern, &flags, None));
         }
+        // Compiling reads every code unit of the pattern once.
+        self.charge_intrinsic_work(pattern.encode_utf16().count());
         let program = compile_regexp(&pattern, &flags).map_err(|error| {
             self.regexp_syntax_error(
                 TypeScriptRegExpValidationError::InvalidPattern,
@@ -422,6 +432,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let Some(program) = cached {
             return Ok(program);
         }
+        // A cold compile reads every code unit of the pattern once.
+        self.charge_intrinsic_work(pattern.encode_utf16().count());
         let program = compile_regexp(&pattern, &flags).map_err(|_| {
             self.regexp_syntax_error(
                 TypeScriptRegExpValidationError::InvalidPattern,
@@ -456,7 +468,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             } else {
                 program.try_find_from_utf16(input, start, fuel)
             };
-            collect_bounded_regress_matches(
+            let collected = collect_bounded_regress_matches(
                 &self.heap,
                 matches,
                 input,
@@ -464,14 +476,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 sticky,
                 start,
                 max_matches,
-            )
+            )?;
+            // Collecting writes one record per match.
+            self.charge_intrinsic_work(collected.len());
+            Ok(collected)
         } else {
             let matches = if sticky {
                 program.try_find_from_ucs2_anchored(input, start, fuel)
             } else {
                 program.try_find_from_ucs2(input, start, fuel)
             };
-            collect_bounded_regress_matches(
+            let collected = collect_bounded_regress_matches(
                 &self.heap,
                 matches,
                 input,
@@ -479,7 +494,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 sticky,
                 start,
                 max_matches,
-            )
+            )?;
+            // Collecting writes one record per match.
+            self.charge_intrinsic_work(collected.len());
+            Ok(collected)
         }
     }
 
@@ -607,6 +625,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         input: &str,
     ) -> Result<Value, RuntimeError> {
         let units = bounded_utf16_input(&self.heap, input)?;
+        // Reading the input's code units once precedes the engine's own fuel.
+        self.charge_intrinsic_work(units.len());
         let (global, sticky) = match self.heap.get(receiver)? {
             HeapObject::RegExp(regexp) => (regexp.flags.contains('g'), regexp.flags.contains('y')),
             _ => {
@@ -737,6 +757,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 )));
             }
         };
+        // The result's members and text were each written once.
+        self.charge_intrinsic_work(deep_proportional_units(&result));
         self.stack.push(result);
         Ok(())
     }
@@ -763,6 +785,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 "split",
                 input,
                 &[separator.clone(), Value::Number(limit as f64)],
+                &mut self.instructions_executed,
             );
         };
         if !matches!(self.heap.get(*receiver)?, HeapObject::RegExp(_)) {
@@ -773,9 +796,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 "split",
                 input,
                 &[coerced, Value::Number(limit as f64)],
+                &mut self.instructions_executed,
             );
         }
         let units = bounded_utf16_input(&self.heap, input)?;
+        self.charge_intrinsic_work(units.len());
         if limit == 1 && !units.is_empty() {
             let unicode = matches!(
                 self.heap.get(*receiver)?,
@@ -919,6 +944,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let regexp = matches!(search, Value::Ref(receiver) if matches!(self.heap.get(*receiver)?, HeapObject::RegExp(_)));
         let lone_surrogate_error = lone_surrogate_output_error(regexp);
         let units = bounded_utf16_input(&self.heap, input)?;
+        self.charge_intrinsic_work(units.len());
         let matches = self.replacement_matches(input, search, all)?;
         let mut output = Vec::new();
         let mut output_bytes = 0;
@@ -959,6 +985,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         all: bool,
     ) -> Result<Vec<CapturedMatch>, RuntimeError> {
         let units = bounded_utf16_input(&self.heap, input)?;
+        self.charge_intrinsic_work(units.len());
         match search {
             Value::Ref(receiver) if matches!(self.heap.get(*receiver)?, HeapObject::RegExp(_)) => {
                 let global = matches!(self.heap.get(*receiver)?, HeapObject::RegExp(re) if re.flags.contains('g'));
@@ -1000,6 +1027,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             value => {
                 let needle = self.heap.javascript_to_string(value)?;
                 let needle = bounded_utf16_input(&self.heap, &needle)?;
+                self.charge_intrinsic_work(needle.len());
                 find_string_matches(&self.heap, &units, &needle, all)
             }
         }
@@ -1012,6 +1040,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         all: bool,
     ) -> Result<Value, RuntimeError> {
         let units = bounded_utf16_input(&self.heap, input)?;
+        self.charge_intrinsic_work(units.len());
         let regexp = matches!(search, Value::Ref(receiver) if matches!(self.heap.get(*receiver)?, HeapObject::RegExp(_)));
         let matches = self.replacement_matches(input, search, all)?;
         let mut plan = Vec::new();
@@ -1067,10 +1096,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .ok_or_else(|| js_stdlib_error("invalid RegExp replacement plan"))?;
         let results = regexp_sequence(&self.heap, results)
             .ok_or_else(|| js_stdlib_error("invalid RegExp replacement results"))?;
+        // The join reads every plan entry and settled result once.
+        self.charge_intrinsic_work(plan.len().saturating_add(results.len()));
         if plan.len() != results.len() {
             return Err(js_stdlib_error("RegExp replacement result count mismatch"));
         }
         let units = bounded_utf16_input(&self.heap, input)?;
+        self.charge_intrinsic_work(units.len());
         let mut output = Vec::new();
         let mut output_bytes = 0;
         let mut end = 0_usize;
@@ -1100,6 +1132,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             )?;
             let replacement = self.heap.javascript_to_string(result)?;
             let replacement_units = bounded_utf16_input(&self.heap, &replacement)?;
+            // Each settled replacement writes and reads its text once.
+            self.charge_intrinsic_work(replacement_units.len());
             append_utf16_checked(
                 &self.heap,
                 &mut output,

@@ -816,6 +816,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             (length.trunc() as u64).min(9_007_199_254_740_991)
         };
         let substitutions = args.get(1..).unwrap_or(&[]);
+        // The join reads one indexed segment per count.
+        self.charge_intrinsic_work(usize::try_from(segments).unwrap_or(usize::MAX));
         let mut output = String::new();
         for index in 0..segments {
             let key = Value::String(index.to_string().into());
@@ -961,6 +963,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .set_values(receiver)?
             .expect("Set receiver was checked");
         let (like, size) = self.javascript_set_like(other)?;
+        // Every combinational method scans `this` or the argument's keys and
+        // membership-checks each candidate against a list of the same order,
+        // so the work is the two sizes multiplied.
+        let size_hint = if size.is_finite() && size > 0.0 {
+            size as usize
+        } else {
+            0
+        };
+        self.charge_intrinsic_work(
+            left.len()
+                .saturating_add(size_hint)
+                .saturating_mul(left.len().saturating_add(size_hint)),
+        );
         let contains = |values: &[Value], value: &Value| {
             values
                 .iter()
@@ -974,7 +989,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         output.push(value);
                     }
                 }
-                self.heap.allocate_set(output)?
+                let (value, scanned) = self.heap.allocate_set(output)?;
+                // The dedup compares each member against the ones already kept.
+                self.charge_intrinsic_work(scanned);
+                value
             }
             "intersection" => {
                 let mut output = Vec::new();
@@ -991,7 +1009,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         }
                     }
                 }
-                self.heap.allocate_set(output)?
+                let (value, scanned) = self.heap.allocate_set(output)?;
+                // The dedup compares each member against the ones already kept.
+                self.charge_intrinsic_work(scanned);
+                value
             }
             "difference" => {
                 let mut output;
@@ -1008,7 +1029,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         output.retain(|candidate| !same_value_zero(candidate, &value));
                     }
                 }
-                self.heap.allocate_set(output)?
+                let (value, scanned) = self.heap.allocate_set(output)?;
+                // The dedup compares each member against the ones already kept.
+                self.charge_intrinsic_work(scanned);
+                value
             }
             "symmetricDifference" => {
                 let mut output = left.clone();
@@ -1019,7 +1043,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         output.push(value);
                     }
                 }
-                self.heap.allocate_set(output)?
+                let (value, scanned) = self.heap.allocate_set(output)?;
+                // The dedup compares each member against the ones already kept.
+                self.charge_intrinsic_work(scanned);
+                value
             }
             "isSubsetOf" => {
                 let mut all = true;
@@ -1333,6 +1360,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             if self.heap.is_builtin_object(*receiver) {
                 let keys = self.heap.builtin_enumerable_keys(*receiver)?;
+                // Enumerating writes one result per key.
+                self.charge_intrinsic_work(keys.len());
                 let result = match method.as_str() {
                     "Object.keys" => keys
                         .into_iter()
@@ -1427,12 +1456,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 },
                 _ => Vec::new(),
             };
+            // Enumerating writes one result per member.
+            self.charge_intrinsic_work(result.len());
             self.stack.push(Value::List(result.into()));
             return Ok(true);
         }
         if let [Value::String(method), Value::Ref(receiver), key] = values
             && method.as_str() == "Object.hasOwn"
         {
+            // Coercing a string key reads it whole.
+            self.charge_intrinsic_work(proportional_units(key));
             let key = self.heap.javascript_to_string(key)?;
             let has = crate::runtime::access::javascript_heap_has_own(&self.heap, *receiver, &key)?;
             self.stack.push(Value::Bool(has));
@@ -1446,6 +1479,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 unreachable!("record receiver checked")
             };
             let mut output = target.as_ref().clone();
+            // Assigning copies the target's members before the sources'.
+            self.charge_intrinsic_work(output.len());
             for source in args {
                 // This arm runs before the materializing dispatch below, because
                 // a heap receiver has to stay a reference. That left a projected
@@ -1463,9 +1498,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     Value::Record(record) => Some(ecma_record_entries(record)),
                     _ => None,
                 };
-                for (key, value) in entries.unwrap_or_default() {
+                let entries = entries.unwrap_or_default();
+                let copied = entries.len();
+                for (key, value) in entries {
                     output.insert(key.to_string(), value.clone());
                 }
+                // Each source's entries are copied one by one.
+                self.charge_intrinsic_work(copied);
             }
             self.heap.replace_javascript_record(*receiver, output)?;
             self.stack.push(Value::Ref(*receiver));

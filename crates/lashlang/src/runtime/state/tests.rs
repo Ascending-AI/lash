@@ -1352,10 +1352,12 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
             (Value::String("first".into()), shared.clone()),
             (Value::String("second".into()), Value::Number(f64::NAN)),
         ])
-        .expect("Map");
+        .expect("Map")
+        .0;
     let set = heap
         .allocate_set(vec![shared.clone(), Value::Number(-0.0)])
-        .expect("Set");
+        .expect("Set")
+        .0;
     let date = heap.allocate_date(f64::NAN).expect("Date");
     let error = heap
         .allocate_error(

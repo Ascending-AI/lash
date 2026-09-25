@@ -452,15 +452,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .heap
                 .date_milliseconds(*id)?
                 .expect("Date receiver was checked"),
-            [Value::String(text)] => match parse_iso_date(text) {
-                Ok(value) => value,
-                Err(IsoDateError::Invalid) => f64::NAN,
-                Err(IsoDateError::NonIso) => {
-                    return Err(js_stdlib_error(
-                        "TS_DATE_PARSE_NON_ISO: Date accepts only the ECMA date-time string format; use an ISO string such as 2020-01-01T00:00:00.000Z",
-                    ));
+            [Value::String(text)] => {
+                // Parsing reads every byte of the text once.
+                self.charge_intrinsic_work(text.len());
+                match parse_iso_date(text) {
+                    Ok(value) => value,
+                    Err(IsoDateError::Invalid) => f64::NAN,
+                    Err(IsoDateError::NonIso) => {
+                        return Err(js_stdlib_error(
+                            "TS_DATE_PARSE_NON_ISO: Date accepts only the ECMA date-time string format; use an ISO string such as 2020-01-01T00:00:00.000Z",
+                        ));
+                    }
                 }
-            },
+            }
             [value] => time_clip(self.heap.javascript_to_number(value)?),
             values => {
                 let numbers = values
@@ -491,6 +495,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             "Date.parse" => {
                 let value = args.first().unwrap_or(&Value::Undefined);
                 let text = self.heap.javascript_to_string(value)?;
+                // Parsing reads every byte of the text once.
+                self.charge_intrinsic_work(text.len());
                 let milliseconds = match parse_iso_date(&text) {
                     Ok(value) => value,
                     Err(IsoDateError::Invalid) => f64::NAN,

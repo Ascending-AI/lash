@@ -975,8 +975,18 @@ impl Heap {
     /// The `expect` stays: isolation staging reserved one id per object
     /// collected above, so every staged slot is filled (each site's message
     /// states it).
-    #[expect(clippy::expect_used, reason = "isolation staging reserved every slot")]
     pub(crate) fn isolate_value(&mut self, value: &Value) -> Result<Value, RuntimeError> {
+        self.isolate_value_with_work(value).map(|(root, _)| root)
+    }
+
+    /// The isolated root, plus the number of heap objects the copy staged —
+    /// the proportional work `charge_intrinsic_work` counts, since staging
+    /// visits every reachable object once.
+    #[expect(clippy::expect_used, reason = "isolation staging reserved every slot")]
+    pub(crate) fn isolate_value_with_work(
+        &mut self,
+        value: &Value,
+    ) -> Result<(Value, usize), RuntimeError> {
         let mut staging = IsolationStaging {
             base: self.next_id,
             objects: Vec::new(),
@@ -984,8 +994,9 @@ impl Heap {
         };
         let root = self.stage_isolation(value, &mut staging)?;
         if staging.objects.is_empty() {
-            return Ok(root);
+            return Ok((root, 0));
         }
+        let staged = staging.objects.len();
         let objects = staging
             .objects
             .into_iter()
@@ -1009,7 +1020,7 @@ impl Heap {
                 Value::Ref(HeapId::from_counter(staging.base + offset as u64))
             );
         }
-        Ok(root)
+        Ok((root, staged))
     }
 
     fn stage_isolation(

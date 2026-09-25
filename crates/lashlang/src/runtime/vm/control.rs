@@ -9,6 +9,7 @@ use super::heap_plan::{
     SlotExport, StackExport, instruction_heap_plan, instruction_keeps_vm_state_heapified,
 };
 use super::{IterCursor, Vm, VmRunOutcome};
+use crate::runtime::deep_proportional_units;
 use crate::span::Span;
 
 pub(super) enum VmStep {
@@ -575,7 +576,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     ) {
                         self.stack[index].clone()
                     } else {
-                        self.heap.export_for_instruction(&self.stack[index])?
+                        let exported = self.heap.export_for_instruction(&self.stack[index])?;
+                        // Exporting reads the operand's whole graph once.
+                        self.charge_intrinsic_work(deep_proportional_units(&exported));
+                        exported
                     };
                     self.stack[index] = exported;
                 }
@@ -590,16 +594,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     fn materialize_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {
-        if let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) {
-            *value = self.heap.export_for_instruction(value)?;
-        }
+        let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) else {
+            return Ok(());
+        };
+        let exported = self.heap.export_for_instruction(value)?;
+        // Exporting reads the slot's whole graph once.
+        self.charge_intrinsic_work(deep_proportional_units(&exported));
+        self.slots.values[slot] = Some(exported);
         Ok(())
     }
 
     pub(super) fn materialize_mutable_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {
-        if let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) {
-            *value = self.heap.export_for_mutation(value)?;
-        }
+        let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) else {
+            return Ok(());
+        };
+        let exported = self.heap.export_for_mutation(value)?;
+        // Exporting reads the slot's whole graph once.
+        self.charge_intrinsic_work(deep_proportional_units(&exported));
+        self.slots.values[slot] = Some(exported);
         Ok(())
     }
 
@@ -636,10 +648,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // positional walks agreeing.
         let (holders, durable_len) = self.heap_import_holders(&pending_iterators, scan_extras);
         if !holders.is_empty() {
-            let values = holders
+            let values: Vec<Value> = holders
                 .iter()
                 .map(|holder| self.heap_import_value(*holder).clone())
                 .collect();
+            // Importing walks every holder's whole graph once.
+            self.charge_intrinsic_work(values.iter().fold(0usize, |total, value| {
+                total.saturating_add(deep_proportional_units(value))
+            }));
             let imported = self.heap.import_values(values, durable_len);
             self.heap.end_allocation_scope();
             let imported = imported?;

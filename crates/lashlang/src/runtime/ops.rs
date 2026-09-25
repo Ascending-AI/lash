@@ -9,6 +9,9 @@ use std::sync::Arc;
 
 use crate::ast::BinaryOp;
 
+pub(crate) use super::fuel::{
+    binary_op_work_units, deep_proportional_units, proportional_units, sorting_work,
+};
 use super::instruction::Name;
 use super::*;
 
@@ -37,7 +40,15 @@ pub(crate) async fn execute_intrinsic(
     match builtin {
         IntrinsicOp::Len => {
             expect_arg_count("len", values, 1)?;
-            execute_len_builtin(&values[0]).await
+            let result = execute_len_builtin(&values[0]).await?;
+            // Counting a string's characters walks it once; every other
+            // collection's length is already in hand.
+            if matches!(values[0], Value::String(_))
+                && let Value::Number(units) = result
+            {
+                charge_collection_work(instructions_executed, units as usize);
+            }
+            Ok(result)
         }
         IntrinsicOp::Empty => {
             expect_arg_count("empty", values, 1)?;
@@ -58,13 +69,17 @@ pub(crate) async fn execute_intrinsic(
         IntrinsicOp::Keys => {
             expect_arg_count("keys", values, 1)?;
             match &values[0] {
-                Value::Record(record) => Ok(Value::List(
-                    record
-                        .keys()
-                        .map(|key| Value::String(key.into()))
-                        .collect::<Vec<_>>()
-                        .into(),
-                )),
+                Value::Record(record) => {
+                    // Enumerating writes one key per member.
+                    charge_collection_work(instructions_executed, record.len());
+                    Ok(Value::List(
+                        record
+                            .keys()
+                            .map(|key| Value::String(key.into()))
+                            .collect::<Vec<_>>()
+                            .into(),
+                    ))
+                }
                 Value::Projected(value) => Ok(Value::List(
                     value
                         .keys()
@@ -87,19 +102,46 @@ pub(crate) async fn execute_intrinsic(
             }
             let value = materialize_projected_async(values[0].clone()).await?;
             match &value {
-                Value::Record(record) => Ok(Value::List(
-                    record.values().cloned().collect::<Vec<_>>().into(),
-                )),
+                Value::Record(record) => {
+                    // Enumerating writes one value per member.
+                    charge_collection_work(instructions_executed, record.len());
+                    Ok(Value::List(
+                        record.values().cloned().collect::<Vec<_>>().into(),
+                    ))
+                }
                 Value::Null => Ok(Value::List(Vec::new().into())),
                 _ => Err(RuntimeError::ValuesUnsupported),
             }
         }
         IntrinsicOp::Contains => {
             expect_arg_count("contains", values, 2)?;
+            // A text or sequence scan reads the haystack once; a record's
+            // key lookup reads the needle.
+            charge_collection_work(
+                instructions_executed,
+                match &values[0] {
+                    Value::Record(_) => proportional_units(&values[1]),
+                    haystack => proportional_units(haystack),
+                },
+            );
             execute_contains_builtin(&values[0], &values[1]).await
         }
-        IntrinsicOp::Find(_) => execute_find_builtin(values).await,
-        IntrinsicOp::GrepText => execute_grep_text_builtin(values).await,
+        IntrinsicOp::Find(_) => {
+            // The scan reads the haystack's text once.
+            charge_collection_work(
+                instructions_executed,
+                values.first().map_or(0, proportional_units),
+            );
+            execute_find_builtin(values).await
+        }
+        IntrinsicOp::GrepText => {
+            // The line scan reads the text once.
+            charge_collection_work(
+                instructions_executed,
+                values.first().map_or(0, proportional_units),
+            );
+            execute_grep_text_builtin(values).await
+        }
         IntrinsicOp::StartsWith => {
             expect_arg_count("starts_with", values, 2)?;
             let prefix = materialize_projected_async(values[1].clone()).await?;
@@ -111,6 +153,8 @@ pub(crate) async fn execute_intrinsic(
             let value = materialize_projected_async(values[0].clone()).await?;
             let value = coerce_string(&value)?;
             let prefix = coerce_string(&prefix)?;
+            // The comparison reads at most the needle's bytes.
+            charge_collection_work(instructions_executed, value.len().min(prefix.len()));
             Ok(Value::Bool(value.starts_with(prefix.as_ref())))
         }
         IntrinsicOp::EndsWith => {
@@ -124,6 +168,8 @@ pub(crate) async fn execute_intrinsic(
             let value = materialize_projected_async(values[0].clone()).await?;
             let value = coerce_string(&value)?;
             let suffix = coerce_string(&suffix)?;
+            // The comparison reads at most the needle's bytes.
+            charge_collection_work(instructions_executed, value.len().min(suffix.len()));
             Ok(Value::Bool(value.ends_with(suffix.as_ref())))
         }
         IntrinsicOp::Split => {
@@ -137,6 +183,8 @@ pub(crate) async fn execute_intrinsic(
             let value = materialize_projected_async(values[0].clone()).await?;
             let value = coerce_string(&value)?;
             let needle = coerce_string(&needle)?;
+            // Splitting reads the text once and writes each part once.
+            charge_collection_work(instructions_executed, value.len());
             Ok(Value::List(
                 value
                     .split(needle.as_ref())
@@ -164,7 +212,12 @@ pub(crate) async fn execute_intrinsic(
         }),
         IntrinsicOp::Join => {
             expect_arg_count("join", values, 2)?;
-            execute_join_builtin_async(&values[0], &values[1]).await
+            let result = execute_join_builtin_async(&values[0], &values[1]).await?;
+            // Joining writes every byte of the text once.
+            if let Value::String(joined) = &result {
+                charge_collection_work(instructions_executed, joined.len());
+            }
+            Ok(result)
         }
         IntrinsicOp::Trim => {
             expect_arg_count("trim", values, 1)?;
@@ -174,7 +227,10 @@ pub(crate) async fn execute_intrinsic(
                 return Ok(value);
             }
             let value = materialize_projected_async(values[0].clone()).await?;
-            Ok(Value::String(coerce_string(&value)?.trim().into()))
+            let text = coerce_string(&value)?;
+            // Trimming reads the whole text once.
+            charge_collection_work(instructions_executed, text.len());
+            Ok(Value::String(text.trim().into()))
         }
         IntrinsicOp::Slice => {
             expect_arg_count("slice", values, 3)?;
@@ -187,17 +243,24 @@ pub(crate) async fn execute_intrinsic(
             }
             let target = materialize_projected_async(values[0].clone()).await?;
             match &target {
-                Value::String(value) => Ok(Value::String(slice_string(value, start, end).into())),
+                Value::String(value) => {
+                    // Slicing reads the text's characters once.
+                    charge_collection_work(instructions_executed, value.len());
+                    Ok(Value::String(slice_string(value, start, end).into()))
+                }
                 Value::Tuple(items) => {
                     let Some((start, end)) = clamp_slice_bounds(start, end, items.len()) else {
                         return Ok(Value::Tuple(Vec::new().into()));
                     };
+                    // The slice writes each of its elements once.
+                    charge_collection_work(instructions_executed, end - start);
                     Ok(Value::Tuple(items[start..end].to_vec().into()))
                 }
                 Value::List(items) => {
                     let Some((start, end)) = clamp_slice_bounds(start, end, items.len()) else {
                         return Ok(Value::List(Vec::new().into()));
                     };
+                    charge_collection_work(instructions_executed, end - start);
                     Ok(Value::List(items[start..end].to_vec().into()))
                 }
                 _ => Err(RuntimeError::SliceUnsupported),
@@ -205,12 +268,14 @@ pub(crate) async fn execute_intrinsic(
         }
         IntrinsicOp::ToString => {
             expect_arg_count("to_string", values, 1)?;
-            let value = if value_contains_projected(&values[0]) {
+            let rendered = if value_contains_projected(&values[0]) {
                 stringify_value_async(&values[0]).await?
             } else {
                 stringify_value_direct(&values[0])?
             };
-            Ok(Value::String(value.into()))
+            // Stringifying writes each output byte once.
+            charge_collection_work(instructions_executed, rendered.len());
+            Ok(Value::String(rendered.into()))
         }
         IntrinsicOp::ToInt => {
             expect_arg_count("to_int", values, 1)?;
@@ -220,6 +285,8 @@ pub(crate) async fn execute_intrinsic(
                 return Ok(Value::Number(as_number(&value)?.trunc()));
             }
             let value = materialize_projected_async(values[0].clone()).await?;
+            // Parsing a number reads the whole text.
+            charge_collection_work(instructions_executed, proportional_units(&value));
             Ok(Value::Number(as_number(&value)?.trunc()))
         }
         IntrinsicOp::ToFloat => {
@@ -230,6 +297,8 @@ pub(crate) async fn execute_intrinsic(
                 return Ok(Value::Number(as_number(&value)?));
             }
             let value = materialize_projected_async(values[0].clone()).await?;
+            // Parsing a number reads the whole text.
+            charge_collection_work(instructions_executed, proportional_units(&value));
             Ok(Value::Number(as_number(&value)?))
         }
         IntrinsicOp::JsonParse => {
@@ -240,11 +309,12 @@ pub(crate) async fn execute_intrinsic(
                 return Ok(value);
             }
             let value = materialize_projected_async(values[0].clone()).await?;
+            let text = coerce_string(&value)?;
+            // Parsing reads every byte of the text once.
+            charge_collection_work(instructions_executed, text.len());
             let parsed: serde_json::Value =
-                serde_json::from_str(&coerce_string(&value)?).map_err(|err| {
-                    RuntimeError::InvalidJson {
-                        detail: err.to_string(),
-                    }
+                serde_json::from_str(&text).map_err(|err| RuntimeError::InvalidJson {
+                    detail: err.to_string(),
                 })?;
             Ok(from_json(parsed))
         }
@@ -260,18 +330,31 @@ pub(crate) async fn execute_intrinsic(
                     });
                 }
             };
-            Ok(Value::String(
-                apply_format_async(template, &values[1..]).await?.into(),
-            ))
+            let rendered = apply_format_async(template, &values[1..]).await?;
+            // Rendering reads the template and writes each output byte once.
+            charge_collection_work(
+                instructions_executed,
+                template.len().saturating_add(rendered.len()),
+            );
+            Ok(Value::String(rendered.into()))
         }
         IntrinsicOp::Validate => {
             expect_arg_count("validate", values, 2)?;
-            execute_validate_builtin(
-                materialize_projected_async(values[0].clone()).await?,
-                &materialize_projected_async(values[1].clone()).await?,
-            )
+            let value = materialize_projected_async(values[0].clone()).await?;
+            let schema = materialize_projected_async(values[1].clone()).await?;
+            // A validation walks the schema and the value's members once.
+            charge_collection_work(
+                instructions_executed,
+                deep_proportional_units(&value).saturating_add(deep_proportional_units(&schema)),
+            );
+            execute_validate_builtin(value, &schema)
         }
-        IntrinsicOp::Range(_) => execute_range_builtin_async(values).await,
+        IntrinsicOp::Range(_) => {
+            let result = execute_range_builtin_async(values).await?;
+            // Building the range writes each element once.
+            charge_collection_work(instructions_executed, proportional_units(&result));
+            Ok(result)
+        }
         IntrinsicOp::CeilDiv => {
             execute_integer_div_builtin_async("ceil_div", values, f64::ceil).await
         }
@@ -280,7 +363,10 @@ pub(crate) async fn execute_intrinsic(
         }
         IntrinsicOp::Push => {
             expect_arg_count("push", values, 2)?;
-            execute_push_builtin_async(values[0].clone(), values[1].clone()).await
+            let result = execute_push_builtin_async(values[0].clone(), values[1].clone()).await?;
+            // Copying the list writes each element once.
+            charge_collection_work(instructions_executed, proportional_units(&result));
+            Ok(result)
         }
         IntrinsicOp::Sort => execute_sort_builtin(values, instructions_executed).await,
         IntrinsicOp::SortBy => execute_sort_by_builtin(values, instructions_executed).await,
@@ -316,15 +402,12 @@ pub(crate) async fn execute_intrinsic(
     }
 }
 
-fn charge_collection_work(instructions_executed: &mut u64, amount: usize) {
+/// Adds `amount` units of proportional intrinsic work to the instruction
+/// counter a builtin or dispatch is accumulating into — the same
+/// saturating-add `Vm::charge_intrinsic_work` performs, in a form a pure
+/// helper or a call site holding a heap borrow can use.
+pub(crate) fn charge_collection_work(instructions_executed: &mut u64, amount: usize) {
     *instructions_executed = instructions_executed.saturating_add(amount as u64);
-}
-
-fn sorting_work(items: usize) -> usize {
-    if items < 2 {
-        return 0;
-    }
-    items.saturating_mul(usize::BITS.saturating_sub((items - 1).leading_zeros()) as usize)
 }
 
 async fn shaping_list(
@@ -573,20 +656,32 @@ async fn execute_unique_builtin(
 ) -> Result<Value, RuntimeError> {
     expect_arg_count("unique", values, 1)?;
     let items = shaping_list("unique", &values[0], instructions_executed).await?;
-    let mut unique = Vec::with_capacity(items.len());
+    let count = items.len();
+    let mut unique = Vec::with_capacity(count);
     let mut scalar_seen = BTreeSet::new();
+    let mut scanned = 0usize;
     for item in items {
         let unseen = match scalar_equality_key(&item) {
             Some(key) => scalar_seen.insert(key),
             // Composite values retain Value's typed equality. This fallback is
             // intentionally quadratic for records/collections; scalar-heavy
             // inputs use the O(n log n) ordered-set path above.
-            None => !unique.contains(&item),
+            None => {
+                let position = unique.iter().position(|kept| *kept == item);
+                scanned = scanned.saturating_add(position.map_or(unique.len(), |found| found + 1));
+                position.is_none()
+            }
         };
         if unseen {
             unique.push(item);
         }
     }
+    // The scalar probes cost an ordered-set lookup each, and every composite
+    // item compared against the elements kept before it.
+    charge_collection_work(
+        instructions_executed,
+        sorting_work(count).saturating_add(scanned),
+    );
     Ok(Value::List(unique.into()))
 }
 

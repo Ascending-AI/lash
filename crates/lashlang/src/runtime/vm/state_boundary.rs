@@ -45,3 +45,44 @@ pub(super) fn validation_plan_cache_entry(schema: &Value) -> Option<(usize, Arc<
         _ => None,
     }
 }
+
+impl<'a, H: ExecutionHost> Vm<'a, H> {
+    /// Materializes host-visible globals, omitting any entire binding that
+    /// contains a function value at any depth.
+    pub fn into_globals(mut self) -> Result<Record, RuntimeError> {
+        let runtime_globals = self.slots.into_globals(
+            &self.chunk.slot_names,
+            &self.chunk.private_slots,
+            &self.projected_bindings,
+            None,
+        )?;
+        super::super::state::host_view(&runtime_globals, &mut self.heap)
+    }
+
+    pub(crate) fn into_state_parts(self) -> Result<(Record, Heap), RuntimeError> {
+        let globals = self.slots.into_globals(
+            &self.chunk.slot_names,
+            &self.chunk.private_slots,
+            &self.projected_bindings,
+            None,
+        )?;
+        Ok((globals, self.heap))
+    }
+
+    pub(crate) fn recycle_into_state_parts(
+        mut self,
+        scratch: &mut ExecutionScratch,
+    ) -> Result<(Record, Heap), RuntimeError> {
+        self.stack.clear();
+        self.iter_stack.clear();
+        scratch.stack = std::mem::take(&mut self.stack);
+        scratch.iter_stack = std::mem::take(&mut self.iter_stack);
+        let globals = self.slots.into_globals(
+            &self.chunk.slot_names,
+            &self.chunk.private_slots,
+            &self.projected_bindings,
+            Some(&mut scratch.slot_values),
+        )?;
+        Ok((globals, self.heap))
+    }
+}

@@ -66,7 +66,11 @@ impl IterCursor {
         }
     }
 
-    pub(super) fn next_value(&mut self, heap: &Heap) -> Result<Option<Value>, RuntimeError> {
+    pub(super) fn next_value(
+        &mut self,
+        heap: &Heap,
+        work: &mut usize,
+    ) -> Result<Option<Value>, RuntimeError> {
         match self {
             Self::List {
                 values,
@@ -80,8 +84,10 @@ impl IterCursor {
                 // A `Map` entry is its key and the value it holds now: `set`
                 // on a pending key updates what the loop will see.
                 if let Some(Value::Ref(map)) = collection
-                    && let HeapObject::Map(_) = heap.get(*map)?
+                    && let HeapObject::Map(live) = heap.get(*map)?
                 {
+                    // The live lookup scans the entry list once per step.
+                    *work = work.saturating_add(live.entries.len());
                     let current = heap.map_get(*map, &value)?.unwrap_or(Value::Undefined);
                     return Ok(Some(Value::List(vec![value, current].into())));
                 }
@@ -161,16 +167,21 @@ pub(super) enum CollectionMutation<'a> {
     Cleared,
 }
 
+/// Returns the proportional work performed: one unit per pending member of
+/// each cursor the mutation touched, since an addition or deletion scans —
+/// or copies — that whole tail.
 pub(super) fn update_live_cursors<'a>(
     iterators: impl Iterator<Item = &'a mut IterState>,
     collection: HeapId,
     mutation: &CollectionMutation<'_>,
-) {
+) -> usize {
+    let mut work = 0usize;
     for iterator in iterators {
         let Some((values, index)) = iterator.cursor.pending_for(collection) else {
             continue;
         };
         let values = values.make_mut();
+        work = work.saturating_add(values.len());
         match mutation {
             CollectionMutation::Added(value) => {
                 values.push(value.clone());
@@ -191,6 +202,7 @@ pub(super) fn update_live_cursors<'a>(
             CollectionMutation::Cleared => values.truncate(index),
         }
     }
+    work
 }
 
 #[derive(Clone)]
@@ -243,6 +255,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 _ => None,
             };
             if let Some(pending) = pending {
+                // The cursor snapshots one key or value per member.
+                self.charge_intrinsic_work(pending.len());
                 return Ok(IterCursor::List {
                     values: ListValue::from(pending),
                     index: 0,
@@ -276,5 +290,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .iter_mut()
                 .flat_map(|frame| frame.iter_stack.iter_mut()),
         )
+    }
+}
+
+impl<'a, H: ExecutionHost> Vm<'a, H> {
+    pub(super) fn unwind_iterators(&mut self) {
+        while let Some(iter_state) = self.iter_stack.pop() {
+            self.slots
+                .restore_temporary(iter_state.binding, iter_state.restore);
+        }
+    }
+
+    /// The host's projected-binding declaration when `self.slots` is the root
+    /// scope's — inside a function the active slot state holds the frame's
+    /// locals, which are never projected bindings and may collide with one's
+    /// name.
+    pub(super) fn active_projected_bindings(&self) -> Option<&ProjectedBindings> {
+        self.active_function
+            .is_none()
+            .then_some(&self.projected_bindings)
     }
 }

@@ -7,6 +7,7 @@ use super::super::{
     tool_failure_fields,
 };
 use super::Vm;
+use crate::runtime::deep_proportional_units;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ExceptionHandler {
@@ -205,6 +206,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         value: Value,
         origin: Option<Box<PendingErrorOrigin>>,
     ) -> Result<bool, RuntimeError> {
+        // Importing the thrown value walks its whole graph once.
+        self.charge_intrinsic_work(deep_proportional_units(&value));
         let mut imported = self.heap.import_values(vec![value], 0)?;
         let value = imported
             .pop()

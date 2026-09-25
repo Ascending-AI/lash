@@ -12,6 +12,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<(), RuntimeError> {
         let input = self.pop_stack()?;
         let input = self.heap.javascript_to_string(&input)?;
+        // Encoding or decoding reads every input byte once.
+        self.charge_intrinsic_work(input.len());
         let result = match codec {
             JavaScriptUriCodec::EncodeComponent => Ok(encode(&input, false)),
             JavaScriptUriCodec::EncodeUri => Ok(encode(&input, true)),
@@ -21,6 +23,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         match result {
             Ok(value) => {
                 ensure_javascript_string_size(value.len())?;
+                self.charge_intrinsic_work(value.len());
                 self.stack.push(Value::String(value.into()));
                 Ok(())
             }

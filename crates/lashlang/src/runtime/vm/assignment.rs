@@ -57,6 +57,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .checked_add(right.len())
                         .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
                     ensure_javascript_string_size(bytes)?;
+                    // Concatenating writes the whole result once.
+                    self.charge_intrinsic_work(bytes);
                     self.slots.ensure_assignable(
                         slot,
                         slot_names_for(self.chunk, self.active_function),
@@ -77,6 +79,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .checked_add(right.len())
                         .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
                     ensure_javascript_string_size(bytes)?;
+                    // Concatenating writes the whole result once.
+                    self.charge_intrinsic_work(bytes);
                     Value::String(StringValue::concatenated(&left, &right))
                 }
             }
@@ -118,7 +122,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.last_value = Some(value);
             return Ok(());
         }
+        let was_ref = matches!(self.slots.get(slot), Some(Value::Ref(_)));
         self.materialize_mutable_slot(slot)?;
+        if was_ref {
+            // Exporting the accumulator reads its whole graph once.
+            self.charge_intrinsic_work(self.slots.get(slot).map_or(0, deep_proportional_units));
+        }
+        // `xs + [item]` copies every element the accumulator holds when the
+        // slot is not an in-place list.
+        let copy_units = match self.slots.get(slot) {
+            Some(Value::List(_)) => 0,
+            current => proportional_units(current.unwrap_or(&Value::Null)).saturating_add(1),
+        };
+        self.charge_intrinsic_work(copy_units);
         let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
         let current = self
             .slots
@@ -165,12 +181,28 @@ impl<H: ExecutionHost> Vm<'_, H> {
             _ => None,
         };
         if let Some(target) = extend_target {
+            // Extending copies each appended element into the accumulator.
+            let units = match &right {
+                Value::Ref(id) => match self.heap.get(*id) {
+                    Ok(HeapObject::List(items)) | Ok(HeapObject::Tuple(items)) => items.len(),
+                    _ => 0,
+                },
+                right => proportional_units(right),
+            };
+            self.charge_intrinsic_work(units);
             let value = self.heap.extend_list(&target, &right)?;
             self.last_value = Some(value);
             return Ok(());
         }
+        let was_ref = matches!(self.slots.get(slot), Some(Value::Ref(_)));
         self.materialize_mutable_slot(slot)?;
+        if was_ref {
+            // Exporting the accumulator reads its whole graph once.
+            self.charge_intrinsic_work(self.slots.get(slot).map_or(0, deep_proportional_units));
+        }
         let right = self.heap.export_for_instruction(&right)?;
+        // Exporting reads the appended container's members once.
+        self.charge_intrinsic_work(deep_proportional_units(&right));
         let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
         let value = {
             let left = self
@@ -199,13 +231,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
         };
+        // `+=` copies the operands' members into the stored container: the
+        // charge is the result's size.
+        self.charge_intrinsic_work(proportional_units(&value));
         // Concatenation copies the operands' members into a new container, so
         // the container that lands in the slot is isolated before it is stored.
         let value = if matches!(
             value,
             Value::Tuple(_) | Value::List(_) | Value::Record(_) | Value::Ref(_)
         ) {
-            let isolated = self.heap.isolate_value(&value)?;
+            let (isolated, staged) = self.heap.isolate_value_with_work(&value)?;
+            // Isolation copies every object the stored graph reaches.
+            self.charge_intrinsic_work(staged);
             self.slots.values[slot] = Some(isolated.clone());
             isolated
         } else {
@@ -252,6 +289,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
         };
+        // `+=` copies the operands' members into the stored container: the
+        // charge is the result's size.
+        self.charge_intrinsic_work(proportional_units(&value));
         self.last_value = Some(value);
         Ok(())
     }
@@ -295,6 +335,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 name: slot_name.text.to_string(),
             })?;
         let value = add_assign_index_number(root, index, right)?;
+        // An indexed `+=` that grows a member copies its whole result once.
+        self.charge_intrinsic_work(proportional_units(&value));
         self.last_value = Some(value);
         Ok(())
     }
